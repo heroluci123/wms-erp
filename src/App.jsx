@@ -1,0 +1,48 @@
+import React from 'react'
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { Layout } from './components/Layout/Layout'
+
+// Pages
+import { Login } from './pages/Login'
+import { Dashboard } from './pages/Dashboard'
+import { Recebimento } from './pages/Recebimento'
+import { Movimentacao } from './pages/Movimentacao'
+import { Expedicao } from './pages/Expedicao'
+import { Inventario } from './pages/Inventario'
+import { InventarioOperador } from './pages/InventarioOperador'
+import { InventarioConciliacao } from './pages/InventarioConciliacao'
+import { Produtos } from './pages/Produtos'
+import { Saida } from './pages/Saida'
+import { Locais } from './pages/Locais'
+import { Operadores } from './pages/Operadores'
+import { MapaCapacidade } from './pages/MapaCapacidade'
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        
+        {/* Rotas protegidas (dentro do Layout principal) */}
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="recebimento" element={<Recebimento />} />
+          <Route path="movimentacao" element={<Movimentacao />} />
+          <Route path="saida" element={<Saida />} />
+          <Route path="expedicao" element={<Expedicao />} />
+          <Route path="inventario" element={<Inventario />} />
+          <Route path="inventario/coletor" element={<InventarioOperador />} />
+          <Route path="inventario/conciliacao/:id" element={<InventarioConciliacao />} />
+          <Route path="produtos" element={<Produtos />} />
+          <Route path="locais" element={<Locais />} />
+          <Route path="operadores" element={<Operadores />} />
+          <Route path="mapa" element={<MapaCapacidade />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
+  )
+}
+
+export default App

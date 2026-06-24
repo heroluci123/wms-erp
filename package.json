@@ -1,0 +1,77 @@
+{
+  "name": "wms-erp",
+  "version": "1.0.0",
+  "description": "WMS/ERP Operacional",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build && electron-builder",
+    "vite": "vite",
+    "electron": "electron .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "better-sqlite3": "11.2.1",
+    "date-fns": "^3.6.0",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.3.9",
+    "lucide-react": "^0.395.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1",
+    "recharts": "^3.9.0",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^8.2.2",
+    "electron": "31.7.7",
+    "electron-builder": "24.13.3",
+    "jimp": "^1.6.0",
+    "png-to-ico": "^2.1.8",
+    "vite": "^5.3.1",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.wms.erp.logistica",
+    "productName": "WMS Logística",
+    "icon": "assets/icon.ico",
+    "asar": true,
+    "electronVersion": "31.7.7",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "node_modules/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WMS Logística",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "heroluci123",
+      "repo": "wms-erp",
+      "private": true
+    }
+  }
+}

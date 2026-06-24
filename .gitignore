@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-electron/
+*.db
+*.db-shm
+*.db-wal
+.env
+import_*.js
+import_*.csv
+wms-local.db*
