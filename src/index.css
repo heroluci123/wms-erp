@@ -1253,3 +1253,56 @@ tbody td {
   color: var(--text-disabled);
   padding-bottom: 0.5rem;
 }
+
+/* --- Coletor RFID (tela curta, ex: Zebra/Honeywell) --- */
+@media (max-height: 600px) {
+  .coletor-home {
+    padding: 0.3rem;
+    gap: 0.3rem;
+  }
+  .coletor-header {
+    margin-bottom: 0;
+  }
+  .coletor-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 0.85rem;
+  }
+  .coletor-nome {
+    font-size: 0.85rem;
+  }
+  .coletor-perfil {
+    font-size: 0.65rem;
+  }
+  .coletor-title {
+    padding: 0.3rem 0.5rem;
+    gap: 0.4rem;
+  }
+  .coletor-title-badge {
+    width: 30px;
+    height: 30px;
+    font-size: 0.9rem;
+  }
+  .coletor-title-main {
+    font-size: 0.85rem;
+  }
+  .coletor-title-sub {
+    font-size: 0.65rem;
+  }
+  .coletor-grid {
+    gap: 0.3rem;
+  }
+  .coletor-card {
+    padding: 0.4rem 0.3rem;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    border-radius: 8px;
+  }
+  .coletor-card-icon svg {
+    width: 28px;
+    height: 28px;
+  }
+  .coletor-footer {
+    display: none;
+  }
+}
