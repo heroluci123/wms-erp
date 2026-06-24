@@ -321,10 +321,34 @@ export function Saida() {
                     {produto?.descricao}
                   </div>
                   <div className="text-muted mt-4">
-                    {qtdCaixas} CX / {qtdKg} KG — De: <strong>{origem}</strong> <ArrowRight size={14} style={{ display: 'inline' }} /> Para: <strong>EXPEDIÇÃO</strong>
+                    De: <strong>{origem}</strong> <ArrowRight size={14} style={{ display: 'inline' }} /> Para: <strong>EXPEDIÇÃO</strong>
                   </div>
                 </div>
               </div>
+
+              {/* Preview saldo antes/depois */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center', margin: '16px 0', padding: 16, background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>POSIÇÃO ATUAL</div>
+                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 15 }}>{saldoAtual?.qtd_caixas} CX</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{saldoAtual?.qtd_kg} KG</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 11, color: 'var(--danger)', marginBottom: 2 }}>RETIRADA</div>
+                  <div style={{ fontWeight: 700, color: 'var(--danger)', fontSize: 15 }}>- {qtdCaixas} CX</div>
+                  <div style={{ color: 'var(--danger)', fontSize: 13 }}>- {qtdKg} KG</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>SALDO RESTANTE</div>
+                  <div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 15 }}>
+                    {(parseFloat(saldoAtual?.qtd_caixas || 0) - parseFloat(qtdCaixas || 0)).toFixed(2).replace(/\.00$/, '')} CX
+                  </div>
+                  <div style={{ color: 'var(--success)', fontSize: 13 }}>
+                    {(parseFloat(saldoAtual?.qtd_kg || 0) - parseFloat(qtdKg || 0)).toFixed(2).replace(/\.00$/, '')} KG
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-12 mt-16">
                 <button className="btn btn--ghost w-full" onClick={resetAll}>Cancelar</button>
                 <button className="btn btn--success w-full btn--lg" onClick={confirmarSaida}>

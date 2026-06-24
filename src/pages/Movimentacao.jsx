@@ -12,7 +12,7 @@ import * as movimentacoesQueries from '../queries/movimentacoes.js';
 export function Movimentacao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   
-  const [step, setStep] = useState(1) // 1: Origem, 2: Produto, 3: Qtd, 4: Destino
+  const [step, setStep] = useState(1) // 1: Origem, 2: Produto, 3: Qtd, 4: Destino, 5: Confirmar
   const [origem, setOrigem] = useState('')
   const [produto, setProduto] = useState(null)
   const [saldoAtual, setSaldoAtual] = useState(null)
@@ -119,10 +119,14 @@ export function Movimentacao() {
       return toastError('Endereço Inválido', `O endereço "${dst}" não está cadastrado. Cadastre-o na tela de Locais.`)
     }
 
-    finalizarTransferencia(dst)
+    finalizarDestino(dst)
   }
 
-  const finalizarTransferencia = async (dstFinal) => {
+  const finalizarDestino = (dstFinal) => {
+    setDestino(dstFinal)
+    setStep(5)
+  }
+  const confirmarMovimentacao = async () => {
     try {
       const payload = {
         produto_id: produto.id,
@@ -131,14 +135,14 @@ export function Movimentacao() {
         qtd_caixas: parseFloat(qtdCaixas),
         qtd_kg: parseFloat(qtdKg),
         origem: origem,
-        destino: dstFinal,
+        destino: destino,
         operador_id: operador.id,
         operador_nome: operador.nome
       }
 
       const res = await movimentacoesQueries.transferir(payload)
       if (res.success) {
-        toastSuccess('Movimentação Concluída', `${produto.descricao} movido para ${dstFinal}`)
+        toastSuccess('Movimentação Concluída', `${produto.descricao} movido para ${destino}`)
         resetAll()
       } else {
         toastError('Erro na Movimentação', res.error)
@@ -304,6 +308,56 @@ export function Movimentacao() {
               <MapPin size={20} /> {destino}
             </div>
           ) : null}
+        </div>
+
+        {/* STEP 5: CONFIRMAÇÃO */}
+        <div className={`mov-step ${step === 5 ? 'active' : ''}`} style={{ opacity: step >= 5 ? 1 : 0.5 }}>
+          <div className="mov-step__header">
+            <div className="mov-step__number">5</div>
+            <div className="mov-step__label">Confirmar Movimentação</div>
+          </div>
+          {step === 5 && (
+            <div>
+              <div className="saldo-display" style={{ background: 'var(--accent-muted)', borderColor: 'var(--accent)' }}>
+                <div className="saldo-item" style={{ flex: 1 }}>
+                  <div style={{ color: 'var(--accent)', fontWeight: 700, fontSize: 16 }}>{produto?.descricao}</div>
+                  <div className="text-muted mt-4">
+                    De: <strong>{origem}</strong> <ArrowRight size={14} style={{ display: 'inline' }} /> Para: <strong>{destino}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Preview saldo antes/depois */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center', margin: '16px 0', padding: 16, background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>POSIÇÃO ORIGEM</div>
+                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 15 }}>{saldoAtual?.qtd_caixas} CX</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{saldoAtual?.qtd_kg} KG</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 11, color: 'var(--warning)', marginBottom: 2 }}>MOVENDO</div>
+                  <div style={{ fontWeight: 700, color: 'var(--warning)', fontSize: 15 }}>{qtdCaixas} CX</div>
+                  <div style={{ color: 'var(--warning)', fontSize: 13 }}>{qtdKg} KG</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>RESTANTE ORIGEM</div>
+                  <div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 15 }}>
+                    {(parseFloat(saldoAtual?.qtd_caixas || 0) - parseFloat(qtdCaixas || 0)).toFixed(2).replace(/\.00$/, '')} CX
+                  </div>
+                  <div style={{ color: 'var(--success)', fontSize: 13 }}>
+                    {(parseFloat(saldoAtual?.qtd_kg || 0) - parseFloat(qtdKg || 0)).toFixed(2).replace(/\.00$/, '')} KG
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-12">
+                <button className="btn btn--ghost w-full" onClick={resetAll}>Cancelar</button>
+                <button className="btn btn--primary w-full btn--lg" onClick={confirmarMovimentacao}>
+                  <Check size={18} /> Confirmar Movimentação
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
