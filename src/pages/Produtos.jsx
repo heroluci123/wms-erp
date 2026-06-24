@@ -180,11 +180,10 @@ export function Produtos() {
 
         <div>
           <div className="form-group mb-16">
-            <div className="flex items-center gap-8 bg-bg-2 border border-border rounded-lg px-12 py-8">
-              <Search size={18} className="text-muted" />
+            <div className="search-box">
+              <Search size={18} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
               <input 
                 type="text" 
-                className="bg-transparent border-none text-primary w-full outline-none font-sans" 
                 placeholder="Buscar por código ou descrição..." 
                 value={busca} 
                 onChange={e => setBusca(e.target.value)} 

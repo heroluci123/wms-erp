@@ -108,16 +108,16 @@ export async function receber({ produto_id, lote, validade, qtd_caixas, qtd_kg, 
  * DESPACHO (Checkout): baixa definitiva do endereço EXPEDICAO
  * Pode confirmar item por item ou todos de uma vez
  */
-export async function confirmarDespacho(produto_id, lote, operador_id) {
+export async function confirmarDespacho(produto_id, lote, validade, operador_id) {
   const tx = await db.transaction('write')
   try {
-    // Buscar o que está em EXPEDICAO para este produto/lote
+    // Buscar o que está em EXPEDICAO para este produto/lote/validade
     const resSaldo = await tx.execute({
       sql: `
         SELECT qtd_caixas, qtd_kg FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ?
+        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
       `,
-      args: [produto_id, lote || '']
+      args: [produto_id, lote || '', validade || '']
     })
     const saldo = resSaldo.rows[0]
 
@@ -135,13 +135,13 @@ export async function confirmarDespacho(produto_id, lote, operador_id) {
       args: [produto_id, lote || '', saldo.qtd_caixas, saldo.qtd_kg, operador_id || null]
     })
 
-    // Zerar o registro (ou deletar)
+    // Deletar APENAS a linha com a validade correta
     await tx.execute({
       sql: `
         DELETE FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ?
+        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
       `,
-      args: [produto_id, lote || '']
+      args: [produto_id, lote || '', validade || '']
     })
 
     await tx.commit()

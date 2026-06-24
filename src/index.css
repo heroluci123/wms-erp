@@ -464,6 +464,32 @@ tbody td {
 
 .form-hint { font-size: 11px; color: var(--text-muted); }
 
+/* ─── Search Box wrapper (ícone + input) ────────────────────────────────────── */
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-3);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.search-box input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  width: 100%;
+}
+.search-box input::placeholder { color: var(--text-muted); }
+
 /* ─── Botões ─────────────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;

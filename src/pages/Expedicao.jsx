@@ -79,9 +79,9 @@ export function Expedicao() {
     carregarExpedicao()
   }, [])
 
-  const handleDespacho = async (produto_id, lote) => {
+  const handleDespacho = async (produto_id, lote, validade) => {
     try {
-      const res = await movimentacoesQueries.confirmarDespacho(produto_id, lote, operador.id)
+      const res = await movimentacoesQueries.confirmarDespacho(produto_id, lote, validade, operador.id)
       if (res.success) {
         toastSuccess('Despacho Confirmado', `Item baixado do estoque. (${res.qtd_caixas} cx)`)
         carregarExpedicao()
@@ -180,7 +180,7 @@ export function Expedicao() {
                   <button className="btn btn--danger btn--sm" onClick={() => handleEstorno(item.produto_id, item.lote)}>
                     <XCircle size={14} /> Estornar
                   </button>
-                  <button className="btn btn--success" onClick={() => handleDespacho(item.produto_id, item.lote)}>
+                  <button className="btn btn--success" onClick={() => handleDespacho(item.produto_id, item.lote, item.validade)}>
                     <CheckCircle2 size={16} /> Confirmar Despacho
                   </button>
                 </div>

@@ -23,14 +23,14 @@ const FluxoTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
   return (
     <div style={{
-      background: 'var(--bg-card)', border: '1px solid var(--border)',
-      borderRadius: 8, padding: '10px 16px', fontSize: 13
+      background: '#1a1d2e', border: '1px solid #2d3250',
+      borderRadius: 8, padding: '10px 16px', fontSize: 13, boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
     }}>
-      <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontSize: 11 }}>{label}</p>
+      <p style={{ color: '#94a3b8', marginBottom: 6, fontSize: 11 }}>{label}</p>
       {payload.map((p, i) => (
         <div key={i} style={{ color: p.color, display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontWeight: 700 }}>{p.name}:</span>
-          <span>{Number(p.value).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg</span>
+          <span style={{ color: '#e2e8f0' }}>{Number(p.value).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg</span>
         </div>
       ))}
     </div>
@@ -48,8 +48,13 @@ const TopProdutosBar = ({ data, colors, emptyMsg }) => {
         <XAxis type="number" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} tickFormatter={v => `${(v/1000).toFixed(1)}t`} />
         <YAxis type="category" dataKey="descricao" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} width={120}
           tickFormatter={v => v.length > 16 ? v.slice(0, 16) + '…' : v} />
-        <Tooltip formatter={(v, n, p) => [`${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg`, 'Volume']}
-          contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+        <Tooltip 
+          formatter={(v, n, p) => [`${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg`, 'Volume']}
+          contentStyle={{ background: '#1a1d2e', border: '1px solid #2d3250', borderRadius: 8, fontSize: 12, color: '#e2e8f0' }}
+          itemStyle={{ color: '#e2e8f0' }}
+          labelStyle={{ color: '#94a3b8' }}
+          cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+        />
         <Bar dataKey="total_kg" radius={[0, 4, 4, 0]}>
           {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
         </Bar>
