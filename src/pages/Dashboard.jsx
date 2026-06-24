@@ -17,7 +17,7 @@ import * as movimentacoesQueries from '../queries/movimentacoes.js'
 
 // ─── Cores para os gráficos ────────────────────────────────────────────────
 const COLORS_ENTRADA = ['#22d3ee', '#06b6d4', '#0891b2', '#0e7490', '#155e75']
-const COLORS_SAIDA   = ['#f97316', '#ea580c', '#c2410c', '#9a3412', '#7c2d12']
+const COLORS_SAIDA   = ['#10b981', '#059669', '#047857', '#065f46', '#064e3b']
 
 // ─── Tooltip escuro para o gráfico de fluxo ─────────────────────────────────
 const FluxoTooltip = ({ active, payload, label }) => {
@@ -279,13 +279,13 @@ export function Dashboard() {
               <span className="kpi-card__value" style={{ fontSize: 18 }}>R$ {entValor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
               <span className="kpi-card__sub">{Number(tot.qtd_recebimentos || 0)} recebimentos no período</span>
             </div>
-            <div className="kpi-card" style={{ borderColor: '#f97316' }}>
-              <span className="kpi-card__label flex items-center gap-8" style={{ color: '#f97316' }}><ArrowUp size={14} /> KG Expedido</span>
+            <div className="kpi-card" style={{ borderColor: '#10b981' }}>
+              <span className="kpi-card__label flex items-center gap-8" style={{ color: '#10b981' }}><ArrowUp size={14} /> KG Expedido</span>
               <span className="kpi-card__value">{saiKg.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
               <span className="kpi-card__sub">{saiCx.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} caixas despachadas</span>
             </div>
-            <div className="kpi-card" style={{ borderColor: '#f97316' }}>
-              <span className="kpi-card__label flex items-center gap-8" style={{ color: '#f97316' }}><DollarSign size={14} /> Valor Expedido</span>
+            <div className="kpi-card" style={{ borderColor: '#10b981' }}>
+              <span className="kpi-card__label flex items-center gap-8" style={{ color: '#10b981' }}><DollarSign size={14} /> Valor Expedido</span>
               <span className="kpi-card__value" style={{ fontSize: 18 }}>R$ {saiValor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
               <span className="kpi-card__sub">{Number(tot.qtd_despachos || 0)} despachos no período</span>
             </div>
@@ -298,9 +298,9 @@ export function Dashboard() {
               <span className="kpi-card__value">{giro}%</span>
               <span className="kpi-card__sub">Saída / Estoque atual</span>
             </div>
-            <div className="kpi-card" style={{ borderColor: entKg > saiKg ? '#22d3ee' : '#f97316' }}>
+            <div className="kpi-card" style={{ borderColor: entKg > saiKg ? '#22d3ee' : '#10b981' }}>
               <span className="kpi-card__label flex items-center gap-8" style={{ color: 'var(--text-muted)' }}><Boxes size={14} /> Saldo do Período</span>
-              <span className="kpi-card__value" style={{ color: entKg >= saiKg ? '#22d3ee' : '#f97316' }}>
+              <span className="kpi-card__value" style={{ color: entKg >= saiKg ? '#22d3ee' : '#10b981' }}>
                 {entKg >= saiKg ? '+' : ''}{(entKg - saiKg).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg
               </span>
               <span className="kpi-card__sub">{entKg >= saiKg ? 'Mais entrada que saída' : 'Mais saída que entrada'}</span>
@@ -394,7 +394,7 @@ export function Dashboard() {
                   <Tooltip content={<FluxoTooltip />} />
                   <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-secondary)' }} />
                   <Bar dataKey="entradas_kg" name="Entradas (KG)" fill="#22d3ee" radius={[3, 3, 0, 0]} opacity={0.9} />
-                  <Bar dataKey="saidas_kg"   name="Saídas (KG)"   fill="#f97316" radius={[3, 3, 0, 0]} opacity={0.9} />
+                  <Bar dataKey="saidas_kg"   name="Saídas (KG)"   fill="#10b981" radius={[3, 3, 0, 0]} opacity={0.9} />
                   <Line dataKey="entradas_kg" name="" stroke="#22d3ee" dot={false} strokeWidth={2} strokeOpacity={0.5} />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -416,7 +416,7 @@ export function Dashboard() {
 
             <div className="card card--elevated">
               <div className="flex items-center gap-10 mb-16">
-                <TrendingDown size={18} style={{ color: '#f97316' }} />
+                <TrendingDown size={18} style={{ color: '#10b981' }} />
                 <div>
                   <h3 style={{ fontWeight: 700, fontSize: 14 }}>Top 5 Produtos — Saídas</h3>
                   <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>Por KG despachado no período</p>
