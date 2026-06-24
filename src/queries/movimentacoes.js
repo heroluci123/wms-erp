@@ -2,7 +2,7 @@ import { db } from '../lib/db.js';
 
 /** Queries de Movimentações — operações atômicas com transação SQLite */
 
-const inventariosQueries = require('./inventarios')
+import * as inventariosQueries from './inventarios.js';
 
 /**
  * TRANSFERÊNCIA INTERNA: decrementa origem, incrementa (ou cria) destino
