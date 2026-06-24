@@ -23,8 +23,8 @@ export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_k
   try {
     // 1. Verificar saldo na origem
     const resOrigem = await tx.execute({
-      sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ?`,
-      args: [produto_id, origem, lote || '']
+      sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+      args: [produto_id, origem, lote || '', validade || '']
     })
     const saldoOrigem = resOrigem.rows[0]
 
@@ -34,8 +34,8 @@ export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_k
 
     // 2. Decrementar origem
     await tx.execute({
-      sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND lote = ?`,
-      args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '']
+      sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+      args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '', validade || '']
     })
 
     // 3. Incrementar (ou criar) destino via UPSERT
@@ -282,9 +282,9 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
     const resOrigem = await tx.execute({
       sql: `
         SELECT qtd_caixas, qtd_kg FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = ? AND lote = ?
+        WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
       `,
-      args: [produto_id, origem, lote || '']
+      args: [produto_id, origem, lote || '', validade || '']
     })
     const saldoOrigem = resOrigem.rows[0]
 
@@ -297,9 +297,9 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
       sql: `
         UPDATE estoque_posicao
         SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP
-        WHERE produto_id = ? AND endereco = ? AND lote = ?
+        WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
       `,
-      args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '']
+      args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '', validade || '']
     })
 
     // 3. Incrementar EXPEDICAO
