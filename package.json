@@ -73,7 +73,8 @@
       "provider": "github",
       "owner": "heroluci123",
       "repo": "wms-erp",
-      "private": true
+      "private": true,
+      "releaseType": "release"
     },
     "extraFiles": [
       ".env"
