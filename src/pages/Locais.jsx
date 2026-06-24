@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { MapPin, Search, Plus, Edit2, Trash2, FileDown } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import * as locaisQueries from '../queries/locais.js';
 
 export function Locais() {
   const { operador, toastSuccess, toastError } = useAppStore()
@@ -12,7 +13,7 @@ export function Locais() {
 
   const carregar = async () => {
     try {
-      const data = await window.wmsAPI.locais.listar()
+      const data = await locaisQueries.listar()
       setLocais(data)
     } catch (err) {
       toastError('Erro', 'Falha ao carregar locais')
@@ -28,11 +29,11 @@ export function Locais() {
     try {
       const payload = { ...formData, capacidade_max_caixas: parseFloat(formData.capacidade_max_caixas) || 0 }
       if (isEditing) {
-        const res = await window.wmsAPI.locais.atualizar(payload)
+        const res = await locaisQueries.atualizar(payload)
         if (res.success) toastSuccess('Sucesso', 'Local atualizado.')
         else return toastError('Erro', res.error)
       } else {
-        const res = await window.wmsAPI.locais.criar(payload)
+        const res = await locaisQueries.criar(payload)
         if (res.success) toastSuccess('Sucesso', 'Local cadastrado.')
         else return toastError('Erro', res.error)
       }
@@ -48,7 +49,7 @@ export function Locais() {
     if (!window.confirm('Tem certeza que deseja desativar este local?')) return
     
     try {
-      const res = await window.wmsAPI.locais.deletar(id)
+      const res = await locaisQueries.deletar(id)
       if (res.success) {
         toastSuccess('Sucesso', 'Local desativado.')
         carregar()
@@ -77,7 +78,7 @@ export function Locais() {
     const header = ['Endereço,Tipo,Capacidade Máx (CX)']
     const rows = filtrados.map(l => `${l.endereco},${l.is_insumo === 1 ? 'Insumos' : 'Geral'},${l.capacidade_max_caixas || 0}`)
     const content = [...header, ...rows].join('\n')
-    await window.wmsAPI.export.csv('locais.csv', content)
+    await downloadCSV(content)
   }
 
   return (

@@ -1,7 +1,9 @@
+import { db } from '../lib/db.js';
+
 /** Queries de Estoque e Posições */
 
 // Listagem geral com JOIN em produtos, excluindo registros zerados
-async function listarGeral(db) {
+export async function listarGeral() {
   const res = await db.execute(`
     SELECT
       ep.id, ep.endereco, ep.lote, ep.validade,
@@ -17,7 +19,7 @@ async function listarGeral(db) {
 }
 
 // Busca saldo de um produto em um endereço específico (apenas lotes com saldo > 0)
-async function buscarPorEnderecoProduto(db, endereco, produto_id) {
+export async function buscarPorEnderecoProduto(endereco, produto_id) {
   const res = await db.execute({
     sql: `
       SELECT
@@ -35,7 +37,7 @@ async function buscarPorEnderecoProduto(db, endereco, produto_id) {
 }
 
 // Tudo em um endereço
-async function buscarPorEndereco(db, endereco) {
+export async function buscarPorEndereco(endereco) {
   const res = await db.execute({
     sql: `
       SELECT
@@ -52,7 +54,7 @@ async function buscarPorEndereco(db, endereco) {
 }
 
 // Sugestão de Putaway: endereços onde o produto já tem saldo (excluindo REC e EXPEDICAO)
-async function sugestaoPutaway(db, produto_id, lote) {
+export async function sugestaoPutaway(produto_id, lote) {
   const res = await db.execute({
     sql: `
       SELECT endereco, lote, qtd_caixas, qtd_kg, validade
@@ -71,7 +73,7 @@ async function sugestaoPutaway(db, produto_id, lote) {
 
 // Verificação FEFO: existem lotes mais antigos do mesmo produto?
 // Retorna lotes com validade MENOR que a bipada (mais antigos que deveriam sair primeiro)
-async function verificarFEFO(db, produto_id, validade_bipada) {
+export async function verificarFEFO(produto_id, validade_bipada) {
   const res = await db.execute({
     sql: `
       SELECT ep.endereco, ep.lote, ep.validade, ep.qtd_caixas, ep.qtd_kg
@@ -89,7 +91,7 @@ async function verificarFEFO(db, produto_id, validade_bipada) {
 }
 
 // Listar área de expedição
-async function listarExpedicao(db) {
+export async function listarExpedicao() {
   const res = await db.execute(`
     SELECT
       ep.id, ep.lote, ep.validade, ep.qtd_caixas, ep.qtd_kg, ep.updated_at,
@@ -104,7 +106,7 @@ async function listarExpedicao(db) {
 }
 
 // KPIs para o Dashboard
-async function calcularKPIs(db, filtros = {}) {
+export async function calcularKPIs(filtros = {}) {
   const isEstritoInsumo = filtros.incluirInsumos === true
   const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
 
@@ -146,9 +148,4 @@ async function calcularKPIs(db, filtros = {}) {
     vencendoBreve: Number(vencendoBreve.v),
     vencidos: Number(vencidos.v),
   }
-}
-
-module.exports = {
-  listarGeral, buscarPorEnderecoProduto, buscarPorEndereco,
-  sugestaoPutaway, verificarFEFO, listarExpedicao, calcularKPIs
 }

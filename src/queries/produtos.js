@@ -1,5 +1,7 @@
+import { db } from '../lib/db.js';
+
 /** Queries de Produtos */
-async function listar(db) {
+export async function listar() {
   const res = await db.execute(`
     SELECT id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, created_at
     FROM produtos ORDER BY descricao ASC
@@ -7,7 +9,7 @@ async function listar(db) {
   return res.rows
 }
 
-async function buscarPorCodigo(db, codigo) {
+export async function buscarPorCodigo(codigo) {
   // Remove zeros à esquerda para o código interno
   const codigoNorm = String(codigo).replace(/^0+/, '') || codigo
   // O EAN geralmente precisa dos zeros à esquerda intactos
@@ -23,7 +25,7 @@ async function buscarPorCodigo(db, codigo) {
   return res.rows[0]
 }
 
-async function criar(db, { codigo, ean, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {
+export async function criar({ codigo, ean, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {
   const codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
   const eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
   
@@ -48,7 +50,7 @@ async function criar(db, { codigo, ean, descricao, valor_unitario = 0, tipo_prod
   }
 }
 
-async function atualizar(db, { id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo }) {
+export async function atualizar({ id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo }) {
   const codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
   const eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
 
@@ -73,7 +75,7 @@ async function atualizar(db, { id, codigo, ean, descricao, valor_unitario, tipo_
   }
 }
 
-async function deletar(db, id) {
+export async function deletar(id) {
   // Verificar se tem estoque ativo
   const res = await db.execute({
     sql: `SELECT SUM(qtd_caixas) as total FROM estoque_posicao WHERE produto_id = ?`,
@@ -96,5 +98,3 @@ async function deletar(db, id) {
     throw err
   }
 }
-
-module.exports = { listar, buscarPorCodigo, criar, atualizar, deletar }

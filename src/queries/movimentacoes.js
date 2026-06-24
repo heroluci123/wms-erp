@@ -1,3 +1,5 @@
+import { db } from '../lib/db.js';
+
 /** Queries de Movimentações — operações atômicas com transação SQLite */
 
 const inventariosQueries = require('./inventarios')
@@ -6,7 +8,7 @@ const inventariosQueries = require('./inventarios')
  * TRANSFERÊNCIA INTERNA: decrementa origem, incrementa (ou cria) destino
  * Executa tudo em uma única transação para garantir integridade
  */
-async function transferir(db, { produto_id, lote, validade, qtd_caixas, qtd_kg, origem, destino, operador_id, operador_nome }) {
+export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_kg, origem, destino, operador_id, operador_nome }) {
   if (destino === 'REC' || destino === 'EXPEDICAO') {
     return { success: false, error: 'Proibido transferir diretamente para REC ou EXPEDICAO usando a Movimentação. Use as telas adequadas.' }
   }
@@ -70,7 +72,7 @@ async function transferir(db, { produto_id, lote, validade, qtd_caixas, qtd_kg, 
 /**
  * RECEBIMENTO: cria saldo no endereço 'REC'
  */
-async function receber(db, { produto_id, lote, validade, qtd_caixas, qtd_kg, operador_id, operador_nome }) {
+export async function receber({ produto_id, lote, validade, qtd_caixas, qtd_kg, operador_id, operador_nome }) {
   const tx = await db.transaction('write')
   try {
     await tx.execute({
@@ -106,7 +108,7 @@ async function receber(db, { produto_id, lote, validade, qtd_caixas, qtd_kg, ope
  * DESPACHO (Checkout): baixa definitiva do endereço EXPEDICAO
  * Pode confirmar item por item ou todos de uma vez
  */
-async function confirmarDespacho(db, produto_id, lote, operador_id) {
+export async function confirmarDespacho(produto_id, lote, operador_id) {
   const tx = await db.transaction('write')
   try {
     // Buscar o que está em EXPEDICAO para este produto/lote
@@ -153,7 +155,7 @@ async function confirmarDespacho(db, produto_id, lote, operador_id) {
 /**
  * Listar log de movimentações com filtros opcionais
  */
-async function listarLog(db, { limit = 100, tipo, produto_id, data_inicio, data_fim, incluirInsumos } = {}) {
+export async function listarLog({ limit = 100, tipo, produto_id, data_inicio, data_fim, incluirInsumos } = {}) {
   let query = `
     SELECT
       ml.id, ml.tipo, ml.endereco_origem, ml.endereco_destino,
@@ -181,7 +183,7 @@ async function listarLog(db, { limit = 100, tipo, produto_id, data_inicio, data_
   return res.rows
 }
 
-async function listarExpedicao(db) {
+export async function listarExpedicao() {
   const res = await db.execute({
     sql: `
       SELECT
@@ -196,7 +198,7 @@ async function listarExpedicao(db) {
   return res.rows
 }
 
-async function estornarExpedicao(db, { produto_id, lote, destino, operador_id, operador_nome }) {
+export async function estornarExpedicao({ produto_id, lote, destino, operador_id, operador_nome }) {
   if (!destino || destino === 'EXPEDICAO') {
     return { success: false, error: 'Endereço de destino inválido para estorno.' }
   }
@@ -265,7 +267,7 @@ async function estornarExpedicao(db, { produto_id, lote, destino, operador_id, o
  * A função transferir() bloqueia destino EXPEDICAO intencionalmente para proteger a Movimentação.
  * Esta função é a única rota permitida para enviar material à área de Expedição.
  */
-async function enviarParaExpedicao(db, { produto_id, lote, validade, qtd_caixas, qtd_kg, origem, operador_id, operador_nome }) {
+export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caixas, qtd_kg, origem, operador_id, operador_nome }) {
   if (!origem || origem === 'REC' || origem === 'EXPEDICAO') {
     return { success: false, error: 'Endereço de origem inválido para saída.' }
   }
@@ -331,7 +333,7 @@ async function enviarParaExpedicao(db, { produto_id, lote, validade, qtd_caixas,
   }
 }
 
-async function relatorioExecutivo(db, filtros = {}) {
+export async function relatorioExecutivo(filtros = {}) {
   const isEstritoInsumo = filtros.incluirInsumos === true;
   const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
 
@@ -408,7 +410,7 @@ async function relatorioExecutivo(db, filtros = {}) {
   }
 }
 
-async function deletarLog(db, id) {
+export async function deletarLog(id) {
   try {
     const res = await db.execute({
       sql: 'DELETE FROM movimentacoes_log WHERE id = ?',
@@ -421,16 +423,4 @@ async function deletarLog(db, id) {
   } catch (err) {
     return { success: false, error: err.message }
   }
-}
-
-module.exports = {
-  transferir,
-  receber,
-  confirmarDespacho,
-  listarLog,
-  listarExpedicao,
-  estornarExpedicao,
-  enviarParaExpedicao,
-  relatorioExecutivo,
-  deletarLog
 }

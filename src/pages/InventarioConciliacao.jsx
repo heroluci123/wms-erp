@@ -4,6 +4,7 @@ import { ArrowLeft, RefreshCcw, CheckCircle, AlertTriangle, X, Layers } from 'lu
 import { useAppStore } from '../store/appStore'
 import { StatusItemBadge, InventarioStatusBadge } from '../components/shared/Badge'
 import { format } from 'date-fns'
+import * as inventariosQueries from '../queries/inventarios.js';
 
 export function InventarioConciliacao() {
   const { id } = useParams()
@@ -22,10 +23,10 @@ export function InventarioConciliacao() {
   const carregar = useCallback(async () => {
     try {
       const [inv, iraData, lista, zonasData] = await Promise.all([
-        window.wmsAPI.inventarios.buscar(parseInt(id)),
-        window.wmsAPI.inventarios.calcularIRA(parseInt(id)),
-        window.wmsAPI.inventarios.itens(parseInt(id)),
-        window.wmsAPI.inventarios.zonas(parseInt(id)).catch(() => []),
+        inventariosQueries.buscar(parseInt(id)),
+        inventariosQueries.calcularIRA(parseInt(id)),
+        inventariosQueries.listarItens(parseInt(id)),
+        inventariosQueries.listarZonas(parseInt(id)).catch(() => []),
       ])
       setInventario(inv)
       setIra(iraData.ira_geral)
@@ -45,11 +46,11 @@ export function InventarioConciliacao() {
       const isCargaInicial = inventario?.tipo === 'CargaInicial'
       let res
       if (isCargaInicial) {
-        res = await window.wmsAPI.inventarios.conciliarCargaInicial({ 
+        res = await inventariosQueries.conciliarCargaInicial({ 
           inventario_id: parseInt(id), operador_id: operador.id, operador_nome: operador.nome 
         })
       } else {
-        res = await window.wmsAPI.inventarios.conciliar({ 
+        res = await inventariosQueries.conciliar({ 
           inventario_id: parseInt(id), operador_id: operador.id, operador_nome: operador.nome 
         })
       }
@@ -69,7 +70,7 @@ export function InventarioConciliacao() {
 
   const handleRecontar = async (item_id) => {
     try {
-      const res = await window.wmsAPI.inventarios.recontarItem(item_id)
+      const res = await inventariosQueries.recontarItem(item_id)
       if (res.success) { toastSuccess('Resetado', 'Item voltou para Pendente.'); carregar() }
     } catch (err) { toastError('Erro', err.message) }
   }
@@ -77,7 +78,7 @@ export function InventarioConciliacao() {
   const handleCancelarItem = async (item_id, descricao) => {
     if (!window.confirm(`Cancelar o item "${descricao}"? Ele será removido deste inventário.`)) return
     try {
-      const res = await window.wmsAPI.inventarios.cancelarItem(item_id)
+      const res = await inventariosQueries.cancelarItem(item_id)
       if (res.success) { toastSuccess('Item Cancelado', 'Item removido do inventário.'); carregar() }
       else toastError('Erro', res.error)
     } catch (err) { toastError('Erro', err.message) }
@@ -87,7 +88,7 @@ export function InventarioConciliacao() {
     if (!itemParaValidar) return
     setLoadingValidar(true)
     try {
-      const res = await window.wmsAPI.inventarios.validarSemAjuste({ 
+      const res = await inventariosQueries.validarEstoqueSemAjuste({ 
         item_id: itemParaValidar.id, 
         operador_id: operador.id, 
         operador_nome: operador.nome 

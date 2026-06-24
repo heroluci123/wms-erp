@@ -4,6 +4,10 @@ import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { AlertModal } from '../components/shared/AlertModal'
 import { format } from 'date-fns'
+import * as locaisQueries from '../queries/locais.js';
+import * as produtosQueries from '../queries/produtos.js';
+import * as estoqueQueries from '../queries/estoque.js';
+import * as movimentacoesQueries from '../queries/movimentacoes.js';
 
 export function Movimentacao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -38,7 +42,7 @@ export function Movimentacao() {
     const end = val.toUpperCase()
     // Validar se endereço existe na tabela de locais (exceto REC e EXPEDICAO que são virtuais)
     if (end !== 'REC' && end !== 'EXPEDICAO') {
-      const local = await window.wmsAPI.locais.buscar(end)
+      const local = await locaisQueries.buscarPorEndereco(end)
       if (!local) {
         return toastError('Endereço Inválido', `O endereço "${end}" não está cadastrado. Cadastre-o na tela de Locais.`)
       }
@@ -50,10 +54,10 @@ export function Movimentacao() {
 
   const scanProduto = async (val) => {
     try {
-      const p = await window.wmsAPI.produtos.buscarPorCodigo(val)
+      const p = await produtosQueries.buscarPorCodigo(val)
       if (!p) return toastWarning('Aviso', 'Produto não cadastrado.')
       
-      const saldos = await window.wmsAPI.estoque.buscarPorEnderecoProduto(origem, p.id)
+      const saldos = await estoqueQueries.buscarPorEnderecoProduto(origem, p.id)
       if (saldos.length === 0) {
         return toastError('Sem Saldo', `O produto não possui saldo em ${origem}`)
       }
@@ -65,7 +69,7 @@ export function Movimentacao() {
         const saldo = saldos[0]
         setSaldoAtual(saldo)
         if (origem === 'REC') {
-          const puts = await window.wmsAPI.estoque.sugestaoPutaway(p.id, saldo.lote)
+          const puts = await estoqueQueries.sugestaoPutaway(p.id, saldo.lote)
           setSugestoes(puts)
         }
         setStep(3)
@@ -84,7 +88,7 @@ export function Movimentacao() {
     setSaldoAtual(saldo)
     setSaldoOpcoes([])
     if (origem === 'REC') {
-      const puts = await window.wmsAPI.estoque.sugestaoPutaway(produto.id, saldo.lote)
+      const puts = await estoqueQueries.sugestaoPutaway(produto.id, saldo.lote)
       setSugestoes(puts)
     }
     setStep(3)
@@ -110,7 +114,7 @@ export function Movimentacao() {
     }
 
     // ── TRAVA: Validar se o endereço de destino está cadastrado ──
-    const localDst = await window.wmsAPI.locais.buscar(dst)
+    const localDst = await locaisQueries.buscarPorEndereco(dst)
     if (!localDst) {
       return toastError('Endereço Inválido', `O endereço "${dst}" não está cadastrado. Cadastre-o na tela de Locais.`)
     }
@@ -132,7 +136,7 @@ export function Movimentacao() {
         operador_nome: operador.nome
       }
 
-      const res = await window.wmsAPI.movimentacoes.transferir(payload)
+      const res = await movimentacoesQueries.transferir(payload)
       if (res.success) {
         toastSuccess('Movimentação Concluída', `${produto.descricao} movido para ${dstFinal}`)
         resetAll()

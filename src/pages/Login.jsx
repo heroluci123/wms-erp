@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { Delete } from 'lucide-react'
+import * as operadoresQueries from '../queries/operadores.js';
 
 export function Login() {
   const [pin, setPin] = useState('')
@@ -21,7 +22,7 @@ export function Login() {
     if (pin.length !== 4) return
     setLoading(true)
     try {
-      const res = await window.wmsAPI.operadores.autenticar(pin)
+      const res = await operadoresQueries.autenticar(pin)
       if (res.success) {
         setOperador(res.operador)
         navigate('/')

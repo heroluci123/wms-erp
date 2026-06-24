@@ -1,3 +1,5 @@
+import { db } from '../lib/db.js';
+
 /** Queries de Inventário — Cíclico, Geral (Wall-to-Wall), Carga Inicial e Ciclos */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Retorna lista de endereços bloqueados (em inventário aberto) */
-async function enderecosBloqueados(db) {
+export async function enderecosBloqueados() {
   const { rows } = await db.execute({
     sql: `
     SELECT DISTINCT ii.endereco
@@ -17,7 +19,7 @@ async function enderecosBloqueados(db) {
 }
 
 /** Verifica se um endereço está bloqueado */
-async function verificarEnderecoBloqueado(db, endereco) {
+export async function verificarEnderecoBloqueado(endereco) {
   const { rows } = await db.execute({
     sql: `
     SELECT i.id, i.tipo, i.nome, i.tipo_filtro, i.identificador_filtro
@@ -33,17 +35,17 @@ async function verificarEnderecoBloqueado(db, endereco) {
 // CICLOS
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function ciclos_listar(db) {
+export async function ciclos_listar() {
   const { rows } = await db.execute({ sql: `SELECT * FROM inventario_ciclos ORDER BY data_criacao DESC`, args: [] })
   return rows
 }
 
-async function ciclos_buscarAtivo(db) {
+export async function ciclos_buscarAtivo() {
   const { rows } = await db.execute({ sql: `SELECT * FROM inventario_ciclos WHERE status = 'Ativo' LIMIT 1`, args: [] })
   return rows[0]
 }
 
-async function ciclos_criar(db, { nome, target_pct = 99.9 }) {
+export async function ciclos_criar({ nome, target_pct = 99.9 }) {
   try {
     const { rows: ativoRows } = await db.execute({ sql: `SELECT id FROM inventario_ciclos WHERE status = 'Ativo' LIMIT 1`, args: [] })
     const ativo = ativoRows[0]
@@ -55,7 +57,7 @@ async function ciclos_criar(db, { nome, target_pct = 99.9 }) {
   }
 }
 
-async function ciclos_encerrar(db, { ciclo_id, forcar = false }) {
+export async function ciclos_encerrar({ ciclo_id, forcar = false }) {
   const tx = await db.transaction('write')
   try {
     // 1. Verificar se há inventários ativos para este ciclo
@@ -101,14 +103,14 @@ async function ciclos_encerrar(db, { ciclo_id, forcar = false }) {
   }
 }
 
-async function recontarItem(db, item_id) {
+export async function recontarItem(item_id) {
   try {
     await db.execute({ sql: `UPDATE inventario_itens SET qtd_contada_caixas = NULL, qtd_contada_kg = NULL, status_item = 'Pendente', contagem_atual = contagem_atual + 1 WHERE id = ?`, args: [item_id] })
     return { success: true }
   } catch (err) { return { success: false, error: err.message } }
 }
 
-async function validarEstoqueSemAjuste(db, item_id, operador_id, operador_nome) {
+export async function validarEstoqueSemAjuste(item_id, operador_id, operador_nome) {
   const tx = await db.transaction('write')
   try {
     const { rows: itemRows } = await tx.execute({ sql: `SELECT * FROM inventario_itens WHERE id = ?`, args: [item_id] })
@@ -151,7 +153,7 @@ async function validarEstoqueSemAjuste(db, item_id, operador_id, operador_nome) 
   }
 }
 
-async function ciclos_dashboard(db, ciclo_id) {
+export async function ciclos_dashboard(ciclo_id) {
   // Todos os inventários finalizados do ciclo
   const { rows: inventariosFinalizados } = await db.execute({
     sql: `
@@ -234,7 +236,7 @@ async function ciclos_dashboard(db, ciclo_id) {
 }
 
 // Retorna ou cria o produto dummy para endereços vazios
-async function getProdutoVazio(db) {
+export async function getProdutoVazio() {
   let { rows: pRows } = await db.execute({ sql: `SELECT id FROM produtos WHERE codigo = 'VAZIO'`, args: [] })
   let p = pRows[0]
   if (!p) {
@@ -248,7 +250,7 @@ async function getProdutoVazio(db) {
 // INVENTÁRIO CÍCLICO (rotativo)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function criar(db, { tipo_filtro, identificador_filtro }) {
+export async function criar({ tipo_filtro, identificador_filtro }) {
   const tx = await db.transaction('write')
   try {
     const { rows: ativoRows } = await tx.execute({
@@ -325,7 +327,7 @@ async function criar(db, { tipo_filtro, identificador_filtro }) {
 // INVENTÁRIO GERAL (Wall-to-Wall)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function criarGeral(db, { nome, zonas = [] }) {
+export async function criarGeral({ nome, zonas = [] }) {
   const tx = await db.transaction('write')
   try {
     const result = await tx.execute({
@@ -369,7 +371,7 @@ async function criarGeral(db, { nome, zonas = [] }) {
   }
 }
 
-async function listarZonas(db, inventario_id) {
+export async function listarZonas(inventario_id) {
   const { rows: zonas } = await db.execute({ sql: `SELECT * FROM inventario_zonas WHERE inventario_id = ? ORDER BY id`, args: [inventario_id] })
   const result = []
   for (const z of zonas) {
@@ -393,7 +395,7 @@ async function listarZonas(db, inventario_id) {
 // INVENTÁRIO CARGA INICIAL
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function criarCargaInicial(db) {
+export async function criarCargaInicial() {
   try {
     const { rows: existeRows } = await db.execute({ sql: `SELECT id FROM inventarios WHERE tipo = 'CargaInicial' AND status NOT IN ('Finalizado OK','Cancelado') LIMIT 1`, args: [] })
     const existe = existeRows[0]
@@ -414,7 +416,7 @@ async function criarCargaInicial(db) {
   }
 }
 
-async function conciliarCargaInicial(db, { inventario_id, operador_id, operador_nome }) {
+export async function conciliarCargaInicial({ inventario_id, operador_id, operador_nome }) {
   const tx = await db.transaction('write')
   try {
     const { rows: itens } = await tx.execute({
@@ -456,7 +458,7 @@ async function conciliarCargaInicial(db, { inventario_id, operador_id, operador_
 // LISTAGEM GERAL
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function listar(db) {
+export async function listar() {
   const { rows } = await db.execute({
     sql: `
     SELECT i.*,
@@ -474,7 +476,7 @@ async function listar(db) {
   return rows
 }
 
-async function buscar(db, id) {
+export async function buscar(id) {
   const { rows } = await db.execute({
     sql: `
     SELECT i.*, ic.nome as ciclo_nome
@@ -485,7 +487,7 @@ async function buscar(db, id) {
   return rows[0]
 }
 
-async function listarItens(db, inventario_id) {
+export async function listarItens(inventario_id) {
   const { rows } = await db.execute({
     sql: `
     SELECT
@@ -507,7 +509,7 @@ async function listarItens(db, inventario_id) {
 // CONTAGEM (Coletor)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function registrarContagem(db, { item_id, qtd_contada_caixas, qtd_contada_kg, validade_informada }) {
+export async function registrarContagem({ item_id, qtd_contada_caixas, qtd_contada_kg, validade_informada }) {
   const { rows: itemRows } = await db.execute({ sql: `SELECT ii.*, i.tipo as tipo_inventario FROM inventario_itens ii JOIN inventarios i ON i.id = ii.inventario_id WHERE ii.id = ?`, args: [item_id] })
   const item = itemRows[0]
   if (!item) return { success: false, error: 'Item não encontrado' }
@@ -588,7 +590,7 @@ async function registrarContagem(db, { item_id, qtd_contada_caixas, qtd_contada_
 // CONCILIAÇÃO COM LOG DE AUDITORIA
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function conciliar(db, { inventario_id, operador_id, operador_nome }) {
+export async function conciliar({ inventario_id, operador_id, operador_nome }) {
   const tx = await db.transaction('write')
   try {
     const { rows: invRows } = await tx.execute({ sql: `SELECT * FROM inventarios WHERE id = ?`, args: [inventario_id] })
@@ -662,12 +664,12 @@ async function conciliar(db, { inventario_id, operador_id, operador_nome }) {
 // CANCELAMENTOS E RESETS
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function cancelar(db, id) {
+export async function cancelar(id) {
   await db.execute({ sql: `UPDATE inventarios SET status = 'Cancelado', data_finalizacao = CURRENT_TIMESTAMP WHERE id = ?`, args: [id] })
   return { success: true }
 }
 
-async function cancelarItem(db, item_id) {
+export async function cancelarItem(item_id) {
   try {
     const { rows: itemRows } = await db.execute({ sql: `SELECT inventario_id FROM inventario_itens WHERE id = ?`, args: [item_id] })
     const item = itemRows[0]
@@ -689,7 +691,7 @@ async function cancelarItem(db, item_id) {
 // IRA E ITENS SURPRESA
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function calcularIRA(db, inventario_id) {
+export async function calcularIRA(inventario_id) {
   const { rows: itens } = await db.execute({
     sql: `
     SELECT
@@ -715,7 +717,7 @@ async function calcularIRA(db, inventario_id) {
   return { itens, ira_geral: parseFloat(iraGeral) }
 }
 
-async function adicionarItemSurpresa(db, { inventario_id, endereco, produto_id, validade }) {
+export async function adicionarItemSurpresa({ inventario_id, endereco, produto_id, validade }) {
   // Se o endereço recebeu um item surpresa, ele não está mais vazio.
   // Deletar o item dummy (VAZIO) se existir para este endereço.
   const { rows: dummyProdRows } = await db.execute({ sql: `SELECT id FROM produtos WHERE codigo = 'VAZIO'`, args: [] })
@@ -748,7 +750,7 @@ async function adicionarItemSurpresa(db, { inventario_id, endereco, produto_id, 
 // LOG DE AJUSTES
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function listarAjustesLog(db, { ciclo_id, inventario_id } = {}) {
+export async function listarAjustesLog({ ciclo_id, inventario_id } = {}) {
   let sql = `
     SELECT al.*, p.codigo, p.descricao, p.tipo_produto
     FROM inventario_ajustes_log al
@@ -761,26 +763,4 @@ async function listarAjustesLog(db, { ciclo_id, inventario_id } = {}) {
   sql += ' ORDER BY al.data_ajuste DESC LIMIT 500'
   const { rows } = await db.execute({ sql, args: params })
   return rows
-}
-
-module.exports = {
-  // Ciclos
-  ciclos_listar, ciclos_buscarAtivo, ciclos_criar, ciclos_encerrar, ciclos_dashboard,
-  // Inventários
-  criar, criarGeral, criarCargaInicial,
-  listar, buscar, listarItens, listarZonas,
-  // Contagem
-  registrarContagem,
-  // Conciliação
-  conciliar, conciliarCargaInicial,
-  // Cancelamento e Reset
-  cancelar, cancelarItem, recontarItem,
-  // IRA
-  calcularIRA, adicionarItemSurpresa,
-  // Log
-  listarAjustesLog,
-  // Bloqueio de endereços
-  enderecosBloqueados, verificarEnderecoBloqueado,
-  // Validação
-  validarEstoqueSemAjuste
 }

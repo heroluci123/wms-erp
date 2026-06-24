@@ -3,6 +3,8 @@ import { UploadCloud, Check, History, Download, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
+import * as movimentacoesQueries from '../queries/movimentacoes.js';
+import * as produtosQueries from '../queries/produtos.js';
 
 export function Recebimento() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -31,7 +33,7 @@ export function Recebimento() {
 
   const carregarHistorico = async () => {
     try {
-      const logs = await window.wmsAPI.movimentacoes.listarLog({ tipo: 'RECEBIMENTO', incluirInsumos })
+      const logs = await movimentacoesQueries.listarLog({ tipo: 'RECEBIMENTO', incluirInsumos })
       setHistorico(logs)
     } catch (e) {
       toastError('Erro', 'Falha ao carregar histórico')
@@ -80,7 +82,7 @@ export function Recebimento() {
 
   const buscarProduto = async (cod) => {
     try {
-      const p = await window.wmsAPI.produtos.buscarPorCodigo(cod)
+      const p = await produtosQueries.buscarPorCodigo(cod)
       if (p) {
         setProduto(p)
         setFormData(f => ({ ...f, codigo: cod }))
@@ -126,7 +128,7 @@ export function Recebimento() {
         operador_nome: operador.nome
       }
 
-      const res = await window.wmsAPI.movimentacoes.receber(payload)
+      const res = await movimentacoesQueries.receber(payload)
       if (res.success) {
         toastSuccess('Recebimento Concluído', `Lote direcionado para posição REC.`)
         // Reset form
@@ -351,7 +353,7 @@ export function Recebimento() {
                             title="Deletar Log de Histórico"
                             onClick={async () => {
                               if (window.confirm('Tem certeza que deseja apagar este registro do histórico? (Isso NÃO estorna o saldo, apenas limpa o registro de log)')) {
-                                const res = await window.wmsAPI.movimentacoes.deletarLog(h.id);
+                                const res = await movimentacoesQueries.deletarLog(h.id);
                                 if (res.success) {
                                   toastSuccess('Sucesso', 'Registro apagado do histórico.');
                                   carregarHistorico();

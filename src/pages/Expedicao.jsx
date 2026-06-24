@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Box, CheckCircle2, Truck, RefreshCw, XCircle, History, Download, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { format } from 'date-fns'
+import * as movimentacoesQueries from '../queries/movimentacoes.js';
 
 export function Expedicao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -22,7 +23,7 @@ export function Expedicao() {
 
   const carregarHistorico = async () => {
     try {
-      const logs = await window.wmsAPI.movimentacoes.listarLog({ tipo: 'DESPACHO', incluirInsumos })
+      const logs = await movimentacoesQueries.listarLog({ tipo: 'DESPACHO', incluirInsumos })
       setHistorico(logs)
     } catch (e) {
       toastError('Erro', 'Falha ao carregar histórico')
@@ -65,7 +66,7 @@ export function Expedicao() {
   const carregarExpedicao = async () => {
     setLoading(true)
     try {
-      const data = await window.wmsAPI.movimentacoes.listarExpedicao()
+      const data = await movimentacoesQueries.listarExpedicao()
       setItens(data)
     } catch (err) {
       toastError('Erro', 'Falha ao carregar área de expedição.')
@@ -80,7 +81,7 @@ export function Expedicao() {
 
   const handleDespacho = async (produto_id, lote) => {
     try {
-      const res = await window.wmsAPI.movimentacoes.confirmarDespacho(produto_id, lote, operador.id)
+      const res = await movimentacoesQueries.confirmarDespacho(produto_id, lote, operador.id)
       if (res.success) {
         toastSuccess('Despacho Confirmado', `Item baixado do estoque. (${res.qtd_caixas} cx)`)
         carregarExpedicao()
@@ -106,7 +107,7 @@ export function Expedicao() {
         operador_id: operador.id,
         operador_nome: operador.nome
       }
-      const res = await window.wmsAPI.movimentacoes.estornarExpedicao(payload)
+      const res = await movimentacoesQueries.estornarExpedicao(payload)
       if (res.success) {
         toastSuccess('Estorno Realizado', `Lote retornado para ${payload.destino}.`)
         carregarExpedicao()
@@ -277,7 +278,7 @@ export function Expedicao() {
                             title="Deletar Log de Histórico"
                             onClick={async () => {
                               if (window.confirm('Tem certeza que deseja apagar este registro do histórico? (Isso NÃO estorna o saldo, apenas limpa o registro de log)')) {
-                                const res = await window.wmsAPI.movimentacoes.deletarLog(h.id);
+                                const res = await movimentacoesQueries.deletarLog(h.id);
                                 if (res.success) {
                                   toastSuccess('Sucesso', 'Registro apagado do histórico.');
                                   carregarHistorico();

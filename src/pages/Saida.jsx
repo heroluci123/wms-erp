@@ -2,6 +2,10 @@ import React, { useState } from 'react'
 import { Truck, MapPin, Box, Hash, Check, ArrowRight } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { format } from 'date-fns'
+import * as locaisQueries from '../queries/locais.js';
+import * as produtosQueries from '../queries/produtos.js';
+import * as estoqueQueries from '../queries/estoque.js';
+import * as movimentacoesQueries from '../queries/movimentacoes.js';
 
 export function Saida() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -33,7 +37,7 @@ export function Saida() {
       return toastError('Endereço Inválido', `Não é possível fazer saída a partir de "${end}".`)
     }
     // Validar se endereço está cadastrado
-    const local = await window.wmsAPI.locais.buscar(end)
+    const local = await locaisQueries.buscarPorEndereco(end)
     if (!local) {
       return toastError('Endereço Inválido', `O endereço "${end}" não está cadastrado.`)
     }
@@ -44,10 +48,10 @@ export function Saida() {
 
   const scanProduto = async (val) => {
     try {
-      const p = await window.wmsAPI.produtos.buscarPorCodigo(val)
+      const p = await produtosQueries.buscarPorCodigo(val)
       if (!p) return toastWarning('Aviso', 'Produto não cadastrado.')
       
-      const saldos = await window.wmsAPI.estoque.buscarPorEnderecoProduto(origem, p.id)
+      const saldos = await estoqueQueries.buscarPorEnderecoProduto(origem, p.id)
       if (saldos.length === 0) {
         return toastError('Sem Saldo', `O produto não possui saldo em ${origem}`)
       }
@@ -76,7 +80,7 @@ export function Saida() {
 
   const verificarFEFO = async (p, saldo) => {
     if (saldo.validade) {
-      const maisAntigos = await window.wmsAPI.estoque.verificarFEFO(p.id, saldo.validade)
+      const maisAntigos = await estoqueQueries.verificarFEFO(p.id, saldo.validade)
       if (maisAntigos.length > 0) {
         setFefoAlert(maisAntigos)
         return
@@ -141,7 +145,7 @@ export function Saida() {
 
       // Solução final pragmática: enviar com destino EXPEDICAO usando listarLog como workaround
       // NÃO! Vamos usar a lógica correta. O backend precisa de uma nova rota.
-      // Como temos window.wmsAPI.movimentacoes.transferir que chama 'movimentacoes:transferir',
+      // Como temos movimentacoesQueries.transferir que chama 'movimentacoes:transferir',
       // e o backend bloqueia REC/EXPEDICAO, precisamos criar uma API separada.
       
       // Na verdade, a forma mais correta é: o backend deve ter uma function enviarParaExpedicao
@@ -163,7 +167,7 @@ export function Saida() {
       // Porém isso já foi implementado. A trava está no backend.
       // Vou ter que criar uma nova IPC. Vou fazer isso direto aqui.
       
-      const res = await window.wmsAPI.movimentacoes.enviarParaExpedicao(payload)
+      const res = await movimentacoesQueries.enviarParaExpedicao(payload)
       if (res.success) {
         toastSuccess('Saída Confirmada', `${produto.descricao} enviado para a Expedição. (${qtdCaixas} cx)`)
         resetAll()

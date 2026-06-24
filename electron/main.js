@@ -6,21 +6,43 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 // ─── Inicialização do Banco de Dados ──────────────────────────────────────────
 let db
-function initDatabase() {
-  const Database = require('better-sqlite3')
+async function initDatabase() {
+  const { createClient } = require('@libsql/client')
+  
+  if (app.isPackaged) {
+    require('dotenv').config({ path: path.join(process.resourcesPath, '.env') })
+  } else {
+    require('dotenv').config()
+  }
+
   const userDataPath = app.getPath('userData')
   const dbPath = path.join(userDataPath, 'wms.db')
   
-  // Log do caminho para o usuário configurar o Drive
   console.log('[WMS] Banco de dados em:', dbPath)
   
-  db = new Database(dbPath, { verbose: isDev ? console.log : null })
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
+  const syncUrl = process.env.TURSO_DATABASE_URL
+  const authToken = process.env.TURSO_AUTH_TOKEN
+
+  if (syncUrl && authToken) {
+    db = createClient({
+      url: `file:${dbPath}`,
+      syncUrl,
+      authToken,
+      syncInterval: 60
+    })
+    try {
+      await db.sync()
+      console.log('[WMS] Banco sincronizado com Turso.')
+    } catch (e) {
+      console.error('[WMS] Falha ao sincronizar Turso (modo offline ativado):', e.message)
+    }
+  } else {
+    db = createClient({ url: `file:${dbPath}` })
+  }
   
   // Executar migrations
   const { runMigrations } = require('./database/migrations')
-  runMigrations(db)
+  await runMigrations(db)
   
   return db
 }
@@ -52,8 +74,8 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
-  initDatabase()
+app.whenReady().then(async () => {
+  await initDatabase()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

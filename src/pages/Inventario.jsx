@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { InventarioStatusBadge } from '../components/shared/Badge'
 import { format } from 'date-fns'
+import * as inventariosQueries from '../queries/inventarios.js';
 
 // ─── Sub-componente: Painel do Ciclo Ativo ───────────────────────────────────
 function PainelCicloAtivo({ ciclo, onRefresh }) {
@@ -18,7 +19,7 @@ function PainelCicloAtivo({ ciclo, onRefresh }) {
     if (!ciclo) return
     setLoadingDash(true)
     try {
-      const d = await window.wmsAPI.inventarios.ciclosDashboard(ciclo.id)
+      const d = await inventariosQueries.ciclos_dashboard(ciclo.id)
       setDash(d)
     } catch (e) { /* silencioso */ }
     finally { setLoadingDash(false) }
@@ -28,7 +29,7 @@ function PainelCicloAtivo({ ciclo, onRefresh }) {
 
   const handleEncerrar = async (forcar = false) => {
     try {
-      const res = await window.wmsAPI.inventarios.ciclosEncerrar({ ciclo_id: ciclo.id, forcar })
+      const res = await inventariosQueries.ciclos_encerrar({ ciclo_id: ciclo.id, forcar })
       if (res.success) {
         toastSuccess('Ciclo Encerrado', 'O ciclo foi encerrado com sucesso.')
         setShowEncerrar(false)
@@ -143,7 +144,7 @@ function CicloAccordion({ ciclo }) {
     if (isAbrindo && !dash) {
       setLoading(true)
       try {
-        const d = await window.wmsAPI.inventarios.ciclosDashboard(ciclo.id)
+        const d = await inventariosQueries.ciclos_dashboard(ciclo.id)
         setDash(d)
       } catch (e) {}
       finally { setLoading(false) }
@@ -253,9 +254,9 @@ export function Inventario() {
     setLoading(true)
     try {
       const [invData, cicloData, ciclosData] = await Promise.all([
-        window.wmsAPI.inventarios.listar(),
-        window.wmsAPI.inventarios.ciclosBuscarAtivo(),
-        window.wmsAPI.inventarios.ciclosListar(),
+        inventariosQueries.listar(),
+        inventariosQueries.ciclos_buscarAtivo(),
+        inventariosQueries.ciclos_listar(),
       ])
       setInventarios(invData)
       setCicloAtivo(cicloData)
@@ -282,7 +283,7 @@ export function Inventario() {
 
   const carregarLog = useCallback(async () => {
     try {
-      const log = await window.wmsAPI.inventarios.ajustesLog({})
+      const log = await inventariosQueries.listarAjustesLog({})
       setAjustesLog(log)
     } catch(e) {}
   }, [])
@@ -294,7 +295,7 @@ export function Inventario() {
   const handleCriarCiclico = async (e) => {
     e.preventDefault()
     try {
-      const res = await window.wmsAPI.inventarios.criar({ tipo_filtro: tipoFiltro, identificador_filtro: identificador.toUpperCase() })
+      const res = await inventariosQueries.criar({ tipo_filtro: tipoFiltro, identificador_filtro: identificador.toUpperCase() })
       if (res.success) {
         toastSuccess('Inventário Criado', `${res.total_itens} posições separadas para contagem.`)
         carregar()
@@ -307,7 +308,7 @@ export function Inventario() {
     const zonas = zonasGeral.split(',').map(z => z.trim().toUpperCase()).filter(Boolean)
     if (zonas.length === 0) return toastError('Erro', 'Informe ao menos uma zona/rua.')
     try {
-      const res = await window.wmsAPI.inventarios.criarGeral({ nome: nomeGeral, zonas })
+      const res = await inventariosQueries.criarGeral({ nome: nomeGeral, zonas })
       if (res.success) {
         toastSuccess('Inventário Geral Criado', 'Inventário Wall-to-Wall iniciado.')
         setNomeGeral(''); setZonasGeral('')
@@ -319,7 +320,7 @@ export function Inventario() {
   const handleCriarCargaInicial = async () => {
     if (!window.confirm('Isso iniciará a carga inicial do sistema. Todos os endereços serão abertos para inserção de saldo. Confirmar?')) return
     try {
-      const res = await window.wmsAPI.inventarios.criarCargaInicial()
+      const res = await inventariosQueries.criarCargaInicial()
       if (res.success) {
         toastSuccess('Carga Inicial Criada', `${res.total_locais} locais disponíveis para inserção.`)
         navigate(`/inventario/conciliacao/${res.inventario_id}`)
@@ -330,7 +331,7 @@ export function Inventario() {
   const handleCriarCiclo = async (e) => {
     e.preventDefault()
     try {
-      const res = await window.wmsAPI.inventarios.ciclosCriar({ nome: nomeCiclo, target_pct: parseFloat(targetCiclo) || 99.9 })
+      const res = await inventariosQueries.ciclos_criar({ nome: nomeCiclo, target_pct: parseFloat(targetCiclo) || 99.9 })
       if (res.success) {
         toastSuccess('Ciclo Criado', `Ciclo "${nomeCiclo}" ativado.`)
         setNomeCiclo('')
@@ -342,7 +343,7 @@ export function Inventario() {
   const handleCancelar = async (id) => {
     if (!window.confirm('Tem certeza que deseja cancelar este inventário?')) return
     try {
-      const res = await window.wmsAPI.inventarios.cancelar(id)
+      const res = await inventariosQueries.cancelar(id)
       if (res.success) { toastSuccess('Cancelado', 'Inventário cancelado.'); carregar() }
       else toastError('Erro', res.error)
     } catch (err) { toastError('Erro', err.message) }

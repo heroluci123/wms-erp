@@ -11,6 +11,8 @@ import { CurvaBadge, EnderecoBadge } from '../components/shared/Badge'
 import { format, differenceInDays, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { useAppStore } from '../store/appStore'
+import * as estoqueQueries from '../queries/estoque.js';
+import * as movimentacoesQueries from '../queries/movimentacoes.js';
 
 // ─── Cores para os gráficos ────────────────────────────────────────────────
 const COLORS_ENTRADA = ['#22d3ee', '#06b6d4', '#0891b2', '#0e7490', '#155e75']
@@ -77,8 +79,8 @@ export function Dashboard() {
     try {
       const filtros = { incluirInsumos }
       const [kpisData, estoqueData] = await Promise.all([
-        window.wmsAPI.estoque.kpis(filtros),
-        window.wmsAPI.estoque.listarGeral()
+        estoqueQueries.calcularKPIs(filtros),
+        estoqueQueries.listarGeral()
       ])
       setKpis(kpisData)
       setEstoque(incluirInsumos 
@@ -87,7 +89,7 @@ export function Dashboard() {
       )
 
       if (isExecutivo) {
-        const rel = await window.wmsAPI.movimentacoes.relatorioExecutivo(filtros)
+        const rel = await movimentacoesQueries.relatorioExecutivo(filtros)
         setRelatorio(rel)
       }
     } catch (err) {
@@ -112,7 +114,7 @@ export function Dashboard() {
     const rows = estoqueFiltrado.map(i =>
       `${i.endereco};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.lote || ''};${i.validade || ''};${i.qtd_caixas};${i.qtd_kg};${i.status_curva};${i.valor_unitario || 0}`
     ).join("\n")
-    await window.wmsAPI.export.csv('estoque_filtrado.csv', header + rows)
+    await downloadCSV(header + rows)
   }
 
   const renderValidade = (data) => {

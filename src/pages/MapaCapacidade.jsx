@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Map, RefreshCw, BarChart2, CheckCircle2, AlertCircle, Database } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import * as locaisQueries from '../queries/locais.js';
+import * as estoqueQueries from '../queries/estoque.js';
 
 export function MapaCapacidade() {
   const { toastError } = useAppStore()
@@ -12,8 +14,8 @@ export function MapaCapacidade() {
   const carregar = async () => {
     setLoading(true)
     try {
-      const locData = await window.wmsAPI.locais.listar()
-      const estData = await window.wmsAPI.estoque.listarGeral()
+      const locData = await locaisQueries.listar()
+      const estData = await estoqueQueries.listarGeral()
       setLocais(locData)
       setEstoque(estData)
     } catch (err) {

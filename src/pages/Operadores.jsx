@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Users, Plus, Edit2, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import * as operadoresQueries from '../queries/operadores.js';
 
 export function Operadores() {
   const { operador, toastSuccess, toastError } = useAppStore()
@@ -32,7 +33,7 @@ export function Operadores() {
 
   const carregar = async () => {
     try {
-      const data = await window.wmsAPI.operadores.listar()
+      const data = await operadoresQueries.listar()
       setOperadores(data)
     } catch (err) {
       toastError('Erro', 'Falha ao carregar operadores')
@@ -52,11 +53,11 @@ export function Operadores() {
 
     try {
       if (isEditing) {
-        const res = await window.wmsAPI.operadores.atualizar(formData)
+        const res = await operadoresQueries.atualizar(formData)
         if (res.success) toastSuccess('Sucesso', 'Operador atualizado.')
         else return toastError('Erro', res.error)
       } else {
-        const res = await window.wmsAPI.operadores.criar(formData)
+        const res = await operadoresQueries.criar(formData)
         if (res.success) toastSuccess('Sucesso', 'Operador cadastrado.')
         else return toastError('Erro', res.error)
       }
@@ -73,7 +74,7 @@ export function Operadores() {
     if (!window.confirm('Tem certeza que deseja desativar este operador?')) return
     
     try {
-      const res = await window.wmsAPI.operadores.desativar(id)
+      const res = await operadoresQueries.desativar(id)
       if (res.success) {
         toastSuccess('Sucesso', 'Operador desativado.')
         carregar()

@@ -1,11 +1,13 @@
+import { db } from '../lib/db.js';
+
 /** Queries para Locais (Endereços Físicos) */
 
-async function listar(db) {
+export async function listar() {
   const res = await db.execute('SELECT * FROM locais WHERE ativo = 1 ORDER BY endereco ASC')
   return res.rows
 }
 
-async function buscarPorEndereco(db, endereco) {
+export async function buscarPorEndereco(endereco) {
   const res = await db.execute({
     sql: 'SELECT * FROM locais WHERE endereco = ? AND ativo = 1',
     args: [endereco]
@@ -13,7 +15,7 @@ async function buscarPorEndereco(db, endereco) {
   return res.rows[0]
 }
 
-async function criar(db, { endereco, capacidade_max_caixas, is_insumo = 0 }) {
+export async function criar({ endereco, capacidade_max_caixas, is_insumo = 0 }) {
   try {
     const res = await db.execute({
       sql: 'INSERT INTO locais (endereco, capacidade_max_caixas, is_insumo) VALUES (?, ?, ?)',
@@ -28,7 +30,7 @@ async function criar(db, { endereco, capacidade_max_caixas, is_insumo = 0 }) {
   }
 }
 
-async function atualizar(db, { id, endereco, capacidade_max_caixas, is_insumo = 0 }) {
+export async function atualizar({ id, endereco, capacidade_max_caixas, is_insumo = 0 }) {
   try {
     await db.execute({
       sql: 'UPDATE locais SET endereco = ?, capacidade_max_caixas = ?, is_insumo = ? WHERE id = ?',
@@ -43,7 +45,7 @@ async function atualizar(db, { id, endereco, capacidade_max_caixas, is_insumo = 
   }
 }
 
-async function deletar(db, id) {
+export async function deletar(id) {
   try {
     await db.execute({
       sql: 'UPDATE locais SET ativo = 0 WHERE id = ?',
@@ -54,5 +56,3 @@ async function deletar(db, id) {
     return { success: false, error: err.message }
   }
 }
-
-module.exports = { listar, buscarPorEndereco, criar, atualizar, deletar }

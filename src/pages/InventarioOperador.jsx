@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { MapPin, Box, CheckCircle2, AlertCircle, Plus, X, Package, Settings } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import * as inventariosQueries from '../queries/inventarios.js';
+import * as locaisQueries from '../queries/locais.js';
+import * as produtosQueries from '../queries/produtos.js';
 
 export function InventarioOperador() {
   const { toastSuccess, toastError, toastWarning } = useAppStore()
@@ -35,7 +38,7 @@ export function InventarioOperador() {
   // 1. Carregar inventários
   const carregar = async () => {
     try {
-      const all = await window.wmsAPI.inventarios.listar()
+      const all = await inventariosQueries.listar()
       const emContagem = all.filter(i => i.status === 'Em Contagem' || i.status === 'Aberto')
       setInventarios(emContagem)
     } catch (e) {
@@ -49,7 +52,7 @@ export function InventarioOperador() {
   const selecionarInventario = async (inv) => {
     try {
       const isCarga = inv.tipo === 'CargaInicial'
-      const itens = await window.wmsAPI.inventarios.itens(inv.id)
+      const itens = await inventariosQueries.listarItens(inv.id)
       const pesoStatus = { 'Pendente': 1, '2ª Contagem': 2, '3ª Contagem': 3 }
       const pendentes = itens
         .filter(i => ['Pendente', '2ª Contagem', '3ª Contagem'].includes(i.status_item))
@@ -111,7 +114,7 @@ export function InventarioOperador() {
 
     if (isCarga) {
       try {
-        const locais = await window.wmsAPI.locais.listar()
+        const locais = await locaisQueries.listar()
         if (!locais.find(l => l.endereco.toUpperCase() === addr)) {
           return toastError('Endereço Inválido', 'Este endereço não existe no sistema. Cadastre-o primeiro na aba Locais.')
         }
@@ -137,12 +140,12 @@ export function InventarioOperador() {
     if (!val || val.trim() === '') return
 
     try {
-      const p = await window.wmsAPI.produtos.buscarPorCodigo(val)
+      const p = await produtosQueries.buscarPorCodigo(val)
       if (!p) {
         // Produto não encontrado: abre modal de cadastro rápido se for Carga Inicial
         const isCarga = inventarioAtivo?.tipo === 'CargaInicial'
         if (isCarga) {
-          const prods = await window.wmsAPI.produtos.listar()
+          const prods = await produtosQueries.listar()
           setProdutosSemEan(prods.filter(p => !p.ean))
           setModalCadastro({ ean: val.trim() })
           setFormCadastro({ descricao: '', tipo_produto: 'Materia Prima', status_curva: 'C', valor_unitario: '', grupo: '', produtoVinculado: null })
@@ -178,7 +181,7 @@ export function InventarioOperador() {
       let res;
       if (formCadastro.produtoVinculado) {
         // Atualiza o produto existente com o novo EAN e os campos da tela
-        res = await window.wmsAPI.produtos.atualizar({
+        res = await produtosQueries.atualizar({
           ...formCadastro.produtoVinculado,
           ean: modalCadastro.isEdicao ? formCadastro.produtoVinculado.ean : modalCadastro.ean,
           descricao: formCadastro.descricao.trim(),
@@ -188,7 +191,7 @@ export function InventarioOperador() {
           valor_unitario: parseFloat(formCadastro.valor_unitario) || 0
         })
       } else {
-        res = await window.wmsAPI.produtos.criar({
+        res = await produtosQueries.criar({
           ean: modalCadastro.ean,
           codigo: '',
           descricao: formCadastro.descricao.trim(),
@@ -207,7 +210,7 @@ export function InventarioOperador() {
       const eanBipado = modalCadastro.ean
       setModalCadastro(null)
       // Busca o produto recém criado e preenche o item
-      const p = await window.wmsAPI.produtos.buscarPorCodigo(eanBipado)
+      const p = await produtosQueries.buscarPorCodigo(eanBipado)
       if (p) {
         setItemAtual({
           id: null,
@@ -232,7 +235,7 @@ export function InventarioOperador() {
 
   const abrirModalEdicaoProduto = async () => {
     try {
-      const p = await window.wmsAPI.produtos.buscarPorCodigo(itemAtual.codigo)
+      const p = await produtosQueries.buscarPorCodigo(itemAtual.codigo)
       if (p) {
         setFormCadastro({
           descricao: p.descricao,
@@ -280,7 +283,7 @@ export function InventarioOperador() {
     if (itemMatch) {
       item_id = itemMatch.id
     } else {
-      const res = await window.wmsAPI.inventarios.adicionarItem({
+      const res = await inventariosQueries.adicionarItemSurpresa({
         inventario_id: inventarioAtivo.id,
         endereco: enderecoAtual,
         produto_id: itemAtual.produto_id,
@@ -330,7 +333,7 @@ export function InventarioOperador() {
       const todosParaEnviar = [...counted, ...uncounted]
 
       await Promise.all(
-        todosParaEnviar.map(c => window.wmsAPI.inventarios.registrarContagem({
+        todosParaEnviar.map(c => inventariosQueries.registrarContagem({
           item_id: c.item_id,
           qtd_contada_caixas: c.caixas,
           qtd_contada_kg: c.kg,
@@ -350,7 +353,7 @@ export function InventarioOperador() {
         setStep(1)
         setTimeout(() => document.getElementById('inv-endereco')?.focus(), 100)
       } else {
-        const itens = await window.wmsAPI.inventarios.itens(inventarioAtivo.id)
+        const itens = await inventariosQueries.listarItens(inventarioAtivo.id)
         const pesoStatus = { 'Pendente': 1, '2ª Contagem': 2, '3ª Contagem': 3 }
         const pendentes = itens
           .filter(i => ['Pendente', '2ª Contagem', '3ª Contagem'].includes(i.status_item))

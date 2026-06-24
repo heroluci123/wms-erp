@@ -38,13 +38,13 @@ function TopBar() {
       )}
 
       <div className="titlebar__controls">
-        <button className="titlebar__btn" onClick={() => window.wmsAPI.window.minimize()}>
+        <button className="titlebar__btn" onClick={() => (() => {})()}>
           <Minus size={16} />
         </button>
-        <button className="titlebar__btn" onClick={() => window.wmsAPI.window.maximize()}>
+        <button className="titlebar__btn" onClick={() => (() => {})()}>
           <Square size={14} />
         </button>
-        <button className="titlebar__btn titlebar__btn--close" onClick={() => window.wmsAPI.window.close()}>
+        <button className="titlebar__btn titlebar__btn--close" onClick={() => (() => {})()}>
           <X size={16} />
         </button>
       </div>

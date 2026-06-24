@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Plus, Search, Trash2, Edit2, FileDown } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { CurvaBadge } from '../components/shared/Badge'
+import * as produtosQueries from '../queries/produtos.js';
 
 export function Produtos() {
   const { toastSuccess, toastError, operador } = useAppStore()
@@ -14,7 +15,7 @@ export function Produtos() {
 
   const carregar = async () => {
     try {
-      const data = await window.wmsAPI.produtos.listar()
+      const data = await produtosQueries.listar()
       setProdutos(data)
     } catch (err) {
       toastError('Erro', 'Falha ao carregar produtos')
@@ -39,10 +40,10 @@ export function Produtos() {
       }
 
       if (isEditing) {
-        const res = await window.wmsAPI.produtos.atualizar(payload)
+        const res = await produtosQueries.atualizar(payload)
         if (res.success) toastSuccess('Sucesso', 'Produto atualizado.')
       } else {
-        const res = await window.wmsAPI.produtos.criar(payload)
+        const res = await produtosQueries.criar(payload)
         if (res.success) toastSuccess('Sucesso', 'Produto cadastrado.')
       }
       resetForm()
@@ -56,7 +57,7 @@ export function Produtos() {
     if (operador?.perfil !== 'gestor') return toastError('Acesso Negado', 'Ação restrita a gestores.')
     if (!window.confirm('Tem certeza que deseja excluir este produto?')) return
     try {
-      const res = await window.wmsAPI.produtos.deletar(id)
+      const res = await produtosQueries.deletar(id)
       if (res.success) {
         toastSuccess('Excluído', 'Produto removido com sucesso.')
         carregar()
@@ -95,7 +96,7 @@ export function Produtos() {
     const rows = produtos.map(p =>
       `${p.id};${p.codigo || ''};${p.ean || ''};${p.descricao};${p.grupo || ''};${p.tipo_produto};${p.status_curva};${p.unidade};${p.valor_unitario || 0}`
     ).join("\n")
-    await window.wmsAPI.export.csv('cadastro_produtos.csv', header + rows)
+    await downloadCSV(header + rows)
   }
 
   return (

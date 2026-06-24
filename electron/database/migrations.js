@@ -2,8 +2,8 @@
  * Migrations do banco SQLite do WMS/ERP
  * Executa criação de tabelas e índices na ordem correta
  */
-function runMigrations(db) {
-  db.exec(`
+async function runMigrations(db) {
+  await db.executeMultiple(`
     -- ── Locais (Endereços Físicos) ─────────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS locais (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,7 +132,7 @@ function runMigrations(db) {
       qtd_2_kg             REAL,
       qtd_3_caixas         REAL,
       qtd_3_kg             REAL,
-      status_item          TEXT DEFAULT 'Pendente', -- Removido CHECK restrito
+      status_item          TEXT DEFAULT 'Pendente',
       data_contagem        DATETIME
     );
     CREATE INDEX IF NOT EXISTS idx_inv_itens_inventario ON inventario_itens(inventario_id);
@@ -149,108 +149,76 @@ function runMigrations(db) {
   `)
 
   // Seed inicial: criar operador gestor padrão se não existir
-  const gestor = db.prepare("SELECT id FROM operadores WHERE pin = '0000' LIMIT 1").get()
-  if (!gestor) {
-    db.prepare(`
+  const gestorRes = await db.execute("SELECT id FROM operadores WHERE pin = '0000' LIMIT 1")
+  if (gestorRes.rows.length === 0) {
+    await db.execute(`
       INSERT INTO operadores (nome, pin, perfil) VALUES ('Administrador', '0000', 'gestor')
-    `).run()
+    `)
   }
 
-  // Migrations dinâmicas: adicionar colunas novas (ignora se já existir)
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN contagem_atual INTEGER DEFAULT 1;") } catch(e){}
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN qtd_1_caixas REAL;") } catch(e){}
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN qtd_1_kg REAL;") } catch(e){}
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN qtd_2_caixas REAL;") } catch(e){}
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN qtd_2_kg REAL;") } catch(e){}
-  // Migrations dinâmicas: Ajustes incrementais sem apagar dados
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN qtd_3_caixas REAL;") } catch(e){}
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN qtd_3_kg REAL;") } catch(e){}
-  // Validade informada pelo operador (separada da validade do sistema)
-  try { db.exec("ALTER TABLE inventario_itens ADD COLUMN validade_contada DATE;") } catch(e){}
+  // Migrations dinâmicas
+  const tryExecute = async (sql) => { try { await db.execute(sql) } catch(e){} }
+  
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN contagem_atual INTEGER DEFAULT 1;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN qtd_1_caixas REAL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN qtd_1_kg REAL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN qtd_2_caixas REAL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN qtd_2_kg REAL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN qtd_3_caixas REAL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN qtd_3_kg REAL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN validade_contada DATE;")
+  
   try {
-    db.prepare(`
-      ALTER TABLE produtos ADD COLUMN tipo_produto TEXT DEFAULT 'Materia Prima'
-    `).run()
+    await db.execute("ALTER TABLE produtos ADD COLUMN tipo_produto TEXT DEFAULT 'Materia Prima'")
     console.log('[WMS] Coluna tipo_produto adicionada a produtos.')
-  } catch (e) {
-    console.log('[WMS] Coluna tipo_produto já existe ou não pôde ser criada:', e.message)
-  }
+  } catch (e) {}
 
   try {
-    db.exec("ALTER TABLE produtos ADD COLUMN ean TEXT;")
+    await db.execute("ALTER TABLE produtos ADD COLUMN ean TEXT;")
     console.log('[WMS] Coluna ean adicionada a produtos.')
-  } catch (e) {
-    console.log('[WMS] Coluna ean já existe:', e.message)
-  }
-  try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_produtos_ean ON produtos(ean) WHERE ean IS NOT NULL AND ean != '';") } catch(e){}
+  } catch (e) {}
+  
+  await tryExecute("CREATE UNIQUE INDEX IF NOT EXISTS idx_produtos_ean ON produtos(ean) WHERE ean IS NOT NULL AND ean != '';")
 
   try {
-    db.prepare(`
-      ALTER TABLE locais ADD COLUMN is_insumo INTEGER DEFAULT 0
-    `).run()
+    await db.execute("ALTER TABLE locais ADD COLUMN is_insumo INTEGER DEFAULT 0")
     console.log('[WMS] Coluna is_insumo adicionada a locais.')
-  } catch (e) {
-    console.log('[WMS] Coluna is_insumo já existe ou não pôde ser criada:', e.message)
-  }
+  } catch (e) {}
 
-  // Patch: is_adm em operadores
-  try { db.exec("ALTER TABLE operadores ADD COLUMN is_adm INTEGER DEFAULT 0;") } catch(e){}
-  // Patch: coluna 'tipo' e 'ciclo_id' em inventarios (retrocompatível)
-  try { db.exec("ALTER TABLE inventarios ADD COLUMN tipo TEXT DEFAULT 'Ciclico';") } catch(e){}
-  try { db.exec("ALTER TABLE inventarios ADD COLUMN ciclo_id INTEGER;") } catch(e){}
-  try { db.exec("ALTER TABLE inventarios ADD COLUMN nome TEXT;") } catch(e){}
-  // Garantir que o ADM padrão tem is_adm=1
-  try {
-    db.prepare("UPDATE operadores SET is_adm = 1 WHERE pin = '0000' AND perfil = 'gestor'").run()
-  } catch(e) {}
+  await tryExecute("ALTER TABLE operadores ADD COLUMN is_adm INTEGER DEFAULT 0;")
+  await tryExecute("ALTER TABLE inventarios ADD COLUMN tipo TEXT DEFAULT 'Ciclico';")
+  await tryExecute("ALTER TABLE inventarios ADD COLUMN ciclo_id INTEGER;")
+  await tryExecute("ALTER TABLE inventarios ADD COLUMN nome TEXT;")
+  await tryExecute("UPDATE operadores SET is_adm = 1 WHERE pin = '0000' AND perfil = 'gestor'")
 
   try { 
-    db.exec("ALTER TABLE operadores ADD COLUMN permissoes TEXT DEFAULT '{}';") 
-    // Se a coluna foi criada com sucesso, migra os perfis antigos
+    await db.execute("ALTER TABLE operadores ADD COLUMN permissoes TEXT DEFAULT '{}';") 
     console.log('[WMS] Coluna permissoes adicionada. Migrando perfis legados...')
     
-    // Permissões completas para gestor
     const permissoesGestor = JSON.stringify({
-      recebimento: true,
-      movimentacao: true,
-      saida: true,
-      expedicao: true,
-      inventario_coletor: true,
-      inventario_gestao: true,
-      produtos: true,
-      locais: true,
-      operadores: true,
-      dashboard_executivo: true
+      recebimento: true, movimentacao: true, saida: true, expedicao: true,
+      inventario_coletor: true, inventario_gestao: true, produtos: true,
+      locais: true, operadores: true, dashboard_executivo: true
     })
     
-    // Permissões limitadas para operador antigo (por padrão)
     const permissoesOperador = JSON.stringify({
-      recebimento: true,
-      movimentacao: true,
-      saida: true,
-      expedicao: true,
-      inventario_coletor: true,
-      inventario_gestao: false,
-      produtos: true,
-      locais: false,
-      operadores: false,
-      dashboard_executivo: false
+      recebimento: true, movimentacao: true, saida: true, expedicao: true,
+      inventario_coletor: true, inventario_gestao: false, produtos: true,
+      locais: false, operadores: false, dashboard_executivo: false
     })
 
-    db.prepare(`UPDATE operadores SET permissoes = ? WHERE perfil = 'gestor'`).run(permissoesGestor)
-    db.prepare(`UPDATE operadores SET permissoes = ? WHERE perfil = 'operador'`).run(permissoesOperador)
+    await db.execute({ sql: `UPDATE operadores SET permissoes = ? WHERE perfil = 'gestor'`, args: [permissoesGestor] })
+    await db.execute({ sql: `UPDATE operadores SET permissoes = ? WHERE perfil = 'operador'`, args: [permissoesOperador] })
     console.log('[WMS] Migração de permissões concluída.')
   } catch(e) {
-    // Coluna já existe — fazer patch incremental para adicionar dashboard_executivo
-    // nos gestores existentes que ainda não possuem esse campo
     try {
-      const gestores = db.prepare("SELECT id, permissoes FROM operadores WHERE perfil = 'gestor'").all()
-      for (const g of gestores) {
+      const gestoresRes = await db.execute("SELECT id, permissoes FROM operadores WHERE perfil = 'gestor'")
+      for (const g of gestoresRes.rows) {
         try {
           const perms = JSON.parse(g.permissoes || '{}')
           if (perms.dashboard_executivo === undefined) {
             perms.dashboard_executivo = true
-            db.prepare('UPDATE operadores SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), g.id)
+            await db.execute({ sql: 'UPDATE operadores SET permissoes = ? WHERE id = ?', args: [JSON.stringify(perms), g.id] })
             console.log('[WMS] Patch dashboard_executivo aplicado no operador id=' + g.id)
           }
         } catch(pe) {}
@@ -258,12 +226,12 @@ function runMigrations(db) {
     } catch(pe2) {}
   }
 
-  // Migration crítica: remover CHECK constraints antigos que bloqueiam novos status
-  // Verifica se a tabela inventario_itens ainda tem o CHECK antigo
-  const itemsTableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='inventario_itens'").get()
+  // Migration crítica: remover CHECK constraints antigos
+  const itemsTableInfoRes = await db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='inventario_itens'")
+  const itemsTableInfo = itemsTableInfoRes.rows[0]
   if (itemsTableInfo && itemsTableInfo.sql && itemsTableInfo.sql.includes("'Pendente','OK','Divergente'")) {
     console.log('[WMS] Recriando inventario_itens sem CHECK constraint antigo...')
-    db.exec(`
+    await db.executeMultiple(`
       PRAGMA foreign_keys = OFF;
       CREATE TABLE inventario_itens_v3 (
         id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,11 +267,11 @@ function runMigrations(db) {
     console.log('[WMS] inventario_itens recriada com sucesso.')
   }
 
-  // Verifica se a tabela inventarios ainda tem o CHECK antigo
-  const invTableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='inventarios'").get()
+  const invTableInfoRes = await db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='inventarios'")
+  const invTableInfo = invTableInfoRes.rows[0]
   if (invTableInfo && invTableInfo.sql && invTableInfo.sql.includes("'Aberto','Em Contagem','Divergente','Finalizado'")) {
     console.log('[WMS] Recriando inventarios sem CHECK constraint antigo...')
-    db.exec(`
+    await db.executeMultiple(`
       PRAGMA foreign_keys = OFF;
       CREATE TABLE inventarios_v3 (
         id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -321,16 +289,13 @@ function runMigrations(db) {
     console.log('[WMS] inventarios recriada com sucesso.')
   }
 
-  console.log('[WMS] Migrations executadas com sucesso.')
-
-  // ─── Migração Especial: Atualizar UNIQUE de estoque_posicao ─────────────────
   try {
-    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='estoque_posicao'").get()
+    const tableInfoRes = await db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='estoque_posicao'")
+    const tableInfo = tableInfoRes.rows[0]
     if (tableInfo && !tableInfo.sql.includes('UNIQUE(produto_id, endereco, lote, validade)')) {
       console.log('[WMS] Aplicando migração da constraint UNIQUE em estoque_posicao...')
-      db.exec(`
+      await db.executeMultiple(`
         PRAGMA foreign_keys=off;
-        BEGIN TRANSACTION;
         CREATE TABLE estoque_posicao_new (
           id          INTEGER PRIMARY KEY AUTOINCREMENT,
           produto_id  INTEGER NOT NULL REFERENCES produtos(id) ON DELETE RESTRICT,
@@ -348,7 +313,6 @@ function runMigrations(db) {
         CREATE INDEX IF NOT EXISTS idx_estoque_endereco ON estoque_posicao(endereco);
         CREATE INDEX IF NOT EXISTS idx_estoque_produto  ON estoque_posicao(produto_id);
         CREATE INDEX IF NOT EXISTS idx_estoque_validade ON estoque_posicao(validade);
-        COMMIT;
         PRAGMA foreign_keys=on;
       `)
       console.log('[WMS] Migração UNIQUE concluída.')
@@ -357,14 +321,13 @@ function runMigrations(db) {
     console.error('[WMS] Erro na migração UNIQUE de estoque_posicao:', err)
   }
 
-  // ─── Migração Especial: Flexibilização da Tabela de Produtos ─────────────────
   try {
-    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='produtos'").get()
+    const tableInfoRes = await db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='produtos'")
+    const tableInfo = tableInfoRes.rows[0]
     if (tableInfo && (tableInfo.sql.includes('codigo         TEXT NOT NULL UNIQUE') || !tableInfo.sql.includes('ean            TEXT UNIQUE'))) {
       console.log('[WMS] Aplicando migração de flexibilização na tabela produtos...')
-      db.exec(`
+      await db.executeMultiple(`
         PRAGMA foreign_keys=off;
-        BEGIN TRANSACTION;
         CREATE TABLE produtos_new (
           id             INTEGER PRIMARY KEY AUTOINCREMENT,
           codigo         TEXT UNIQUE,
@@ -385,7 +348,6 @@ function runMigrations(db) {
         DROP TABLE produtos;
         ALTER TABLE produtos_new RENAME TO produtos;
         CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo);
-        COMMIT;
         PRAGMA foreign_keys=on;
       `)
       console.log('[WMS] Migração de produtos concluída.')
@@ -393,12 +355,8 @@ function runMigrations(db) {
   } catch (err) {
     console.error('[WMS] Erro na migração da tabela produtos:', err)
   }
-  try {
-    db.exec("ALTER TABLE produtos ADD COLUMN grupo TEXT DEFAULT '';")
-    console.log('[WMS] Coluna grupo adicionada à tabela produtos.')
-  } catch (e) {
-    // Ignora se a coluna já existir
-  }
+  
+  await tryExecute("ALTER TABLE produtos ADD COLUMN grupo TEXT DEFAULT '';")
 }
 
 module.exports = { runMigrations }

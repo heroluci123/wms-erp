@@ -11,8 +11,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "better-sqlite3": "11.2.1",
+    "@libsql/client": "^0.17.4",
     "date-fns": "^3.6.0",
+    "dotenv": "^17.4.2",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.3.9",
     "lucide-react": "^0.395.0",
@@ -72,6 +73,9 @@
       "owner": "heroluci123",
       "repo": "wms-erp",
       "private": true
-    }
+    },
+    "extraFiles": [
+      ".env"
+    ]
   }
 }

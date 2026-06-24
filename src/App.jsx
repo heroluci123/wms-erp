@@ -16,6 +16,12 @@ import { Saida } from './pages/Saida'
 import { Locais } from './pages/Locais'
 import { Operadores } from './pages/Operadores'
 import { MapaCapacidade } from './pages/MapaCapacidade'
+import { ColetorHome } from './pages/ColetorHome'
+
+function HomeWrapper() {
+  const isMobile = window.innerWidth <= 768
+  return isMobile ? <ColetorHome /> : <Dashboard />
+}
 
 function App() {
   return (
@@ -25,7 +31,7 @@ function App() {
         
         {/* Rotas protegidas (dentro do Layout principal) */}
         <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<HomeWrapper />} />
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="movimentacao" element={<Movimentacao />} />
           <Route path="saida" element={<Saida />} />
