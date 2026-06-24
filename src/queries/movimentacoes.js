@@ -337,76 +337,108 @@ export async function relatorioExecutivo(filtros = {}) {
   const isEstritoInsumo = filtros.incluirInsumos === true;
   const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
 
-  // 1. Entradas x Saídas (Últimos 30 dias)
+  // Período flexível
+  const dataInicio = filtros.data_inicio || (() => {
+    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10)
+  })()
+  const dataFim = filtros.data_fim || new Date().toISOString().slice(0, 10)
+
+  // 1. Fluxo diário no período
   const resFluxo = await db.execute({
     sql: `
       SELECT 
         strftime('%Y-%m-%d', data_hora) as data,
         SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg ELSE 0 END) as entradas_kg,
-        SUM(CASE WHEN m.tipo = 'DESPACHO' THEN m.qtd_kg ELSE 0 END) as saidas_kg
+        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_kg ELSE 0 END) as saidas_kg
       FROM movimentacoes_log m
       LEFT JOIN produtos p ON p.id = m.produto_id
-      WHERE m.data_hora >= date('now', '-30 days') ${filterSQL}
-      GROUP BY data
-      ORDER BY data ASC
+      WHERE date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+      GROUP BY data ORDER BY data ASC
     `,
-    args: []
+    args: [dataInicio, dataFim]
   })
-  const fluxoDiario = resFluxo.rows
 
-  // 2. Top Produtos (Entrada) - 30 dias
+  // 2. KPIs totais do período
+  const resTotais = await db.execute({
+    sql: `
+      SELECT
+        SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg    ELSE 0 END) as total_entrada_kg,
+        SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_caixas ELSE 0 END) as total_entrada_cx,
+        SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg * COALESCE(p.valor_unitario,0) ELSE 0 END) as total_entrada_valor,
+        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_kg    ELSE 0 END) as total_saida_kg,
+        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_caixas ELSE 0 END) as total_saida_cx,
+        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_kg * COALESCE(p.valor_unitario,0) ELSE 0 END) as total_saida_valor,
+        COUNT(DISTINCT CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.id END) as qtd_recebimentos,
+        COUNT(DISTINCT CASE WHEN m.tipo = 'DESPACHO'    THEN m.id END) as qtd_despachos
+      FROM movimentacoes_log m
+      LEFT JOIN produtos p ON p.id = m.produto_id
+      WHERE date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+    `,
+    args: [dataInicio, dataFim]
+  })
+  const totais = resTotais.rows[0] || {}
+
+  // 3. Top Produtos (Entrada)
   const resTopEntradas = await db.execute({
     sql: `
-      SELECT 
-        p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg
+      SELECT p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg, SUM(m.qtd_caixas) as total_cx
       FROM movimentacoes_log m
       JOIN produtos p ON p.id = m.produto_id
-      WHERE m.tipo = 'RECEBIMENTO' AND m.data_hora >= date('now', '-30 days') ${filterSQL}
-      GROUP BY p.id
-      ORDER BY total_kg DESC
-      LIMIT 5
+      WHERE m.tipo = 'RECEBIMENTO' AND date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+      GROUP BY p.id ORDER BY total_kg DESC LIMIT 5
     `,
-    args: []
+    args: [dataInicio, dataFim]
   })
-  const topEntradas = resTopEntradas.rows
 
-  // 3. Top Produtos (Saída) - 30 dias
+  // 4. Top Produtos (Saída)
   const resTopSaidas = await db.execute({
     sql: `
-      SELECT 
-        p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg
+      SELECT p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg, SUM(m.qtd_caixas) as total_cx,
+             SUM(m.qtd_kg * COALESCE(p.valor_unitario,0)) as total_valor
       FROM movimentacoes_log m
       JOIN produtos p ON p.id = m.produto_id
-      WHERE m.tipo = 'DESPACHO' AND m.data_hora >= date('now', '-30 days') ${filterSQL}
-      GROUP BY p.id
-      ORDER BY total_kg DESC
-      LIMIT 5
+      WHERE m.tipo = 'DESPACHO' AND date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+      GROUP BY p.id ORDER BY total_kg DESC LIMIT 5
     `,
-    args: []
+    args: [dataInicio, dataFim]
   })
-  const topSaidas = resTopSaidas.rows
 
-  // 4. Produtos Estagnados (Sem movimentação há mais de 30 dias com saldo > 0)
+  // 5. Produtos Estagnados
   const resEstagnados = await db.execute({
     sql: `
-      SELECT 
-        p.codigo, p.descricao, ep.endereco, ep.lote, ep.qtd_kg,
-        julianday('now') - julianday(ep.updated_at) as dias_parado
+      SELECT p.codigo, p.descricao, ep.endereco, ep.lote, ep.qtd_kg,
+             julianday('now') - julianday(ep.updated_at) as dias_parado
       FROM estoque_posicao ep
       JOIN produtos p ON p.id = ep.produto_id
       WHERE ep.qtd_caixas > 0 AND ep.updated_at < date('now', '-30 days') ${filterSQL}
-      ORDER BY dias_parado DESC
-      LIMIT 10
+      ORDER BY dias_parado DESC LIMIT 10
     `,
     args: []
   })
-  const estagnados = resEstagnados.rows
+
+  // 6. Alertas de validade (próximos 30 dias ou vencidos)
+  const resAlertas = await db.execute({
+    sql: `
+      SELECT p.codigo, p.descricao, ep.endereco, ep.validade, ep.qtd_caixas, ep.qtd_kg,
+             CAST(julianday(ep.validade) - julianday('now') AS INTEGER) as dias_para_vencer
+      FROM estoque_posicao ep
+      JOIN produtos p ON p.id = ep.produto_id
+      WHERE ep.qtd_caixas > 0 AND ep.validade IS NOT NULL AND ep.validade != ''
+        AND julianday(ep.validade) <= julianday('now', '+30 days') ${filterSQL}
+      ORDER BY ep.validade ASC LIMIT 10
+    `,
+    args: []
+  })
 
   return {
-    fluxoDiario,
-    topEntradas,
-    topSaidas,
-    estagnados
+    fluxoDiario: resFluxo.rows,
+    totais,
+    topEntradas: resTopEntradas.rows,
+    topSaidas:   resTopSaidas.rows,
+    estagnados:  resEstagnados.rows,
+    alertasValidade: resAlertas.rows,
+    dataInicio,
+    dataFim
   }
 }
 
