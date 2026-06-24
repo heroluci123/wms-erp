@@ -48,8 +48,7 @@ export function Login() {
   return (
     <div className="login-screen">
       <div className="login-card">
-        <div className="login-logo">W</div>
-        <h1 className="login-title">WMS ERP</h1>
+        <h1 className="login__title">WMSphere - Tricarnes</h1>
         <p className="login-subtitle">Digite seu PIN de Operador</p>
 
         <div className="pin-display">

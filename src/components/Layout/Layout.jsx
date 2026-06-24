@@ -16,8 +16,7 @@ function TopBar() {
   return (
     <div className="titlebar">
       <div className="titlebar__logo">
-        <div className="titlebar__logo-icon">W</div>
-        <span className="titlebar__title">WMS LOGÍSTICA</span>
+        <span className="titlebar__title">WMSphere - Tricarnes</span>
       </div>
       
       <div className="titlebar__spacer" />

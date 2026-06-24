@@ -47,7 +47,7 @@ export function ColetorHome() {
           <div className="coletor-avatar">{operador?.nome?.charAt(0) || 'U'}</div>
           <div>
             <div className="coletor-nome">{operador?.nome}</div>
-            <div className="coletor-perfil">Selecione a operação</div>
+            <div className="coletor-perfil">WMSphere - Tricarnes</div>
           </div>
         </div>
         <button className="coletor-logout" onClick={handleLogout} title="Sair">
