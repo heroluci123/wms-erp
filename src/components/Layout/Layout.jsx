@@ -134,6 +134,13 @@ function Sidebar() {
 export function Layout() {
   const { operador } = useAppStore()
   const navigate = useNavigate()
+  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 768)
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
 
   useEffect(() => {
     if (!operador) {
@@ -146,10 +153,10 @@ export function Layout() {
   return (
     <div className="app-shell">
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-        <TopBar />
+        {!isMobile && <TopBar />}
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <Sidebar />
-          <main className="main-content">
+          {!isMobile && <Sidebar />}
+          <main className={isMobile ? 'main-content-mobile' : 'main-content'}>
             <Outlet />
           </main>
         </div>
