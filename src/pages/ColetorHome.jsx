@@ -47,22 +47,13 @@ export function ColetorHome() {
           <div className="coletor-avatar">{operador?.nome?.charAt(0) || 'U'}</div>
           <div>
             <div className="coletor-nome">{operador?.nome}</div>
-            <div className="coletor-perfil">{operador?.perfil}</div>
+            <div className="coletor-perfil">Selecione a operação</div>
           </div>
         </div>
         <button className="coletor-logout" onClick={handleLogout} title="Sair">
-          <LogOut size={22} />
+          <LogOut size={20} />
         </button>
       </header>
-
-      {/* Título */}
-      <div className="coletor-title">
-        <div className="coletor-title-badge">W</div>
-        <div>
-          <div className="coletor-title-main">WMS Logística</div>
-          <div className="coletor-title-sub">Selecione a operação</div>
-        </div>
-      </div>
 
       {/* Botões */}
       <div className="coletor-grid">
@@ -78,8 +69,6 @@ export function ColetorHome() {
           </button>
         ))}
       </div>
-
-      <div className="coletor-footer">WMS Logística v1.0</div>
     </div>
   )
 }
