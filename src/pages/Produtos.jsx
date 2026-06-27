@@ -140,15 +140,15 @@ export function Produtos() {
               <input type="text" className="form-input" value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value})} required />
             </div>
             <div className="form-group">
-              <label className="form-label">Grupo (Ex: Carne Bovina, Frango...)</label>
-              <input type="text" list="grupos-list" className="form-input" value={formData.grupo} onChange={e => setFormData({...formData, grupo: e.target.value})} />
-              <datalist id="grupos-list">
-                <option value="Carne Bovina" />
-                <option value="Carne Suína" />
-                <option value="Carne de Frango" />
-                <option value="Insumos" />
-                <option value="Outros" />
-              </datalist>
+              <label className="form-label">Grupo</label>
+              <select className="form-input" value={formData.grupo} onChange={e => setFormData({...formData, grupo: e.target.value})}>
+                <option value="">Selecione um Grupo...</option>
+                <option value="Carne Bovina">Carne Bovina</option>
+                <option value="Carne Suína">Carne Suína</option>
+                <option value="Carne de Frango">Carne de Frango</option>
+                <option value="Insumos">Insumos</option>
+                <option value="Outros">Outros</option>
+              </select>
             </div>
             <div className="flex gap-12">
               <div className="form-group" style={{ flex: 1 }}>
