@@ -49,8 +49,20 @@ export async function buscarPorCodigo(codigo) {
 }
 
 export async function criar({ codigo, ean, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {
-  const codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
-  const eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
+  let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
+  let eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
+
+  if (eanVal && eanVal.length >= 15) {
+    if (!codVal) {
+      const u6 = eanVal.slice(-6)
+      codVal = u6.replace(/^0+/, '') || u6
+    }
+    eanVal = null
+  }
+  if (codVal && codVal.length >= 15) {
+    const u6 = codVal.slice(-6)
+    codVal = u6.replace(/^0+/, '') || u6
+  }
   
   if (!codVal && !eanVal) {
     throw new Error('É necessário informar pelo menos o Código Interno ou o EAN.')
@@ -74,8 +86,20 @@ export async function criar({ codigo, ean, descricao, valor_unitario = 0, tipo_p
 }
 
 export async function atualizar({ id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo }) {
-  const codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
-  const eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
+  let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
+  let eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
+
+  if (eanVal && eanVal.length >= 15) {
+    if (!codVal) {
+      const u6 = eanVal.slice(-6)
+      codVal = u6.replace(/^0+/, '') || u6
+    }
+    eanVal = null
+  }
+  if (codVal && codVal.length >= 15) {
+    const u6 = codVal.slice(-6)
+    codVal = u6.replace(/^0+/, '') || u6
+  }
 
   if (!codVal && !eanVal) {
     throw new Error('É necessário informar pelo menos o Código Interno ou o EAN.')
