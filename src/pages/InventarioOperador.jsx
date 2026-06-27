@@ -464,9 +464,9 @@ export function InventarioOperador() {
                     />
                     {sugestoesDescricao.length > 0 && (
                       <div style={{
-                        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                        background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
-                        marginTop: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.5)', overflow: 'hidden'
+                        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                        background: '#1a1d2e', border: '1px solid var(--border)', borderRadius: 8,
+                        marginTop: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.8)', overflow: 'hidden'
                       }}>
                         {sugestoesDescricao.map(p => (
                           <div key={p.id} style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: 13 }}
@@ -522,15 +522,15 @@ export function InventarioOperador() {
                 </div>
               </div>
               <div className="form-group">
-                <label className="form-label">Grupo (Ex: Carne Bovina...)</label>
-                <input type="text" list="grupos-list" className="form-input" value={formCadastro.grupo} onChange={e => setFormCadastro(prev => ({ ...prev, grupo: e.target.value }))} />
-                <datalist id="grupos-list">
-                  <option value="Carne Bovina" />
-                  <option value="Carne Suína" />
-                  <option value="Carne de Frango" />
-                  <option value="Insumos" />
-                  <option value="Outros" />
-                </datalist>
+                <label className="form-label">Grupo</label>
+                <select className="form-input" value={formCadastro.grupo} onChange={e => setFormCadastro(prev => ({ ...prev, grupo: e.target.value }))}>
+                  <option value="">Selecione um Grupo...</option>
+                  <option value="Carne Bovina">Carne Bovina</option>
+                  <option value="Carne Suína">Carne Suína</option>
+                  <option value="Carne de Frango">Carne de Frango</option>
+                  <option value="Insumos">Insumos</option>
+                  <option value="Outros">Outros</option>
+                </select>
               </div>
               <div className="flex gap-8 mt-8">
                 <button type="submit" className="btn btn--warning w-full" disabled={salvandoCadastro}>
