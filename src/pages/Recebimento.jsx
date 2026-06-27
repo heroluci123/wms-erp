@@ -85,7 +85,7 @@ export function Recebimento() {
       const p = await produtosQueries.buscarPorCodigo(cod)
       if (p) {
         setProduto(p)
-        setFormData(f => ({ ...f, codigo: cod }))
+        setFormData(f => ({ ...f, codigo: p.codigo || p.ean || cod }))
         toastSuccess('Produto Localizado', p.descricao)
         // Move o foco para o lote
         document.getElementById('input-lote')?.focus()

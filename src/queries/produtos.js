@@ -10,10 +10,12 @@ export async function listar() {
 }
 
 export async function buscarPorCodigo(codigo) {
-  // Remove zeros à esquerda para o código interno
-  const codigoNorm = String(codigo).replace(/^0+/, '') || codigo
-  // O EAN geralmente precisa dos zeros à esquerda intactos
-  const codigoExato = String(codigo)
+  const codigoStr = String(codigo).trim()
+  if (!codigoStr) return undefined
+
+  // 1. Exact match attempts (normalizing zeros)
+  const codigoNorm = codigoStr.replace(/^0+/, '') || codigoStr
+  const codigoExato = codigoStr
   
   const res = await db.execute({
     sql: `
@@ -22,7 +24,28 @@ export async function buscarPorCodigo(codigo) {
     `,
     args: [codigoNorm, codigoExato, codigoExato, codigoNorm]
   })
-  return res.rows[0]
+  
+  if (res.rows.length > 0) return res.rows[0]
+
+  // 2. Extração Inteligente (Controle Agregado Frigorífico)
+  // Se bipar um código longo de caixa única (ex: 16+ dígitos), extrai os últimos 6
+  // para identificar qual é a carne.
+  if (codigoStr.length >= 8) {
+    const ultimos6 = codigoStr.slice(-6)
+    const ultimos6Norm = ultimos6.replace(/^0+/, '') || ultimos6
+    
+    const resExtraido = await db.execute({
+      sql: `
+        SELECT id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo
+        FROM produtos WHERE codigo = ? OR ean = ? OR codigo = ? OR ean = ?
+      `,
+      args: [ultimos6, ultimos6, ultimos6Norm, ultimos6Norm]
+    })
+    
+    if (resExtraido.rows.length > 0) return resExtraido.rows[0]
+  }
+
+  return undefined
 }
 
 export async function criar({ codigo, ean, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {
