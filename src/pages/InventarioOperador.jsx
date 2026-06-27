@@ -442,13 +442,13 @@ export function InventarioOperador() {
               <div className="form-group" style={{ position: 'relative' }}>
                 <label className="form-label">Descrição do Produto *</label>
                 {formCadastro.produtoVinculado ? (
-                  <div className="flex items-center gap-8 bg-bg-2 border border-border p-12 rounded-lg">
+                  <div className="form-input flex items-center justify-between" style={{ height: 'auto', minHeight: 42, padding: '8px 12px' }}>
                     <div style={{ flex: 1 }}>
-                      <div className="text-primary font-bold">{formCadastro.produtoVinculado.descricao}</div>
-                      {!modalCadastro.isEdicao && <div className="text-xs text-muted mt-4">Vincular EAN a este produto</div>}
+                      <div className="font-bold">{formCadastro.produtoVinculado.descricao}</div>
+                      {!modalCadastro.isEdicao && <div className="text-xs text-muted" style={{ marginTop: 2 }}>Vincular EAN a este produto</div>}
                     </div>
                     {!modalCadastro.isEdicao && (
-                      <button type="button" className="btn btn--ghost btn--sm" onClick={() => setFormCadastro(prev => ({...prev, produtoVinculado: null, descricao: ''}))} title="Remover Vínculo"><X size={14}/></button>
+                      <button type="button" className="btn btn--ghost btn--sm" style={{ padding: 4, height: 'auto' }} onClick={() => setFormCadastro(prev => ({...prev, produtoVinculado: null, descricao: ''}))} title="Remover Vínculo"><X size={16}/></button>
                     )}
                   </div>
                 ) : (
