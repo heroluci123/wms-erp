@@ -15,9 +15,9 @@ export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_k
 
   try {
     // Verificar bloqueio de inventário nos endereços
-    const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(db, origem)
+    const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(origem)
     if (bloqOrigem) return { success: false, error: `Endereço ${origem} está bloqueado por inventário em andamento.`, bloqueado: true }
-    const bloqDestino = await inventariosQueries.verificarEnderecoBloqueado(db, destino)
+    const bloqDestino = await inventariosQueries.verificarEnderecoBloqueado(destino)
     if (bloqDestino) return { success: false, error: `Endereço ${destino} está bloqueado por inventário em andamento.`, bloqueado: true }
 
     // 1. Verificar saldo na origem
@@ -156,9 +156,9 @@ export async function estornarExpedicao({ produto_id, lote, destino, operador_id
     return { success: false, error: 'Endereço de destino inválido para estorno.' }
   }
 
-  // Verificar bloqueio de inventário no destino
-  const bloqDestino = await inventariosQueries.verificarEnderecoBloqueado(db, destino)
-  if (bloqDestino) return { success: false, error: `Endereço de devolução (${destino}) está bloqueado por inventário em andamento.`, bloqueado: true }
+  // Verificar bloqueio no destino
+  const bloqDestino = await inventariosQueries.verificarEnderecoBloqueado(destino)
+  if (bloqDestino) return { success: false, error: `Endereço de destino ${destino} está bloqueado por inventário.`, bloqueado: true }
 
   try {
     const resSaldo = await db.execute({
@@ -199,9 +199,9 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
     return { success: false, error: 'Endereço de origem inválido para saída.' }
   }
 
-  // Verificar bloqueio de inventário na origem
-  const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(db, origem)
-  if (bloqOrigem) return { success: false, error: `Endereço ${origem} está bloqueado por inventário em andamento.`, bloqueado: true }
+  // Verificar bloqueio na origem
+  const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(origem)
+  if (bloqOrigem) return { success: false, error: `Endereço de origem ${origem} está bloqueado por inventário.`, bloqueado: true }
 
   try {
     const resOrigem = await db.execute({
