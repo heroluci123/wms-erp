@@ -157,16 +157,28 @@ async function executeBatch(queries) {
 
 // ─── IPC Handlers ─────────────────────────────────────────────────────────────
 ipcMain.handle('db-execute', async (event, sql, args) => {
-  return executeQuery(sql, args || [])
+  try {
+    return await executeQuery(sql, args || [])
+  } catch (err) {
+    throw new Error(err.message || 'Erro desconhecido no banco de dados')
+  }
 })
 
 ipcMain.handle('db-batch', async (event, queries) => {
-  return executeBatch(queries)
+  try {
+    return await executeBatch(queries)
+  } catch (err) {
+    throw new Error(err.message || 'Erro desconhecido no lote do banco de dados')
+  }
 })
 
 ipcMain.handle('db-sync', async () => {
-  await syncFromRemote()
-  return { ok: true }
+  try {
+    await syncFromRemote()
+    return { ok: true }
+  } catch (err) {
+    throw new Error(err.message || 'Erro ao sincronizar')
+  }
 })
 
 // ─── Janela Principal ─────────────────────────────────────────────────────────
