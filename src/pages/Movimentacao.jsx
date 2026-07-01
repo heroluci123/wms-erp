@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowRight, MapPin, Box, Hash, AlertTriangle, Lightbulb } from 'lucide-react'
+import { ArrowRight, MapPin, Box, Hash, AlertTriangle, Lightbulb, Check } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { AlertModal } from '../components/shared/AlertModal'
@@ -106,20 +106,22 @@ export function Movimentacao() {
   }
 
   const scanDestino = async (val) => {
-    const dst = val.toUpperCase()
+    try {
+      const dst = val.toUpperCase()
 
-    // ── TRAVA: Proibido mover para REC ou EXPEDICAO via Movimentação ──
-    if (dst === 'REC' || dst === 'EXPEDICAO') {
-      return toastError('Destino Proibido', `Não é permitido transferir para "${dst}" pela Movimentação. Use a tela de Recebimento ou Saída.`)
+      if (dst === 'REC' || dst === 'EXPEDICAO') {
+        return toastError('Destino Proibido', `Não é permitido transferir para "${dst}" pela Movimentação. Use a tela de Recebimento ou Saída.`)
+      }
+
+      const localDst = await locaisQueries.buscarPorEndereco(dst)
+      if (!localDst) {
+        return toastError('Endereço Inválido', `O endereço "${dst}" não está cadastrado. Cadastre-o na tela de Locais.`)
+      }
+
+      finalizarDestino(dst)
+    } catch (err) {
+      toastError('Erro ao validar destino', err.message)
     }
-
-    // ── TRAVA: Validar se o endereço de destino está cadastrado ──
-    const localDst = await locaisQueries.buscarPorEndereco(dst)
-    if (!localDst) {
-      return toastError('Endereço Inválido', `O endereço "${dst}" não está cadastrado. Cadastre-o na tela de Locais.`)
-    }
-
-    finalizarDestino(dst)
   }
 
   const finalizarDestino = (dstFinal) => {
