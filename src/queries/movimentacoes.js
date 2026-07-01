@@ -13,58 +13,41 @@ export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_k
     return { success: false, error: 'Proibido transferir diretamente para REC ou EXPEDICAO usando a Movimentação. Use as telas adequadas.' }
   }
 
-  // Verificar bloqueio de inventário nos endereços
-  const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(db, origem)
-  if (bloqOrigem) return { success: false, error: `Endereço ${origem} está bloqueado por inventário em andamento. Encerre o inventário para movimentar.`, bloqueado: true }
-  const bloqDestino = await inventariosQueries.verificarEnderecoBloqueado(db, destino)
-  if (bloqDestino) return { success: false, error: `Endereço ${destino} está bloqueado por inventário em andamento. Encerre o inventário para movimentar.`, bloqueado: true }
-
-  const tx = await db.transaction('write')
   try {
+    // Verificar bloqueio de inventário nos endereços
+    const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(db, origem)
+    if (bloqOrigem) return { success: false, error: `Endereço ${origem} está bloqueado por inventário em andamento.`, bloqueado: true }
+    const bloqDestino = await inventariosQueries.verificarEnderecoBloqueado(db, destino)
+    if (bloqDestino) return { success: false, error: `Endereço ${destino} está bloqueado por inventário em andamento.`, bloqueado: true }
+
     // 1. Verificar saldo na origem
-    const resOrigem = await tx.execute({
+    const resOrigem = await db.execute({
       sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
       args: [produto_id, origem, lote || '', validade || '']
     })
     const saldoOrigem = resOrigem.rows[0]
+    if (!saldoOrigem) return { success: false, error: `Saldo não encontrado: produto no endereço ${origem}` }
+    if (saldoOrigem.qtd_caixas < qtd_caixas) return { success: false, error: `Saldo insuficiente: disponível ${saldoOrigem.qtd_caixas} cx, solicitado ${qtd_caixas} cx` }
+    if (saldoOrigem.qtd_kg < qtd_kg) return { success: false, error: `Saldo insuficiente: disponível ${saldoOrigem.qtd_kg} kg, solicitado ${qtd_kg} kg` }
 
-    if (!saldoOrigem) throw new Error(`Saldo não encontrado: produto no endereço ${origem}`)
-    if (saldoOrigem.qtd_caixas < qtd_caixas) throw new Error(`Saldo insuficiente: disponível ${saldoOrigem.qtd_caixas} cx, solicitado ${qtd_caixas} cx`)
-    if (saldoOrigem.qtd_kg < qtd_kg) throw new Error(`Saldo insuficiente: disponível ${saldoOrigem.qtd_kg} kg, solicitado ${qtd_kg} kg`)
+    // 2-4. Executar operações em lote atômico
+    await db.batch([
+      {
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+        args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '', validade || '']
+      },
+      {
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [produto_id, destino, lote || '', validade || '', qtd_caixas, qtd_kg]
+      },
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'TRANSFERENCIA')`,
+        args: [produto_id, origem, destino, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
+      }
+    ], 'write')
 
-    // 2. Decrementar origem
-    await tx.execute({
-      sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
-      args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '', validade || '']
-    })
-
-    // 3. Incrementar (ou criar) destino via UPSERT
-    await tx.execute({
-      sql: `
-        INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET
-          qtd_caixas = qtd_caixas + excluded.qtd_caixas,
-          qtd_kg     = qtd_kg + excluded.qtd_kg,
-          updated_at = CURRENT_TIMESTAMP
-      `,
-      args: [produto_id, destino, lote || '', validade || '', qtd_caixas, qtd_kg]
-    })
-
-    // 4. Registrar log de auditoria
-    await tx.execute({
-      sql: `
-        INSERT INTO movimentacoes_log
-          (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'TRANSFERENCIA')
-      `,
-      args: [produto_id, origem, destino, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
-    })
-
-    await tx.commit()
     return { success: true }
   } catch (err) {
-    await tx.rollback()
     return { success: false, error: err.message }
   }
 }
@@ -73,33 +56,19 @@ export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_k
  * RECEBIMENTO: cria saldo no endereço 'REC'
  */
 export async function receber({ produto_id, lote, validade, qtd_caixas, qtd_kg, operador_id, operador_nome }) {
-  const tx = await db.transaction('write')
   try {
-    await tx.execute({
-      sql: `
-        INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg)
-        VALUES (?, 'REC', ?, ?, ?, ?)
-        ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET
-          qtd_caixas = qtd_caixas + excluded.qtd_caixas,
-          qtd_kg     = qtd_kg + excluded.qtd_kg,
-          updated_at = CURRENT_TIMESTAMP
-      `,
-      args: [produto_id, lote || '', validade || '', qtd_caixas, qtd_kg]
-    })
-
-    await tx.execute({
-      sql: `
-        INSERT INTO movimentacoes_log
-          (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
-        VALUES (?, 'DOCA', 'REC', ?, ?, ?, ?, ?, 'RECEBIMENTO')
-      `,
-      args: [produto_id, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
-    })
-
-    await tx.commit()
+    await db.batch([
+      {
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'REC', ?, ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [produto_id, lote || '', validade || '', qtd_caixas, qtd_kg]
+      },
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'DOCA', 'REC', ?, ?, ?, ?, ?, 'RECEBIMENTO')`,
+        args: [produto_id, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
+      }
+    ], 'write')
     return { success: true }
   } catch (err) {
-    await tx.rollback()
     return { success: false, error: err.message }
   }
 }
@@ -109,45 +78,29 @@ export async function receber({ produto_id, lote, validade, qtd_caixas, qtd_kg, 
  * Pode confirmar item por item ou todos de uma vez
  */
 export async function confirmarDespacho(produto_id, lote, validade, operador_id) {
-  const tx = await db.transaction('write')
   try {
-    // Buscar o que está em EXPEDICAO para este produto/lote/validade
-    const resSaldo = await tx.execute({
-      sql: `
-        SELECT qtd_caixas, qtd_kg FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
-      `,
+    const resSaldo = await db.execute({
+      sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
       args: [produto_id, lote || '', validade || '']
     })
     const saldo = resSaldo.rows[0]
-
     if (!saldo || (saldo.qtd_caixas === 0 && saldo.qtd_kg === 0)) {
-      throw new Error('Nenhum saldo encontrado na área de Expedição para este item.')
+      return { success: false, error: 'Nenhum saldo encontrado na área de Expedição para este item.' }
     }
 
-    // Registrar log de despacho antes de deletar
-    await tx.execute({
-      sql: `
-        INSERT INTO movimentacoes_log
-          (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, tipo)
-        VALUES (?, 'EXPEDICAO', 'SAIDA_DEFINITIVA', ?, ?, ?, ?, 'DESPACHO')
-      `,
-      args: [produto_id, lote || '', saldo.qtd_caixas, saldo.qtd_kg, operador_id || null]
-    })
+    await db.batch([
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, tipo) VALUES (?, 'EXPEDICAO', 'SAIDA_DEFINITIVA', ?, ?, ?, ?, 'DESPACHO')`,
+        args: [produto_id, lote || '', saldo.qtd_caixas, saldo.qtd_kg, operador_id || null]
+      },
+      {
+        sql: `DELETE FROM estoque_posicao WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+        args: [produto_id, lote || '', validade || '']
+      }
+    ], 'write')
 
-    // Deletar APENAS a linha com a validade correta
-    await tx.execute({
-      sql: `
-        DELETE FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
-      `,
-      args: [produto_id, lote || '', validade || '']
-    })
-
-    await tx.commit()
     return { success: true, qtd_caixas: saldo.qtd_caixas, qtd_kg: saldo.qtd_kg }
   } catch (err) {
-    await tx.rollback()
     return { success: false, error: err.message }
   }
 }
@@ -207,57 +160,31 @@ export async function estornarExpedicao({ produto_id, lote, destino, operador_id
   const bloqDestino = await inventariosQueries.verificarEnderecoBloqueado(db, destino)
   if (bloqDestino) return { success: false, error: `Endereço de devolução (${destino}) está bloqueado por inventário em andamento.`, bloqueado: true }
 
-  const tx = await db.transaction('write')
   try {
-    const resSaldo = await tx.execute({
-      sql: `
-        SELECT qtd_caixas, qtd_kg, validade FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ?
-      `,
+    const resSaldo = await db.execute({
+      sql: `SELECT qtd_caixas, qtd_kg, validade FROM estoque_posicao WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ?`,
       args: [produto_id, lote || '']
     })
     const saldo = resSaldo.rows[0]
+    if (!saldo || saldo.qtd_caixas <= 0) return { success: false, error: 'Item não encontrado na Expedição.' }
 
-    if (!saldo || saldo.qtd_caixas <= 0) {
-      throw new Error('Item não encontrado na Expedição.')
-    }
+    await db.batch([
+      {
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [produto_id, destino, lote || '', saldo.validade || '', saldo.qtd_caixas, saldo.qtd_kg]
+      },
+      {
+        sql: `DELETE FROM estoque_posicao WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ?`,
+        args: [produto_id, lote || '']
+      },
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'EXPEDICAO', ?, ?, ?, ?, ?, ?, 'TRANSFERENCIA')`,
+        args: [produto_id, destino, lote || '', saldo.qtd_caixas, saldo.qtd_kg, operador_id || null, operador_nome || 'Sistema']
+      }
+    ], 'write')
 
-    // 1. Voltar para o destino (estorno)
-    await tx.execute({
-      sql: `
-        INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET
-          qtd_caixas = qtd_caixas + excluded.qtd_caixas,
-          qtd_kg     = qtd_kg + excluded.qtd_kg,
-          updated_at = CURRENT_TIMESTAMP
-      `,
-      args: [produto_id, destino, lote || '', saldo.validade || '', saldo.qtd_caixas, saldo.qtd_kg]
-    })
-
-    // 2. Zerar/Remover da expedição
-    await tx.execute({
-      sql: `
-        DELETE FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ?
-      `,
-      args: [produto_id, lote || '']
-    })
-
-    // 3. Log
-    await tx.execute({
-      sql: `
-        INSERT INTO movimentacoes_log
-          (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
-        VALUES (?, 'EXPEDICAO', ?, ?, ?, ?, ?, ?, 'TRANSFERENCIA')
-      `,
-      args: [produto_id, destino, lote || '', saldo.qtd_caixas, saldo.qtd_kg, operador_id || null, operador_nome || 'Sistema']
-    })
-
-    await tx.commit()
     return { success: true }
   } catch (err) {
-    await tx.rollback()
     return { success: false, error: err.message }
   }
 }
@@ -276,56 +203,31 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
   const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(db, origem)
   if (bloqOrigem) return { success: false, error: `Endereço ${origem} está bloqueado por inventário em andamento.`, bloqueado: true }
 
-  const tx = await db.transaction('write')
   try {
-    // 1. Verificar saldo na origem
-    const resOrigem = await tx.execute({
-      sql: `
-        SELECT qtd_caixas, qtd_kg FROM estoque_posicao
-        WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
-      `,
+    const resOrigem = await db.execute({
+      sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
       args: [produto_id, origem, lote || '', validade || '']
     })
     const saldoOrigem = resOrigem.rows[0]
+    if (!saldoOrigem) return { success: false, error: `Saldo não encontrado no endereço ${origem}` }
+    if (saldoOrigem.qtd_caixas < qtd_caixas) return { success: false, error: `Saldo insuficiente: disponível ${saldoOrigem.qtd_caixas} cx` }
+    if (saldoOrigem.qtd_kg < qtd_kg) return { success: false, error: `Saldo insuficiente: disponível ${saldoOrigem.qtd_kg} kg` }
 
-    if (!saldoOrigem) throw new Error(`Saldo não encontrado no endereço ${origem}`)
-    if (saldoOrigem.qtd_caixas < qtd_caixas) throw new Error(`Saldo insuficiente: disponível ${saldoOrigem.qtd_caixas} cx`)
-    if (saldoOrigem.qtd_kg < qtd_kg) throw new Error(`Saldo insuficiente: disponível ${saldoOrigem.qtd_kg} kg`)
+    await db.batch([
+      {
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+        args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '', validade || '']
+      },
+      {
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'EXPEDICAO', ?, ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [produto_id, lote || '', validade || '', qtd_caixas, qtd_kg]
+      },
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'EXPEDICAO', ?, ?, ?, ?, ?, 'TRANSFERENCIA')`,
+        args: [produto_id, origem, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
+      }
+    ], 'write')
 
-    // 2. Decrementar origem
-    await tx.execute({
-      sql: `
-        UPDATE estoque_posicao
-        SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP
-        WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')
-      `,
-      args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '', validade || '']
-    })
-
-    // 3. Incrementar EXPEDICAO
-    await tx.execute({
-      sql: `
-        INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg)
-        VALUES (?, 'EXPEDICAO', ?, ?, ?, ?)
-        ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET
-          qtd_caixas = qtd_caixas + excluded.qtd_caixas,
-          qtd_kg     = qtd_kg + excluded.qtd_kg,
-          updated_at = CURRENT_TIMESTAMP
-      `,
-      args: [produto_id, lote || '', validade || '', qtd_caixas, qtd_kg]
-    })
-
-    // 4. Log de auditoria
-    await tx.execute({
-      sql: `
-        INSERT INTO movimentacoes_log
-          (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
-        VALUES (?, ?, 'EXPEDICAO', ?, ?, ?, ?, ?, 'TRANSFERENCIA')
-      `,
-      args: [produto_id, origem, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
-    })
-
-    await tx.commit()
     return { success: true }
   } catch (err) {
     await tx.rollback()
