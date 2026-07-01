@@ -334,109 +334,104 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
 }
 
 export async function relatorioExecutivo(filtros = {}) {
-  const isEstritoInsumo = filtros.incluirInsumos === true;
+  const isEstritoInsumo = filtros.incluirInsumos === true
   const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
 
-  // Período flexível
-  const dataInicio = filtros.data_inicio || (() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10)
-  })()
-  const dataFim = filtros.data_fim || new Date().toISOString().slice(0, 10)
+  let { data_inicio, data_fim } = filtros
+  
+  const dInicio = data_inicio ? new Date(data_inicio) : new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  const dFim = data_fim ? new Date(data_fim) : new Date()
+  
+  const dataInicio = dInicio.toISOString().split('T')[0]
+  const dataFim = dFim.toISOString().split('T')[0]
 
-  // 1. Fluxo diário no período
-  const resFluxo = await db.execute({
-    sql: `
-      SELECT 
-        strftime('%Y-%m-%d', data_hora) as data,
-        SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg ELSE 0 END) as entradas_kg,
-        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_kg ELSE 0 END) as saidas_kg
-      FROM movimentacoes_log m
-      LEFT JOIN produtos p ON p.id = m.produto_id
-      WHERE date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
-      GROUP BY data ORDER BY data ASC
-    `,
-    args: [dataInicio, dataFim]
-  })
+  const batchQueries = [
+    // 1. Fluxo Diário
+    {
+      sql: `
+        SELECT date(m.data_hora) as data,
+               SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg ELSE 0 END) as entradas_kg,
+               SUM(CASE WHEN m.tipo = 'DESPACHO' THEN m.qtd_kg ELSE 0 END) as saidas_kg
+        FROM movimentacoes_log m
+        JOIN produtos p ON p.id = m.produto_id
+        WHERE date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+        GROUP BY date(m.data_hora)
+        ORDER BY date(m.data_hora) ASC
+      `,
+      args: [dataInicio, dataFim]
+    },
+    // 2. Totais (Entradas vs Saídas)
+    {
+      sql: `
+        SELECT 
+          SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg ELSE 0 END) as total_entradas,
+          SUM(CASE WHEN m.tipo = 'DESPACHO' THEN m.qtd_kg ELSE 0 END) as total_saidas
+        FROM movimentacoes_log m
+        JOIN produtos p ON p.id = m.produto_id
+        WHERE date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+      `,
+      args: [dataInicio, dataFim]
+    },
+    // 3. Top 5 Produtos com Maior Entrada
+    {
+      sql: `
+        SELECT p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg
+        FROM movimentacoes_log m
+        JOIN produtos p ON p.id = m.produto_id
+        WHERE m.tipo = 'RECEBIMENTO' AND date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+        GROUP BY p.id ORDER BY total_kg DESC LIMIT 5
+      `,
+      args: [dataInicio, dataFim]
+    },
+    // 4. Top 5 Produtos com Maior Saída
+    {
+      sql: `
+        SELECT p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg
+        FROM movimentacoes_log m
+        JOIN produtos p ON p.id = m.produto_id
+        WHERE m.tipo = 'DESPACHO' AND date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
+        GROUP BY p.id ORDER BY total_kg DESC LIMIT 5
+      `,
+      args: [dataInicio, dataFim]
+    },
+    // 5. Produtos Estagnados
+    {
+      sql: `
+        SELECT p.codigo, p.descricao, ep.endereco, ep.lote, ep.qtd_kg,
+               julianday('now') - julianday(ep.updated_at) as dias_parado
+        FROM estoque_posicao ep
+        JOIN produtos p ON p.id = ep.produto_id
+        WHERE ep.qtd_caixas > 0 AND ep.updated_at < date('now', '-30 days') ${filterSQL}
+        ORDER BY dias_parado DESC LIMIT 10
+      `,
+      args: []
+    },
+    // 6. Alertas de validade
+    {
+      sql: `
+        SELECT p.codigo, p.descricao, ep.endereco, ep.validade, ep.qtd_caixas, ep.qtd_kg,
+               CAST(julianday(ep.validade) - julianday('now') AS INTEGER) as dias_para_vencer
+        FROM estoque_posicao ep
+        JOIN produtos p ON p.id = ep.produto_id
+        WHERE ep.qtd_caixas > 0 AND ep.validade IS NOT NULL AND ep.validade != ''
+          AND julianday(ep.validade) <= julianday('now', '+30 days') ${filterSQL}
+        ORDER BY ep.validade ASC LIMIT 10
+      `,
+      args: []
+    }
+  ]
 
-  // 2. KPIs totais do período
-  const resTotais = await db.execute({
-    sql: `
-      SELECT
-        SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg    ELSE 0 END) as total_entrada_kg,
-        SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_caixas ELSE 0 END) as total_entrada_cx,
-        SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg * COALESCE(p.valor_unitario,0) ELSE 0 END) as total_entrada_valor,
-        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_kg    ELSE 0 END) as total_saida_kg,
-        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_caixas ELSE 0 END) as total_saida_cx,
-        SUM(CASE WHEN m.tipo = 'DESPACHO'    THEN m.qtd_kg * COALESCE(p.valor_unitario,0) ELSE 0 END) as total_saida_valor,
-        COUNT(DISTINCT CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.id END) as qtd_recebimentos,
-        COUNT(DISTINCT CASE WHEN m.tipo = 'DESPACHO'    THEN m.id END) as qtd_despachos
-      FROM movimentacoes_log m
-      LEFT JOIN produtos p ON p.id = m.produto_id
-      WHERE date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
-    `,
-    args: [dataInicio, dataFim]
-  })
-  const totais = resTotais.rows[0] || {}
+  const res = await db.batch(batchQueries, 'read')
 
-  // 3. Top Produtos (Entrada)
-  const resTopEntradas = await db.execute({
-    sql: `
-      SELECT p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg, SUM(m.qtd_caixas) as total_cx
-      FROM movimentacoes_log m
-      JOIN produtos p ON p.id = m.produto_id
-      WHERE m.tipo = 'RECEBIMENTO' AND date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
-      GROUP BY p.id ORDER BY total_kg DESC LIMIT 5
-    `,
-    args: [dataInicio, dataFim]
-  })
-
-  // 4. Top Produtos (Saída)
-  const resTopSaidas = await db.execute({
-    sql: `
-      SELECT p.codigo, p.descricao, SUM(m.qtd_kg) as total_kg, SUM(m.qtd_caixas) as total_cx,
-             SUM(m.qtd_kg * COALESCE(p.valor_unitario,0)) as total_valor
-      FROM movimentacoes_log m
-      JOIN produtos p ON p.id = m.produto_id
-      WHERE m.tipo = 'DESPACHO' AND date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
-      GROUP BY p.id ORDER BY total_kg DESC LIMIT 5
-    `,
-    args: [dataInicio, dataFim]
-  })
-
-  // 5. Produtos Estagnados
-  const resEstagnados = await db.execute({
-    sql: `
-      SELECT p.codigo, p.descricao, ep.endereco, ep.lote, ep.qtd_kg,
-             julianday('now') - julianday(ep.updated_at) as dias_parado
-      FROM estoque_posicao ep
-      JOIN produtos p ON p.id = ep.produto_id
-      WHERE ep.qtd_caixas > 0 AND ep.updated_at < date('now', '-30 days') ${filterSQL}
-      ORDER BY dias_parado DESC LIMIT 10
-    `,
-    args: []
-  })
-
-  // 6. Alertas de validade (próximos 30 dias ou vencidos)
-  const resAlertas = await db.execute({
-    sql: `
-      SELECT p.codigo, p.descricao, ep.endereco, ep.validade, ep.qtd_caixas, ep.qtd_kg,
-             CAST(julianday(ep.validade) - julianday('now') AS INTEGER) as dias_para_vencer
-      FROM estoque_posicao ep
-      JOIN produtos p ON p.id = ep.produto_id
-      WHERE ep.qtd_caixas > 0 AND ep.validade IS NOT NULL AND ep.validade != ''
-        AND julianday(ep.validade) <= julianday('now', '+30 days') ${filterSQL}
-      ORDER BY ep.validade ASC LIMIT 10
-    `,
-    args: []
-  })
+  const totais = res[1].rows[0] || { total_entradas: 0, total_saidas: 0 }
 
   return {
-    fluxoDiario: resFluxo.rows,
+    fluxoDiario: res[0].rows,
     totais,
-    topEntradas: resTopEntradas.rows,
-    topSaidas:   resTopSaidas.rows,
-    estagnados:  resEstagnados.rows,
-    alertasValidade: resAlertas.rows,
+    topEntradas: res[2].rows,
+    topSaidas:   res[3].rows,
+    estagnados:  res[4].rows,
+    alertasValidade: res[5].rows,
     dataInicio,
     dataFim
   }

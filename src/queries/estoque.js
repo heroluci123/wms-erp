@@ -107,45 +107,31 @@ export async function listarExpedicao() {
 
 // KPIs para o Dashboard
 export async function calcularKPIs(filtros = {}) {
-  const isEstritoInsumo = filtros.incluirInsumos === true
-  const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
+  const filterSQL = (filtros.incluirInsumos === true) ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
 
-  const totalSKUs = (await db.execute(`SELECT COUNT(DISTINCT ep.produto_id) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`)).rows[0]
-  const itensREC = (await db.execute(`SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE ep.endereco = 'REC' AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`)).rows[0]
-  const itensExpedicao = (await db.execute(`SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE ep.endereco = 'EXPEDICAO' AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`)).rows[0]
-  const inventariosAbertos = (await db.execute(`SELECT COUNT(*) as v FROM inventarios WHERE status NOT IN ('Finalizado')`)).rows[0]
-  
   const hoje = new Date()
   const em30dias = new Date(hoje)
   em30dias.setDate(hoje.getDate() + 30)
   const dataLimite = em30dias.toISOString().split('T')[0]
   const dataHoje = hoje.toISOString().split('T')[0]
-  
-  const vencendoBreve = (await db.execute({
-    sql: `
-      SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id
-      WHERE ep.validade IS NOT NULL
-        AND ep.validade >= ? AND ep.validade <= ?
-        AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}
-    `,
-    args: [dataHoje, dataLimite]
-  })).rows[0]
 
-  const vencidos = (await db.execute({
-    sql: `
-      SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id
-      WHERE ep.validade IS NOT NULL AND ep.validade < ?
-        AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}
-    `,
-    args: [dataHoje]
-  })).rows[0]
+  const batchQueries = [
+    `SELECT COUNT(DISTINCT ep.produto_id) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`,
+    `SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE ep.endereco = 'REC' AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`,
+    `SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE ep.endereco = 'EXPEDICAO' AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`,
+    `SELECT COUNT(*) as v FROM inventarios WHERE status NOT IN ('Finalizado OK', 'Cancelado')`,
+    { sql: `SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE ep.validade IS NOT NULL AND ep.validade >= ? AND ep.validade <= ? AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`, args: [dataHoje, dataLimite] },
+    { sql: `SELECT COUNT(*) as v FROM estoque_posicao ep JOIN produtos p ON p.id = ep.produto_id WHERE ep.validade IS NOT NULL AND ep.validade < ? AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0) ${filterSQL}`, args: [dataHoje] }
+  ]
+
+  const res = await db.batch(batchQueries, 'read')
 
   return {
-    totalSKUs: Number(totalSKUs.v),
-    itensREC: Number(itensREC.v),
-    itensExpedicao: Number(itensExpedicao.v),
-    inventariosAbertos: Number(inventariosAbertos.v),
-    vencendoBreve: Number(vencendoBreve.v),
-    vencidos: Number(vencidos.v),
+    totalSKUs: Number(res[0].rows[0].v),
+    itensREC: Number(res[1].rows[0].v),
+    itensExpedicao: Number(res[2].rows[0].v),
+    inventariosAbertos: Number(res[3].rows[0].v),
+    vencendoBreve: Number(res[4].rows[0].v),
+    vencidos: Number(res[5].rows[0].v),
   }
 }
