@@ -49,25 +49,42 @@ async function initDatabase() {
   }
 }
 
+// Converte BigInt e outros tipos não-serializáveis para IPC
+function serializeVal(v) {
+  if (typeof v === 'bigint') return Number(v)
+  if (v === null || v === undefined) return v
+  if (typeof v === 'object' && !Array.isArray(v)) {
+    const out = {}
+    for (const [k, val] of Object.entries(v)) out[k] = serializeVal(val)
+    return out
+  }
+  if (Array.isArray(v)) return v.map(serializeVal)
+  return v
+}
+
+function serializeResult(r) {
+  return {
+    rows: r.rows.map(row => {
+      const obj = {}
+      for (const [k, val] of Object.entries(row)) obj[k] = serializeVal(val)
+      return obj
+    }),
+    rowsAffected: typeof r.rowsAffected === 'bigint' ? Number(r.rowsAffected) : (r.rowsAffected || 0),
+    lastInsertRowid: r.lastInsertRowid != null ? String(r.lastInsertRowid) : null
+  }
+}
+
 // ─── IPC Handlers de Banco de Dados ───────────────────────────────────────────
 ipcMain.handle('db-execute', async (event, query, args) => {
   if (!db) throw new Error('Banco de dados não inicializado')
-  const result = await db.execute(typeof query === 'string' ? { sql: query, args: args || [] } : query)
-  return {
-    rows: result.rows.map(r => Object.fromEntries(Object.entries(r))),
-    rowsAffected: result.rowsAffected,
-    lastInsertRowid: result.lastInsertRowid?.toString()
-  }
+  const result = await db.execute(typeof query === 'string' ? { sql: query, args: args || [] } : { sql: query, args: args || [] })
+  return serializeResult(result)
 })
 
 ipcMain.handle('db-batch', async (event, queries) => {
   if (!db) throw new Error('Banco de dados não inicializado')
-  const results = await db.batch(queries, 'deferred')
-  return results.map(r => ({
-    rows: r.rows.map(row => Object.fromEntries(Object.entries(row))),
-    rowsAffected: r.rowsAffected,
-    lastInsertRowid: r.lastInsertRowid?.toString()
-  }))
+  const results = await db.batch(queries, 'write')
+  return results.map(serializeResult)
 })
 
 ipcMain.handle('db-sync', async () => {
