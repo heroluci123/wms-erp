@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "better-sqlite3": "^12.11.1",
     "date-fns": "^3.6.0",
     "dotenv": "^17.4.2",
     "electron-store": "^8.1.0",
@@ -43,11 +44,15 @@
     "directories": {
       "output": "dist-electron"
     },
+    "npmRebuild": true,
     "files": [
       "dist/**/*",
       "electron/**/*",
       "node_modules/**/*",
       "assets/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
     ],
     "win": {
       "target": [

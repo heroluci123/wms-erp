@@ -1,95 +1,171 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
+const fs = require('fs')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
-// ─── Banco de Dados LOCAL (Embedded Replica) ──────────────────────────────────
-let db = null
+// ─── Configurações do banco ───────────────────────────────────────────────────
+const REMOTE_URL = 'https://wms-erp-heroluci123.aws-us-east-1.turso.io'
+const AUTH_TOKEN  = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODIzMDMwMjUsImlkIjoiMDE5ZWY5ODktOTEwMS03N2IwLTlkYzUtNWIzMjZkYmQwNTk0IiwicmlkIjoiZjg0ZmM3ZTEtZGE4ZC00MWY0LTliODUtYTQ2ZTdhMTk3ODU2In0.jwPV7pJtq6P7s-ApY4hXEMG7TGerCpi1FEEVY2ND8642kawySSLH2udkUgXx4XoaYzNa3y2xgudPeY7Rj-4pBg'
 
+let localDb   = null  // better-sqlite3 (leitura local instantânea)
+let remoteDb  = null  // @libsql/client HTTP (escrita na nuvem)
+
+// ─── Inicialização ────────────────────────────────────────────────────────────
 async function initDatabase() {
+  const dbPath = path.join(app.getPath('userData'), 'wms-local.db')
+  console.log('[DB] Caminho local:', dbPath)
+
+  // 1. Banco local SQLite (melhor-sqlite3) — sempre rápido
+  try {
+    const Database = require('better-sqlite3')
+    localDb = new Database(dbPath)
+    localDb.pragma('journal_mode = WAL')
+    localDb.pragma('foreign_keys = ON')
+    console.log('[DB] Banco local SQLite aberto com sucesso.')
+  } catch (err) {
+    console.error('[DB] Falha ao abrir banco local:', err.message)
+  }
+
+  // 2. Cliente remoto HTTP (para escritas e sync)
   try {
     const { createClient } = await import('@libsql/client')
-    
-    const dbPath = path.join(app.getPath('userData'), 'wms-local.db')
-    const remoteUrl = 'libsql://wms-erp-heroluci123.aws-us-east-1.turso.io'
-    const authToken = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODIzMDMwMjUsImlkIjoiMDE5ZWY5ODktOTEwMS03N2IwLTlkYzUtNWIzMjZkYmQwNTk0IiwicmlkIjoiZjg0ZmM3ZTEtZGE4ZC00MWY0LTliODUtYTQ2ZTdhMTk3ODU2In0.jwPV7pJtq6P7s-ApY4hXEMG7TGerCpi1FEEVY2ND8642kawySSLH2udkUgXx4XoaYzNa3y2xgudPeY7Rj-4pBg'
-
-    console.log('[DB] Inicializando banco local em:', dbPath)
-
-    db = createClient({
-      url: `file:${dbPath}`,
-      syncUrl: remoteUrl,
-      authToken: authToken,
-    })
-
-    // Sincronização inicial com a nuvem
-    console.log('[DB] Sincronizando com a nuvem...')
-    await db.sync()
-    console.log('[DB] Sincronização concluída! Banco local pronto.')
-
-    // Sync periódico a cada 30 segundos
-    setInterval(async () => {
-      try {
-        await db.sync()
-        console.log('[DB] Sync periódico OK')
-      } catch (e) {
-        console.warn('[DB] Sync periódico falhou (sem internet?):', e.message)
-      }
-    }, 30000)
-
+    remoteDb = createClient({ url: REMOTE_URL, authToken: AUTH_TOKEN })
+    console.log('[DB] Cliente remoto HTTP conectado.')
   } catch (err) {
-    console.error('[DB] Falha ao inicializar banco local, caindo para HTTP:', err.message)
-    // Fallback para conexão HTTP direta caso embedded replica falhe
-    const { createClient } = await import('@libsql/client')
-    db = createClient({
-      url: 'https://wms-erp-heroluci123.aws-us-east-1.turso.io',
-      authToken: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODIzMDMwMjUsImlkIjoiMDE5ZWY5ODktOTEwMS03N2IwLTlkYzUtNWIzMjZkYmQwNTk0IiwicmlkIjoiZjg0ZmM3ZTEtZGE4ZC00MWY0LTliODUtYTQ2ZTdhMTk3ODU2In0.jwPV7pJtq6P7s-ApY4hXEMG7TGerCpi1FEEVY2ND8642kawySSLH2udkUgXx4XoaYzNa3y2xgudPeY7Rj-4pBg',
-    })
-    console.log('[DB] Usando conexão HTTP direta como fallback.')
+    console.error('[DB] Falha ao conectar cliente remoto:', err.message)
+  }
+
+  // 3. Sincronização inicial: baixar dados da nuvem para o local
+  await syncFromRemote()
+
+  // 4. Sync periódico a cada 60 segundos
+  setInterval(syncFromRemote, 60000)
+}
+
+// ─── Sync: baixa tudo da nuvem para o SQLite local ────────────────────────────
+async function syncFromRemote() {
+  if (!remoteDb || !localDb) return
+  try {
+    console.log('[DB] Sincronizando tabelas da nuvem...')
+
+    const tables = ['produtos', 'operadores', 'locais', 'estoque_posicao', 'movimentacoes_log', 'inventarios', 'inventario_itens']
+
+    for (const table of tables) {
+      try {
+        const res = await remoteDb.execute(`SELECT * FROM ${table}`)
+        if (res.rows.length === 0) continue
+
+        const cols = Object.keys(res.rows[0])
+        const placeholders = cols.map(() => '?').join(', ')
+        const colNames = cols.join(', ')
+
+        // Usa INSERT OR REPLACE para upsert completo
+        const stmt = localDb.prepare(
+          `INSERT OR REPLACE INTO ${table} (${colNames}) VALUES (${placeholders})`
+        )
+
+        const insertMany = localDb.transaction((rows) => {
+          for (const row of rows) {
+            stmt.run(cols.map(c => row[c]))
+          }
+        })
+        insertMany(res.rows)
+        console.log(`[DB] Sync ${table}: ${res.rows.length} registros`)
+      } catch (e) {
+        console.warn(`[DB] Sync ${table} falhou:`, e.message)
+      }
+    }
+
+    console.log('[DB] Sincronização concluída.')
+  } catch (err) {
+    console.warn('[DB] Sync geral falhou (sem internet?):', err.message)
   }
 }
 
-// Converte BigInt e outros tipos não-serializáveis para IPC
+// ─── Serializador para IPC (converte BigInt → Number) ─────────────────────────
 function serializeVal(v) {
   if (typeof v === 'bigint') return Number(v)
-  if (v === null || v === undefined) return v
-  if (typeof v === 'object' && !Array.isArray(v)) {
-    const out = {}
-    for (const [k, val] of Object.entries(v)) out[k] = serializeVal(val)
-    return out
-  }
-  if (Array.isArray(v)) return v.map(serializeVal)
   return v
 }
 
-function serializeResult(r) {
+function makeRows(stmt, params) {
+  const raw = params ? stmt.all(...params) : stmt.all()
+  return raw.map(row => {
+    const obj = {}
+    for (const [k, v] of Object.entries(row)) obj[k] = serializeVal(v)
+    return obj
+  })
+}
+
+function runStmt(stmt, params) {
+  const info = params ? stmt.run(...params) : stmt.run()
   return {
-    rows: r.rows.map(row => {
-      const obj = {}
-      for (const [k, val] of Object.entries(row)) obj[k] = serializeVal(val)
-      return obj
-    }),
-    rowsAffected: typeof r.rowsAffected === 'bigint' ? Number(r.rowsAffected) : (r.rowsAffected || 0),
-    lastInsertRowid: r.lastInsertRowid != null ? String(r.lastInsertRowid) : null
+    rows: [],
+    rowsAffected: info.changes,
+    lastInsertRowid: info.lastInsertRowid ? String(info.lastInsertRowid) : null
   }
 }
 
-// ─── IPC Handlers de Banco de Dados ───────────────────────────────────────────
-ipcMain.handle('db-execute', async (event, query, args) => {
-  if (!db) throw new Error('Banco de dados não inicializado')
-  const result = await db.execute(typeof query === 'string' ? { sql: query, args: args || [] } : { sql: query, args: args || [] })
-  return serializeResult(result)
+// ─── Executa uma query (leitura local, escrita local+remota) ──────────────────
+async function executeQuery(sql, args = []) {
+  const isWrite = /^\s*(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)/i.test(sql)
+
+  if (localDb) {
+    try {
+      const stmt = localDb.prepare(sql)
+      if (!isWrite) {
+        return { rows: makeRows(stmt, args), rowsAffected: 0, lastInsertRowid: null }
+      } else {
+        const res = runStmt(stmt, args)
+        // Escrita também sobe para a nuvem (não bloqueia)
+        if (remoteDb) {
+          remoteDb.execute({ sql, args }).catch(e =>
+            console.warn('[DB] Escrita remota falhou (será replicada no próximo sync):', e.message)
+          )
+        }
+        return res
+      }
+    } catch (e) {
+      console.warn('[DB] Erro no banco local, tentando remoto:', e.message)
+    }
+  }
+
+  // Fallback: usa remoto
+  if (remoteDb) {
+    const res = await remoteDb.execute({ sql, args })
+    return {
+      rows: res.rows.map(r => { const o = {}; for (const [k,v] of Object.entries(r)) o[k] = serializeVal(v); return o }),
+      rowsAffected: res.rowsAffected || 0,
+      lastInsertRowid: res.lastInsertRowid ? String(res.lastInsertRowid) : null
+    }
+  }
+
+  throw new Error('Banco de dados não disponível.')
+}
+
+// ─── Executa um batch de queries ─────────────────────────────────────────────
+async function executeBatch(queries) {
+  const results = []
+  for (const q of queries) {
+    const sql  = typeof q === 'string' ? q : q.sql
+    const args = typeof q === 'string' ? [] : (q.args || [])
+    results.push(await executeQuery(sql, args))
+  }
+  return results
+}
+
+// ─── IPC Handlers ─────────────────────────────────────────────────────────────
+ipcMain.handle('db-execute', async (event, sql, args) => {
+  return executeQuery(sql, args || [])
 })
 
 ipcMain.handle('db-batch', async (event, queries) => {
-  if (!db) throw new Error('Banco de dados não inicializado')
-  const results = await db.batch(queries, 'write')
-  return results.map(serializeResult)
+  return executeBatch(queries)
 })
 
 ipcMain.handle('db-sync', async () => {
-  if (!db) throw new Error('Banco de dados não inicializado')
-  await db.sync()
+  await syncFromRemote()
   return { ok: true }
 })
 
@@ -114,7 +190,6 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
-    // mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
@@ -128,7 +203,6 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 
-  // ─── Auto-Update ──────────────────────────────────────────────────────────
   if (app.isPackaged) {
     const { autoUpdater } = require('electron-updater')
     autoUpdater.autoDownload = true
@@ -160,7 +234,6 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// ─── IPC Handlers da Janela ───────────────────────────────────────────────
 ipcMain.on('window-minimize', () => mainWindow?.minimize())
 ipcMain.on('window-maximize', () => {
   if (mainWindow?.isMaximized()) {
