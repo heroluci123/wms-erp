@@ -59,10 +59,11 @@ async function syncFromRemote() {
         const cols = Object.keys(res.rows[0])
         const placeholders = cols.map(() => '?').join(', ')
         const colNames = cols.join(', ')
+        const updates = cols.filter(c => c !== 'id').map(c => `${c}=excluded.${c}`).join(', ')
 
-        // Usa INSERT OR REPLACE para upsert completo
+        // Usa UPSERT para atualizar sem deletar a linha (evita erro de Foreign Key)
         const stmt = localDb.prepare(
-          `INSERT OR REPLACE INTO ${table} (${colNames}) VALUES (${placeholders})`
+          `INSERT INTO ${table} (${colNames}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${updates}`
         )
 
         const insertMany = localDb.transaction((rows) => {
