@@ -110,6 +110,7 @@ export function Dashboard() {
   const [filtroDescricao, setFiltroDescricao] = useState('')
   const [filtroCodigo,    setFiltroCodigo]    = useState('')
   const [filtroEndereco,  setFiltroEndereco]  = useState('')
+  const [filtroVencimento,setFiltroVencimento]= useState('todos') // 'todos', 'vencidos_proximos'
 
   const aplicarPreset = (idx) => {
     setPresetAtivo(idx)
@@ -146,11 +147,21 @@ export function Dashboard() {
   useEffect(() => { carregarDados() }, [carregarDados])
 
   // Filtros de tabela
-  const estoqueFiltrado = estoque.filter(item =>
-    (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
-    (item.codigo || '').toLowerCase().includes(filtroCodigo.toLowerCase()) &&
-    (item.endereco || '').toLowerCase().includes(filtroEndereco.toLowerCase())
-  )
+  let estoqueFiltrado = estoque.filter(item => {
+    if (filtroVencimento === 'vencidos_proximos') {
+      if (!item.validade) return false
+      const dataStr = item.validade.toString().substring(0, 10) + 'T12:00:00'
+      const dias = differenceInDays(new Date(dataStr), new Date())
+      if (dias > 30) return false
+    }
+    return (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
+           (item.codigo || '').toLowerCase().includes(filtroCodigo.toLowerCase()) &&
+           (item.endereco || '').toLowerCase().includes(filtroEndereco.toLowerCase())
+  })
+
+  if (filtroVencimento === 'vencidos_proximos') {
+    estoqueFiltrado = estoqueFiltrado.sort((a, b) => new Date(a.validade) - new Date(b.validade))
+  }
 
   const exportarCSV = async () => {
     if (estoqueFiltrado.length === 0) return
@@ -489,12 +500,21 @@ export function Dashboard() {
             <option value="operacao">Visão: Operação (MP/PA)</option>
             <option value="insumos">Visão: Insumos</option>
           </select>
-          <input type="text" className="form-input" style={{ width: 160 }}
-            placeholder="Filtrar Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
-          <input type="text" className="form-input" style={{ width: 160 }}
-            placeholder="Filtrar Código..." value={filtroCodigo} onChange={e => setFiltroCodigo(e.target.value)} />
-          <input type="text" className="form-input" style={{ width: 220 }}
-            placeholder="Filtrar Descrição..." value={filtroDescricao} onChange={e => setFiltroDescricao(e.target.value)} />
+          <select
+            className="form-input bg-bg-card"
+            style={{ width: 220, fontWeight: 600 }}
+            value={filtroVencimento}
+            onChange={e => setFiltroVencimento(e.target.value)}
+          >
+            <option value="todos">Validade: Todas</option>
+            <option value="vencidos_proximos">⚠️ Vencidos e Próximos (30d)</option>
+          </select>
+          <input type="text" className="form-input" style={{ width: 140 }}
+            placeholder="Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
+          <input type="text" className="form-input" style={{ width: 140 }}
+            placeholder="Código..." value={filtroCodigo} onChange={e => setFiltroCodigo(e.target.value)} />
+          <input type="text" className="form-input" style={{ width: 200 }}
+            placeholder="Descrição..." value={filtroDescricao} onChange={e => setFiltroDescricao(e.target.value)} />
         </div>
 
         <div className="table-container" style={{ maxHeight: 'calc(100vh - 420px)', overflowY: 'auto' }}>
