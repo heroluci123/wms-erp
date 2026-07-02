@@ -351,7 +351,7 @@ export function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {relatorio.alertasValidade.map((item, i) => {
+                    {relatorio.alertasValidade.slice(0, 10).map((item, i) => {
                       const vencido = item.dias_para_vencer < 0
                       return (
                         <tr key={i}>
@@ -459,7 +459,7 @@ export function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {relatorio.estagnados.map((item, i) => (
+                    {relatorio.estagnados.slice(0, 10).map((item, i) => (
                       <tr key={i}>
                         <td>
                           <div style={{ fontWeight: 600 }}>{item.descricao}</div>

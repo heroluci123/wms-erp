@@ -304,7 +304,7 @@ export async function relatorioExecutivo(filtros = {}) {
         FROM estoque_posicao ep
         JOIN produtos p ON p.id = ep.produto_id
         WHERE ep.qtd_caixas > 0 AND ep.updated_at < date('now', '-30 days') ${filterSQL}
-        ORDER BY dias_parado DESC LIMIT 10
+        ORDER BY dias_parado DESC
       `,
       args: []
     },
@@ -317,7 +317,7 @@ export async function relatorioExecutivo(filtros = {}) {
         JOIN produtos p ON p.id = ep.produto_id
         WHERE ep.qtd_caixas > 0 AND ep.validade IS NOT NULL AND ep.validade != ''
           AND julianday(ep.validade) <= julianday('now', '+30 days') ${filterSQL}
-        ORDER BY ep.validade ASC LIMIT 10
+        ORDER BY ep.validade ASC
       `,
       args: []
     }
