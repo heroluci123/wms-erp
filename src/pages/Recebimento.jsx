@@ -71,6 +71,40 @@ export function Recebimento() {
     }
   }
 
+  const handleRemoverCaixa = async (c) => {
+    if (!window.confirm(`Tem certeza que deseja apagar a caixa de ${c.peso_kg}kg do palete?`)) return;
+    try {
+      const res = await movimentacoesQueries.removerCaixaSerializada(c.id, operador.id, operador.nome);
+      if (res.success) {
+        toastSuccess('Sucesso', 'Caixa apagada.');
+        selecionarPalete(paleteAtivo);
+        carregarPaletesAbertos();
+      } else {
+        toastError('Erro', res.error);
+      }
+    } catch (e) {
+      toastError('Erro fatal', e.message);
+    }
+  };
+
+  const handleConcluirPalete = async () => {
+    if (!paleteAtivo) return;
+    if (!window.confirm(`Tem certeza que deseja fechar o ${paleteAtivo.codigo} na doca?`)) return;
+    try {
+      const res = await movimentacoesQueries.concluirPalete(paleteAtivo.id);
+      if (res.success) {
+        toastSuccess('Palete Concluído', `${paleteAtivo.codigo} fechado com sucesso.`);
+        setPaleteAtivo(null);
+        setCaixasDoPalete([]);
+        carregarPaletesAbertos();
+      } else {
+        toastError('Erro', res.error);
+      }
+    } catch (e) {
+      toastError('Erro fatal', e.message);
+    }
+  };
+
   // --- Fluxo de Bipagem da Caixa (SSCC) ---
   const { inputRef: codigoRef, handleKeyDown: handleCodigoKeyDown } = useBarcodeScanner({
     onScan: async (val) => {
@@ -191,7 +225,10 @@ export function Recebimento() {
             ) : (
               <div style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
                 <div style={{ background: 'var(--bg-2)', padding: '12px 16px', borderBottom: '1px solid var(--border)', borderTopLeftRadius: 10, borderTopRightRadius: 10 }}>
-                  <div className="text-sm font-bold text-primary mb-4">Conteúdo do {paleteAtivo.codigo}</div>
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="text-sm font-bold text-primary">Conteúdo do {paleteAtivo.codigo}</div>
+                    <button className="btn btn--sm btn--secondary" onClick={handleConcluirPalete} title="Fechar o palete na doca para liberar para movimentação"><Check size={14}/> Concluir Palete</button>
+                  </div>
                   <div className="flex gap-16 text-sm">
                     <div>Caixas: <strong>{caixasDoPalete.length}</strong></div>
                     <div>Peso Total: <strong>{caixasDoPalete.reduce((sum, c) => sum + c.peso_kg, 0).toFixed(2)} kg</strong></div>
@@ -207,9 +244,12 @@ export function Recebimento() {
                           <div className="font-bold text-sm">{c.produto_descricao}</div>
                           <div className="text-xs text-muted font-mono">{c.ean_caixa}</div>
                         </div>
-                        <div className="text-right">
-                          <div className="font-bold text-cyan">{c.peso_kg} kg</div>
-                          <div className="text-xs text-muted">Venc: {format(new Date(c.validade + 'T00:00:00'), 'dd/MM/yy')}</div>
+                        <div className="text-right flex items-center gap-12">
+                          <div>
+                            <div className="font-bold text-cyan">{c.peso_kg} kg</div>
+                            <div className="text-xs text-muted">Venc: {format(new Date(c.validade + 'T00:00:00'), 'dd/MM/yy')}</div>
+                          </div>
+                          <button className="btn btn--ghost text-danger p-4" onClick={() => handleRemoverCaixa(c)} title="Excluir caixa do palete"><Trash2 size={16}/></button>
                         </div>
                       </div>
                     ))

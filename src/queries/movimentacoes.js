@@ -52,6 +52,49 @@ export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id
   }
 }
 
+export async function removerCaixaSerializada(caixa_id, operador_id, operador_nome) {
+  try {
+    // Busca dados da caixa
+    const res = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE id = ?`, args: [caixa_id] });
+    if (res.rows.length === 0) return { success: false, error: 'Caixa não encontrada.' };
+    const caixa = res.rows[0];
+
+    await db.batch([
+      // 1. Deletar a caixa
+      { sql: `DELETE FROM estoque_caixas WHERE id = ?`, args: [caixa_id] },
+      // 2. Subtrair do saldo agregado
+      {
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = 'REC' AND validade IS ?`,
+        args: [caixa.peso_kg, caixa.produto_id, caixa.validade]
+      },
+      // 3. Log de ajuste (deleção)
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'REC', 'EXCLUIDO', '', 1, ?, ?, ?, 'AJUSTE')`,
+        args: [caixa.produto_id, caixa.peso_kg, operador_id || null, operador_nome || 'Sistema']
+      }
+    ], 'write');
+
+    // Limpa saldos zerados
+    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`);
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function concluirPalete(palete_id) {
+  try {
+    await db.execute({
+      sql: `UPDATE paletes SET status = 'FECHADO_DOCA' WHERE id = ?`,
+      args: [palete_id]
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function listarCaixasDoPalete(palete_id) {
   const res = await db.execute({
     sql: `
@@ -83,8 +126,169 @@ export async function listarPaletesAbertos() {
 // ───────────────────────────────────────────────────
 
 /**
- * TRANSFERÊNCIA INTERNA: decrementa origem, incrementa (ou cria) destino
- * Executa tudo em uma única transação para garantir integridade
+ * MOTOR DE IDENTIFICAÇÃO UNIVERSAL PARA MOVIMENTAÇÕES
+ * Retorna o tipo de entidade lida: PALETE, CAIXA, ou PRODUTO_GENERICO
+ */
+export async function identificarCodigoMovimentacao(codigo) {
+  // 1. Tentar como Palete
+  if (codigo.startsWith('PLT-')) {
+    const resPalete = await db.execute({ sql: `SELECT * FROM paletes WHERE codigo = ?`, args: [codigo] });
+    if (resPalete.rows.length > 0) {
+      const p = resPalete.rows[0];
+      const caixasRes = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL'`, args: [p.id] });
+      return { 
+        tipo: 'PALETE', 
+        dados: {
+          ...p,
+          caixas: caixasRes.rows,
+          peso_total: caixasRes.rows.reduce((sum, c) => sum + c.peso_kg, 0)
+        }
+      };
+    }
+  }
+
+  // 2. Tentar como Caixa SSCC Específica
+  const resCaixa = await db.execute({ 
+    sql: `SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo, pal.codigo as palete_codigo 
+          FROM estoque_caixas c 
+          JOIN produtos p ON c.produto_id = p.id
+          LEFT JOIN paletes pal ON c.palete_id = pal.id
+          WHERE c.ean_caixa = ? AND c.status = 'DISPONIVEL'`, 
+    args: [codigo] 
+  });
+  
+  if (resCaixa.rows.length > 0) {
+    return { tipo: 'CAIXA', dados: resCaixa.rows[0] };
+  }
+
+  // 3. Tentar como Endereço Físico (modo antigo de origem)
+  const resEnd = await db.execute({ sql: `SELECT * FROM locais WHERE endereco = ?`, args: [codigo] });
+  if (resEnd.rows.length > 0) {
+    return { tipo: 'ENDERECO', dados: resEnd.rows[0] };
+  }
+
+  // Se não for nenhum dos 3, a tela deverá tratar como "Não encontrado"
+  return { tipo: 'DESCONHECIDO', dados: null };
+}
+
+export async function transferirPalete({ palete_id, destino, operador_id, operador_nome }) {
+  if (destino === 'REC' || destino === 'EXPEDICAO') {
+    return { success: false, error: 'Proibido transferir diretamente para REC ou EXPEDICAO usando a Movimentação. Use as telas adequadas.' }
+  }
+
+  try {
+    const p = (await db.execute({ sql: `SELECT * FROM paletes WHERE id = ?`, args: [palete_id] })).rows[0];
+    if (!p) return { success: false, error: 'Palete não encontrado.' };
+    const origem = p.endereco_atual;
+
+    const caixas = (await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL'`, args: [palete_id] })).rows;
+
+    const blocos = [];
+
+    // 1. Atualizar palete e suas caixas (caso a caixa tivesse endereço solto)
+    blocos.push({ sql: `UPDATE paletes SET endereco_atual = ?, status = 'ARMAZENADO' WHERE id = ?`, args: [destino, palete_id] });
+    blocos.push({ sql: `UPDATE estoque_caixas SET endereco = ? WHERE palete_id = ?`, args: [destino, palete_id] });
+
+    // 2. Agrupar as caixas por produto e validade para ajustar os saldos agregados (estoque_posicao)
+    const agrupamento = {};
+    for (const c of caixas) {
+      const key = `${c.produto_id}_${c.validade}`;
+      if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, caixas: 0, kg: 0 };
+      agrupamento[key].caixas += 1;
+      agrupamento[key].kg += c.peso_kg;
+    }
+
+    for (const g of Object.values(agrupamento)) {
+      // Retira da Origem
+      blocos.push({
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+        args: [g.caixas, g.kg, g.produto_id, origem, g.validade || '']
+      });
+
+      // Insere no Destino
+      blocos.push({
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [g.produto_id, destino, g.validade || null, g.caixas, g.kg]
+      });
+
+      // Log
+      blocos.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, ?, '', ?, ?, ?, ?, 'TRANSFERENCIA')`,
+        args: [g.produto_id, origem, destino, g.caixas, g.kg, operador_id || null, operador_nome || 'Sistema']
+      });
+    }
+
+    await db.batch(blocos, 'write');
+    // Limpar posições zeradas
+    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`);
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, operador_nome }) {
+  if (destino === 'REC' || destino === 'EXPEDICAO') {
+    return { success: false, error: 'Proibido transferir para REC/EXPEDICAO via Movimentação.' }
+  }
+
+  try {
+    const placeholders = caixas_ids.map(() => '?').join(',');
+    const caixas = (await db.execute({ sql: `SELECT c.*, p.endereco_atual as palete_endereco FROM estoque_caixas c LEFT JOIN paletes p ON c.palete_id = p.id WHERE c.id IN (${placeholders})`, args: caixas_ids })).rows;
+
+    if (caixas.length === 0) return { success: false, error: 'Nenhuma caixa válida selecionada.' };
+
+    const blocos = [];
+
+    // Agrupamento para atualizar estoque genérico e logs
+    const agrupamento = {};
+
+    for (const c of caixas) {
+      // Origem real da caixa é o endereço dela, ou se estiver num palete, o endereço do palete
+      const origem_real = c.endereco || c.palete_endereco || 'REC';
+
+      // Remove a caixa do palete (desmembramento) e atualiza o endereço
+      blocos.push({ sql: `UPDATE estoque_caixas SET palete_id = NULL, endereco = ? WHERE id = ?`, args: [destino, c.id] });
+
+      const key = `${c.produto_id}_${c.validade}_${origem_real}`;
+      if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, origem: origem_real, caixas: 0, kg: 0 };
+      agrupamento[key].caixas += 1;
+      agrupamento[key].kg += c.peso_kg;
+    }
+
+    for (const g of Object.values(agrupamento)) {
+      // Retira da Origem
+      blocos.push({
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+        args: [g.caixas, g.kg, g.produto_id, g.origem, g.validade || '']
+      });
+
+      // Insere no Destino
+      blocos.push({
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [g.produto_id, destino, g.validade || null, g.caixas, g.kg]
+      });
+
+      // Log
+      blocos.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, ?, '', ?, ?, ?, ?, 'TRANSFERENCIA')`,
+        args: [g.produto_id, g.origem, destino, g.caixas, g.kg, operador_id || null, operador_nome || 'Sistema']
+      });
+    }
+
+    await db.batch(blocos, 'write');
+    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`);
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * TRANSFERÊNCIA INTERNA ANTIGA: decrementa origem, incrementa (ou cria) destino
+ * Usada para endereços genéricos (quando se transfere KG sem bipar caixa específica)
  */
 export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_kg, origem, destino, operador_id, operador_nome }) {
   if (destino === 'REC' || destino === 'EXPEDICAO') {
