@@ -27,9 +27,22 @@ export async function buscarPorCodigo(codigo) {
   
   if (res.rows.length > 0) return res.rows[0]
 
-  // 2. Extração Inteligente (Controle Agregado Frigorífico)
-  // Se bipar um código longo de caixa única (ex: 16+ dígitos), extrai os últimos 6
-  // para identificar qual é a carne.
+  // 2. Busca nas Regras (produtos_eans)
+  const regrasRes = await db.execute({
+    sql: `
+      SELECT p.*
+      FROM produtos_eans pe
+      JOIN produtos p ON pe.produto_id = p.id
+      WHERE pe.codigo_barras = ?
+         OR (pe.tipo_regra = 'CONTEM' AND ? LIKE '%' || pe.codigo_barras)
+      ORDER BY pe.tipo_regra DESC LIMIT 1
+    `,
+    args: [codigoExato, codigoExato]
+  })
+  
+  if (regrasRes.rows.length > 0) return regrasRes.rows[0]
+
+  // 3. Extração Inteligente Legada (últimos 6 dígitos)
   if (codigoStr.length >= 8) {
     const ultimos6 = codigoStr.slice(-6)
     const ultimos6Norm = ultimos6.replace(/^0+/, '') || ultimos6
@@ -46,6 +59,38 @@ export async function buscarPorCodigo(codigo) {
   }
 
   return undefined
+}
+
+export async function salvarRegraEan(produto_id, codigo_barras, tipo_regra = 'EXATO') {
+  try {
+    await db.execute({
+      sql: `INSERT INTO produtos_eans (produto_id, codigo_barras, tipo_regra) VALUES (?, ?, ?)`,
+      args: [produto_id, codigo_barras.trim(), tipo_regra]
+    })
+    return { success: true }
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint')) {
+      return { success: false, error: 'Esta regra ou EAN já está vinculada a outro produto.' }
+    }
+    return { success: false, error: err.message }
+  }
+}
+
+export async function listarRegras(produto_id) {
+  const res = await db.execute({
+    sql: `SELECT * FROM produtos_eans WHERE produto_id = ? ORDER BY created_at DESC`,
+    args: [produto_id]
+  })
+  return res.rows
+}
+
+export async function removerRegraEan(id) {
+  try {
+    await db.execute({ sql: `DELETE FROM produtos_eans WHERE id = ?`, args: [id] })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
 }
 
 export async function criar({ codigo, ean, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {

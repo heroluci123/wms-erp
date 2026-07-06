@@ -5,6 +5,7 @@ import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
 import * as movimentacoesQueries from '../queries/movimentacoes.js';
 import * as produtosQueries from '../queries/produtos.js';
+import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx';
 
 export function Recebimento() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -23,6 +24,9 @@ export function Recebimento() {
   const [filtroProduto, setFiltroProduto] = useState('')
   const [filtroData, setFiltroData] = useState('')
   const [incluirInsumos, setIncluirInsumos] = useState(false)
+
+  const [modalEanOpen, setModalEanOpen] = useState(false)
+  const [eanDesconhecido, setEanDesconhecido] = useState('')
 
   const historicoFiltrado = historico.filter(h => {
     const pStr = (h.codigo + ' ' + h.descricao).toLowerCase()
@@ -90,7 +94,8 @@ export function Recebimento() {
         // Move o foco para o lote
         document.getElementById('input-lote')?.focus()
       } else {
-        toastWarning('Não Encontrado', 'Produto não cadastrado.')
+        setEanDesconhecido(cod)
+        setModalEanOpen(true)
         setProduto(null)
       }
     } catch (e) {
@@ -376,6 +381,17 @@ export function Recebimento() {
           </div>
         </div>
       )}
+
+      <CadastroEanModal 
+        isOpen={modalEanOpen} 
+        onClose={() => { setModalEanOpen(false); setTimeout(() => codigoRef.current?.focus(), 100); }} 
+        codigoDesconhecido={eanDesconhecido} 
+        onRegraSalva={(p) => { 
+          setProduto(p); 
+          setFormData(f => ({ ...f, codigo: eanDesconhecido })); 
+          setTimeout(() => document.getElementById('input-lote')?.focus(), 100); 
+        }} 
+      />
     </div>
   )
 }

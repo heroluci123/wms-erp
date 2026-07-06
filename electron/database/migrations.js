@@ -46,6 +46,30 @@ async function runMigrations(db) {
     CREATE INDEX IF NOT EXISTS idx_estoque_produto  ON estoque_posicao(produto_id);
     CREATE INDEX IF NOT EXISTS idx_estoque_validade ON estoque_posicao(validade);
 
+    -- ── Regras de EANs Múltiplos ───────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS produtos_eans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+      codigo_barras TEXT NOT NULL UNIQUE,
+      tipo_regra TEXT CHECK(tipo_regra IN ('EXATO','CONTEM')) DEFAULT 'EXATO',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_produtos_eans_codigo ON produtos_eans(codigo_barras);
+
+    -- ── Ordens de Produção (Rendimento e Desossa) ──────────────────────────────
+    CREATE TABLE IF NOT EXISTS ordens_producao (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      status TEXT CHECK(status IN ('ABERTA','CONCLUIDA','CANCELADA')) DEFAULT 'ABERTA',
+      materia_prima_id INTEGER REFERENCES produtos(id),
+      lote TEXT,
+      peso_enviado REAL DEFAULT 0,
+      peso_retornado REAL DEFAULT 0,
+      perda REAL DEFAULT 0,
+      operador_id INTEGER REFERENCES operadores(id),
+      data_inicio DATETIME DEFAULT CURRENT_TIMESTAMP,
+      data_fim DATETIME
+    );
+
     -- ── Log de Movimentações (auditoria imutável) ──────────────────────────────
     CREATE TABLE IF NOT EXISTS movimentacoes_log (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,

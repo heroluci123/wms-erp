@@ -235,6 +235,83 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
   }
 }
 
+export async function abrirOrdemProducao({ produto_id, lote, validade, qtd_caixas, qtd_kg, origem, operador_id, operador_nome }) {
+  if (!origem || origem === 'REC' || origem === 'EXPEDICAO') {
+    return { success: false, error: 'Endereço de origem inválido para envio à produção.' }
+  }
+
+  // Verificar bloqueio na origem
+  const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(origem)
+  if (bloqOrigem) return { success: false, error: `Endereço de origem ${origem} está bloqueado por inventário.`, bloqueado: true }
+
+  try {
+    const resOrigem = await db.execute({
+      sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+      args: [produto_id, origem, lote || '', validade || '']
+    })
+    const saldoOrigem = resOrigem.rows[0]
+    if (!saldoOrigem) return { success: false, error: `Saldo não encontrado no endereço ${origem}` }
+    if (saldoOrigem.qtd_caixas < qtd_caixas) return { success: false, error: `Saldo insuficiente: disponível ${saldoOrigem.qtd_caixas} cx` }
+    if (saldoOrigem.qtd_kg < qtd_kg) return { success: false, error: `Saldo insuficiente: disponível ${saldoOrigem.qtd_kg} kg` }
+
+    await db.batch([
+      {
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+        args: [qtd_caixas, qtd_kg, produto_id, origem, lote || '', validade || '']
+      },
+      {
+        sql: `INSERT INTO ordens_producao (materia_prima_id, lote, peso_enviado, operador_id) VALUES (?, ?, ?, ?)`,
+        args: [produto_id, lote || '', qtd_kg, operador_id || null]
+      },
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'PRODUCAO', ?, ?, ?, ?, ?, 'DESPACHO')`,
+        args: [produto_id, origem, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
+      }
+    ], 'write')
+
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+export async function listarOrdensProducao(status = 'ABERTA') {
+  const res = await db.execute({
+    sql: `
+      SELECT o.*, p.descricao as produto_descricao, p.codigo as produto_codigo, op.nome as operador_nome
+      FROM ordens_producao o
+      JOIN produtos p ON p.id = o.materia_prima_id
+      LEFT JOIN operadores op ON op.id = o.operador_id
+      WHERE o.status = ?
+      ORDER BY o.data_inicio DESC
+    `,
+    args: [status]
+  })
+  return res.rows
+}
+
+export async function fecharOrdemProducao({ ordem_id, peso_retornado }) {
+  try {
+    const resOrdem = await db.execute({
+      sql: `SELECT peso_enviado FROM ordens_producao WHERE id = ?`,
+      args: [ordem_id]
+    })
+    const ordem = resOrdem.rows[0]
+    if (!ordem) return { success: false, error: 'Ordem de produção não encontrada.' }
+
+    const perda = ordem.peso_enviado - peso_retornado
+
+    await db.execute({
+      sql: `UPDATE ordens_producao SET status = 'CONCLUIDA', peso_retornado = ?, perda = ?, data_fim = CURRENT_TIMESTAMP WHERE id = ?`,
+      args: [peso_retornado, perda, ordem_id]
+    })
+
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function relatorioExecutivo(filtros = {}) {
   const isEstritoInsumo = filtros.incluirInsumos === true
   const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
