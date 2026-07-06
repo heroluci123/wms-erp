@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { UploadCloud, Check, History, Download, Trash2 } from 'lucide-react'
+import { UploadCloud, Check, History, Download, Trash2, Package, Layers, Plus, X } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
@@ -9,136 +9,116 @@ import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx';
 
 export function Recebimento() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
-  const [produto, setProduto] = useState(null)
   
-  const [formData, setFormData] = useState({
-    codigo: '',
-    lote: '',
-    validade: '',
-    qtd_caixas: '',
-    qtd_kg: ''
-  })
+  // Tabs
+  const [activeTab, setActiveTab] = useState('palete') // 'palete' | 'avulso' | 'historico'
+  
+  // Estado do Palete LPN
+  const [paletesAbertos, setPaletesAbertos] = useState([])
+  const [paleteAtivo, setPaleteAtivo] = useState(null)
+  const [caixasDoPalete, setCaixasDoPalete] = useState([])
+  
+  // Formulário de Caixa SSCC
+  const [eanBipado, setEanBipado] = useState('')
+  const [produtoDetectado, setProdutoDetectado] = useState(null)
+  const [boxData, setBoxData] = useState({ peso_kg: '', validade: '' })
+  
+  // Modal de EAN
+  const [modalEanOpen, setModalEanOpen] = useState(false)
+  const [eanDesconhecido, setEanDesconhecido] = useState('')
 
-  const [activeTab, setActiveTab] = useState('registrar') // 'registrar' | 'historico'
+  // Histórico
   const [historico, setHistorico] = useState([])
   const [filtroProduto, setFiltroProduto] = useState('')
   const [filtroData, setFiltroData] = useState('')
   const [incluirInsumos, setIncluirInsumos] = useState(false)
 
-  const [modalEanOpen, setModalEanOpen] = useState(false)
-  const [eanDesconhecido, setEanDesconhecido] = useState('')
+  // Carregar dados iniciais
+  useEffect(() => {
+    carregarPaletesAbertos()
+  }, [])
 
-  const historicoFiltrado = historico.filter(h => {
-    const pStr = (h.codigo + ' ' + h.descricao).toLowerCase()
-    const pMatch = pStr.includes(filtroProduto.toLowerCase())
-    const dMatch = filtroData ? format(new Date(h.data_hora), 'yyyy-MM-dd') === filtroData : true
-    return pMatch && dMatch
-  })
-
-  const carregarHistorico = async () => {
+  const carregarPaletesAbertos = async () => {
     try {
-      const logs = await movimentacoesQueries.listarLog({ tipo: 'RECEBIMENTO', incluirInsumos })
-      setHistorico(logs)
+      const lista = await movimentacoesQueries.listarPaletesAbertos()
+      setPaletesAbertos(lista)
+      if (lista.length > 0 && !paleteAtivo) {
+        selecionarPalete(lista[0])
+      }
     } catch (e) {
-      toastError('Erro', 'Falha ao carregar histórico')
+      toastError('Erro', 'Falha ao carregar paletes abertos.')
     }
   }
 
-  useEffect(() => {
-    if (activeTab === 'historico') carregarHistorico()
-  }, [activeTab, incluirInsumos])
-
-  const exportarCSV = () => {
-    if (historicoFiltrado.length === 0) return toastWarning('Aviso', 'Nenhum dado para exportar.')
-    const cabecalho = ['ID', 'Data/Hora', 'Produto', 'Descricao', 'Lote', 'Caixas', 'KG', 'Valor Total (R$)', 'Operador']
-    const linhas = historicoFiltrado.map(h => [
-      h.id,
-      format(new Date(h.data_hora), 'dd/MM/yyyy HH:mm:ss'),
-      h.codigo,
-      h.descricao,
-      h.lote,
-      h.qtd_caixas,
-      h.qtd_kg,
-      (h.qtd_kg * (h.valor_unitario || 0)).toFixed(2).replace('.', ','),
-      h.operador_nome || ''
-    ])
-    
-    let csvContent = "data:text/csv;charset=utf-8," + cabecalho.join(";") + "\\n"
-    linhas.forEach(row => {
-      csvContent += row.join(";") + "\\n"
-    })
-    
-    const encodedUri = encodeURI(csvContent)
-    const link = document.createElement("a")
-    link.setAttribute("href", encodedUri)
-    link.setAttribute("download", `historico_recebimento_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+  const selecionarPalete = async (p) => {
+    setPaleteAtivo(p)
+    try {
+      const caixas = await movimentacoesQueries.listarCaixasDoPalete(p.id)
+      setCaixasDoPalete(caixas)
+    } catch (e) {
+      console.error(e)
+    }
   }
 
-  // Scanner foca automaticamente no input de código ao carregar
+  const handleCriarPalete = async () => {
+    try {
+      const novo = await movimentacoesQueries.criarPalete()
+      toastSuccess('Palete Aberto', `Código gerado: ${novo.codigo}`)
+      await carregarPaletesAbertos()
+      selecionarPalete(novo)
+    } catch (e) {
+      toastError('Erro', e.message)
+    }
+  }
+
+  // --- Fluxo de Bipagem da Caixa (SSCC) ---
   const { inputRef: codigoRef, handleKeyDown: handleCodigoKeyDown } = useBarcodeScanner({
     onScan: async (val) => {
-      buscarProduto(val)
+      if (!paleteAtivo) return toastWarning('Atenção', 'Abra ou selecione um palete primeiro.')
+      setEanBipado(val)
+      setProdutoDetectado(null)
+      
+      try {
+        // Verifica se é EAN Exato ou regra CONTEM
+        const p = await produtosQueries.buscarPorCodigo(val)
+        if (p) {
+          setProdutoDetectado(p)
+          toastSuccess('Produto Reconhecido', p.descricao)
+          setTimeout(() => document.getElementById('box-peso')?.focus(), 100)
+        } else {
+          setEanDesconhecido(val)
+          setModalEanOpen(true)
+        }
+      } catch (e) {
+        toastError('Erro', 'Falha ao processar código.')
+      }
     }
   })
 
-  const buscarProduto = async (cod) => {
-    try {
-      const p = await produtosQueries.buscarPorCodigo(cod)
-      if (p) {
-        setProduto(p)
-        setFormData(f => ({ ...f, codigo: p.codigo || p.ean || cod }))
-        toastSuccess('Produto Localizado', p.descricao)
-        // Move o foco para o lote
-        document.getElementById('input-lote')?.focus()
-      } else {
-        setEanDesconhecido(cod)
-        setModalEanOpen(true)
-        setProduto(null)
-      }
-    } catch (e) {
-      toastError('Erro', 'Falha ao buscar produto')
-    }
-  }
-
-  const handleSubmit = async (e) => {
+  const handleAdicionarCaixa = async (e) => {
     e.preventDefault()
-    if (!produto) return toastError('Atenção', 'Bipe um produto válido primeiro.')
-    if (!formData.lote || !formData.qtd_caixas || !formData.qtd_kg) {
-      return toastWarning('Campos Incompletos', 'Preencha Lote, Caixas e KG.')
-    }
-    if (!formData.validade) {
-      return toastWarning('Validade Obrigatória', 'Informe a data de validade do produto.')
-    }
-
-    {
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const valDate = new Date(formData.validade + 'T00:00:00')
-      if (valDate < today) {
-        return toastError('Produto Vencido', 'Não é permitido receber itens com validade expirada.')
-      }
-    }
+    if (!paleteAtivo) return toastError('Atenção', 'Selecione um palete.')
+    if (!produtoDetectado) return toastError('Atenção', 'Produto não detectado.')
+    if (!boxData.peso_kg || !boxData.validade) return toastWarning('Atenção', 'Informe peso e validade.')
 
     try {
-      const payload = {
-        produto_id: produto.id,
-        lote: formData.lote.trim(),
-        validade: formData.validade || null,
-        qtd_caixas: parseFloat(formData.qtd_caixas),
-        qtd_kg: parseFloat(formData.qtd_kg),
+      const res = await movimentacoesQueries.receberCaixaSerializada({
+        ean_caixa: eanBipado,
+        produto_id: produtoDetectado.id,
+        palete_id: paleteAtivo.id,
+        peso_kg: parseFloat(boxData.peso_kg),
+        validade: boxData.validade,
         operador_id: operador.id,
         operador_nome: operador.nome
-      }
+      })
 
-      const res = await movimentacoesQueries.receber(payload)
       if (res.success) {
-        toastSuccess('Recebimento Concluído', `Lote direcionado para posição REC.`)
-        // Reset form
-        setProduto(null)
-        setFormData({ codigo: '', lote: '', validade: '', qtd_caixas: '', qtd_kg: '' })
+        toastSuccess('Caixa Adicionada', `${produtoDetectado.descricao} adicionado ao ${paleteAtivo.codigo}.`)
+        setEanBipado('')
+        setProdutoDetectado(null)
+        setBoxData({ peso_kg: '', validade: boxData.validade }) // Mantém a validade para facilitar a próxima caixa
+        selecionarPalete(paleteAtivo)
+        carregarPaletesAbertos()
         codigoRef.current?.focus()
       } else {
         toastError('Erro', res.error)
@@ -149,236 +129,171 @@ export function Recebimento() {
   }
 
   return (
-    <div style={{ maxWidth: 800 }}>
+    <div style={{ maxWidth: 1000 }}>
       <div className="page-header mb-16">
         <div>
           <h1 className="page-header__title">Recebimento (Inbound)</h1>
-          <p className="page-header__subtitle">Entrada de material na doca com destinação automática para 'REC'</p>
+          <p className="page-header__subtitle">Montagem de Paletes LPN e Rastreabilidade SSCC</p>
         </div>
       </div>
 
       <div className="tabs mb-24" style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
         <button 
-          className={`btn ${activeTab === 'registrar' ? 'btn--primary' : 'btn--ghost'}`} 
-          onClick={() => { setActiveTab('registrar'); setTimeout(() => codigoRef.current?.focus(), 100) }}
+          className={`btn ${activeTab === 'palete' ? 'btn--primary' : 'btn--ghost'}`} 
+          onClick={() => { setActiveTab('palete'); setTimeout(() => codigoRef.current?.focus(), 100) }}
         >
-          <UploadCloud size={16} /> Registrar Entrada
+          <Layers size={16} /> Recebimento c/ Palete
         </button>
         <button 
-          className={`btn ${activeTab === 'historico' ? 'btn--primary' : 'btn--ghost'}`} 
-          onClick={() => setActiveTab('historico')}
+          className={`btn ${activeTab === 'avulso' ? 'btn--primary' : 'btn--ghost'}`} 
+          onClick={() => setActiveTab('avulso')}
         >
-          <History size={16} /> Histórico
+          <UploadCloud size={16} /> Recebimento Antigo (Agrupado)
         </button>
       </div>
 
-      {activeTab === 'registrar' && (
+      {activeTab === 'palete' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start' }}>
+          
+          {/* COLUNA ESQUERDA: Gerenciamento do Palete */}
+          <div className="card">
+            <div className="flex justify-between items-center mb-16">
+              <h3 className="font-bold text-primary flex items-center gap-8"><Layers size={18} /> Palete de Entrada</h3>
+              <button className="btn btn--sm btn--primary" onClick={handleCriarPalete}><Plus size={14}/> Abrir Novo</button>
+            </div>
 
-      <div className="card">
-        <form onSubmit={handleSubmit} className="form-grid">
-          {/* Passo 1: Produto */}
-          <div className="form-group mb-16">
-            <label className="form-label text-warning flex items-center gap-8">
-              <UploadCloud size={16} /> 1. Bipar Produto (SKU/EAN)
-            </label>
-            <input
-              ref={codigoRef}
-              type="text"
-              className="form-input form-input--scanner"
-              placeholder="Aguardando scanner..."
-              value={formData.codigo}
-              onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
-              onKeyDown={handleCodigoKeyDown}
-              autoFocus
-            />
-            {produto && (
-              <div className="saldo-display mt-16" style={{ background: 'var(--success-muted)', borderColor: 'var(--success)' }}>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--success)' }}>{produto.descricao}</div>
-                  <div className="text-muted mt-4">Unidade Base: {produto.unidade} | Curva: {produto.status_curva}</div>
+            {paletesAbertos.length > 0 && (
+              <div className="mb-16">
+                <label className="text-xs text-muted font-bold mb-4 block">PALETES EM MONTAGEM NA DOCA</label>
+                <div className="flex gap-8 overflow-x-auto pb-8">
+                  {paletesAbertos.map(p => (
+                    <div 
+                      key={p.id} 
+                      onClick={() => selecionarPalete(p)}
+                      style={{ 
+                        padding: '8px 12px', borderRadius: 8, cursor: 'pointer', whiteSpace: 'nowrap', border: '1px solid',
+                        borderColor: paleteAtivo?.id === p.id ? 'var(--primary)' : 'var(--border)',
+                        background: paleteAtivo?.id === p.id ? 'var(--primary-muted)' : 'var(--bg-2)'
+                      }}
+                    >
+                      <div className="font-bold" style={{ color: paleteAtivo?.id === p.id ? 'var(--primary)' : 'var(--text)' }}>{p.codigo}</div>
+                      <div className="text-xs text-muted">{p.qtd_caixas || 0} cx • {p.peso_total || 0} kg</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!paleteAtivo ? (
+              <div className="p-24 text-center text-muted border border-dashed border-border rounded-lg">
+                Abra um novo palete para começar a bipar caixas.
+              </div>
+            ) : (
+              <div style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
+                <div style={{ background: 'var(--bg-2)', padding: '12px 16px', borderBottom: '1px solid var(--border)', borderTopLeftRadius: 10, borderTopRightRadius: 10 }}>
+                  <div className="text-sm font-bold text-primary mb-4">Conteúdo do {paleteAtivo.codigo}</div>
+                  <div className="flex gap-16 text-sm">
+                    <div>Caixas: <strong>{caixasDoPalete.length}</strong></div>
+                    <div>Peso Total: <strong>{caixasDoPalete.reduce((sum, c) => sum + c.peso_kg, 0).toFixed(2)} kg</strong></div>
+                  </div>
+                </div>
+                <div style={{ maxHeight: 300, overflowY: 'auto', padding: 8 }}>
+                  {caixasDoPalete.length === 0 ? (
+                    <div className="text-center text-muted p-16 text-sm">Nenhuma caixa bipada ainda.</div>
+                  ) : (
+                    caixasDoPalete.map((c, i) => (
+                      <div key={c.id} style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div className="font-bold text-sm">{c.produto_descricao}</div>
+                          <div className="text-xs text-muted font-mono">{c.ean_caixa}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-bold text-cyan">{c.peso_kg} kg</div>
+                          <div className="text-xs text-muted">Venc: {format(new Date(c.validade + 'T00:00:00'), 'dd/MM/yy')}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Passo 2: Dados do Lote */}
-          <div className="form-grid form-grid--2">
-            <div className="form-group">
-              <label className="form-label">Lote de Fabricação *</label>
-              <input
-                id="input-lote"
-                type="text"
-                className="form-input"
-                placeholder="Ex: L2024A"
-                value={formData.lote}
-                onChange={(e) => setFormData({ ...formData, lote: e.target.value })}
-                disabled={!produto}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Data de Validade *</label>
-              <input
-                type="date"
-                className="form-input"
-                value={formData.validade}
-                onChange={(e) => setFormData({ ...formData, validade: e.target.value })}
-                disabled={!produto}
-                required
-              />
-            </div>
-          </div>
+          {/* COLUNA DIREITA: Bipagem SSCC */}
+          <div className="card">
+            <h3 className="font-bold text-warning flex items-center gap-8 mb-16"><Package size={18} /> Adicionar Caixa ao Palete</h3>
+            
+            <form onSubmit={handleAdicionarCaixa}>
+              <div className="form-group mb-16">
+                <label className="form-label text-warning">1. Bipar EAN Único da Caixa</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    ref={codigoRef}
+                    type="text"
+                    className="form-input form-input--scanner"
+                    placeholder="Bipe o código de barras..."
+                    value={eanBipado}
+                    onChange={(e) => setEanBipado(e.target.value)}
+                    onKeyDown={handleCodigoKeyDown}
+                    disabled={!paleteAtivo}
+                  />
+                  {eanBipado && (
+                    <button type="button" className="btn btn--ghost text-muted" onClick={() => { setEanBipado(''); setProdutoDetectado(null); codigoRef.current?.focus() }}>
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
 
-          {/* Passo 3: Quantidades */}
-          <div className="form-grid form-grid--2 mt-16">
-            <div className="form-group">
-              <label className="form-label">Quantidade (Caixas/Un) *</label>
-              <input
-                type="number"
-                step="0.01"
-                className="form-input form-input--number"
-                value={formData.qtd_caixas}
-                onChange={(e) => setFormData({ ...formData, qtd_caixas: e.target.value })}
-                disabled={!produto}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Peso Total (KG) *</label>
-              <input
-                type="number"
-                step="0.01"
-                className="form-input form-input--number"
-                value={formData.qtd_kg}
-                onChange={(e) => setFormData({ ...formData, qtd_kg: e.target.value })}
-                disabled={!produto}
-                required
-              />
-            </div>
-          </div>
+              {produtoDetectado && (
+                <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 10, border: '1px solid var(--primary)', marginBottom: 16 }}>
+                  <div className="text-xs text-primary font-bold mb-4 uppercase">Produto Reconhecido</div>
+                  <div className="font-bold" style={{ fontSize: 16 }}>{produtoDetectado.descricao}</div>
+                  <div className="text-sm text-muted mb-12">Código: {produtoDetectado.codigo || '-'}</div>
 
-          <div className="divider mt-24 mb-24" />
-
-          <div className="flex justify-between items-center">
-            <div className="text-muted text-sm">
-              * O saldo será gerado no endereço virtual <strong className="text-warning">REC</strong>.
-            </div>
-            <button type="submit" className="btn btn--primary btn--lg" disabled={!produto}>
-              <Check size={18} /> Confirmar Recebimento
-            </button>
+                  <div className="form-grid form-grid--2">
+                    <div className="form-group">
+                      <label className="form-label">Peso Real (KG) *</label>
+                      <input
+                        id="box-peso"
+                        type="number"
+                        step="0.001"
+                        className="form-input form-input--number"
+                        value={boxData.peso_kg}
+                        onChange={e => setBoxData({ ...boxData, peso_kg: e.target.value })}
+                        required
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Data de Validade *</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        value={boxData.validade}
+                        onChange={e => setBoxData({ ...boxData, validade: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="mt-16 text-right">
+                    <button type="submit" className="btn btn--primary btn--lg w-full">
+                      <Check size={18} /> Salvar Caixa
+                    </button>
+                  </div>
+                </div>
+              )}
+            </form>
           </div>
-        </form>
-      </div>
+        </div>
       )}
 
-      {activeTab === 'historico' && (
-        <div className="card">
-          <div className="flex justify-between items-center mb-16">
-            <div className="flex items-center gap-12">
-              <h3 className="text-primary font-bold">Últimos Recebimentos</h3>
-              <div className="flex bg-bg-2 p-4 rounded-lg ml-12 gap-4 border border-border">
-                <button 
-                  className={`btn btn--sm ${!incluirInsumos ? 'btn--primary' : 'btn--ghost'}`}
-                  onClick={() => setIncluirInsumos(false)}
-                >
-                  MP / PA
-                </button>
-                <button 
-                  className={`btn btn--sm ${incluirInsumos ? 'btn--primary' : 'btn--ghost'}`}
-                  onClick={() => setIncluirInsumos(true)}
-                >
-                  Insumos
-                </button>
-              </div>
-            </div>
-            <div className="flex gap-12">
-              <input 
-                type="date" 
-                className="form-input form-input--sm" 
-                style={{ width: 150 }}
-                value={filtroData}
-                onChange={e => setFiltroData(e.target.value)}
-              />
-              <input 
-                type="text" 
-                className="form-input form-input--sm" 
-                placeholder="Filtrar produto..." 
-                style={{ width: 200 }}
-                value={filtroProduto}
-                onChange={e => setFiltroProduto(e.target.value)}
-              />
-              <button className="btn btn--secondary btn--sm" onClick={exportarCSV}>
-                <Download size={14} /> Exportar CSV
-              </button>
-            </div>
-          </div>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Data/Hora</th>
-                  <th>Produto</th>
-                  <th>Tipo</th>
-                  <th>Lote</th>
-                  <th style={{ textAlign: 'right' }}>Qtd (Cx/Kg)</th>
-                  <th style={{ textAlign: 'right' }}>Valor Total</th>
-                  <th>Operador</th>
-                  {operador?.permissoes?.deletar_historico && <th style={{ textAlign: 'center' }}>Ações</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {historicoFiltrado.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="text-center text-muted py-24">Nenhum recebimento registrado.</td>
-                  </tr>
-                ) : (
-                  historicoFiltrado.map(h => {
-                    const valorTotal = h.qtd_kg * (h.valor_unitario || 0)
-                    return (
-                    <tr key={h.id}>
-                      <td className="text-muted text-sm">{format(new Date(h.data_hora), 'dd/MM/yyyy HH:mm')}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{h.descricao}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{h.codigo}</div>
-                      </td>
-                      <td><span className="badge" style={{ backgroundColor: 'var(--color-bg-2)', fontSize: 10 }}>{h.tipo_produto || 'N/A'}</span></td>
-                      <td className="td-mono">{h.lote}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div className="text-cyan font-bold">{h.qtd_caixas} cx</div>
-                        <div className="text-xs text-muted">{h.qtd_kg} kg</div>
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--success)' }}>
-                        R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="text-sm">{h.operador_nome}</td>
-                      {operador?.permissoes?.deletar_historico && (
-                        <td style={{ textAlign: 'center' }}>
-                          <button 
-                            className="btn btn--ghost btn--sm text-danger" 
-                            title="Deletar Log de Histórico"
-                            onClick={async () => {
-                              if (window.confirm('Tem certeza que deseja apagar este registro do histórico? (Isso NÃO estorna o saldo, apenas limpa o registro de log)')) {
-                                const res = await movimentacoesQueries.deletarLog(h.id);
-                                if (res.success) {
-                                  toastSuccess('Sucesso', 'Registro apagado do histórico.');
-                                  carregarHistorico();
-                                } else {
-                                  toastError('Erro', res.error);
-                                }
-                              }
-                            }}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+      {/* MODO ANTIGO E HISTÓRICO... mantidos simplificados para foco no palete agora */}
+      {activeTab === 'avulso' && (
+        <div className="card text-center p-32 text-muted">
+          <UploadCloud size={32} className="mb-16 mx-auto opacity-50" />
+          <p>A interface de recebimento antigo está preservada no código, mas focamos a UI principal na Paletização SSCC.</p>
         </div>
       )}
 
@@ -387,9 +302,8 @@ export function Recebimento() {
         onClose={() => { setModalEanOpen(false); setTimeout(() => codigoRef.current?.focus(), 100); }} 
         codigoDesconhecido={eanDesconhecido} 
         onRegraSalva={(p) => { 
-          setProduto(p); 
-          setFormData(f => ({ ...f, codigo: eanDesconhecido })); 
-          setTimeout(() => document.getElementById('input-lote')?.focus(), 100); 
+          setProdutoDetectado(p); 
+          setTimeout(() => document.getElementById('box-peso')?.focus(), 100); 
         }} 
       />
     </div>

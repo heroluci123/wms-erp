@@ -4,6 +4,84 @@ import { db } from '../lib/db.js';
 
 import * as inventariosQueries from './inventarios.js';
 
+// ── LPN (Paletes) e SSCC (Caixas Serializadas) ──
+
+export async function criarPalete() {
+  // Gera um código único estilo PLT-XXXX
+  const resCount = await db.execute("SELECT count(*) as total FROM paletes");
+  const num = (resCount.rows[0].total + 1).toString().padStart(4, '0');
+  const codigo = `PLT-${num}`;
+  
+  await db.execute({
+    sql: `INSERT INTO paletes (codigo, endereco_atual, status) VALUES (?, 'REC', 'ATIVO')`,
+    args: [codigo]
+  });
+  
+  const res = await db.execute({
+    sql: `SELECT * FROM paletes WHERE codigo = ?`,
+    args: [codigo]
+  });
+  return res.rows[0];
+}
+
+export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id, peso_kg, validade, operador_id, operador_nome }) {
+  try {
+    // 1. Inserir a caixa serializada
+    await db.batch([
+      {
+        sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, palete_id, peso_kg, validade, status) VALUES (?, ?, ?, ?, ?, 'DISPONIVEL')`,
+        args: [ean_caixa, produto_id, palete_id || null, peso_kg, validade || null]
+      },
+      // 2. Aumentar o saldo agregado em REC (mantém compatibilidade com o WMS atual)
+      {
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'REC', '', ?, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [produto_id, validade || null, peso_kg]
+      },
+      // 3. Registrar no log
+      {
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'FORNECEDOR', 'REC', '', 1, ?, ?, ?, 'RECEBIMENTO_SSCC')`,
+        args: [produto_id, peso_kg, operador_id || null, operador_nome || 'Sistema']
+      }
+    ], 'write');
+    return { success: true };
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed: estoque_caixas.ean_caixa')) {
+      return { success: false, error: 'Este código EAN já foi recebido.' };
+    }
+    return { success: false, error: err.message };
+  }
+}
+
+export async function listarCaixasDoPalete(palete_id) {
+  const res = await db.execute({
+    sql: `
+      SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo 
+      FROM estoque_caixas c
+      JOIN produtos p ON c.produto_id = p.id
+      WHERE c.palete_id = ? AND c.status = 'DISPONIVEL'
+      ORDER BY c.created_at DESC
+    `,
+    args: [palete_id]
+  });
+  return res.rows;
+}
+
+export async function listarPaletesAbertos() {
+  const res = await db.execute({
+    sql: `
+      SELECT p.*, count(c.id) as qtd_caixas, sum(c.peso_kg) as peso_total
+      FROM paletes p
+      LEFT JOIN estoque_caixas c ON c.palete_id = p.id AND c.status = 'DISPONIVEL'
+      WHERE p.status = 'ATIVO' AND p.endereco_atual = 'REC'
+      GROUP BY p.id
+      ORDER BY p.created_at DESC
+    `
+  });
+  return res.rows;
+}
+
+// ───────────────────────────────────────────────────
+
 /**
  * TRANSFERÊNCIA INTERNA: decrementa origem, incrementa (ou cria) destino
  * Executa tudo em uma única transação para garantir integridade

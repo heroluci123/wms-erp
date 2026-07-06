@@ -70,6 +70,34 @@ async function runMigrations(db) {
       data_fim DATETIME
     );
 
+    -- ── Paletes (LPN - License Plate Number) ───────────────────────────────────
+    CREATE TABLE IF NOT EXISTS paletes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo TEXT NOT NULL UNIQUE,
+      endereco_atual TEXT DEFAULT 'REC',
+      status TEXT CHECK(status IN ('ATIVO','DESMONTADO')) DEFAULT 'ATIVO',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_paletes_codigo ON paletes(codigo);
+
+    -- ── Estoque Serializado (Caixas Únicas) ────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS estoque_caixas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ean_caixa TEXT NOT NULL UNIQUE,
+      produto_id INTEGER NOT NULL REFERENCES produtos(id),
+      palete_id INTEGER REFERENCES paletes(id),
+      endereco TEXT,
+      lote TEXT DEFAULT '',
+      validade DATE,
+      peso_kg REAL NOT NULL,
+      status TEXT CHECK(status IN ('DISPONIVEL','CONSUMIDA')) DEFAULT 'DISPONIVEL',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_estoque_caixas_ean ON estoque_caixas(ean_caixa);
+    CREATE INDEX IF NOT EXISTS idx_estoque_caixas_palete ON estoque_caixas(palete_id);
+    CREATE INDEX IF NOT EXISTS idx_estoque_caixas_endereco ON estoque_caixas(endereco);
+
     -- ── Log de Movimentações (auditoria imutável) ──────────────────────────────
     CREATE TABLE IF NOT EXISTS movimentacoes_log (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
