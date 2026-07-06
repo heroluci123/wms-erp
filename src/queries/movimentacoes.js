@@ -39,7 +39,7 @@ export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id
       },
       // 3. Registrar no log
       {
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'FORNECEDOR', 'REC', '', 1, ?, ?, ?, 'RECEBIMENTO_SSCC')`,
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'FORNECEDOR', 'REC', '', 1, ?, ?, ?, 'RECEBIMENTO')`,
         args: [produto_id, peso_kg, operador_id || null, operador_nome || 'Sistema']
       }
     ], 'write');
