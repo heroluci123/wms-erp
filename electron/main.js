@@ -49,7 +49,27 @@ async function syncFromRemote() {
   try {
     console.log('[DB] Sincronizando tabelas da nuvem...')
 
-    const tables = ['produtos', 'operadores', 'locais', 'estoque_posicao', 'movimentacoes_log', 'inventarios', 'inventario_itens']
+    // Tenta inicializar o schema local primeiro (caso tenha ocorrido update do app com novas tabelas)
+    try {
+      const fs = require('fs')
+      const path = require('path')
+      const migPath = path.join(__dirname, 'database', 'migrations.js')
+      if (fs.existsSync(migPath)) {
+        const { runMigrations } = require(migPath)
+        // Para rodar no banco local (better-sqlite3), criamos um wrapper que imita a API assíncrona
+        await runMigrations({
+          executeMultiple: async (sqlStr) => localDb.exec(sqlStr)
+        })
+      }
+    } catch(e) {
+      console.warn('[DB] Erro ao rodar schema local:', e.message)
+    }
+
+    const tables = [
+      'produtos', 'operadores', 'locais', 'estoque_posicao', 'movimentacoes_log', 
+      'inventarios', 'inventario_itens', 'produtos_eans', 'ordens_producao', 
+      'paletes', 'estoque_caixas'
+    ]
 
     for (const table of tables) {
       try {
