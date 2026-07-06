@@ -9,6 +9,36 @@ export async function listar() {
   return res.rows
 }
 
+/**
+ * Busca sugestão automática de produto baseado em regras CONTEM já cadastradas.
+ * Ex: EAN "0025584829004960" pode ser Filé de Costela se existir regra CONTEM com "004960".
+ * Retorna { produto, regraUsada } ou null.
+ */
+export async function buscarSugestaoEan(codigo) {
+  const codigoStr = String(codigo).trim()
+  if (!codigoStr || codigoStr.length < 4) return null
+
+  // Testa sufixos progressivos (últimos 4, 5, 6, 7, 8 dígitos) contra regras CONTEM
+  const regrasRes = await db.execute({
+    sql: `
+      SELECT p.*, pe.codigo_barras as regra_usada
+      FROM produtos_eans pe
+      JOIN produtos p ON pe.produto_id = p.id
+      WHERE pe.tipo_regra = 'CONTEM' AND ? LIKE '%' || pe.codigo_barras
+      ORDER BY length(pe.codigo_barras) DESC
+      LIMIT 1
+    `,
+    args: [codigoStr]
+  })
+
+  if (regrasRes.rows.length > 0) {
+    const row = regrasRes.rows[0]
+    return { produto: row, regraUsada: row.regra_usada }
+  }
+  return null
+}
+
+
 export async function buscarPorCodigo(codigo) {
   const codigoStr = String(codigo).trim()
   if (!codigoStr) return undefined
