@@ -9,7 +9,7 @@ import {
   Tooltip, Legend, BarChart, Cell
 } from 'recharts'
 import { CurvaBadge, EnderecoBadge } from '../components/shared/Badge'
-import { format, differenceInDays, parseISO, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
+import { format, parseISO, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { useAppStore } from '../store/appStore'
 import * as estoqueQueries from '../queries/estoque.js'
@@ -82,14 +82,6 @@ const PRESETS = [
   { label: 'Este ano', getRange: () => [startOfYear(new Date()).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
 ]
 
-function downloadCSV(content) {
-  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' })
-  const url  = URL.createObjectURL(blob)
-  const a    = Object.assign(document.createElement('a'), { href: url, download: `estoque_${Date.now()}.csv` })
-  document.body.appendChild(a); a.click(); document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
 // ─── Componente principal ────────────────────────────────────────────────────
 export function Dashboard() {
   const { operador } = useAppStore()
@@ -105,12 +97,6 @@ export function Dashboard() {
   // Período personalizado
   const [dataInicio, setDataInicio] = useState(() => subDays(new Date(), 29).toISOString().slice(0,10))
   const [dataFim,    setDataFim]    = useState(() => new Date().toISOString().slice(0,10))
-
-  // Filtros de tabela
-  const [filtroDescricao, setFiltroDescricao] = useState('')
-  const [filtroCodigo,    setFiltroCodigo]    = useState('')
-  const [filtroEndereco,  setFiltroEndereco]  = useState('')
-  const [filtroVencimento,setFiltroVencimento]= useState('todos') // 'todos', 'vencidos_proximos'
 
   const aplicarPreset = (idx) => {
     setPresetAtivo(idx)
@@ -145,42 +131,6 @@ export function Dashboard() {
   }, [isExecutivo, incluirInsumos, dataInicio, dataFim])
 
   useEffect(() => { carregarDados() }, [carregarDados])
-
-  // Filtros de tabela
-  let estoqueFiltrado = estoque.filter(item => {
-    if (filtroVencimento === 'vencidos_proximos') {
-      if (!item.validade) return false
-      const dataStr = item.validade.toString().substring(0, 10) + 'T12:00:00'
-      const dias = differenceInDays(new Date(dataStr), new Date())
-      if (dias > 30) return false
-    }
-    return (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
-           (item.codigo || '').toLowerCase().includes(filtroCodigo.toLowerCase()) &&
-           (item.endereco || '').toLowerCase().includes(filtroEndereco.toLowerCase())
-  })
-
-  if (filtroVencimento === 'vencidos_proximos') {
-    estoqueFiltrado = estoqueFiltrado.sort((a, b) => new Date(a.validade) - new Date(b.validade))
-  }
-
-  const exportarCSV = async () => {
-    if (estoqueFiltrado.length === 0) return
-    const header = "ENDERECO;PRODUTO_ID;CODIGO;DESCRICAO;GRUPO;LOTE;VALIDADE;CAIXAS;KG;CURVA;VALOR_UNIT\n"
-    const rows = estoqueFiltrado.map(i =>
-      `${i.endereco};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.lote || ''};${i.validade || ''};${String(i.qtd_caixas).replace('.', ',')};${String(i.qtd_kg).replace('.', ',')};${i.status_curva};${String(i.valor_unitario || 0).replace('.', ',')}`
-    ).join("\n")
-    await downloadCSV(header + rows)
-  }
-
-  const renderValidade = (data) => {
-    if (!data) return <span className="td-muted">-</span>
-    const dataStr = data.toString().substring(0, 10) + 'T12:00:00'
-    const dataObj = new Date(dataStr)
-    const dias = differenceInDays(dataObj, new Date())
-    if (dias < 0) return <span className="validade--critico">{format(dataObj, 'dd/MM/yyyy')} (Vencido)</span>
-    if (dias <= 30) return <span className="validade--alerta">{format(dataObj, 'dd/MM/yyyy')} ({dias} dias)</span>
-    return <span className="validade--ok">{format(dataObj, 'dd/MM/yyyy')}</span>
-  }
 
   // KPIs calculados do estoque atual
   const valorTotal   = estoque.reduce((acc, i) => acc + (i.qtd_kg * (i.valor_unitario || 0)), 0)
@@ -226,7 +176,6 @@ export function Dashboard() {
           {isExecutivo && (
             <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 99, background: 'var(--success-muted)', color: 'var(--success)', fontWeight: 700, letterSpacing: 1 }}>EXECUTIVO</span>
           )}
-          <button className="btn btn--secondary" onClick={exportarCSV}><FileDown size={16} /> Exportar CSV</button>
           <button className="btn btn--primary" onClick={carregarDados}><RefreshCw size={16} className={loading ? 'spin' : ''} /> Atualizar</button>
         </div>
       </div>
@@ -484,118 +433,6 @@ export function Dashboard() {
           )}
         </>
       )}
-
-      {/* ── Tabela de Posições ────────────────────────────────────────────── */}
-      <div className="card card--elevated p-0">
-        <div className="p-16 border-b border-border bg-bg-2 flex items-center gap-16 flex-wrap">
-          <div className="flex items-center gap-8 text-primary font-bold mr-auto">
-            <Search size={18} /> Filtros de Posições
-          </div>
-          <select
-            className="form-input bg-bg-card"
-            style={{ width: 180, fontWeight: 600 }}
-            value={incluirInsumos ? 'insumos' : 'operacao'}
-            onChange={e => setIncluirInsumos(e.target.value === 'insumos')}
-          >
-            <option value="operacao">Visão: Operação (MP/PA)</option>
-            <option value="insumos">Visão: Insumos</option>
-          </select>
-          <select
-            className="form-input bg-bg-card"
-            style={{ width: 220, fontWeight: 600 }}
-            value={filtroVencimento}
-            onChange={e => setFiltroVencimento(e.target.value)}
-          >
-            <option value="todos">Validade: Todas</option>
-            <option value="vencidos_proximos">⚠️ Vencidos e Próximos (30d)</option>
-          </select>
-          <input type="text" className="form-input" style={{ width: 140 }}
-            placeholder="Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
-          <input type="text" className="form-input" style={{ width: 140 }}
-            placeholder="Código..." value={filtroCodigo} onChange={e => setFiltroCodigo(e.target.value)} />
-          <input type="text" className="form-input" style={{ width: 200 }}
-            placeholder="Descrição..." value={filtroDescricao} onChange={e => setFiltroDescricao(e.target.value)} />
-        </div>
-
-        <div className="table-container" style={{ maxHeight: 'calc(100vh - 420px)', overflowY: 'auto' }}>
-          <table>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
-              <tr>
-                <th>Endereço</th>
-                <th>Código</th>
-                <th>Descrição</th>
-                <th>Grupo</th>
-                <th>Tipo</th>
-                <th>Curva</th>
-                <th>Lote</th>
-                <th>Validade</th>
-                <th style={{ textAlign: 'right' }}>Caixas</th>
-                <th style={{ textAlign: 'right' }}>KG</th>
-                {isExecutivo && <th style={{ textAlign: 'right' }}>Valor Total</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {estoqueFiltrado.length === 0 ? (
-                <tr><td colSpan={isExecutivo ? 11 : 10} className="text-center text-muted py-24">Nenhum saldo encontrado com os filtros atuais.</td></tr>
-              ) : (
-                estoqueFiltrado.map((item) => (
-                  <tr key={item.id}>
-                    <td><EnderecoBadge endereco={item.endereco} /></td>
-                    <td className="td-mono">{item.codigo}</td>
-                    <td style={{ maxWidth: 250 }} className="truncate" title={item.descricao}>{item.descricao}</td>
-                    <td>{item.grupo || '-'}</td>
-                    <td><span className="badge" style={{ backgroundColor: 'var(--color-bg-2)', fontSize: 10 }}>{item.tipo_produto || 'N/A'}</span></td>
-                    <td><CurvaBadge curva={item.status_curva} /></td>
-                    <td className="td-mono">{item.lote || '-'}</td>
-                    <td>{renderValidade(item.validade)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{item.qtd_caixas}</td>
-                    <td style={{ textAlign: 'right' }} className="td-muted">{item.qtd_kg}</td>
-                    {isExecutivo && (
-                      <td style={{ textAlign: 'right' }} className="text-success font-bold">
-                        R$ {(item.qtd_kg * (item.valor_unitario || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Totalizador com base no filtro atual */}
-        {estoqueFiltrado.length > 0 && (() => {
-          const totalCx  = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_caixas) || 0), 0)
-          const totalKg  = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_kg) || 0), 0)
-          const totalVal = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_kg) * (parseFloat(i.valor_unitario) || 0)), 0)
-          const totalItens = estoqueFiltrado.length
-          return (
-            <div style={{
-              display: 'flex', gap: 0, borderTop: '2px solid var(--accent)',
-              background: 'linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(34,211,238,0.05) 100%)'
-            }}>
-              <div style={{ flex: 1, padding: '12px 16px', textAlign: 'center', borderRight: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Linhas</div>
-                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--cyan)' }}>{totalItens}</div>
-              </div>
-              <div style={{ flex: 1, padding: '12px 16px', textAlign: 'center', borderRight: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Total Caixas</div>
-                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--cyan)' }}>{totalCx.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</div>
-              </div>
-              <div style={{ flex: 2, padding: '12px 16px', textAlign: 'center', borderRight: isExecutivo ? '1px solid var(--border)' : 'none' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Total KG</div>
-                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--success)' }}>{totalKg.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(totalKg / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 3 })} ton</div>
-              </div>
-              {isExecutivo && (
-                <div style={{ flex: 2, padding: '12px 16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Valor Total</div>
-                  <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--warning)' }}>R$ {totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                </div>
-              )}
-            </div>
-          )
-        })()}
-      </div>
     </div>
   )
 }

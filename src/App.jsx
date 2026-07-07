@@ -5,6 +5,7 @@ import { Layout } from './components/Layout/Layout'
 // Pages
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
+import { EstoqueEnderecos } from './pages/EstoqueEnderecos'
 import { Recebimento } from './pages/Recebimento'
 import { Movimentacao } from './pages/Movimentacao'
 import { Expedicao } from './pages/Expedicao'
@@ -32,6 +33,7 @@ function App() {
         {/* Rotas protegidas (dentro do Layout principal) */}
         <Route path="/" element={<Layout />}>
           <Route index element={<HomeWrapper />} />
+          <Route path="estoque" element={<EstoqueEnderecos />} />
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="movimentacao" element={<Movimentacao />} />
           <Route path="saida" element={<Saida />} />

@@ -60,6 +60,11 @@ function Sidebar() {
       <NavLink to="/" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
         <Package size={18} /> Dashboard
       </NavLink>
+      {operador?.permissoes?.estoque_enderecos && (
+        <NavLink to="/estoque" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <Layers size={18} /> Estoque por Endereço
+        </NavLink>
+      )}
       <NavLink to="/mapa" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
         <Map size={18} /> Mapa de Capacidade
       </NavLink>

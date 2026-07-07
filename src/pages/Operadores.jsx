@@ -26,6 +26,7 @@ export function Operadores() {
       locais: false,
       operadores: false,
       dashboard_executivo: false,
+      estoque_enderecos: false,
       inventario_carga_inicial: false,
       deletar_historico: false
     }
@@ -235,6 +236,10 @@ export function Operadores() {
                 <label className="flex items-center gap-8 cursor-pointer p-8 hover:bg-bg-card rounded-md">
                   <input type="checkbox" checked={formData.permissoes.dashboard_executivo} onChange={() => togglePermissao('dashboard_executivo')} />
                   <span className="text-sm">Painel Executivo</span>
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer p-8 hover:bg-bg-card rounded-md">
+                  <input type="checkbox" checked={formData.permissoes.estoque_enderecos} onChange={() => togglePermissao('estoque_enderecos')} />
+                  <span className="text-sm">Estoque por Endereço (Tabela)</span>
                 </label>
                 <label className="flex items-center gap-8 cursor-pointer p-8 hover:bg-bg-card rounded-md">
                   <input type="checkbox" checked={formData.permissoes.deletar_historico} onChange={() => togglePermissao('deletar_historico')} />
