@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore'
 import * as inventariosQueries from '../queries/inventarios.js';
 import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
+import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
 
 export function InventarioOperador() {
   const { toastSuccess, toastError, toastWarning } = useAppStore()
@@ -29,11 +30,15 @@ export function InventarioOperador() {
   const [qtdKg, setQtdKg] = useState('')
   const [qtdValidade, setQtdValidade] = useState('')
 
-  // Modal de cadastro rápido
+  // Modal de cadastro rápido (CargaInicial)
   const [modalCadastro, setModalCadastro] = useState(null) // { ean }
   const [formCadastro, setFormCadastro] = useState({ descricao: '', tipo_produto: 'Materia Prima', status_curva: 'C', valor_unitario: '', grupo: '', produtoVinculado: null })
   const [salvandoCadastro, setSalvandoCadastro] = useState(false)
   const [produtosSemEan, setProdutosSemEan] = useState([])
+
+  // Modal de vinculação rápida de EAN (todos os tipos de inventário)
+  const [modalEanOpen, setModalEanOpen] = useState(false)
+  const [eanDesconhecido, setEanDesconhecido] = useState('')
 
   // 1. Carregar inventários
   const carregar = async () => {
@@ -142,16 +147,19 @@ export function InventarioOperador() {
     try {
       const p = await produtosQueries.buscarPorCodigo(val)
       if (!p) {
-        // Produto não encontrado: abre modal de cadastro rápido se for Carga Inicial
         const isCarga = inventarioAtivo?.tipo === 'CargaInicial'
         if (isCarga) {
+          // Carga Inicial: abre modal completo de criacao de produto
           const prods = await produtosQueries.listar()
           setProdutosSemEan(prods.filter(p => !p.ean))
           setModalCadastro({ ean: val.trim() })
           setFormCadastro({ descricao: '', tipo_produto: 'Materia Prima', status_curva: 'C', valor_unitario: '', grupo: '', produtoVinculado: null })
-          return
+        } else {
+          // Ciclico / outros: abre modal rapido de vinculacao de EAN
+          setEanDesconhecido(val.trim())
+          setModalEanOpen(true)
         }
-        return toastError('Produto não encontrado', `EAN/Código "${val}" não está cadastrado no sistema.`)
+        return
       }
       
       setItemAtual({
@@ -715,6 +723,29 @@ export function InventarioOperador() {
         </div>
 
       </div>
+
+      {/* Modal de vinculacao de EAN rapido (inventario ciclico e outros) */}
+      <CadastroEanModal
+        isOpen={modalEanOpen}
+        onClose={() => { setModalEanOpen(false); setTimeout(() => document.getElementById('inv-produto')?.focus(), 100) }}
+        codigoDesconhecido={eanDesconhecido}
+        onRegraSalva={(p) => {
+          // Após vincular, preence o item e avança para informar quantidade
+          setItemAtual({
+            id: null,
+            produto_id: p.id,
+            endereco: enderecoAtual,
+            codigo: p.codigo || p.ean,
+            descricao: p.descricao,
+            status_curva: p.status_curva,
+            tipo_produto: p.tipo_produto,
+            grupo: p.grupo,
+            status_item: 'Pendente'
+          })
+          setStep(3)
+          setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
+        }}
+      />
     </div>
   )
 }

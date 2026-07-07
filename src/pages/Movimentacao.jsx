@@ -7,6 +7,7 @@ import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
 import * as estoqueQueries from '../queries/estoque.js';
 import * as movimentacoesQueries from '../queries/movimentacoes.js';
+import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
 
 export function Movimentacao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -27,6 +28,10 @@ export function Movimentacao() {
   const [qtdCaixas, setQtdCaixas] = useState('')
   const [qtdKg, setQtdKg] = useState('')
   const [sugestoes, setSugestoes] = useState([])
+
+  // Modal EAN
+  const [modalEanOpen, setModalEanOpen] = useState(false)
+  const [eanDesconhecido, setEanDesconhecido] = useState('')
 
   const [destino, setDestino] = useState('')
 
@@ -127,7 +132,12 @@ export function Movimentacao() {
   const processarScanProdutoAntigo = async (val) => {
     try {
       const p = await produtosQueries.buscarPorCodigo(val)
-      if (!p) return toastWarning('Aviso', 'Produto não cadastrado.')
+      if (!p) {
+        // EAN desconhecido: abre modal para vincular
+        setEanDesconhecido(val)
+        setModalEanOpen(true)
+        return
+      }
       
       const saldos = await estoqueQueries.buscarPorEnderecoProduto(enderecoOrigem, p.id)
       if (saldos.length === 0) {
@@ -374,6 +384,28 @@ export function Movimentacao() {
         )}
 
       </div>
+
+      <CadastroEanModal
+        isOpen={modalEanOpen}
+        onClose={() => { setModalEanOpen(false); setTimeout(() => document.getElementById('input-universal')?.focus(), 100) }}
+        codigoDesconhecido={eanDesconhecido}
+        onRegraSalva={async (p) => {
+          // Depois de vincular o EAN, busca o saldo e continua o fluxo automaticamente
+          const saldos = await estoqueQueries.buscarPorEnderecoProduto(enderecoOrigem, p.id)
+          if (saldos.length === 0) {
+            toastError('Sem Saldo', `EAN vinculado! Mas o produto não possui saldo em ${enderecoOrigem}`)
+            return
+          }
+          setProdutoAntigo(p)
+          if (saldos.length === 1) {
+            setSaldoAtual(saldos[0])
+            setStep('ANTIGO_QTD')
+          } else {
+            setSaldoOpcoes(saldos)
+            setStep('ANTIGO_SELECIONAR_LOTE')
+          }
+        }}
+      />
     </div>
   )
 }
