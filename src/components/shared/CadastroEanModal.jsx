@@ -15,13 +15,18 @@ import * as produtosQueries from '../../queries/produtos.js';
  * Sem toggle "muda por caixa" — é sempre variável na prática.
  */
 export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraSalva }) {
-  const { toastSuccess, toastError } = useAppStore();
+  const { toastSuccess, toastError, operador } = useAppStore();
+  const podeCadastrar = operador?.permissoes?.includes('produtos');
 
   const [sugestao, setSugestao] = useState(null);
-  const [modo, setModo] = useState('carregando'); // 'carregando' | 'sugestao' | 'busca'
+  const [modo, setModo] = useState('carregando'); // 'carregando' | 'sugestao' | 'busca' | 'novo'
   const [busca, setBusca] = useState('');
   const [produtosList, setProdutosList] = useState([]);
   const [produtoSelecionado, setProdutoSelecionado] = useState(null);
+  
+  const [formNovo, setFormNovo] = useState({
+    descricao: '', codigo: '', unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima', status_curva: 'C'
+  });
 
   // Quantos dígitos finais usar como sufixo (editável pelo usuário)
   const [sufixoLen, setSufixoLen] = useState(6);
@@ -102,6 +107,38 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
         ? `Qualquer caixa com EAN terminando em "…${sufixo}" será reconhecida como ${produtoSelecionado.descricao}.`
         : `Código ${ean} vinculado a ${produtoSelecionado.descricao}.`;
       toastSuccess('Regra salva! 🎉', msg);
+    }
+  };
+
+  const handleSalvarNovoProduto = async () => {
+    if (!formNovo.descricao.trim()) return toastError('Atenção', 'Preencha a descrição do produto.');
+    try {
+      // Cria o produto sem EAN (vamos vincular a regra em vez do EAN direto se for SSCC longo)
+      // Se for curto, podemos usar como código ou ean exato.
+      const produtoArgs = { ...formNovo, valor_unitario: 0 };
+      if (!isEanLongo && !produtoArgs.codigo) produtoArgs.codigo = ean;
+
+      const resCriar = await produtosQueries.criar(produtoArgs);
+      if (!resCriar.success) return toastError('Erro ao criar', resCriar.error);
+
+      const novoProdutoObj = { id: resCriar.id, ...produtoArgs };
+      
+      let tipo, regra;
+      if (isEanLongo) {
+        if (!sufixo || sufixo.length < 3) return toastError('Atenção', 'O sufixo precisa ter ao menos 3 dígitos.');
+        tipo = 'CONTEM';
+        regra = sufixo;
+      } else {
+        tipo = 'EXATO';
+        regra = ean;
+      }
+
+      const ok = await salvarRegra(novoProdutoObj, tipo, regra);
+      if (ok) {
+        toastSuccess('Produto criado e regra salva! 🎉', `${formNovo.descricao} adicionado.`);
+      }
+    } catch (err) {
+      toastError('Erro fatal', err.message);
     }
   };
 
@@ -251,6 +288,86 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
                 onClick={handleSalvarManual}
                 disabled={!produtoSelecionado}>
                 <Check size={16} /> Vincular e Salvar
+              </button>
+
+              {podeCadastrar && (
+                <div style={{ marginTop: 16, textAlign: 'center' }}>
+                  <span className="text-muted text-sm">O produto não está na lista? </span>
+                  <button className="btn btn--ghost btn--sm text-primary" onClick={() => {
+                    setFormNovo({ descricao: '', codigo: isEanLongo ? '' : ean, unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima', status_curva: 'C' });
+                    setModo('novo');
+                  }}>
+                    Cadastrar novo produto
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── CADASTRO DE NOVO PRODUTO ── */}
+          {modo === 'novo' && (
+            <div>
+              <button className="btn btn--ghost btn--sm mb-14 flex items-center gap-8" style={{ color: 'var(--text-muted)' }} onClick={() => setModo('busca')}>
+                ← Voltar para a busca
+              </button>
+
+              <div style={{ background: 'var(--bg-1)', padding: 16, borderRadius: 10, marginBottom: 16 }}>
+                <h4 className="font-bold mb-12 text-primary">Cadastrar Novo Produto</h4>
+                
+                <div className="form-group mb-12">
+                  <label className="form-label">Descrição *</label>
+                  <input type="text" className="form-input" autoFocus value={formNovo.descricao} onChange={e => setFormNovo({...formNovo, descricao: e.target.value})} placeholder="Ex: COXAO MOLE 20KG" />
+                </div>
+                
+                <div className="form-grid form-grid--2 mb-12">
+                  <div className="form-group">
+                    <label className="form-label">Código Interno</label>
+                    <input type="text" className="form-input" value={formNovo.codigo} onChange={e => setFormNovo({...formNovo, codigo: e.target.value})} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Unidade</label>
+                    <select className="form-input" value={formNovo.unidade} onChange={e => setFormNovo({...formNovo, unidade: e.target.value})}>
+                      <option value="CX">Caixa (CX)</option>
+                      <option value="KG">Quilo (KG)</option>
+                      <option value="UN">Unidade (UN)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-grid form-grid--2 mb-12">
+                  <div className="form-group">
+                    <label className="form-label">Tipo de Produto</label>
+                    <select className="form-input" value={formNovo.tipo_produto} onChange={e => setFormNovo({...formNovo, tipo_produto: e.target.value})}>
+                      <option value="Materia Prima">Matéria Prima</option>
+                      <option value="Embalagem">Embalagem</option>
+                      <option value="Subproduto">Subproduto</option>
+                      <option value="Revenda">Revenda</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Curva ABC</label>
+                    <select className="form-input" value={formNovo.status_curva} onChange={e => setFormNovo({...formNovo, status_curva: e.target.value})}>
+                      <option value="A">Curva A</option>
+                      <option value="B">Curva B</option>
+                      <option value="C">Curva C</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {isEanLongo && (
+                <div style={{ padding: '10px 14px', background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>O produto será criado e a regra do sufixo </span>
+                  <strong style={{ color: 'var(--warning)', fontFamily: 'monospace' }}>…{sufixo}</strong>
+                  <span style={{ color: 'var(--text-muted)' }}> será vinculada a ele automaticamente.</span>
+                </div>
+              )}
+
+              <button
+                className="btn btn--primary btn--lg w-full"
+                onClick={handleSalvarNovoProduto}
+                disabled={!formNovo.descricao.trim()}>
+                <Check size={16} /> Salvar e Vincular
               </button>
             </div>
           )}
