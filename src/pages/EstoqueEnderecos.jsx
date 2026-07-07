@@ -161,7 +161,7 @@ export function EstoqueEnderecos() {
           </div>
 
           {/* Tabela Scrollável */}
-          <div className="table-container">
+          <div className="table-container" style={{ overflowX: 'auto', width: '100%' }}>
             <table className="table-densa">
               <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                 <tr>
