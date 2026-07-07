@@ -87,9 +87,9 @@ export function EstoqueEnderecos() {
   const totalItens = estoqueFiltrado.length
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ paddingBottom: 40 }}>
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="page-header" style={{ flexShrink: 0 }}>
+      <div className="page-header mb-24">
         <div>
           <h1 className="page-header__title flex items-center gap-12">
             <Layers size={26} /> Estoque por Endereço
@@ -104,44 +104,47 @@ export function EstoqueEnderecos() {
         </div>
       </div>
 
-      {/* ── Body: Layout de duas colunas (Tabela esq, Totais dir) ──────────── */}
-      <div style={{ display: 'flex', gap: 24, flex: 1, minHeight: 0 }}>
+      {/* ── Body: Layout responsivo (Tabela esq, Totais dir) ──────────── */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
         
         {/* Lado Esquerdo: Tabela */}
-        <div className="card card--elevated p-0" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)' }}>
+        <div className="card card--elevated p-0" style={{ flex: '1 1 700px', minWidth: 0, border: '1px solid var(--border)' }}>
           {/* Barra de Filtros */}
-          <div className="p-16 border-b border-border bg-bg-2 flex items-center gap-16 flex-wrap" style={{ flexShrink: 0 }}>
+          <div className="p-16 border-b border-border bg-bg-2 flex items-center gap-12 flex-wrap">
             <div className="flex items-center gap-8 text-primary font-bold mr-auto">
-              <Search size={18} /> Filtros de Posições
+              <Search size={18} /> Filtros
             </div>
-            <select
-              className="form-input bg-bg-card"
-              style={{ width: 180, fontWeight: 600 }}
-              value={incluirInsumos ? 'insumos' : 'operacao'}
-              onChange={e => setIncluirInsumos(e.target.value === 'insumos')}
-            >
-              <option value="operacao">Visão: Operação (MP/PA)</option>
-              <option value="insumos">Visão: Insumos</option>
-            </select>
-            <select
-              className="form-input bg-bg-card"
-              style={{ width: 220, fontWeight: 600 }}
-              value={filtroVencimento}
-              onChange={e => setFiltroVencimento(e.target.value)}
-            >
-              <option value="todos">Validade: Todas</option>
-              <option value="vencidos_proximos">⚠️ Vencidos e Próximos (30d)</option>
-            </select>
-            <input type="text" className="form-input" style={{ width: 140 }}
-              placeholder="Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
-            <input type="text" className="form-input" style={{ width: 140 }}
-              placeholder="Código..." value={filtroCodigo} onChange={e => setFiltroCodigo(e.target.value)} />
-            <input type="text" className="form-input" style={{ width: 200 }}
-              placeholder="Descrição..." value={filtroDescricao} onChange={e => setFiltroDescricao(e.target.value)} />
+            
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', flex: 1, minWidth: 400, justifyContent: 'flex-end' }}>
+              <select
+                className="form-input bg-bg-card"
+                style={{ flex: '1 1 160px', fontWeight: 600 }}
+                value={incluirInsumos ? 'insumos' : 'operacao'}
+                onChange={e => setIncluirInsumos(e.target.value === 'insumos')}
+              >
+                <option value="operacao">Visão: Operação (MP/PA)</option>
+                <option value="insumos">Visão: Insumos</option>
+              </select>
+              <select
+                className="form-input bg-bg-card"
+                style={{ flex: '1 1 180px', fontWeight: 600 }}
+                value={filtroVencimento}
+                onChange={e => setFiltroVencimento(e.target.value)}
+              >
+                <option value="todos">Validade: Todas</option>
+                <option value="vencidos_proximos">⚠️ Vencidos e Próximos (30d)</option>
+              </select>
+              <input type="text" className="form-input" style={{ flex: '1 1 100px' }}
+                placeholder="Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
+              <input type="text" className="form-input" style={{ flex: '1 1 100px' }}
+                placeholder="Código..." value={filtroCodigo} onChange={e => setFiltroCodigo(e.target.value)} />
+              <input type="text" className="form-input" style={{ flex: '1 1 140px' }}
+                placeholder="Descrição..." value={filtroDescricao} onChange={e => setFiltroDescricao(e.target.value)} />
+            </div>
           </div>
 
           {/* Tabela Scrollável */}
-          <div className="table-container" style={{ flex: 1, overflowY: 'auto' }}>
+          <div className="table-container">
             <table>
               <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                 <tr>
@@ -188,9 +191,9 @@ export function EstoqueEnderecos() {
         </div>
 
         {/* Lado Direito: Totalizador */}
-        <div style={{ width: 280, flexShrink: 0 }}>
+        <div style={{ flex: '1 1 300px', maxWidth: 400 }}>
           <div className="card card--elevated" style={{
-            position: 'sticky', top: 0,
+            position: 'sticky', top: 24,
             background: 'linear-gradient(180deg, rgba(30,33,52,0.95) 0%, rgba(26,29,46,0.95) 100%)',
             border: '1px solid var(--border)',
             borderTop: '3px solid var(--accent)'
