@@ -414,19 +414,24 @@ function Expedicao({ refresh }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function EnvioProducao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
-  const [step, setStep] = useState('SCAN') // SCAN | CONFIRMAR
+  const [step, setStep] = useState('SCAN') // SCAN | CONFIRMAR | PARCIAL_EAN
   const [eanBipado, setEanBipado] = useState('')
   const [caixaEncontrada, setCaixaEncontrada] = useState(null)
   const [pesoEnvio, setPesoEnvio] = useState('')
+  const [eanResto, setEanResto] = useState('')
   const [salvando, setSalvando] = useState(false)
 
   const reset = () => {
-    setStep('SCAN'); setEanBipado(''); setCaixaEncontrada(null); setPesoEnvio(''); setSalvando(false)
+    setStep('SCAN'); setEanBipado(''); setCaixaEncontrada(null); setPesoEnvio(''); setEanResto(''); setSalvando(false)
     setTimeout(() => eanRef.current?.focus(), 100)
   }
 
   const { inputRef: eanRef, handleKeyDown: handleEanKeyDown } = useBarcodeScanner({
     onScan: async (val) => {
+      if (step === 'PARCIAL_EAN') {
+        setEanResto(val)
+        return
+      }
       setEanBipado(val)
       setCaixaEncontrada(null)
       try {
@@ -443,30 +448,40 @@ function EnvioProducao() {
     }
   })
 
+  const pesoEnvioNum = parseFloat(pesoEnvio) || 0
+  const pesoCaixaNum = caixaEncontrada ? parseFloat(caixaEncontrada.peso_kg) : 0
+  const isParcial = pesoEnvioNum > 0 && Math.abs(pesoEnvioNum - pesoCaixaNum) >= 0.05
+  const pesoResto = isParcial ? parseFloat((pesoCaixaNum - pesoEnvioNum).toFixed(3)) : 0
+
   const confirmarEnvio = async () => {
     if (!caixaEncontrada) return
-    const kg = parseFloat(pesoEnvio)
-    if (!kg || kg <= 0) return toastError('Peso Inválido', 'Informe um peso válido.')
+    if (pesoEnvioNum <= 0 || pesoEnvioNum > pesoCaixaNum + 0.001) {
+      return toastError('Peso Inválido', `O peso deve ser entre 0.001 e ${pesoCaixaNum} kg.`)
+    }
+    if (isParcial && !eanResto.trim()) {
+      setStep('PARCIAL_EAN')
+      toastWarning('Bipe o EAN Restante', `Saída parcial: bipe a etiqueta da caixa que vai ficar (${pesoResto} kg).`)
+      setTimeout(() => eanRef.current?.focus(), 100)
+      return
+    }
+
     setSalvando(true)
     try {
-      // Baixa a caixa do estoque e cria ordem de produção
-      const origem = caixaEncontrada.endereco || 'REC'
-      await movimentacoesQueries.abrirOrdemProducao({
-        produto_id: caixaEncontrada.produto_id,
-        lote: '',
-        validade: caixaEncontrada.validade,
-        qtd_caixas: 1,
-        qtd_kg: kg,
-        origem,
+      const res = await movimentacoesQueries.abrirOrdemProducaoSSCC({
+        caixa_id: caixaEncontrada.id,
+        peso_enviado_kg: pesoEnvioNum,
         operador_id: operador?.id,
-        operador_nome: operador?.nome
+        operador_nome: operador?.nome,
+        ean_caixa_resto: isParcial ? eanResto.trim() : null
       })
-      // Marcar a caixa como consumida
-      await db.execute({
-        sql: `UPDATE estoque_caixas SET status = 'PRODUCAO', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        args: [caixaEncontrada.id]
-      })
-      toastSuccess('Enviado à Produção! 🏭', `${caixaEncontrada.produto_descricao} — ${kg} kg. Ordem criada.`)
+
+      if (!res.success) {
+        toastError('Erro', res.error)
+        setSalvando(false)
+        return
+      }
+
+      toastSuccess('Enviado à Produção! 🏭', `${caixaEncontrada.produto_descricao} — ${pesoEnvioNum} kg. Ordem criada.`)
       reset()
     } catch (err) {
       toastError('Erro Fatal', err.message)
@@ -496,7 +511,7 @@ function EnvioProducao() {
         </div>
       </div>
 
-      {caixaEncontrada && step === 'CONFIRMAR' && (
+      {caixaEncontrada && step !== 'SCAN' && (
         <div className="card">
           <div style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid #8b5cf6', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
             <div className="text-xs font-bold mb-2 uppercase" style={{ color: '#8b5cf6' }}>✅ Caixa Identificada</div>
@@ -507,23 +522,69 @@ function EnvioProducao() {
               {caixaEncontrada.validade && <div>📅 <strong>{new Date(caixaEncontrada.validade + 'T00:00:00').toLocaleDateString('pt-BR')}</strong></div>}
             </div>
           </div>
-          <div className="form-group mb-14">
-            <label className="form-label">Peso a Enviar (kg) *</label>
-            <input
-              id="prod-peso"
-              type="number"
-              step="0.001"
-              className="form-input form-input--number"
-              value={pesoEnvio}
-              onChange={e => setPesoEnvio(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-8">
-            <button className="btn btn--ghost" onClick={reset}><X size={16}/> Cancelar</button>
-            <button className="btn flex-1 btn--lg" style={{ background: '#8b5cf6', color: 'white' }} onClick={confirmarEnvio} disabled={salvando}>
-              {salvando ? <Loader size={16} className="animate-spin"/> : <Factory size={16}/>} Enviar à Produção
-            </button>
-          </div>
+
+          {step === 'PARCIAL_EAN' && (
+            <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid var(--warning)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+              <div className="flex items-center gap-8 font-bold text-warning mb-8"><Scissors size={15}/> Bipe a etiqueta da caixa restante</div>
+              <div className="text-sm text-muted mb-10">
+                Saindo para produção: <strong>{pesoEnvioNum} kg</strong> → Fica no estoque: <strong>{pesoResto} kg</strong><br/>
+                A sobra precisará de uma etiqueta nova.
+              </div>
+              <input
+                ref={eanRef}
+                type="text"
+                className="form-input form-input--scanner"
+                placeholder="Bipe a etiqueta da caixa restante..."
+                value={eanResto}
+                onChange={e => setEanResto(e.target.value)}
+                onKeyDown={handleEanKeyDown}
+                autoFocus
+              />
+              {eanResto && (
+                <>
+                  <div className="text-success text-sm mt-6">✅ EAN capturado: <strong className="font-mono">{eanResto}</strong></div>
+                  <button className="btn w-full mt-10 btn--lg" style={{ background: '#8b5cf6', color: 'white' }} onClick={confirmarEnvio}>
+                    <Check size={16}/> Confirmar Envio Parcial
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {step === 'CONFIRMAR' && (
+            <>
+              <div className="form-group mb-14">
+                <label className="form-label">Peso a Enviar (kg) *</label>
+                <input
+                  id="prod-peso"
+                  type="number"
+                  step="0.001"
+                  min="0.001"
+                  max={pesoCaixaNum}
+                  className="form-input form-input--number"
+                  value={pesoEnvio}
+                  onChange={e => setPesoEnvio(e.target.value)}
+                />
+                {isParcial && (
+                  <div className="text-warning text-xs mt-4 flex items-center gap-4">
+                    <Scissors size={11}/> Envio parcial — fica no estoque: <strong>{pesoResto} kg</strong>
+                  </div>
+                )}
+              </div>
+              {isParcial && (
+                <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }} className="text-sm text-warning">
+                  <AlertTriangle size={12} style={{ display: 'inline', marginRight: 4 }}/>
+                  Você bipará a etiqueta da caixa restante ({pesoResto} kg) no próximo passo.
+                </div>
+              )}
+              <div className="flex gap-8">
+                <button className="btn btn--ghost" onClick={reset}><X size={16}/> Cancelar</button>
+                <button className="btn flex-1 btn--lg" style={{ background: '#8b5cf6', color: 'white' }} onClick={confirmarEnvio} disabled={salvando}>
+                  {salvando ? <Loader size={16} className="animate-spin"/> : <Factory size={16}/>} Enviar à Produção
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -557,6 +557,83 @@ export async function abrirOrdemProducao({ produto_id, lote, validade, qtd_caixa
   }
 }
 
+export async function abrirOrdemProducaoSSCC({ caixa_id, peso_enviado_kg, operador_id, operador_nome, ean_caixa_resto }) {
+  try {
+    const { rows } = await db.execute({
+      sql: `SELECT c.*, p.descricao as produto_descricao
+            FROM estoque_caixas c JOIN produtos p ON c.produto_id = p.id
+            WHERE c.id = ? AND c.status = 'DISPONIVEL'`,
+      args: [caixa_id]
+    })
+    if (rows.length === 0) return { success: false, error: 'Caixa não encontrada ou já consumida.' }
+    const caixa = rows[0]
+
+    const pesoCaixa = parseFloat(caixa.peso_kg)
+    const pesoEnvio = parseFloat(peso_enviado_kg)
+
+    if (pesoEnvio <= 0) return { success: false, error: 'O peso deve ser maior que zero.' }
+    if (pesoEnvio > pesoCaixa + 0.001) return { success: false, error: `Peso maior que o da caixa.` }
+
+    const isTotalExit = Math.abs(pesoEnvio - pesoCaixa) < 0.05
+    const endereco = caixa.endereco || 'REC'
+    
+    // Verificar bloqueio na origem
+    const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(endereco)
+    if (bloqOrigem) return { success: false, error: `Endereço de origem ${endereco} está bloqueado por inventário.`, bloqueado: true }
+
+    const blocos = []
+
+    if (isTotalExit) {
+      blocos.push({ sql: `UPDATE estoque_caixas SET status = 'PRODUCAO', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, args: [caixa_id] })
+      blocos.push({
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND IFNULL(validade,'') = IFNULL(?,'')`,
+        args: [pesoCaixa, caixa.produto_id, endereco, caixa.validade]
+      })
+      blocos.push({
+        sql: `INSERT INTO ordens_producao (materia_prima_id, lote, peso_enviado, operador_id) VALUES (?, '', ?, ?)`,
+        args: [caixa.produto_id, pesoCaixa, operador_id || null]
+      })
+      blocos.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'PRODUCAO', '', 1, ?, ?, ?, 'DESPACHO')`,
+        args: [caixa.produto_id, endereco, pesoCaixa, operador_id || null, operador_nome || 'Sistema']
+      })
+    } else {
+      if (!ean_caixa_resto || ean_caixa_resto.trim() === '') return { success: false, error: 'EAN da caixa restante é obrigatório.' }
+      const pesoResto = parseFloat((pesoCaixa - pesoEnvio).toFixed(3))
+
+      blocos.push({ sql: `UPDATE estoque_caixas SET status = 'PRODUCAO', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, args: [caixa_id] })
+      blocos.push({
+        sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, palete_id, endereco, peso_kg, validade, status) VALUES (?, ?, NULL, ?, ?, ?, 'DISPONIVEL')`,
+        args: [ean_caixa_resto.trim(), caixa.produto_id, endereco, pesoResto, caixa.validade || null]
+      })
+      blocos.push({
+        sql: `UPDATE estoque_posicao SET qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND IFNULL(validade,'') = IFNULL(?,'')`,
+        args: [pesoEnvio, caixa.produto_id, endereco, caixa.validade]
+      })
+      blocos.push({
+        sql: `INSERT INTO ordens_producao (materia_prima_id, lote, peso_enviado, operador_id) VALUES (?, '', ?, ?)`,
+        args: [caixa.produto_id, pesoEnvio, operador_id || null]
+      })
+      blocos.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'PRODUCAO', '', 1, ?, ?, ?, 'DESPACHO')`,
+        args: [caixa.produto_id, endereco, pesoEnvio, operador_id || null, operador_nome || 'Sistema']
+      })
+    }
+
+    await db.batch(blocos, 'write')
+    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`)
+
+    return {
+      success: true,
+      tipo: isTotalExit ? 'TOTAL' : 'PARCIAL',
+      pesoEnvio,
+      pesoResto: isTotalExit ? 0 : parseFloat((pesoCaixa - pesoEnvio).toFixed(3))
+    }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function listarOrdensProducao(status = 'ABERTA') {
   const res = await db.execute({
     sql: `
