@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Truck, Factory, RotateCcw, MapPin, Box, Hash, Check, ArrowRight, PackageOpen, ChevronDown, Loader, X, ScanBarcode, Scissors, AlertTriangle } from 'lucide-react'
+import { Truck, Factory, RotateCcw, Check, X, Plus, Trash2, Loader, Package, ClipboardList, ScanBarcode, Scissors, AlertTriangle, ChevronRight, PackageOpen, MapPin, Hash } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
@@ -7,373 +7,539 @@ import * as locaisQueries from '../queries/locais.js'
 import * as produtosQueries from '../queries/produtos.js'
 import * as estoqueQueries from '../queries/estoque.js'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
+import { db } from '../lib/db.js'
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
 
-// ────────────────────────────────────────────────────────────────────────────
-// ABA 1: SAÍDA P/ EXPEDIÇÃO (fluxo original)
-// ────────────────────────────────────────────────────────────────────────────
-function SaidaExpedicao() {
+// ─────────────────────────────────────────────────────────────────────────────
+// ABA 1: MONTAR ROMANEIO DE SAÍDA (igual ao Recebimento mas para saída)
+// ─────────────────────────────────────────────────────────────────────────────
+function MontarRomaneio({ onRomaneioFechado }) {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
 
-  const [step, setStep] = useState(1)
-  const [origem, setOrigem] = useState('')
-  const [produto, setProduto] = useState(null)
-  const [saldoAtual, setSaldoAtual] = useState(null)
-  const [saldoOpcoes, setSaldoOpcoes] = useState([])
-  const [qtdCaixas, setQtdCaixas] = useState('')
-  const [qtdKg, setQtdKg] = useState('')
-  const [fefoAlert, setFefoAlert] = useState(null)
-  const [modalEanOpen, setModalEanOpen] = useState(false)
-  const [eanDesconhecido, setEanDesconhecido] = useState('')
-  const [numPedido, setNumPedido] = useState('')
-  const [cliente, setCliente] = useState('')
+  // Romaneio em montagem (persistido em localStorage enquanto não fechado)
+  const [romaneio, setRomaneio] = useState(null) // { cliente, dataEntrega, codigo }
+  const [formRomaneio, setFormRomaneio] = useState({ cliente: '', dataEntrega: '' })
+  const [caixasDoRomaneio, setCaixasDoRomaneio] = useState([])
 
-  const resetAll = () => {
-    setStep(1); setOrigem(''); setProduto(null)
-    setSaldoAtual(null); setSaldoOpcoes([]); setQtdCaixas(''); setQtdKg('')
-    setNumPedido(''); setCliente('')
-    setTimeout(() => document.getElementById('exp-origem')?.focus(), 100)
+  // Estado da bipagem
+  const [eanBipado, setEanBipado] = useState('')
+  const [caixaEncontrada, setCaixaEncontrada] = useState(null)
+  const [pesoSaida, setPesoSaida] = useState('')
+  const [eanResto, setEanResto] = useState('')
+  const [stepBipagem, setStepBipagem] = useState('SCAN') // SCAN | CONFIRMAR | PARCIAL_EAN
+  const [salvandoCaixa, setSalvandoCaixa] = useState(false)
+
+  const resetBipagem = () => {
+    setEanBipado('')
+    setCaixaEncontrada(null)
+    setPesoSaida('')
+    setEanResto('')
+    setStepBipagem('SCAN')
+    setSalvandoCaixa(false)
+    setTimeout(() => eanRef.current?.focus(), 100)
   }
 
-  const scanOrigem = async (val) => {
-    const end = val.toUpperCase()
-    if (end === 'REC' || end === 'EXPEDICAO') return toastError('Endereço Inválido', `Não é possível fazer saída a partir de "${end}".`)
-    const local = await locaisQueries.buscarPorEndereco(end)
-    if (!local) return toastError('Endereço Inválido', `O endereço "${end}" não está cadastrado.`)
-    setOrigem(end); setStep(2)
-    setTimeout(() => document.getElementById('exp-produto')?.focus(), 100)
-  }
-
-  const scanProduto = async (val) => {
-    try {
-      const p = await produtosQueries.buscarPorCodigo(val)
-      if (!p) {
-        setEanDesconhecido(val)
-        setModalEanOpen(true)
+  const { inputRef: eanRef, handleKeyDown: handleEanKeyDown } = useBarcodeScanner({
+    onScan: async (val) => {
+      if (stepBipagem === 'PARCIAL_EAN') {
+        setEanResto(val)
         return
       }
-      const saldos = await estoqueQueries.buscarPorEnderecoProduto(origem, p.id)
-      if (saldos.length === 0) return toastError('Sem Saldo', `O produto não possui saldo em ${origem}`)
-      setProduto(p)
-      if (saldos.length === 1) { setSaldoAtual(saldos[0]); await verificarFEFO(p, saldos[0]) }
-      else { setSaldoOpcoes(saldos); setStep(2.5) }
-    } catch (err) { toastError('Erro', err.message) }
-  }
+      setEanBipado(val)
+      setCaixaEncontrada(null)
+      setPesoSaida('')
+      setEanResto('')
 
-  const verificarFEFO = async (p, saldo) => {
-    if (saldo.validade) {
-      const maisAntigos = await estoqueQueries.verificarFEFO(p.id, saldo.validade)
-      if (maisAntigos.length > 0) { setFefoAlert(maisAntigos); return }
+      try {
+        const res = await movimentacoesQueries.identificarCodigoMovimentacao(val.toUpperCase().trim())
+        if (res.tipo === 'CAIXA') {
+          const cx = res.dados
+          // Verificar se já está no romaneio
+          if (caixasDoRomaneio.find(c => c.eanOriginal === val)) {
+            return toastWarning('Já adicionada', 'Esta caixa já está no romaneio atual.')
+          }
+          setCaixaEncontrada(cx)
+          setPesoSaida(String(cx.peso_kg))
+          setStepBipagem('CONFIRMAR')
+          setTimeout(() => document.getElementById('rom-peso')?.select(), 120)
+        } else {
+          toastError('Caixa não encontrada', 'Este EAN não está em estoque. Receba a caixa primeiro.')
+        }
+      } catch (err) {
+        toastError('Erro', err.message)
+      }
     }
-    setStep(3); setTimeout(() => document.getElementById('exp-caixas')?.focus(), 100)
+  })
+
+  const pesoSaidaNum = parseFloat(pesoSaida) || 0
+  const pesoCaixaNum = caixaEncontrada ? parseFloat(caixaEncontrada.peso_kg) : 0
+  const isParcial = pesoSaidaNum > 0 && Math.abs(pesoSaidaNum - pesoCaixaNum) >= 0.05
+  const pesoResto = isParcial ? parseFloat((pesoCaixaNum - pesoSaidaNum).toFixed(3)) : 0
+
+  const handleConfirmarCaixa = () => {
+    if (!caixaEncontrada) return
+    if (pesoSaidaNum <= 0 || pesoSaidaNum > pesoCaixaNum + 0.001) {
+      return toastError('Peso Inválido', `Peso deve ser entre 0.001 e ${pesoCaixaNum} kg.`)
+    }
+    if (isParcial && !eanResto.trim()) {
+      setStepBipagem('PARCIAL_EAN')
+      toastWarning('Bipe o EAN Restante', `Saída parcial: bipe a etiqueta da caixa que vai ficar (${pesoResto} kg).`)
+      setTimeout(() => eanRef.current?.focus(), 100)
+      return
+    }
+    // Adicionar ao romaneio local
+    setCaixasDoRomaneio(prev => [...prev, {
+      id: caixaEncontrada.id,
+      eanOriginal: String(caixaEncontrada.ean_caixa),
+      eanResto: isParcial ? eanResto.trim() : null,
+      produto_descricao: caixaEncontrada.produto_descricao,
+      produto_id: caixaEncontrada.produto_id,
+      origem: caixaEncontrada.endereco || 'REC',
+      validade: caixaEncontrada.validade,
+      pesoCaixa: pesoCaixaNum,
+      pesoSaida: pesoSaidaNum,
+      isParcial
+    }])
+    toastSuccess('Caixa Adicionada', `${caixaEncontrada.produto_descricao} — ${pesoSaidaNum} kg`)
+    resetBipagem()
   }
 
-  const confirmarSaida = async () => {
+  const removerCaixa = (idx) => setCaixasDoRomaneio(prev => prev.filter((_, i) => i !== idx))
+
+  const handleAbrirRomaneio = () => {
+    if (!formRomaneio.cliente.trim()) return toastError('Atenção', 'Informe o cliente/destino.')
+    const codigo = `ROM-${Date.now().toString(36).toUpperCase()}`
+    setRomaneio({ ...formRomaneio, codigo })
+    setTimeout(() => eanRef.current?.focus(), 200)
+  }
+
+  const handleFecharRomaneio = async () => {
+    if (caixasDoRomaneio.length === 0) return toastError('Atenção', 'Adicione pelo menos uma caixa ao romaneio.')
+    if (!window.confirm(`Fechar o romaneio ${romaneio.codigo} com ${caixasDoRomaneio.length} caixa(s)?`)) return
+
+    setSalvandoCaixa(true)
     try {
-      const res = await movimentacoesQueries.enviarParaExpedicao({
-        produto_id: produto.id, lote: saldoAtual.lote, validade: saldoAtual.validade,
-        qtd_caixas: parseFloat(qtdCaixas), qtd_kg: parseFloat(qtdKg),
-        origem, operador_id: operador.id, operador_nome: operador.nome,
-        num_pedido: numPedido || null, cliente: cliente || null
-      })
-      if (res.success) { toastSuccess('Saída Confirmada', `${produto.descricao} enviado para Expedição.`); resetAll() }
-      else toastError('Erro na Saída', res.error)
-    } catch (err) { toastError('Erro Fatal', err.message) }
+      for (const cx of caixasDoRomaneio) {
+        const res = await movimentacoesQueries.saidaPorCaixaSSCC({
+          caixa_id: cx.id,
+          peso_saida_kg: cx.pesoSaida,
+          num_pedido: romaneio.codigo,
+          cliente: romaneio.cliente,
+          operador_id: operador?.id,
+          operador_nome: operador?.nome,
+          ean_caixa_resto: cx.isParcial ? cx.eanResto : null
+        })
+        if (!res.success) {
+          toastError('Erro em caixa', `${cx.produto_descricao}: ${res.error}`)
+          setSalvandoCaixa(false)
+          return
+        }
+      }
+      toastSuccess('Romaneio Fechado! ✅', `${romaneio.codigo} — ${caixasDoRomaneio.length} caixas expedidas para ${romaneio.cliente}`)
+      setRomaneio(null)
+      setCaixasDoRomaneio([])
+      setFormRomaneio({ cliente: '', dataEntrega: '' })
+      onRomaneioFechado?.()
+    } catch (err) {
+      toastError('Erro Fatal', err.message)
+    } finally {
+      setSalvandoCaixa(false)
+    }
   }
 
-  return (
-    <div>
-      <div className="mov-flow">
-        {/* STEP 1 */}
-        <div className={`mov-step ${step === 1 ? 'active' : step > 1 ? 'completed' : ''}`}>
-          <div className="mov-step__header">
-            <div className="mov-step__number">1</div>
-            <div className="mov-step__label">Endereço de Origem</div>
+  const totalKg = caixasDoRomaneio.reduce((s, c) => s + c.pesoSaida, 0).toFixed(3)
+
+  // ── TELA: Criar Romaneio ──
+  if (!romaneio) {
+    return (
+      <div style={{ maxWidth: 480 }}>
+        <div className="card">
+          <h3 className="font-bold text-primary flex items-center gap-8 mb-20"><ClipboardList size={20}/> Novo Romaneio de Saída</h3>
+          <div className="form-group mb-16">
+            <label className="form-label">Cliente / Destino *</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Nome do cliente ou destino..."
+              value={formRomaneio.cliente}
+              onChange={e => setFormRomaneio(p => ({ ...p, cliente: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && handleAbrirRomaneio()}
+              autoFocus
+            />
           </div>
-          {step === 1 ? (
-            <input id="exp-origem" className="form-input form-input--scanner" placeholder="Bipar ou digitar endereço..." onKeyDown={e => e.key === 'Enter' && scanOrigem(e.target.value)} autoFocus />
+          <div className="form-group mb-20">
+            <label className="form-label">Data de Entrega</label>
+            <input
+              type="date"
+              className="form-input"
+              value={formRomaneio.dataEntrega}
+              onChange={e => setFormRomaneio(p => ({ ...p, dataEntrega: e.target.value }))}
+            />
+          </div>
+          <button className="btn btn--primary btn--lg w-full" onClick={handleAbrirRomaneio}>
+            <Plus size={18}/> Abrir Romaneio
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── TELA: Bipagem das caixas ──
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start', maxWidth: 1000 }}>
+
+      {/* COLUNA ESQUERDA: Resumo do Romaneio */}
+      <div className="card">
+        <div className="flex justify-between items-center mb-16">
+          <div>
+            <div className="text-xs text-muted font-bold uppercase mb-2">Romaneio em Montagem</div>
+            <div className="font-bold text-primary" style={{ fontSize: 16 }}>{romaneio.codigo}</div>
+            <div className="text-sm text-muted">{romaneio.cliente}</div>
+            {romaneio.dataEntrega && <div className="text-xs text-muted">Entrega: {new Date(romaneio.dataEntrega + 'T00:00:00').toLocaleDateString('pt-BR')}</div>}
+          </div>
+          <button className="btn btn--ghost btn--sm text-muted" onClick={() => { if (window.confirm('Descartar romaneio?')) { setRomaneio(null); setCaixasDoRomaneio([]) } }}>
+            <X size={14}/> Descartar
+          </button>
+        </div>
+
+        {/* Totalizador */}
+        <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }} className="flex gap-20 text-sm">
+          <div>Caixas: <strong className="text-primary">{caixasDoRomaneio.length}</strong></div>
+          <div>Total KG: <strong className="text-cyan">{totalKg}</strong></div>
+        </div>
+
+        {/* Lista de caixas */}
+        <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+          {caixasDoRomaneio.length === 0 ? (
+            <div className="text-center text-muted p-20 text-sm">Bipe as caixas à direita →</div>
           ) : (
-            <div className="flex items-center gap-12 font-mono text-cyan" style={{ fontSize: 18, fontWeight: 700 }}>
-              <MapPin size={20} /> {origem}
-            </div>
+            caixasDoRomaneio.map((c, i) => (
+              <div key={i} style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div className="font-bold text-sm">{c.produto_descricao}</div>
+                  <div className="text-xs text-muted font-mono">{c.eanOriginal.slice(-8)}</div>
+                  {c.isParcial && <div className="text-xs text-warning">✂️ parcial — resto: {c.pesoResto} kg</div>}
+                </div>
+                <div className="flex items-center gap-8">
+                  <div className="text-right">
+                    <div className="font-bold text-cyan text-sm">{c.pesoSaida} kg</div>
+                    {c.validade && <div className="text-xs text-muted">{new Date(c.validade + 'T00:00:00').toLocaleDateString('pt-BR')}</div>}
+                  </div>
+                  <button className="btn btn--ghost text-danger p-4" onClick={() => removerCaixa(i)}><Trash2 size={14}/></button>
+                </div>
+              </div>
+            ))
           )}
         </div>
 
-        {/* STEP 2.5 */}
-        {step === 2.5 && (
-          <div className="mov-step active">
-            <div className="mov-step__header"><div className="mov-step__number">2</div><div className="mov-step__label">Selecione o Lote</div></div>
-            <div className="flex-col gap-8">
-              {saldoOpcoes.map((s, i) => (
-                <div key={i} onClick={() => { setSaldoAtual(s); setSaldoOpcoes([]); verificarFEFO(produto, s) }}
-                  style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div className="font-bold text-warning font-mono">Lote: {s.lote || '(sem lote)'}</div>
-                    <div className="text-sm text-muted">Val: {s.validade ? format(new Date(s.validade), 'dd/MM/yyyy') : '—'}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-success font-bold">{s.qtd_caixas} CX</div>
-                    <div className="text-muted text-sm">{s.qtd_kg} KG</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+        {caixasDoRomaneio.length > 0 && (
+          <button
+            className="btn btn--primary btn--lg w-full mt-16"
+            onClick={handleFecharRomaneio}
+            disabled={salvandoCaixa}
+          >
+            {salvandoCaixa ? <Loader size={18} className="animate-spin"/> : <Check size={18}/>}
+            Fechar Romaneio ({caixasDoRomaneio.length} cx · {totalKg} kg)
+          </button>
         )}
+      </div>
 
-        {/* STEP 2 */}
-        <div className={`mov-step ${step === 2 ? 'active' : step > 2 ? 'completed' : ''}`} style={{ opacity: step >= 2 ? 1 : 0.5 }}>
-          <div className="mov-step__header"><div className="mov-step__number">2</div><div className="mov-step__label">Material</div></div>
-          {step === 2 ? (
-            <input id="exp-produto" className="form-input form-input--scanner" placeholder="Bipar código do material..." onKeyDown={e => e.key === 'Enter' && scanProduto(e.target.value)} />
-          ) : step > 2 ? (
-            <div className="saldo-display">
-              <div className="saldo-item" style={{ flex: 1 }}>
-                <div className="saldo-item__label">Material</div>
-                <div style={{ color: 'white', fontWeight: 600 }}>{produto?.descricao}</div>
-                <div className="text-muted text-sm mt-4">Lote: {saldoAtual?.lote} | Val: {saldoAtual?.validade ? format(new Date(saldoAtual.validade), 'dd/MM/yyyy') : '-'}</div>
-              </div>
-              <div className="saldo-item text-right">
-                <div className="saldo-item__label">Disponível</div>
-                <div className="saldo-item__value">{saldoAtual?.qtd_caixas} CX</div>
-                <div className="text-muted">{saldoAtual?.qtd_kg} KG</div>
-              </div>
-            </div>
-          ) : null}
+      {/* COLUNA DIREITA: Bipagem */}
+      <div className="card">
+        <h3 className="font-bold text-warning flex items-center gap-8 mb-16"><ScanBarcode size={18}/> Bipar Caixa</h3>
+
+        {/* Input de scan */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <input
+            ref={eanRef}
+            type="text"
+            className="form-input form-input--scanner"
+            placeholder="Bipe o EAN da caixa..."
+            value={eanBipado}
+            onChange={e => setEanBipado(e.target.value)}
+            onKeyDown={handleEanKeyDown}
+          />
+          {eanBipado && (
+            <button type="button" className="btn btn--ghost text-muted" onClick={resetBipagem}><X size={16}/></button>
+          )}
         </div>
 
-        {/* STEP 3 */}
-        <div className={`mov-step ${step === 3 ? 'active' : step > 3 ? 'completed' : ''}`} style={{ opacity: step >= 3 ? 1 : 0.5 }}>
-          <div className="mov-step__header"><div className="mov-step__number">3</div><div className="mov-step__label">Quantidade</div></div>
-          {step === 3 ? (
-            <form onSubmit={e => { e.preventDefault(); if (!qtdCaixas || !qtdKg) return toastWarning('Aviso', 'Preencha caixas e kg.'); if (parseFloat(qtdCaixas) > saldoAtual.qtd_caixas) return toastError('Aviso', `Saldo: ${saldoAtual.qtd_caixas} cx`); if (parseFloat(qtdKg) > saldoAtual.qtd_kg) return toastError('Aviso', `Saldo: ${saldoAtual.qtd_kg} kg`); setStep(4) }} className="flex gap-16 items-end">
-              <div className="form-group" style={{ flex: 1 }}><label className="form-label">Caixas</label><input id="exp-caixas" type="number" step="0.01" className="form-input form-input--number" value={qtdCaixas} onChange={e => setQtdCaixas(e.target.value)} /></div>
-              <div className="form-group" style={{ flex: 1 }}><label className="form-label">KG</label><input type="number" step="0.01" className="form-input form-input--number" value={qtdKg} onChange={e => setQtdKg(e.target.value)} /></div>
-              <button type="submit" className="btn btn--primary btn--lg">Avançar</button>
-            </form>
-          ) : step > 3 ? (
-            <div className="flex items-center gap-12 font-mono text-cyan" style={{ fontSize: 18, fontWeight: 700 }}>
-              <Hash size={20} /> {qtdCaixas} Caixas / {qtdKg} KG
-            </div>
-          ) : null}
-        </div>
-
-        {/* STEP 4 */}
-        <div className={`mov-step ${step === 4 ? 'active' : ''}`} style={{ opacity: step >= 4 ? 1 : 0.5 }}>
-          <div className="mov-step__header"><div className="mov-step__number">4</div><div className="mov-step__label">Confirmar Envio para Expedição</div></div>
-          {step === 4 && (
-            <div>
-              {/* Pedido e Cliente */}
-              <div className="flex gap-12 mb-16">
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Nº do Pedido <span className="text-muted">(opcional)</span></label>
-                  <input type="text" className="form-input" placeholder="Ex: 1042" value={numPedido} onChange={e => setNumPedido(e.target.value)} />
-                </div>
-                <div className="form-group" style={{ flex: 2 }}>
-                  <label className="form-label">Cliente <span className="text-muted">(opcional)</span></label>
-                  <input type="text" className="form-input" placeholder="Nome ou CNPJ do cliente..." value={cliente} onChange={e => setCliente(e.target.value)} />
-                </div>
+        {/* Card da caixa encontrada */}
+        {caixaEncontrada && stepBipagem !== 'SCAN' && (
+          <div>
+            <div style={{ background: 'var(--bg-2)', border: '1px solid var(--primary)', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
+              <div className="text-xs text-muted font-bold mb-2 uppercase">✅ Caixa em Estoque</div>
+              <div className="font-bold" style={{ fontSize: 15 }}>{caixaEncontrada.produto_descricao}</div>
+              <div className="flex gap-16 text-sm mt-6">
+                <div>📦 <strong>{caixaEncontrada.peso_kg} kg</strong></div>
+                {caixaEncontrada.validade && <div>📅 <strong>{new Date(caixaEncontrada.validade + 'T00:00:00').toLocaleDateString('pt-BR')}</strong></div>}
+                <div className="text-muted font-mono" style={{ fontSize: 11 }}>{caixaEncontrada.endereco}</div>
               </div>
-              <div className="saldo-display" style={{ background: 'var(--warning-muted)', borderColor: 'var(--warning)' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ color: 'var(--warning)', fontWeight: 700, fontSize: 16 }}>{produto?.descricao}</div>
-                  <div className="text-muted mt-4">De: <strong>{origem}</strong> <ArrowRight size={14} style={{ display: 'inline' }} /> Para: <strong>EXPEDIÇÃO</strong></div>
-                  {(numPedido || cliente) && (
-                    <div className="text-muted mt-4" style={{ fontSize: 12 }}>
-                      {numPedido && <span>📋 Pedido: <strong style={{ color: 'var(--cyan)' }}>{numPedido}</strong>  </span>}
-                      {cliente && <span>👤 Cliente: <strong style={{ color: 'var(--cyan)' }}>{cliente}</strong></span>}
+            </div>
+
+            {/* PARCIAL_EAN: aguarda bipe do restante */}
+            {stepBipagem === 'PARCIAL_EAN' && (
+              <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid var(--warning)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div className="flex items-center gap-8 font-bold text-warning mb-8"><Scissors size={15}/> Bipe a etiqueta da caixa restante</div>
+                <div className="text-sm text-muted mb-10">
+                  Saindo: <strong>{pesoSaidaNum} kg</strong> → Fica: <strong>{pesoResto} kg</strong><br/>
+                  A sobra precisará de uma etiqueta nova.
+                </div>
+                <input
+                  ref={eanRef}
+                  type="text"
+                  className="form-input form-input--scanner"
+                  placeholder="Bipe a etiqueta da caixa restante..."
+                  value={eanResto}
+                  onChange={e => setEanResto(e.target.value)}
+                  onKeyDown={handleEanKeyDown}
+                  autoFocus
+                />
+                {eanResto && (
+                  <>
+                    <div className="text-success text-sm mt-6">✅ EAN capturado: <strong className="font-mono">{eanResto}</strong></div>
+                    <button className="btn btn--primary w-full mt-10" onClick={handleConfirmarCaixa}>
+                      <Check size={16}/> Confirmar Saída Parcial
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* CONFIRMAR: editar peso e confirmar */}
+            {stepBipagem === 'CONFIRMAR' && (
+              <div>
+                <div className="form-group mb-12">
+                  <label className="form-label">Peso da Saída (kg) *</label>
+                  <input
+                    id="rom-peso"
+                    type="number"
+                    step="0.001"
+                    min="0.001"
+                    max={pesoCaixaNum}
+                    className="form-input form-input--number"
+                    value={pesoSaida}
+                    onChange={e => setPesoSaida(e.target.value)}
+                  />
+                  {isParcial && (
+                    <div className="text-warning text-xs mt-4 flex items-center gap-4">
+                      <Scissors size={11}/> Saída parcial — fica: <strong>{pesoResto} kg</strong>
                     </div>
                   )}
                 </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center', margin: '16px 0', padding: 16, background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <div><div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>POSIÇÃO ATUAL</div><div style={{ fontWeight: 700, fontSize: 15 }}>{saldoAtual?.qtd_caixas} CX</div><div className="text-muted text-sm">{saldoAtual?.qtd_kg} KG</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--danger)', marginBottom: 2 }}>RETIRADA</div><div style={{ fontWeight: 700, color: 'var(--danger)', fontSize: 15 }}>- {qtdCaixas} CX</div><div style={{ color: 'var(--danger)', fontSize: 13 }}>- {qtdKg} KG</div></div>
-                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>SALDO RESTANTE</div><div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 15 }}>{(parseFloat(saldoAtual?.qtd_caixas || 0) - parseFloat(qtdCaixas || 0)).toFixed(2)} CX</div><div style={{ color: 'var(--success)', fontSize: 13 }}>{(parseFloat(saldoAtual?.qtd_kg || 0) - parseFloat(qtdKg || 0)).toFixed(2)} KG</div></div>
-              </div>
-              <div className="flex gap-12 mt-16">
-                <button className="btn btn--ghost w-full" onClick={resetAll}>Cancelar</button>
-                <button className="btn btn--success w-full btn--lg" onClick={confirmarSaida}><Check size={18} /> Confirmar Saída</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* FEFO ALERT */}
-      {fefoAlert && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
-          <div className="card" style={{ maxWidth: 500, width: '100%', border: '2px solid var(--warning)' }}>
-            <h3 className="text-warning font-bold flex items-center gap-8 mb-16"><Box size={20} /> Alerta FEFO</h3>
-            <p className="mb-16">Existem lotes mais antigos disponíveis. Pelo padrão FEFO, priorize estes:</p>
-            <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 16 }}>
-              {fefoAlert.map((a, i) => (
-                <div key={i} className="flex justify-between items-center py-4 border-b border-border last:border-0 text-sm">
-                  <strong className="text-cyan font-mono">{a.endereco}</strong>
-                  <span className="text-muted">Lote: {a.lote}</span>
-                  <span className="text-danger font-bold">{format(new Date(a.validade), 'dd/MM/yyyy')}</span>
+                {isParcial && (
+                  <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }} className="text-sm text-warning">
+                    <AlertTriangle size={12} style={{ display: 'inline', marginRight: 4 }}/>
+                    Saída parcial: você bipará a etiqueta da caixa restante ({pesoResto} kg) no próximo passo.
+                  </div>
+                )}
+                <div className="flex gap-8">
+                  <button className="btn btn--ghost" onClick={resetBipagem}><X size={16}/> Cancelar</button>
+                  <button className="btn btn--primary flex-1" onClick={handleConfirmarCaixa}>
+                    <Plus size={16}/> {isParcial ? `Adicionar (${pesoSaidaNum} kg)` : 'Adicionar ao Romaneio'}
+                  </button>
                 </div>
-              ))}
-            </div>
-            <div className="flex gap-16">
-              <button className="btn btn--secondary" style={{ flex: 1 }} onClick={() => { setFefoAlert(null); resetAll() }}>Cancelar Saída</button>
-              <button className="btn btn--warning" style={{ flex: 1 }} onClick={() => { setFefoAlert(null); setStep(3); setTimeout(() => document.getElementById('exp-caixas')?.focus(), 100) }}>Ignorar e Continuar</button>
-            </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
-
-      <CadastroEanModal isOpen={modalEanOpen} onClose={() => { setModalEanOpen(false); setTimeout(() => document.getElementById('exp-produto')?.focus(), 100) }} codigoDesconhecido={eanDesconhecido}
-        onRegraSalva={async (p) => { const saldos = await estoqueQueries.buscarPorEnderecoProduto(origem, p.id); if (saldos.length === 0) { toastError('Sem Saldo', `O produto não possui saldo em ${origem}`); return } setProduto(p); if (saldos.length === 1) { setSaldoAtual(saldos[0]); verificarFEFO(p, saldos[0]) } else { setSaldoOpcoes(saldos); setStep(2.5) } }} />
+        )}
+      </div>
     </div>
   )
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// ABA 2: ENVIO P/ PRODUÇÃO (cria Ordem de Produção)
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ABA 2: EXPEDIÇÃO — histórico de romaneios expedidos (via log)
+// ─────────────────────────────────────────────────────────────────────────────
+function Expedicao({ refresh }) {
+  const [romaneios, setRomaneios] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  const carregar = async () => {
+    setLoading(true)
+    try {
+      const res = await db.execute(`
+        SELECT num_pedido as codigo, cliente, count(*) as qtd_caixas, sum(qtd_kg) as total_kg, max(data_hora) as ultima_hora
+        FROM movimentacoes_log
+        WHERE tipo = 'DESPACHO' AND num_pedido LIKE 'ROM-%'
+        GROUP BY num_pedido, cliente
+        ORDER BY ultima_hora DESC
+        LIMIT 50
+      `)
+      setRomaneios(res.rows)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { carregar() }, [refresh])
+
+  return (
+    <div style={{ maxWidth: 700 }}>
+      <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 16px', marginBottom: 16 }} className="text-sm text-muted">
+        📋 Histórico de romaneios de saída já expedidos (fechados).
+      </div>
+      {loading ? (
+        <div className="text-center p-24 text-muted"><Loader size={24}/></div>
+      ) : romaneios.length === 0 ? (
+        <div className="card text-center p-32 text-muted">
+          <ClipboardList size={40} style={{ margin: '0 auto 12px', opacity: 0.4 }}/>
+          <div>Nenhum romaneio expedido ainda.</div>
+        </div>
+      ) : (
+        <div className="flex-col gap-10">
+          {romaneios.map((r, i) => (
+            <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div className="font-bold text-primary font-mono">{r.codigo}</div>
+                <div className="text-sm">{r.cliente || '—'}</div>
+                <div className="text-xs text-muted mt-2">{r.ultima_hora ? format(new Date(r.ultima_hora), 'dd/MM/yyyy HH:mm') : ''}</div>
+              </div>
+              <div className="text-right">
+                <div className="font-bold text-cyan">{parseFloat(r.total_kg || 0).toFixed(3)} kg</div>
+                <div className="text-sm text-muted">{r.qtd_caixas} caixa(s)</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ABA 3: ENVIO P/ PRODUÇÃO — bipa SSCC, auto-preenche tudo
+// ─────────────────────────────────────────────────────────────────────────────
 function EnvioProducao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
-  const [step, setStep] = useState(1)
-  const [origem, setOrigem] = useState('')
-  const [produto, setProduto] = useState(null)
-  const [saldoAtual, setSaldoAtual] = useState(null)
-  const [saldoOpcoes, setSaldoOpcoes] = useState([])
-  const [qtdCaixas, setQtdCaixas] = useState('')
-  const [qtdKg, setQtdKg] = useState('')
-  const [modalEanOpen, setModalEanOpen] = useState(false)
-  const [eanDesconhecido, setEanDesconhecido] = useState('')
+  const [step, setStep] = useState('SCAN') // SCAN | CONFIRMAR
+  const [eanBipado, setEanBipado] = useState('')
+  const [caixaEncontrada, setCaixaEncontrada] = useState(null)
+  const [pesoEnvio, setPesoEnvio] = useState('')
+  const [salvando, setSalvando] = useState(false)
 
-  const resetAll = () => {
-    setStep(1); setOrigem(''); setProduto(null)
-    setSaldoAtual(null); setSaldoOpcoes([]); setQtdCaixas(''); setQtdKg('')
-    setTimeout(() => document.getElementById('prod-origem')?.focus(), 100)
+  const reset = () => {
+    setStep('SCAN'); setEanBipado(''); setCaixaEncontrada(null); setPesoEnvio(''); setSalvando(false)
+    setTimeout(() => eanRef.current?.focus(), 100)
   }
 
-  const scanOrigem = async (val) => {
-    const end = val.toUpperCase()
-    if (end === 'REC' || end === 'EXPEDICAO' || end === 'PRODUCAO') return toastError('Endereço Inválido', `Não é possível fazer saída a partir de "${end}".`)
-    const local = await locaisQueries.buscarPorEndereco(end)
-    if (!local) return toastError('Endereço Inválido', `O endereço "${end}" não está cadastrado.`)
-    setOrigem(end); setStep(2)
-    setTimeout(() => document.getElementById('prod-produto')?.focus(), 100)
-  }
-
-  const scanProduto = async (val) => {
-    try {
-      const p = await produtosQueries.buscarPorCodigo(val)
-      if (!p) { setEanDesconhecido(val); setModalEanOpen(true); return }
-      const saldos = await estoqueQueries.buscarPorEnderecoProduto(origem, p.id)
-      if (saldos.length === 0) return toastError('Sem Saldo', `Produto sem saldo em ${origem}`)
-      setProduto(p)
-      if (saldos.length === 1) { setSaldoAtual(saldos[0]); setStep(3); setTimeout(() => document.getElementById('prod-caixas')?.focus(), 100) }
-      else { setSaldoOpcoes(saldos); setStep(2.5) }
-    } catch (err) { toastError('Erro', err.message) }
-  }
+  const { inputRef: eanRef, handleKeyDown: handleEanKeyDown } = useBarcodeScanner({
+    onScan: async (val) => {
+      setEanBipado(val)
+      setCaixaEncontrada(null)
+      try {
+        const res = await movimentacoesQueries.identificarCodigoMovimentacao(val.toUpperCase().trim())
+        if (res.tipo === 'CAIXA') {
+          setCaixaEncontrada(res.dados)
+          setPesoEnvio(String(res.dados.peso_kg))
+          setStep('CONFIRMAR')
+          setTimeout(() => document.getElementById('prod-peso')?.select(), 120)
+        } else {
+          toastError('Caixa não encontrada', 'Este EAN não está em estoque disponível.')
+        }
+      } catch (err) { toastError('Erro', err.message) }
+    }
+  })
 
   const confirmarEnvio = async () => {
+    if (!caixaEncontrada) return
+    const kg = parseFloat(pesoEnvio)
+    if (!kg || kg <= 0) return toastError('Peso Inválido', 'Informe um peso válido.')
+    setSalvando(true)
     try {
-      const res = await movimentacoesQueries.abrirOrdemProducao({
-        produto_id: produto.id, lote: saldoAtual.lote, validade: saldoAtual.validade,
-        qtd_caixas: parseFloat(qtdCaixas), qtd_kg: parseFloat(qtdKg),
-        origem, operador_id: operador.id, operador_nome: operador.nome
+      // Baixa a caixa do estoque e cria ordem de produção
+      const origem = caixaEncontrada.endereco || 'REC'
+      await movimentacoesQueries.abrirOrdemProducao({
+        produto_id: caixaEncontrada.produto_id,
+        lote: '',
+        validade: caixaEncontrada.validade,
+        qtd_caixas: 1,
+        qtd_kg: kg,
+        origem,
+        operador_id: operador?.id,
+        operador_nome: operador?.nome
       })
-      if (res.success) {
-        toastSuccess('Ordem Aberta! 🏭', `${produto.descricao} (${qtdKg}kg) enviado para produção. Ordem gerada com sucesso!`)
-        resetAll()
-      } else toastError('Erro', res.error)
-    } catch (err) { toastError('Erro Fatal', err.message) }
+      // Marcar a caixa como consumida
+      await db.execute({
+        sql: `UPDATE estoque_caixas SET status = 'PRODUCAO', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        args: [caixaEncontrada.id]
+      })
+      toastSuccess('Enviado à Produção! 🏭', `${caixaEncontrada.produto_descricao} — ${kg} kg. Ordem criada.`)
+      reset()
+    } catch (err) {
+      toastError('Erro Fatal', err.message)
+      setSalvando(false)
+    }
   }
 
   return (
-    <div>
-      <div style={{ background: 'var(--bg-2)', border: '1px solid var(--primary)', borderRadius: 10, padding: '12px 16px', marginBottom: 20 }}>
-        <div className="text-sm" style={{ color: 'var(--primary)' }}>
-          💡 <strong>Como funciona:</strong> Ao enviar para a Produção, o sistema retira o item do estoque e cria uma <strong>Ordem de Produção</strong>. Quando os subprodutos voltarem, use a aba <em>Retorno de Produção</em> para registrar e calcular o rendimento.
+    <div style={{ maxWidth: 520 }}>
+      <div style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid #8b5cf6', borderRadius: 10, padding: '10px 16px', marginBottom: 16 }} className="text-sm">
+        <span style={{ color: '#8b5cf6' }}>💡</span> Bipe o EAN da caixa. O sistema identifica o produto e a origem automaticamente.
+      </div>
+
+      <div className="card mb-16">
+        <h3 className="font-bold flex items-center gap-8 mb-14" style={{ color: '#8b5cf6' }}><ScanBarcode size={18}/> Bipar Caixa para Produção</h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            ref={eanRef}
+            type="text"
+            className="form-input form-input--scanner"
+            placeholder="Bipe o EAN da caixa..."
+            value={eanBipado}
+            onChange={e => setEanBipado(e.target.value)}
+            onKeyDown={handleEanKeyDown}
+          />
+          {eanBipado && <button className="btn btn--ghost text-muted" onClick={reset}><X size={16}/></button>}
         </div>
       </div>
 
-      <div className="mov-flow">
-        <div className={`mov-step ${step === 1 ? 'active' : step > 1 ? 'completed' : ''}`}>
-          <div className="mov-step__header"><div className="mov-step__number">1</div><div className="mov-step__label">Endereço de Origem</div></div>
-          {step === 1 ? <input id="prod-origem" className="form-input form-input--scanner" placeholder="Bipar endereço..." onKeyDown={e => e.key === 'Enter' && scanOrigem(e.target.value)} autoFocus />
-            : <div className="flex items-center gap-12 font-mono text-cyan" style={{ fontSize: 18, fontWeight: 700 }}><MapPin size={20} /> {origem}</div>}
-        </div>
-
-        {step === 2.5 && (
-          <div className="mov-step active">
-            <div className="mov-step__header"><div className="mov-step__number">2</div><div className="mov-step__label">Selecione o Lote</div></div>
-            <div className="flex-col gap-8">
-              {saldoOpcoes.map((s, i) => (
-                <div key={i} onClick={() => { setSaldoAtual(s); setSaldoOpcoes([]); setStep(3); setTimeout(() => document.getElementById('prod-caixas')?.focus(), 100) }}
-                  style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}>
-                  <div><div className="font-bold text-warning font-mono">Lote: {s.lote || '(sem lote)'}</div><div className="text-sm text-muted">Val: {s.validade ? format(new Date(s.validade), 'dd/MM/yyyy') : '—'}</div></div>
-                  <div className="text-right"><div className="text-success font-bold">{s.qtd_caixas} CX</div><div className="text-muted text-sm">{s.qtd_kg} KG</div></div>
-                </div>
-              ))}
+      {caixaEncontrada && step === 'CONFIRMAR' && (
+        <div className="card">
+          <div style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid #8b5cf6', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
+            <div className="text-xs font-bold mb-2 uppercase" style={{ color: '#8b5cf6' }}>✅ Caixa Identificada</div>
+            <div className="font-bold" style={{ fontSize: 15 }}>{caixaEncontrada.produto_descricao}</div>
+            <div className="flex gap-16 text-sm mt-6">
+              <div>📦 <strong>{caixaEncontrada.peso_kg} kg</strong></div>
+              <div>📍 <strong>{caixaEncontrada.endereco || 'REC'}</strong></div>
+              {caixaEncontrada.validade && <div>📅 <strong>{new Date(caixaEncontrada.validade + 'T00:00:00').toLocaleDateString('pt-BR')}</strong></div>}
             </div>
           </div>
-        )}
-
-        <div className={`mov-step ${step === 2 ? 'active' : step > 2 ? 'completed' : ''}`} style={{ opacity: step >= 2 ? 1 : 0.5 }}>
-          <div className="mov-step__header"><div className="mov-step__number">2</div><div className="mov-step__label">Matéria Prima</div></div>
-          {step === 2 ? <input id="prod-produto" className="form-input form-input--scanner" placeholder="Bipar código da matéria prima..." onKeyDown={e => e.key === 'Enter' && scanProduto(e.target.value)} />
-            : step > 2 ? <div className="saldo-display"><div style={{ flex: 1 }}><div style={{ color: 'white', fontWeight: 600 }}>{produto?.descricao}</div><div className="text-muted text-sm mt-4">Lote: {saldoAtual?.lote} | Val: {saldoAtual?.validade ? format(new Date(saldoAtual.validade), 'dd/MM/yyyy') : '-'}</div></div><div className="text-right"><div className="saldo-item__value">{saldoAtual?.qtd_caixas} CX</div><div className="text-muted">{saldoAtual?.qtd_kg} KG</div></div></div> : null}
+          <div className="form-group mb-14">
+            <label className="form-label">Peso a Enviar (kg) *</label>
+            <input
+              id="prod-peso"
+              type="number"
+              step="0.001"
+              className="form-input form-input--number"
+              value={pesoEnvio}
+              onChange={e => setPesoEnvio(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-8">
+            <button className="btn btn--ghost" onClick={reset}><X size={16}/> Cancelar</button>
+            <button className="btn flex-1 btn--lg" style={{ background: '#8b5cf6', color: 'white' }} onClick={confirmarEnvio} disabled={salvando}>
+              {salvando ? <Loader size={16} className="animate-spin"/> : <Factory size={16}/>} Enviar à Produção
+            </button>
+          </div>
         </div>
-
-        <div className={`mov-step ${step === 3 ? 'active' : step > 3 ? 'completed' : ''}`} style={{ opacity: step >= 3 ? 1 : 0.5 }}>
-          <div className="mov-step__header"><div className="mov-step__number">3</div><div className="mov-step__label">Quantidade Enviada</div></div>
-          {step === 3 ? (
-            <form onSubmit={e => { e.preventDefault(); if (!qtdCaixas || !qtdKg) return toastWarning('Aviso', 'Preencha os campos.'); if (parseFloat(qtdKg) > saldoAtual.qtd_kg) return toastError('Saldo insuficiente', `Disponível: ${saldoAtual.qtd_kg} kg`); setStep(4) }} className="flex gap-16 items-end">
-              <div className="form-group" style={{ flex: 1 }}><label className="form-label">Caixas</label><input id="prod-caixas" type="number" step="0.01" className="form-input form-input--number" value={qtdCaixas} onChange={e => setQtdCaixas(e.target.value)} /></div>
-              <div className="form-group" style={{ flex: 1 }}><label className="form-label">KG Total</label><input type="number" step="0.001" className="form-input form-input--number" value={qtdKg} onChange={e => setQtdKg(e.target.value)} /></div>
-              <button type="submit" className="btn btn--primary btn--lg">Avançar</button>
-            </form>
-          ) : step > 3 ? <div className="flex items-center gap-12 font-mono text-cyan" style={{ fontSize: 18, fontWeight: 700 }}><Hash size={20} /> {qtdCaixas} Cx / {qtdKg} KG</div> : null}
-        </div>
-
-        <div className={`mov-step ${step === 4 ? 'active' : ''}`} style={{ opacity: step >= 4 ? 1 : 0.5 }}>
-          <div className="mov-step__header"><div className="mov-step__number">4</div><div className="mov-step__label">Confirmar Envio à Produção</div></div>
-          {step === 4 && (
-            <div>
-              <div style={{ background: 'rgba(139,92,246,0.1)', border: '2px solid #8b5cf6', borderRadius: 12, padding: 20, marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                  <Factory size={24} style={{ color: '#8b5cf6' }} />
-                  <div style={{ fontWeight: 700, fontSize: 18, color: '#8b5cf6' }}>Envio p/ Produção</div>
-                </div>
-                <div style={{ color: 'white', fontWeight: 600, fontSize: 16 }}>{produto?.descricao}</div>
-                <div className="text-muted mt-4 text-sm">{origem} → PRODUÇÃO | {qtdCaixas} cx | <strong style={{ color: '#8b5cf6' }}>{qtdKg} kg</strong></div>
-                <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--bg-1)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)' }}>
-                  Uma <strong style={{ color: '#8b5cf6' }}>Ordem de Produção</strong> será criada. Use a aba <em>Retorno de Produção</em> para registrar os subprodutos quando voltarem.
-                </div>
-              </div>
-              <div className="flex gap-12">
-                <button className="btn btn--ghost w-full" onClick={resetAll}>Cancelar</button>
-                <button className="btn w-full btn--lg" style={{ background: '#8b5cf6', color: 'white' }} onClick={confirmarEnvio}><Check size={18} /> Confirmar e Abrir Ordem</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <CadastroEanModal isOpen={modalEanOpen} onClose={() => { setModalEanOpen(false); setTimeout(() => document.getElementById('prod-produto')?.focus(), 100) }} codigoDesconhecido={eanDesconhecido}
-        onRegraSalva={async (p) => { const saldos = await estoqueQueries.buscarPorEnderecoProduto(origem, p.id); if (saldos.length === 0) { toastError('Sem Saldo', `Produto sem saldo em ${origem}`); return } setProduto(p); if (saldos.length === 1) { setSaldoAtual(saldos[0]); setStep(3) } else { setSaldoOpcoes(saldos); setStep(2.5) } }} />
+      )}
     </div>
   )
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// ABA 3: RETORNO DE PRODUÇÃO (registra subprodutos, calcula rendimento)
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ABA 4: RETORNO DE PRODUÇÃO (mantida igual)
+// ─────────────────────────────────────────────────────────────────────────────
 function RetornoProducao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   const [ordens, setOrdens] = useState([])
   const [ordemSelecionada, setOrdemSelecionada] = useState(null)
-  const [subprodutos, setSubprodutos] = useState([]) // [{ produto, qtd_caixas, qtd_kg, lote, validade }]
+  const [subprodutos, setSubprodutos] = useState([])
   const [pesoTotalRetornado, setPesoTotalRetornado] = useState(0)
   const [loading, setLoading] = useState(false)
-
-  // Form para adicionar subproduto
   const [scanEan, setScanEan] = useState('')
   const [produtoAtual, setProdutoAtual] = useState(null)
   const [subQtdCx, setSubQtdCx] = useState('')
@@ -385,18 +551,12 @@ function RetornoProducao() {
   const scanRef = useRef(null)
 
   useEffect(() => { carregarOrdens() }, [])
-
-  useEffect(() => {
-    const total = subprodutos.reduce((acc, s) => acc + parseFloat(s.qtd_kg || 0), 0)
-    setPesoTotalRetornado(total)
-  }, [subprodutos])
+  useEffect(() => { setPesoTotalRetornado(subprodutos.reduce((a, s) => a + parseFloat(s.qtd_kg || 0), 0)) }, [subprodutos])
 
   const carregarOrdens = async () => {
     setLoading(true)
-    try {
-      const data = await movimentacoesQueries.listarOrdensProducao('ABERTA')
-      setOrdens(data)
-    } catch (e) { toastError('Erro', 'Falha ao carregar ordens.') }
+    try { const data = await movimentacoesQueries.listarOrdensProducao('ABERTA'); setOrdens(data) }
+    catch (e) { toastError('Erro', 'Falha ao carregar ordens.') }
     finally { setLoading(false) }
   }
 
@@ -410,63 +570,47 @@ function RetornoProducao() {
 
   const adicionarSubproduto = () => {
     if (!produtoAtual || !subQtdKg) return toastWarning('Atenção', 'Preencha o produto e o peso.')
-    setSubprodutos(prev => [...prev, {
-      produto: produtoAtual, qtd_caixas: parseFloat(subQtdCx || 0),
-      qtd_kg: parseFloat(subQtdKg), lote: subLote || '', validade: subValidade || ''
-    }])
+    setSubprodutos(prev => [...prev, { produto: produtoAtual, qtd_caixas: parseFloat(subQtdCx || 0), qtd_kg: parseFloat(subQtdKg), lote: subLote || '', validade: subValidade || '' }])
     setProdutoAtual(null); setSubQtdCx(''); setSubQtdKg(''); setSubLote(''); setSubValidade('')
     setTimeout(() => scanRef.current?.focus(), 100)
   }
 
-  const removerSubproduto = (idx) => setSubprodutos(prev => prev.filter((_, i) => i !== idx))
-
   const fecharOrdem = async () => {
     if (subprodutos.length === 0) return toastWarning('Atenção', 'Adicione pelo menos um subproduto.')
     try {
-      // Dar entrada de cada subproduto no estoque (endereço REC)
       for (const sub of subprodutos) {
-        await movimentacoesQueries.receber({
-          produto_id: sub.produto.id, lote: sub.lote, validade: sub.validade,
-          qtd_caixas: sub.qtd_caixas, qtd_kg: sub.qtd_kg,
-          operador_id: operador.id, operador_nome: operador.nome
-        })
+        await movimentacoesQueries.receber({ produto_id: sub.produto.id, lote: sub.lote, validade: sub.validade, qtd_caixas: sub.qtd_caixas, qtd_kg: sub.qtd_kg, operador_id: operador.id, operador_nome: operador.nome })
       }
-      // Fechar a Ordem de Produção
       const res = await movimentacoesQueries.fecharOrdemProducao({ ordem_id: ordemSelecionada.id, peso_retornado: pesoTotalRetornado })
       if (res.success) {
-        const perda = parseFloat(ordemSelecionada.peso_enviado) - pesoTotalRetornado
         const rendimento = ((pesoTotalRetornado / ordemSelecionada.peso_enviado) * 100).toFixed(1)
-        toastSuccess('Ordem Concluída! ✅', `Rendimento: ${rendimento}% | Perda: ${perda.toFixed(3)} kg`)
+        toastSuccess('Ordem Concluída! ✅', `Rendimento: ${rendimento}% | Perda: ${(ordemSelecionada.peso_enviado - pesoTotalRetornado).toFixed(3)} kg`)
         setOrdemSelecionada(null); setSubprodutos([]); setPesoTotalRetornado(0); carregarOrdens()
       } else toastError('Erro', res.error)
     } catch (err) { toastError('Erro Fatal', err.message) }
   }
 
   if (!ordemSelecionada) return (
-    <div>
-      <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', marginBottom: 20 }}>
-        <div className="text-sm text-muted">🔄 Selecione uma Ordem de Produção aberta para registrar o retorno dos subprodutos (desossa, fracionamento, etc).</div>
-      </div>
-      {loading ? <div className="text-center p-24 text-muted"><Loader size={24} /></div> : ordens.length === 0 ? (
+    <div style={{ maxWidth: 700 }}>
+      {loading ? <div className="text-center p-24"><Loader size={24}/></div> : ordens.length === 0 ? (
         <div className="card text-center p-32">
           <PackageOpen size={48} style={{ margin: '0 auto 16px', color: 'var(--text-muted)' }} />
-          <div className="text-muted">Nenhuma Ordem de Produção aberta no momento.</div>
-          <div className="text-sm text-muted mt-8">Use a aba "Envio p/ Produção" para criar uma.</div>
+          <div className="text-muted">Nenhuma Ordem de Produção aberta.</div>
         </div>
       ) : (
         <div className="flex-col gap-12">
           {ordens.map(o => (
             <div key={o.id} onClick={() => setOrdemSelecionada(o)}
-              style={{ background: 'var(--bg-2)', border: '2px solid var(--border)', borderRadius: 12, padding: '16px 20px', cursor: 'pointer', transition: 'border-color 0.2s' }}
+              style={{ background: 'var(--bg-2)', border: '2px solid var(--border)', borderRadius: 12, padding: '16px 20px', cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.borderColor = '#8b5cf6'}
               onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
               <div className="flex justify-between items-start">
                 <div>
-                  <div style={{ fontSize: 12, color: '#8b5cf6', fontWeight: 600, marginBottom: 4 }}>ORDEM #{o.id}</div>
+                  <div style={{ fontSize: 12, color: '#8b5cf6', fontWeight: 600 }}>ORDEM #{o.id}</div>
                   <div style={{ fontWeight: 700, fontSize: 16 }}>{o.produto_descricao}</div>
-                  <div className="text-sm text-muted mt-4">Lote: {o.lote || '-'} | Aberta: {format(new Date(o.data_inicio), 'dd/MM/yyyy HH:mm')}</div>
+                  <div className="text-sm text-muted mt-4">Aberta: {format(new Date(o.data_inicio), 'dd/MM/yyyy HH:mm')}</div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
+                <div className="text-right">
                   <div style={{ fontWeight: 700, fontSize: 18, color: '#8b5cf6' }}>{parseFloat(o.peso_enviado).toFixed(3)} kg</div>
                   <div className="text-sm text-muted">enviados</div>
                 </div>
@@ -482,24 +626,22 @@ function RetornoProducao() {
   const rendimento = ordemSelecionada.peso_enviado > 0 ? ((pesoTotalRetornado / ordemSelecionada.peso_enviado) * 100).toFixed(1) : 0
 
   return (
-    <div>
-      {/* Header da Ordem */}
+    <div style={{ maxWidth: 700 }}>
       <div style={{ background: 'rgba(139,92,246,0.1)', border: '2px solid #8b5cf6', borderRadius: 12, padding: 20, marginBottom: 20 }}>
         <div className="flex justify-between items-start">
           <div>
-            <div style={{ fontSize: 12, color: '#8b5cf6', fontWeight: 700 }}>ORDEM #{ordemSelecionada.id} — EM ANDAMENTO</div>
+            <div style={{ fontSize: 12, color: '#8b5cf6', fontWeight: 700 }}>ORDEM #{ordemSelecionada.id}</div>
             <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{ordemSelecionada.produto_descricao}</div>
-            <div className="text-muted text-sm mt-4">Enviado: <strong style={{ color: '#8b5cf6' }}>{parseFloat(ordemSelecionada.peso_enviado).toFixed(3)} kg</strong> | Lote: {ordemSelecionada.lote || '-'}</div>
+            <div className="text-muted text-sm mt-4">Enviado: <strong style={{ color: '#8b5cf6' }}>{parseFloat(ordemSelecionada.peso_enviado).toFixed(3)} kg</strong></div>
           </div>
-          <button className="btn btn--ghost btn--sm" onClick={() => { setOrdemSelecionada(null); setSubprodutos([]) }}><X size={16} /> Voltar</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => { setOrdemSelecionada(null); setSubprodutos([]) }}><X size={16}/> Voltar</button>
         </div>
       </div>
 
-      {/* Barra de Rendimento */}
       <div className="card mb-20" style={{ background: 'var(--bg-2)' }}>
         <div className="flex justify-between mb-8">
           <div><span className="text-sm text-muted">Retornado:</span> <strong style={{ color: 'var(--success)' }}>{pesoTotalRetornado.toFixed(3)} kg</strong></div>
-          <div><span className="text-sm text-muted">Perda/Apara:</span> <strong style={{ color: perda < 0 ? 'var(--danger)' : 'var(--warning)' }}>{perda.toFixed(3)} kg</strong></div>
+          <div><span className="text-sm text-muted">Perda:</span> <strong style={{ color: perda < 0 ? 'var(--danger)' : 'var(--warning)' }}>{perda.toFixed(3)} kg</strong></div>
           <div><span className="text-sm text-muted">Rendimento:</span> <strong style={{ color: rendimento >= 80 ? 'var(--success)' : 'var(--warning)' }}>{rendimento}%</strong></div>
         </div>
         <div style={{ height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
@@ -507,52 +649,45 @@ function RetornoProducao() {
         </div>
       </div>
 
-      {/* Lista de subprodutos já adicionados */}
       {subprodutos.length > 0 && (
         <div className="card mb-20">
-          <h4 className="font-bold mb-12">Subprodutos Registrados ({subprodutos.length})</h4>
+          <h4 className="font-bold mb-12">Subprodutos ({subprodutos.length})</h4>
           {subprodutos.map((s, i) => (
             <div key={i} className="flex justify-between items-center py-8" style={{ borderBottom: '1px solid var(--border)' }}>
               <div><div className="font-bold text-sm">{s.produto.descricao}</div><div className="text-xs text-muted">Lote: {s.lote || '-'} | Val: {s.validade || '-'}</div></div>
               <div className="flex items-center gap-16">
                 <div className="text-right"><div className="font-bold text-success">{s.qtd_kg} kg</div><div className="text-xs text-muted">{s.qtd_caixas} cx</div></div>
-                <button className="btn btn--ghost btn--sm text-danger" onClick={() => removerSubproduto(i)}><X size={14} /></button>
+                <button className="btn btn--ghost btn--sm text-danger" onClick={() => setSubprodutos(prev => prev.filter((_, ii) => ii !== i))}><X size={14}/></button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Form: adicionar subproduto */}
       <div className="card mb-20">
-        <h4 className="font-bold mb-16">➕ Adicionar Subproduto</h4>
-        <div className="form-group mb-12">
-          <label className="form-label">Bipar código do subproduto</label>
+        <h4 className="font-bold mb-14">➕ Adicionar Subproduto</h4>
+        <div className="form-group mb-10">
           <input ref={scanRef} type="text" className="form-input form-input--scanner" placeholder="Bipar EAN do subproduto..." value={scanEan}
             onChange={e => setScanEan(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleScanEan(e.target.value) }} autoFocus />
           {produtoAtual && <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--success-muted)', border: '1px solid var(--success)', borderRadius: 8, color: 'var(--success)', fontWeight: 600 }}>✅ {produtoAtual.descricao}</div>}
         </div>
         {produtoAtual && (
           <>
-            <div className="form-grid form-grid--2 mb-12">
-              <div className="form-group"><label className="form-label">Caixas</label><input id="ret-cx" type="number" step="0.01" className="form-input form-input--number" value={subQtdCx} onChange={e => setSubQtdCx(e.target.value)} /></div>
-              <div className="form-group"><label className="form-label">KG *</label><input type="number" step="0.001" className="form-input form-input--number" value={subQtdKg} onChange={e => setSubQtdKg(e.target.value)} /></div>
-              <div className="form-group"><label className="form-label">Lote</label><input type="text" className="form-input" value={subLote} onChange={e => setSubLote(e.target.value)} /></div>
-              <div className="form-group"><label className="form-label">Validade</label><input type="date" className="form-input" value={subValidade} onChange={e => setSubValidade(e.target.value)} /></div>
+            <div className="form-grid form-grid--2 mb-10">
+              <div className="form-group"><label className="form-label">Caixas</label><input id="ret-cx" type="number" step="0.01" className="form-input form-input--number" value={subQtdCx} onChange={e => setSubQtdCx(e.target.value)}/></div>
+              <div className="form-group"><label className="form-label">KG *</label><input type="number" step="0.001" className="form-input form-input--number" value={subQtdKg} onChange={e => setSubQtdKg(e.target.value)}/></div>
+              <div className="form-group"><label className="form-label">Lote</label><input type="text" className="form-input" value={subLote} onChange={e => setSubLote(e.target.value)}/></div>
+              <div className="form-group"><label className="form-label">Validade</label><input type="date" className="form-input" value={subValidade} onChange={e => setSubValidade(e.target.value)}/></div>
             </div>
-            <button className="btn btn--primary w-full" onClick={adicionarSubproduto}><Check size={16} /> Adicionar Subproduto</button>
+            <button className="btn btn--primary w-full" onClick={adicionarSubproduto}><Check size={16}/> Adicionar Subproduto</button>
           </>
         )}
       </div>
 
-      {/* Botão Fechar Ordem */}
       {subprodutos.length > 0 && (
         <div style={{ background: 'rgba(139,92,246,0.1)', border: '2px solid #8b5cf6', borderRadius: 12, padding: 20 }}>
-          <div className="text-sm text-muted mb-16">
-            Ao fechar a Ordem, os <strong>{subprodutos.length} subproduto(s)</strong> serão dados como entrada no estoque (endereço REC) e o rendimento será calculado.
-          </div>
           <button className="btn btn--lg w-full" style={{ background: '#8b5cf6', color: 'white' }} onClick={fecharOrdem}>
-            <Check size={20} /> Fechar Ordem e Calcular Rendimento ({rendimento}%)
+            <Check size={20}/> Fechar Ordem e Calcular Rendimento ({rendimento}%)
           </button>
         </div>
       )}
@@ -563,254 +698,29 @@ function RetornoProducao() {
   )
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// ABA SSCC: SAÍDA POR CAIXA RASTREADA (novo método)
-// ────────────────────────────────────────────────────────────────────────────
-function SaidaSSCC() {
-  const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
-
-  // step: 'SCAN' → 'CONFIRMAR' → 'PARCIAL_EAN' → done
-  const [step, setStep] = useState('SCAN')
-  const [eanBipado, setEanBipado] = useState('')
-  const [caixaEncontrada, setCaixaEncontrada] = useState(null) // dados da caixa do banco
-  const [pesoSaida, setPesoSaida] = useState('')
-  const [eanResto, setEanResto] = useState('')
-  const [numPedido, setNumPedido] = useState('')
-  const [cliente, setCliente] = useState('')
-  const [salvando, setSalvando] = useState(false)
-
-  const reset = () => {
-    setStep('SCAN')
-    setCaixaEncontrada(null)
-    setEanBipado('')
-    setPesoSaida('')
-    setEanResto('')
-    setNumPedido('')
-    setCliente('')
-    setSalvando(false)
-    setTimeout(() => eanInputRef.current?.focus(), 100)
-  }
-
-  const { inputRef: eanInputRef, handleKeyDown: handleEanKeyDown } = useBarcodeScanner({
-    onScan: async (val) => {
-      if (step === 'PARCIAL_EAN') {
-        // Está esperando o EAN do restante
-        setEanResto(val)
-        return
-      }
-      // Passo principal: bipar a caixa
-      setEanBipado(val)
-      setCaixaEncontrada(null)
-      setPesoSaida('')
-      setEanResto('')
-
-      try {
-        const res = await movimentacoesQueries.identificarCodigoMovimentacao(val.toUpperCase().trim())
-        if (res.tipo === 'CAIXA') {
-          const cx = res.dados
-          setCaixaEncontrada(cx)
-          setPesoSaida(String(cx.peso_kg)) // pré-preenche com o peso total
-          setStep('CONFIRMAR')
-          setTimeout(() => document.getElementById('sscc-peso-saida')?.focus(), 120)
-        } else if (res.tipo === 'PALETE') {
-          toastError('Tipo Incorreto', 'Você bipou um Palete. Para saída individual, bipe o EAN de uma caixa específica.')
-        } else {
-          toastError('Caixa não encontrada', 'Este EAN não corresponde a nenhuma caixa em estoque. Verifique se foi recebida.')
-        }
-      } catch (err) {
-        toastError('Erro', err.message)
-      }
-    }
-  })
-
-  const pesoSaidaNum = parseFloat(pesoSaida) || 0
-  const pesoCaixaNum = caixaEncontrada ? parseFloat(caixaEncontrada.peso_kg) : 0
-  const isParcial = pesoSaidaNum > 0 && Math.abs(pesoSaidaNum - pesoCaixaNum) >= 0.05
-  const pesoResto = isParcial ? parseFloat((pesoCaixaNum - pesoSaidaNum).toFixed(3)) : 0
-
-  const handleConfirmar = async () => {
-    if (!caixaEncontrada) return
-    if (pesoSaidaNum <= 0 || pesoSaidaNum > pesoCaixaNum + 0.001) {
-      return toastError('Peso Inválido', `Peso deve ser entre 0.01 e ${pesoCaixaNum} kg.`)
-    }
-    // Se parcial, precisa do EAN do resto
-    if (isParcial && !eanResto.trim()) {
-      setStep('PARCIAL_EAN')
-      toastWarning('Bipe o EAN Restante', `Saída parcial: bipar a etiqueta da caixa restante (${pesoResto} kg).`)
-      setTimeout(() => eanInputRef.current?.focus(), 100)
-      return
-    }
-    await executarSaida()
-  }
-
-  const executarSaida = async () => {
-    setSalvando(true)
-    try {
-      const res = await movimentacoesQueries.saidaPorCaixaSSCC({
-        caixa_id: caixaEncontrada.id,
-        peso_saida_kg: pesoSaidaNum,
-        num_pedido: numPedido || null,
-        cliente: cliente || null,
-        operador_id: operador?.id,
-        operador_nome: operador?.nome,
-        ean_caixa_resto: isParcial ? eanResto.trim() : null
-      })
-      if (res.success) {
-        if (res.tipo === 'TOTAL') {
-          toastSuccess('Saída Registrada', `${caixaEncontrada.produto_descricao} — ${pesoSaidaNum} kg saíram.`)
-        } else {
-          toastSuccess('Saída Parcial Registrada', `${pesoSaidaNum} kg saíram. Restam ${res.pesoResto} kg com novo EAN.`)
-        }
-        reset()
-      } else {
-        toastError('Erro na Saída', res.error)
-        setSalvando(false)
-      }
-    } catch (err) {
-      toastError('Erro Fatal', err.message)
-      setSalvando(false)
-    }
-  }
-
-  return (
-    <div style={{ maxWidth: 560 }}>
-      {/* STEP: SCAN */}
-      <div className="card mb-16">
-        <h3 className="font-bold text-primary flex items-center gap-8 mb-16"><ScanBarcode size={18}/> 1. Bipe o EAN da Caixa</h3>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            ref={eanInputRef}
-            type="text"
-            className="form-input form-input--scanner"
-            placeholder="Bipe ou digite o EAN da caixa..."
-            value={eanBipado}
-            onChange={e => setEanBipado(e.target.value)}
-            onKeyDown={handleEanKeyDown}
-          />
-          {eanBipado && (
-            <button type="button" className="btn btn--ghost text-muted" onClick={reset}><X size={16}/></button>
-          )}
-        </div>
-      </div>
-
-      {/* CAIXA ENCONTRADA */}
-      {caixaEncontrada && step !== 'SCAN' && (
-        <div className="card">
-          {/* Info do produto */}
-          <div style={{ background: 'var(--bg-2)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, border: '1px solid var(--primary)' }}>
-            <div className="text-xs text-muted font-bold mb-2 uppercase">✅ Caixa SSCC Identificada</div>
-            <div className="font-bold" style={{ fontSize: 16 }}>{caixaEncontrada.produto_descricao}</div>
-            <div className="flex gap-16 text-sm mt-4">
-              <div>📦 <strong>{caixaEncontrada.peso_kg} kg</strong> no estoque</div>
-              {caixaEncontrada.validade && <div>📅 Venc: <strong>{format(new Date(caixaEncontrada.validade + 'T00:00:00'), 'dd/MM/yyyy')}</strong></div>}
-              <div className="text-muted font-mono" style={{ fontSize: 11 }}>{caixaEncontrada.endereco}</div>
-            </div>
-          </div>
-
-          {/* STEP PARCIAL_EAN: aguardando EAN do restante */}
-          {step === 'PARCIAL_EAN' && (
-            <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid var(--warning)', borderRadius: 10, padding: '16px', marginBottom: 16 }}>
-              <div className="flex items-center gap-8 font-bold text-warning mb-8"><Scissors size={16}/> Saída Parcial — Bipe o EAN da Caixa Restante</div>
-              <div className="text-sm text-muted mb-12">
-                Saindo: <strong>{pesoSaidaNum} kg</strong> → Restam: <strong>{pesoResto} kg</strong><br/>
-                A caixa original sera encerrada. A sobra receberá um novo EAN que você deve bipar agora.
-              </div>
-              <input
-                ref={eanInputRef}
-                type="text"
-                className="form-input form-input--scanner"
-                placeholder="Bipe o EAN da nova caixa (restante)..."
-                value={eanResto}
-                onChange={e => setEanResto(e.target.value)}
-                onKeyDown={handleEanKeyDown}
-                autoFocus
-              />
-              {eanResto && (
-                <div className="mt-8 text-success text-sm">✅ EAN capturado: <strong className="font-mono">{eanResto}</strong></div>
-              )}
-              {eanResto && (
-                <button className="btn btn--primary w-full mt-12" onClick={executarSaida} disabled={salvando}>
-                  {salvando ? <Loader size={16} className="animate-spin"/> : <Check size={16}/>} Confirmar Saída Parcial
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* STEP CONFIRMAR */}
-          {step === 'CONFIRMAR' && (
-            <>
-              <div className="form-grid form-grid--2 mb-16">
-                <div className="form-group">
-                  <label className="form-label">Peso da Saída (kg) *</label>
-                  <input
-                    id="sscc-peso-saida"
-                    type="number"
-                    step="0.001"
-                    min="0.001"
-                    max={pesoCaixaNum}
-                    className="form-input form-input--number"
-                    value={pesoSaida}
-                    onChange={e => setPesoSaida(e.target.value)}
-                  />
-                  {isParcial && (
-                    <div className="text-warning text-xs mt-4 flex items-center gap-4"><Scissors size={11}/> Saída parcial — restam <strong>{pesoResto} kg</strong></div>
-                  )}
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Nº Pedido (opcional)</label>
-                  <input type="text" className="form-input" value={numPedido} onChange={e => setNumPedido(e.target.value)} placeholder="P-001..."/>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Cliente (opcional)</label>
-                  <input type="text" className="form-input" value={cliente} onChange={e => setCliente(e.target.value)}/>
-                </div>
-              </div>
-
-              {isParcial && (
-                <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }} className="text-sm text-warning">
-                  <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4}}/>
-                  Saída parcial detectada. Após confirmar, você precisará bipar o EAN da nova etiqueta da caixa restante ({pesoResto} kg).
-                </div>
-              )}
-
-              <div className="flex gap-8">
-                <button className="btn btn--ghost" onClick={reset}><X size={16}/> Cancelar</button>
-                <button className="btn btn--primary flex-1" onClick={handleConfirmar} disabled={salvando}>
-                  {salvando ? <Loader size={16} className="animate-spin"/> : <Check size={16}/>}
-                  {isParcial ? `Saída Parcial (${pesoSaidaNum} kg)` : `Confirmar Saída Total (${pesoSaidaNum} kg)`}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// COMPONENTE PRINCIPAL: Saida com abas
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPONENTE PRINCIPAL
+// ─────────────────────────────────────────────────────────────────────────────
 export function Saida() {
-  const [activeTab, setActiveTab] = useState('sscc')
+  const [activeTab, setActiveTab] = useState('romaneio')
+  const [refreshExpedicao, setRefreshExpedicao] = useState(0)
 
   const tabs = [
-    { id: 'sscc', label: 'Saída por Caixa (SSCC)', icon: <ScanBarcode size={16} />, color: 'var(--cyan)' },
-    { id: 'expedicao', label: 'Expedição (Antigo)', icon: <Truck size={16} />, color: 'var(--warning)' },
-    { id: 'producao', label: 'Envio p/ Produção', icon: <Factory size={16} />, color: '#8b5cf6' },
-    { id: 'retorno', label: 'Retorno de Produção', icon: <RotateCcw size={16} />, color: 'var(--success)' },
+    { id: 'romaneio', label: 'Montar Romaneio', icon: <ClipboardList size={16}/>, color: 'var(--cyan)' },
+    { id: 'expedicao', label: 'Expedição', icon: <Truck size={16}/>, color: 'var(--warning)' },
+    { id: 'producao', label: 'Envio p/ Produção', icon: <Factory size={16}/>, color: '#8b5cf6' },
+    { id: 'retorno', label: 'Retorno de Produção', icon: <RotateCcw size={16}/>, color: 'var(--success)' },
   ]
 
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div style={{ maxWidth: 1040 }}>
       <div className="page-header mb-24">
         <div>
-          <h1 className="page-header__title flex items-center gap-12"><Truck size={28} /> Saída de Materiais</h1>
-          <p className="page-header__subtitle">Expedição, envio para produção e controle de rendimento</p>
+          <h1 className="page-header__title flex items-center gap-12"><Truck size={28}/> Saída de Materiais</h1>
+          <p className="page-header__subtitle">Romaneios de expedição, produção e controle de rendimento</p>
         </div>
       </div>
 
-      {/* TABS */}
       <div className="flex gap-8 mb-24" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 0, flexWrap: 'wrap' }}>
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}
@@ -821,8 +731,8 @@ export function Saida() {
         ))}
       </div>
 
-      {activeTab === 'sscc' && <SaidaSSCC />}
-      {activeTab === 'expedicao' && <SaidaExpedicao />}
+      {activeTab === 'romaneio' && <MontarRomaneio onRomaneioFechado={() => setRefreshExpedicao(r => r + 1)} />}
+      {activeTab === 'expedicao' && <Expedicao refresh={refreshExpedicao} />}
       {activeTab === 'producao' && <EnvioProducao />}
       {activeTab === 'retorno' && <RetornoProducao />}
     </div>
