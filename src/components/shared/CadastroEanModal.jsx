@@ -16,7 +16,7 @@ import * as produtosQueries from '../../queries/produtos.js';
  */
 export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraSalva }) {
   const { toastSuccess, toastError, operador } = useAppStore();
-  const podeCadastrar = operador?.permissoes?.includes('produtos');
+  const podeCadastrar = operador?.is_adm === 1 || !!(operador?.permissoes?.produtos);
 
   const [sugestao, setSugestao] = useState(null);
   const [modo, setModo] = useState('carregando'); // 'carregando' | 'sugestao' | 'busca' | 'novo'
