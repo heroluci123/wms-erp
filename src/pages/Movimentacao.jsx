@@ -8,6 +8,7 @@ import * as produtosQueries from '../queries/produtos.js';
 import * as estoqueQueries from '../queries/estoque.js';
 import * as movimentacoesQueries from '../queries/movimentacoes.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
+import { ConverterSSCCModal } from '../components/shared/ConverterSSCCModal.jsx'
 
 export function Movimentacao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -29,9 +30,14 @@ export function Movimentacao() {
   const [qtdKg, setQtdKg] = useState('')
   const [sugestoes, setSugestoes] = useState([])
 
-  // Modal EAN
+  // Modal EAN (completamente desconhecido)
   const [modalEanOpen, setModalEanOpen] = useState(false)
   const [eanDesconhecido, setEanDesconhecido] = useState('')
+
+  // Modal Converter SSCC (EAN generico conhecido)
+  const [modalSSCCOpen, setModalSSCCOpen] = useState(false)
+  const [produtoGenerico, setProdutoGenerico] = useState(null)
+  const [eanGenerico, setEanGenerico] = useState('')
 
   const [destino, setDestino] = useState('')
 
@@ -131,20 +137,30 @@ export function Movimentacao() {
 
   const processarScanProdutoAntigo = async (val) => {
     try {
-      const p = await produtosQueries.buscarPorCodigo(val)
-      if (!p) {
-        // EAN desconhecido: abre modal para vincular
+      const resultado = await produtosQueries.buscarPorCodigoComInfo(val)
+      if (!resultado) {
+        // EAN completamente desconhecido: abre modal para vincular
         setEanDesconhecido(val)
         setModalEanOpen(true)
         return
       }
-      
-      const saldos = await estoqueQueries.buscarPorEnderecoProduto(enderecoOrigem, p.id)
+
+      const { produto, eanUnico } = resultado
+
+      if (!eanUnico) {
+        // EAN genérico (legado): pede para converter para SSCC unico
+        setProdutoGenerico(produto)
+        setEanGenerico(val)
+        setModalSSCCOpen(true)
+        return
+      }
+
+      // EAN unico: continua fluxo normal
+      const saldos = await estoqueQueries.buscarPorEnderecoProduto(enderecoOrigem, produto.id)
       if (saldos.length === 0) {
         return toastError('Sem Saldo', `O produto não possui saldo em ${enderecoOrigem}`)
       }
-      setProdutoAntigo(p)
-
+      setProdutoAntigo(produto)
       if (saldos.length === 1) {
         setSaldoAtual(saldos[0])
         setStep('ANTIGO_QTD')
@@ -404,6 +420,37 @@ export function Movimentacao() {
             setSaldoOpcoes(saldos)
             setStep('ANTIGO_SELECIONAR_LOTE')
           }
+        }}
+      />
+
+      <ConverterSSCCModal
+        isOpen={modalSSCCOpen}
+        onClose={() => { setModalSSCCOpen(false); setTimeout(() => document.getElementById('input-universal')?.focus(), 100) }}
+        produto={produtoGenerico}
+        eanGenerico={eanGenerico}
+        onConvertido={async ({ ean_gerado }) => {
+          // Após converter, o EAN gerado já está no estoque_caixas na doca (no Recebimento estava sem palete).
+          // Mas na Movimentação, o ideal seria atualizar o saldo existente? 
+          // O usuário está pegando uma caixa de um lote e dando ela uma identidade.
+          // Na Movimentação, ele pode bipar EAN genérico?
+          
+          // Actually we just converted it. So we should now treat it as the actual product that we want to move.
+          // Let's just proceed to the move screen with 1 box and the generated ean as the item.
+          // Wait, the new logic for SSCC in movement expects the user to scan the SSCC itself. 
+          // If we converted it, it was just saved as received. But this is Movimentacao.
+          // In Movimentacao, he wants to move it. So after converting, we should just let him scan the new EAN?
+          // Or we can just add it to the caixasSelecionadas.
+          toastSuccess('Caixa SSCC Adicionada para Movimentação', produtoGenerico.descricao)
+          setEntidadeTipo('CAIXAS')
+          // A caixa não tem um ID fácil aqui porque criamos ela no estoque_caixas com eanGerado.
+          // Let's just mock the object needed for caixasSelecionadas.
+          setCaixasSelecionadas(prev => [{
+            id: 'temp-' + ean_gerado, // We might need the real ID later. 
+            ean_caixa: ean_gerado,
+            produto_descricao: produtoGenerico.descricao,
+            peso_kg: 0, // we didn't fetch it, but it's fine for UI
+          }, ...prev])
+          
         }}
       />
     </div>

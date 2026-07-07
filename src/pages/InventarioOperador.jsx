@@ -5,6 +5,7 @@ import * as inventariosQueries from '../queries/inventarios.js';
 import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
+import { ConverterSSCCModal } from '../components/shared/ConverterSSCCModal.jsx'
 
 export function InventarioOperador() {
   const { toastSuccess, toastError, toastWarning } = useAppStore()
@@ -39,6 +40,11 @@ export function InventarioOperador() {
   // Modal de vinculação rápida de EAN (todos os tipos de inventário)
   const [modalEanOpen, setModalEanOpen] = useState(false)
   const [eanDesconhecido, setEanDesconhecido] = useState('')
+
+  // Modal Converter SSCC (EAN genérico conhecido)
+  const [modalSSCCOpen, setModalSSCCOpen] = useState(false)
+  const [produtoGenerico, setProdutoGenerico] = useState(null)
+  const [eanGenerico, setEanGenerico] = useState('')
 
   // 1. Carregar inventários
   const carregar = async () => {
@@ -145,8 +151,8 @@ export function InventarioOperador() {
     if (!val || val.trim() === '') return
 
     try {
-      const p = await produtosQueries.buscarPorCodigo(val)
-      if (!p) {
+      const resultado = await produtosQueries.buscarPorCodigoComInfo(val)
+      if (!resultado) {
         const isCarga = inventarioAtivo?.tipo === 'CargaInicial'
         if (isCarga) {
           // Carga Inicial: abre modal completo de criacao de produto
@@ -162,15 +168,26 @@ export function InventarioOperador() {
         return
       }
       
+      const { produto, eanUnico } = resultado
+
+      // Se não for único (é EAN genérico) e NÃO for CargaInicial, 
+      // pedimos para converter em SSCC gerando código único
+      if (!eanUnico && inventarioAtivo?.tipo !== 'CargaInicial') {
+        setProdutoGenerico(produto)
+        setEanGenerico(val)
+        setModalSSCCOpen(true)
+        return
+      }
+
       setItemAtual({
         id: null,
-        produto_id: p.id,
+        produto_id: produto.id,
         endereco: enderecoAtual,
-        codigo: p.codigo || p.ean,
-        descricao: p.descricao,
-        status_curva: p.status_curva,
-        tipo_produto: p.tipo_produto,
-        grupo: p.grupo,
+        codigo: produto.codigo || produto.ean,
+        descricao: produto.descricao,
+        status_curva: produto.status_curva,
+        tipo_produto: produto.tipo_produto,
+        grupo: produto.grupo,
         status_item: 'Pendente'
       })
       setStep(3)
@@ -744,6 +761,35 @@ export function InventarioOperador() {
           })
           setStep(3)
           setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
+        }}
+      />
+
+      {/* Modal para converter EAN genérico em SSCC */}
+      <ConverterSSCCModal
+        isOpen={modalSSCCOpen}
+        onClose={() => { setModalSSCCOpen(false); setTimeout(() => document.getElementById('inv-produto')?.focus(), 100) }}
+        produto={produtoGenerico}
+        eanGenerico={eanGenerico}
+        onConvertido={async ({ ean_gerado, peso_kg, validade }) => {
+          // A caixa já foi salva no estoque_caixas na doca (sem palete) pelo modal.
+          // Aqui no cíclico, o ideal é que ele conte essa caixa no endereço atual.
+          // Podemos mockar a contagem local pra ele, ou melhor: se já foi criado o registro
+          // da caixa, nós apenas registramos que contamos ela.
+          toastSuccess('Inventariado', `Caixa SSCC convertida e bipada.`)
+          
+          setContagemLocal(prev => [{
+            item_id: null,
+            produto_id: produtoGenerico.id,
+            codigo: ean_gerado,
+            descricao: produtoGenerico.descricao,
+            caixas: 1,
+            kg: peso_kg
+          }, ...prev])
+          
+          // Volta pra bipar próximo produto
+          setStep(2)
+          setItemAtual(null)
+          setTimeout(() => document.getElementById('inv-produto')?.focus(), 100)
         }}
       />
     </div>
