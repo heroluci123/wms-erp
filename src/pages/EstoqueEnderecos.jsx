@@ -104,6 +104,23 @@ export function EstoqueEnderecos() {
         </div>
       </div>
 
+      {/* ── CSS Local para Tabela Densa ──────────────────────────────────────── */}
+      <style>{`
+        .table-densa th, .table-densa td {
+          padding: 8px 8px !important;
+          font-size: 11.5px !important;
+          white-space: nowrap;
+        }
+        .table-densa th {
+          font-size: 10px !important;
+        }
+        .td-desc {
+          white-space: normal !important;
+          min-width: 150px;
+          max-width: 250px;
+        }
+      `}</style>
+
       {/* ── Body: Layout responsivo (Tabela esq, Totais dir) ──────────── */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
         
@@ -145,12 +162,12 @@ export function EstoqueEnderecos() {
 
           {/* Tabela Scrollável */}
           <div className="table-container">
-            <table>
+            <table className="table-densa">
               <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                 <tr>
                   <th>Endereço</th>
                   <th>Código</th>
-                  <th>Descrição</th>
+                  <th style={{ width: '100%' }}>Descrição</th>
                   <th>Grupo</th>
                   <th>Tipo</th>
                   <th>Curva</th>
@@ -169,7 +186,7 @@ export function EstoqueEnderecos() {
                     <tr key={item.id}>
                       <td><EnderecoBadge endereco={item.endereco} /></td>
                       <td className="td-mono">{item.codigo}</td>
-                      <td style={{ maxWidth: 250 }} className="truncate" title={item.descricao}>{item.descricao}</td>
+                      <td className="td-desc truncate" title={item.descricao}>{item.descricao}</td>
                       <td>{item.grupo || '-'}</td>
                       <td><span className="badge" style={{ backgroundColor: 'var(--color-bg-2)', fontSize: 10 }}>{item.tipo_produto || 'N/A'}</span></td>
                       <td><CurvaBadge curva={item.status_curva} /></td>
