@@ -24,10 +24,13 @@ function SaidaExpedicao() {
   const [fefoAlert, setFefoAlert] = useState(null)
   const [modalEanOpen, setModalEanOpen] = useState(false)
   const [eanDesconhecido, setEanDesconhecido] = useState('')
+  const [numPedido, setNumPedido] = useState('')
+  const [cliente, setCliente] = useState('')
 
   const resetAll = () => {
     setStep(1); setOrigem(''); setProduto(null)
     setSaldoAtual(null); setSaldoOpcoes([]); setQtdCaixas(''); setQtdKg('')
+    setNumPedido(''); setCliente('')
     setTimeout(() => document.getElementById('exp-origem')?.focus(), 100)
   }
 
@@ -69,7 +72,8 @@ function SaidaExpedicao() {
       const res = await movimentacoesQueries.enviarParaExpedicao({
         produto_id: produto.id, lote: saldoAtual.lote, validade: saldoAtual.validade,
         qtd_caixas: parseFloat(qtdCaixas), qtd_kg: parseFloat(qtdKg),
-        origem, operador_id: operador.id, operador_nome: operador.nome
+        origem, operador_id: operador.id, operador_nome: operador.nome,
+        num_pedido: numPedido || null, cliente: cliente || null
       })
       if (res.success) { toastSuccess('Saída Confirmada', `${produto.descricao} enviado para Expedição.`); resetAll() }
       else toastError('Erro na Saída', res.error)
@@ -158,10 +162,27 @@ function SaidaExpedicao() {
           <div className="mov-step__header"><div className="mov-step__number">4</div><div className="mov-step__label">Confirmar Envio para Expedição</div></div>
           {step === 4 && (
             <div>
+              {/* Pedido e Cliente */}
+              <div className="flex gap-12 mb-16">
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Nº do Pedido <span className="text-muted">(opcional)</span></label>
+                  <input type="text" className="form-input" placeholder="Ex: 1042" value={numPedido} onChange={e => setNumPedido(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ flex: 2 }}>
+                  <label className="form-label">Cliente <span className="text-muted">(opcional)</span></label>
+                  <input type="text" className="form-input" placeholder="Nome ou CNPJ do cliente..." value={cliente} onChange={e => setCliente(e.target.value)} />
+                </div>
+              </div>
               <div className="saldo-display" style={{ background: 'var(--warning-muted)', borderColor: 'var(--warning)' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ color: 'var(--warning)', fontWeight: 700, fontSize: 16 }}>{produto?.descricao}</div>
                   <div className="text-muted mt-4">De: <strong>{origem}</strong> <ArrowRight size={14} style={{ display: 'inline' }} /> Para: <strong>EXPEDIÇÃO</strong></div>
+                  {(numPedido || cliente) && (
+                    <div className="text-muted mt-4" style={{ fontSize: 12 }}>
+                      {numPedido && <span>📋 Pedido: <strong style={{ color: 'var(--cyan)' }}>{numPedido}</strong>  </span>}
+                      {cliente && <span>👤 Cliente: <strong style={{ color: 'var(--cyan)' }}>{cliente}</strong></span>}
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center', margin: '16px 0', padding: 16, background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--border)' }}>

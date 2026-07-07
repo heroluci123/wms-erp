@@ -167,7 +167,7 @@ export function Dashboard() {
     if (estoqueFiltrado.length === 0) return
     const header = "ENDERECO;PRODUTO_ID;CODIGO;DESCRICAO;GRUPO;LOTE;VALIDADE;CAIXAS;KG;CURVA;VALOR_UNIT\n"
     const rows = estoqueFiltrado.map(i =>
-      `${i.endereco};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.lote || ''};${i.validade || ''};${i.qtd_caixas};${i.qtd_kg};${i.status_curva};${i.valor_unitario || 0}`
+      `${i.endereco};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.lote || ''};${i.validade || ''};${String(i.qtd_caixas).replace('.', ',')};${String(i.qtd_kg).replace('.', ',')};${i.status_curva};${String(i.valor_unitario || 0).replace('.', ',')}`
     ).join("\n")
     await downloadCSV(header + rows)
   }
@@ -561,6 +561,40 @@ export function Dashboard() {
             </tbody>
           </table>
         </div>
+
+        {/* Totalizador com base no filtro atual */}
+        {estoqueFiltrado.length > 0 && (() => {
+          const totalCx  = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_caixas) || 0), 0)
+          const totalKg  = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_kg) || 0), 0)
+          const totalVal = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_kg) * (parseFloat(i.valor_unitario) || 0)), 0)
+          const totalItens = estoqueFiltrado.length
+          return (
+            <div style={{
+              display: 'flex', gap: 0, borderTop: '2px solid var(--accent)',
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(34,211,238,0.05) 100%)'
+            }}>
+              <div style={{ flex: 1, padding: '12px 16px', textAlign: 'center', borderRight: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Linhas</div>
+                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--cyan)' }}>{totalItens}</div>
+              </div>
+              <div style={{ flex: 1, padding: '12px 16px', textAlign: 'center', borderRight: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Total Caixas</div>
+                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--cyan)' }}>{totalCx.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</div>
+              </div>
+              <div style={{ flex: 2, padding: '12px 16px', textAlign: 'center', borderRight: isExecutivo ? '1px solid var(--border)' : 'none' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Total KG</div>
+                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--success)' }}>{totalKg.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(totalKg / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 3 })} ton</div>
+              </div>
+              {isExecutivo && (
+                <div style={{ flex: 2, padding: '12px 16px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 1 }}>Valor Total</div>
+                  <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--warning)' }}>R$ {totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

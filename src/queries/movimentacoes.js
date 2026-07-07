@@ -476,7 +476,7 @@ export async function estornarExpedicao({ produto_id, lote, destino, operador_id
  * A função transferir() bloqueia destino EXPEDICAO intencionalmente para proteger a Movimentação.
  * Esta função é a única rota permitida para enviar material à área de Expedição.
  */
-export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caixas, qtd_kg, origem, operador_id, operador_nome }) {
+export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caixas, qtd_kg, origem, operador_id, operador_nome, num_pedido, cliente }) {
   if (!origem || origem === 'REC' || origem === 'EXPEDICAO') {
     return { success: false, error: 'Endereço de origem inválido para saída.' }
   }
@@ -505,8 +505,8 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
         args: [produto_id, lote || '', validade || '', qtd_caixas, qtd_kg]
       },
       {
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'EXPEDICAO', ?, ?, ?, ?, ?, 'TRANSFERENCIA')`,
-        args: [produto_id, origem, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema']
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo, num_pedido, cliente) VALUES (?, ?, 'EXPEDICAO', ?, ?, ?, ?, ?, 'TRANSFERENCIA', ?, ?)`,
+        args: [produto_id, origem, lote || '', qtd_caixas, qtd_kg, operador_id || null, operador_nome || 'Sistema', num_pedido || null, cliente || null]
       }
     ], 'write')
 
