@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Truck, Factory, RotateCcw, MapPin, Box, Hash, Check, ArrowRight, PackageOpen, ChevronDown, Loader, X } from 'lucide-react'
+import { Truck, Factory, RotateCcw, MapPin, Box, Hash, Check, ArrowRight, PackageOpen, ChevronDown, Loader, X, ScanBarcode, Scissors, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
 import * as locaisQueries from '../queries/locais.js'
 import * as produtosQueries from '../queries/produtos.js'
@@ -563,19 +564,245 @@ function RetornoProducao() {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// ABA SSCC: SAÍDA POR CAIXA RASTREADA (novo método)
+// ────────────────────────────────────────────────────────────────────────────
+function SaidaSSCC() {
+  const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
+
+  // step: 'SCAN' → 'CONFIRMAR' → 'PARCIAL_EAN' → done
+  const [step, setStep] = useState('SCAN')
+  const [eanBipado, setEanBipado] = useState('')
+  const [caixaEncontrada, setCaixaEncontrada] = useState(null) // dados da caixa do banco
+  const [pesoSaida, setPesoSaida] = useState('')
+  const [eanResto, setEanResto] = useState('')
+  const [numPedido, setNumPedido] = useState('')
+  const [cliente, setCliente] = useState('')
+  const [salvando, setSalvando] = useState(false)
+
+  const reset = () => {
+    setStep('SCAN')
+    setCaixaEncontrada(null)
+    setEanBipado('')
+    setPesoSaida('')
+    setEanResto('')
+    setNumPedido('')
+    setCliente('')
+    setSalvando(false)
+    setTimeout(() => eanInputRef.current?.focus(), 100)
+  }
+
+  const { inputRef: eanInputRef, handleKeyDown: handleEanKeyDown } = useBarcodeScanner({
+    onScan: async (val) => {
+      if (step === 'PARCIAL_EAN') {
+        // Está esperando o EAN do restante
+        setEanResto(val)
+        return
+      }
+      // Passo principal: bipar a caixa
+      setEanBipado(val)
+      setCaixaEncontrada(null)
+      setPesoSaida('')
+      setEanResto('')
+
+      try {
+        const res = await movimentacoesQueries.identificarCodigoMovimentacao(val.toUpperCase().trim())
+        if (res.tipo === 'CAIXA') {
+          const cx = res.dados
+          setCaixaEncontrada(cx)
+          setPesoSaida(String(cx.peso_kg)) // pré-preenche com o peso total
+          setStep('CONFIRMAR')
+          setTimeout(() => document.getElementById('sscc-peso-saida')?.focus(), 120)
+        } else if (res.tipo === 'PALETE') {
+          toastError('Tipo Incorreto', 'Você bipou um Palete. Para saída individual, bipe o EAN de uma caixa específica.')
+        } else {
+          toastError('Caixa não encontrada', 'Este EAN não corresponde a nenhuma caixa em estoque. Verifique se foi recebida.')
+        }
+      } catch (err) {
+        toastError('Erro', err.message)
+      }
+    }
+  })
+
+  const pesoSaidaNum = parseFloat(pesoSaida) || 0
+  const pesoCaixaNum = caixaEncontrada ? parseFloat(caixaEncontrada.peso_kg) : 0
+  const isParcial = pesoSaidaNum > 0 && Math.abs(pesoSaidaNum - pesoCaixaNum) >= 0.05
+  const pesoResto = isParcial ? parseFloat((pesoCaixaNum - pesoSaidaNum).toFixed(3)) : 0
+
+  const handleConfirmar = async () => {
+    if (!caixaEncontrada) return
+    if (pesoSaidaNum <= 0 || pesoSaidaNum > pesoCaixaNum + 0.001) {
+      return toastError('Peso Inválido', `Peso deve ser entre 0.01 e ${pesoCaixaNum} kg.`)
+    }
+    // Se parcial, precisa do EAN do resto
+    if (isParcial && !eanResto.trim()) {
+      setStep('PARCIAL_EAN')
+      toastWarning('Bipe o EAN Restante', `Saída parcial: bipar a etiqueta da caixa restante (${pesoResto} kg).`)
+      setTimeout(() => eanInputRef.current?.focus(), 100)
+      return
+    }
+    await executarSaida()
+  }
+
+  const executarSaida = async () => {
+    setSalvando(true)
+    try {
+      const res = await movimentacoesQueries.saidaPorCaixaSSCC({
+        caixa_id: caixaEncontrada.id,
+        peso_saida_kg: pesoSaidaNum,
+        num_pedido: numPedido || null,
+        cliente: cliente || null,
+        operador_id: operador?.id,
+        operador_nome: operador?.nome,
+        ean_caixa_resto: isParcial ? eanResto.trim() : null
+      })
+      if (res.success) {
+        if (res.tipo === 'TOTAL') {
+          toastSuccess('Saída Registrada', `${caixaEncontrada.produto_descricao} — ${pesoSaidaNum} kg saíram.`)
+        } else {
+          toastSuccess('Saída Parcial Registrada', `${pesoSaidaNum} kg saíram. Restam ${res.pesoResto} kg com novo EAN.`)
+        }
+        reset()
+      } else {
+        toastError('Erro na Saída', res.error)
+        setSalvando(false)
+      }
+    } catch (err) {
+      toastError('Erro Fatal', err.message)
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 560 }}>
+      {/* STEP: SCAN */}
+      <div className="card mb-16">
+        <h3 className="font-bold text-primary flex items-center gap-8 mb-16"><ScanBarcode size={18}/> 1. Bipe o EAN da Caixa</h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            ref={eanInputRef}
+            type="text"
+            className="form-input form-input--scanner"
+            placeholder="Bipe ou digite o EAN da caixa..."
+            value={eanBipado}
+            onChange={e => setEanBipado(e.target.value)}
+            onKeyDown={handleEanKeyDown}
+          />
+          {eanBipado && (
+            <button type="button" className="btn btn--ghost text-muted" onClick={reset}><X size={16}/></button>
+          )}
+        </div>
+      </div>
+
+      {/* CAIXA ENCONTRADA */}
+      {caixaEncontrada && step !== 'SCAN' && (
+        <div className="card">
+          {/* Info do produto */}
+          <div style={{ background: 'var(--bg-2)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, border: '1px solid var(--primary)' }}>
+            <div className="text-xs text-muted font-bold mb-2 uppercase">✅ Caixa SSCC Identificada</div>
+            <div className="font-bold" style={{ fontSize: 16 }}>{caixaEncontrada.produto_descricao}</div>
+            <div className="flex gap-16 text-sm mt-4">
+              <div>📦 <strong>{caixaEncontrada.peso_kg} kg</strong> no estoque</div>
+              {caixaEncontrada.validade && <div>📅 Venc: <strong>{format(new Date(caixaEncontrada.validade + 'T00:00:00'), 'dd/MM/yyyy')}</strong></div>}
+              <div className="text-muted font-mono" style={{ fontSize: 11 }}>{caixaEncontrada.endereco}</div>
+            </div>
+          </div>
+
+          {/* STEP PARCIAL_EAN: aguardando EAN do restante */}
+          {step === 'PARCIAL_EAN' && (
+            <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid var(--warning)', borderRadius: 10, padding: '16px', marginBottom: 16 }}>
+              <div className="flex items-center gap-8 font-bold text-warning mb-8"><Scissors size={16}/> Saída Parcial — Bipe o EAN da Caixa Restante</div>
+              <div className="text-sm text-muted mb-12">
+                Saindo: <strong>{pesoSaidaNum} kg</strong> → Restam: <strong>{pesoResto} kg</strong><br/>
+                A caixa original sera encerrada. A sobra receberá um novo EAN que você deve bipar agora.
+              </div>
+              <input
+                ref={eanInputRef}
+                type="text"
+                className="form-input form-input--scanner"
+                placeholder="Bipe o EAN da nova caixa (restante)..."
+                value={eanResto}
+                onChange={e => setEanResto(e.target.value)}
+                onKeyDown={handleEanKeyDown}
+                autoFocus
+              />
+              {eanResto && (
+                <div className="mt-8 text-success text-sm">✅ EAN capturado: <strong className="font-mono">{eanResto}</strong></div>
+              )}
+              {eanResto && (
+                <button className="btn btn--primary w-full mt-12" onClick={executarSaida} disabled={salvando}>
+                  {salvando ? <Loader size={16} className="animate-spin"/> : <Check size={16}/>} Confirmar Saída Parcial
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* STEP CONFIRMAR */}
+          {step === 'CONFIRMAR' && (
+            <>
+              <div className="form-grid form-grid--2 mb-16">
+                <div className="form-group">
+                  <label className="form-label">Peso da Saída (kg) *</label>
+                  <input
+                    id="sscc-peso-saida"
+                    type="number"
+                    step="0.001"
+                    min="0.001"
+                    max={pesoCaixaNum}
+                    className="form-input form-input--number"
+                    value={pesoSaida}
+                    onChange={e => setPesoSaida(e.target.value)}
+                  />
+                  {isParcial && (
+                    <div className="text-warning text-xs mt-4 flex items-center gap-4"><Scissors size={11}/> Saída parcial — restam <strong>{pesoResto} kg</strong></div>
+                  )}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Nº Pedido (opcional)</label>
+                  <input type="text" className="form-input" value={numPedido} onChange={e => setNumPedido(e.target.value)} placeholder="P-001..."/>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Cliente (opcional)</label>
+                  <input type="text" className="form-input" value={cliente} onChange={e => setCliente(e.target.value)}/>
+                </div>
+              </div>
+
+              {isParcial && (
+                <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }} className="text-sm text-warning">
+                  <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4}}/>
+                  Saída parcial detectada. Após confirmar, você precisará bipar o EAN da nova etiqueta da caixa restante ({pesoResto} kg).
+                </div>
+              )}
+
+              <div className="flex gap-8">
+                <button className="btn btn--ghost" onClick={reset}><X size={16}/> Cancelar</button>
+                <button className="btn btn--primary flex-1" onClick={handleConfirmar} disabled={salvando}>
+                  {salvando ? <Loader size={16} className="animate-spin"/> : <Check size={16}/>}
+                  {isParcial ? `Saída Parcial (${pesoSaidaNum} kg)` : `Confirmar Saída Total (${pesoSaidaNum} kg)`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL: Saida com abas
 // ────────────────────────────────────────────────────────────────────────────
 export function Saida() {
-  const [activeTab, setActiveTab] = useState('expedicao')
+  const [activeTab, setActiveTab] = useState('sscc')
 
   const tabs = [
-    { id: 'expedicao', label: 'Expedição', icon: <Truck size={16} />, color: 'var(--warning)' },
+    { id: 'sscc', label: 'Saída por Caixa (SSCC)', icon: <ScanBarcode size={16} />, color: 'var(--cyan)' },
+    { id: 'expedicao', label: 'Expedição (Antigo)', icon: <Truck size={16} />, color: 'var(--warning)' },
     { id: 'producao', label: 'Envio p/ Produção', icon: <Factory size={16} />, color: '#8b5cf6' },
     { id: 'retorno', label: 'Retorno de Produção', icon: <RotateCcw size={16} />, color: 'var(--success)' },
   ]
 
   return (
-    <div style={{ maxWidth: 860 }}>
+    <div style={{ maxWidth: 900 }}>
       <div className="page-header mb-24">
         <div>
           <h1 className="page-header__title flex items-center gap-12"><Truck size={28} /> Saída de Materiais</h1>
@@ -584,7 +811,7 @@ export function Saida() {
       </div>
 
       {/* TABS */}
-      <div className="flex gap-8 mb-24" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+      <div className="flex gap-8 mb-24" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 0, flexWrap: 'wrap' }}>
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}
             className={`btn flex items-center gap-8 ${activeTab === tab.id ? 'btn--primary' : 'btn--ghost'}`}
@@ -594,6 +821,7 @@ export function Saida() {
         ))}
       </div>
 
+      {activeTab === 'sscc' && <SaidaSSCC />}
       {activeTab === 'expedicao' && <SaidaExpedicao />}
       {activeTab === 'producao' && <EnvioProducao />}
       {activeTab === 'retorno' && <RetornoProducao />}

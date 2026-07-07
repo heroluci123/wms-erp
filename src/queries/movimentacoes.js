@@ -712,3 +712,108 @@ export async function deletarLog(id) {
     return { success: false, error: err.message }
   }
 }
+
+/**
+ * SAÍDA POR CAIXA SSCC — com suporte a desmembramento parcial
+ *
+ * Fluxo completo:
+ * - Saída TOTAL: marca a caixa como SAIDA, baixa do estoque_posicao, loga como DESPACHO
+ * - Saída PARCIAL: baixa o peso retirado, mas mantém o restante como nova caixa com
+ *   novo EAN (ean_caixa_resto) que o operador OBRIGATORIAMENTE escaneou.
+ *
+ * Parâmetros:
+ *   caixa_id        — ID da caixa em estoque_caixas
+ *   peso_saida_kg   — Quanto KG está saindo agora
+ *   num_pedido      — Opcional
+ *   cliente         — Opcional
+ *   operador_id / operador_nome
+ *   ean_caixa_resto — EAN da nova caixa (restante) — obrigatório se parcial
+ */
+export async function saidaPorCaixaSSCC({ caixa_id, peso_saida_kg, num_pedido, cliente, operador_id, operador_nome, ean_caixa_resto }) {
+  try {
+    // Buscar dados completos da caixa
+    const { rows } = await db.execute({
+      sql: `SELECT c.*, p.descricao as produto_descricao
+            FROM estoque_caixas c JOIN produtos p ON c.produto_id = p.id
+            WHERE c.id = ? AND c.status = 'DISPONIVEL'`,
+      args: [caixa_id]
+    })
+    if (rows.length === 0) return { success: false, error: 'Caixa não encontrada ou já foi retirada do estoque.' }
+    const caixa = rows[0]
+
+    const pesoCaixa = parseFloat(caixa.peso_kg)
+    const pesoSaida = parseFloat(peso_saida_kg)
+
+    if (pesoSaida <= 0) return { success: false, error: 'O peso de saída deve ser maior que zero.' }
+    if (pesoSaida > pesoCaixa + 0.001) return { success: false, error: `Peso de saída (${pesoSaida} kg) maior que o peso da caixa (${pesoCaixa} kg).` }
+
+    const isTotalExit = Math.abs(pesoSaida - pesoCaixa) < 0.05 // diferença menor que 50g = saída total
+    const endereco = caixa.endereco || 'REC'
+
+    const blocos = []
+
+    if (isTotalExit) {
+      // ── SAÍDA TOTAL ──────────────────────────────────────────────────────────
+      // 1. Marca a caixa como SAIDA
+      blocos.push({
+        sql: `UPDATE estoque_caixas SET status = 'SAIDA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        args: [caixa_id]
+      })
+      // 2. Baixa o saldo agregado
+      blocos.push({
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP
+              WHERE produto_id = ? AND endereco = ? AND IFNULL(validade,'') = IFNULL(?,'')`,
+        args: [pesoCaixa, caixa.produto_id, endereco, caixa.validade]
+      })
+      // 3. Loga como DESPACHO
+      blocos.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo, num_pedido, cliente)
+              VALUES (?, ?, 'EXPEDICAO', '', 1, ?, ?, ?, 'DESPACHO', ?, ?)`,
+        args: [caixa.produto_id, endereco, pesoCaixa, operador_id || null, operador_nome || 'Sistema', num_pedido || null, cliente || null]
+      })
+    } else {
+      // ── SAÍDA PARCIAL (DESMEMBRAMENTO) ───────────────────────────────────────
+      if (!ean_caixa_resto || ean_caixa_resto.trim() === '') {
+        return { success: false, error: 'EAN da caixa restante é obrigatório para saída parcial.' }
+      }
+      const pesoResto = parseFloat((pesoCaixa - pesoSaida).toFixed(3))
+
+      // 1. Marca a caixa original como SAIDA (consumida fisicamente)
+      blocos.push({
+        sql: `UPDATE estoque_caixas SET status = 'SAIDA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        args: [caixa_id]
+      })
+      // 2. Cria nova caixa com o restante e o novo EAN
+      blocos.push({
+        sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, palete_id, endereco, peso_kg, validade, status)
+              VALUES (?, ?, NULL, ?, ?, ?, 'DISPONIVEL')`,
+        args: [ean_caixa_resto.trim(), caixa.produto_id, endereco, pesoResto, caixa.validade || null]
+      })
+      // 3. Ajusta o saldo agregado: sai pesoSaida, não altera caixas (1 caixa virou 1 caixa menor)
+      blocos.push({
+        sql: `UPDATE estoque_posicao SET qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP
+              WHERE produto_id = ? AND endereco = ? AND IFNULL(validade,'') = IFNULL(?,'')`,
+        args: [pesoSaida, caixa.produto_id, endereco, caixa.validade]
+      })
+      // 4. Loga como DESPACHO parcial
+      blocos.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo, num_pedido, cliente)
+              VALUES (?, ?, 'EXPEDICAO', '', 1, ?, ?, ?, 'DESPACHO', ?, ?)`,
+        args: [caixa.produto_id, endereco, pesoSaida, operador_id || null, operador_nome || 'Sistema', num_pedido || null, cliente || null]
+      })
+    }
+
+    await db.batch(blocos, 'write')
+    // Limpa posições zeradas
+    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`)
+
+    return {
+      success: true,
+      tipo: isTotalExit ? 'TOTAL' : 'PARCIAL',
+      pesoSaida,
+      pesoResto: isTotalExit ? 0 : parseFloat((pesoCaixa - pesoSaida).toFixed(3))
+    }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}

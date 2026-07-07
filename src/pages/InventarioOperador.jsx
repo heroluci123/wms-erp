@@ -46,6 +46,10 @@ export function InventarioOperador() {
   const [produtoGenerico, setProdutoGenerico] = useState(null)
   const [eanGenerico, setEanGenerico] = useState('')
 
+  // SSCC: dados pré-preenchidos da caixa quando EAN já está cadastrado
+  const [ssccDadosCaixa, setSsccDadosCaixa] = useState(null)       // { peso_kg, validade, ean_caixa }
+  const [ssccModoConfirmacao, setSsccModoConfirmacao] = useState(false) // true = mostrar confirm, false = editar
+
   // 1. Carregar inventários
   const carregar = async () => {
     try {
@@ -113,6 +117,8 @@ export function InventarioOperador() {
     setQtdCaixas('')
     setQtdKg('')
     setQtdValidade('')
+    setSsccDadosCaixa(null)
+    setSsccModoConfirmacao(false)
     setStep(2)
     setTimeout(() => document.getElementById('inv-produto')?.focus(), 100)
   }
@@ -155,13 +161,11 @@ export function InventarioOperador() {
       if (!resultado) {
         const isCarga = inventarioAtivo?.tipo === 'CargaInicial'
         if (isCarga) {
-          // Carga Inicial: abre modal completo de criacao de produto
           const prods = await produtosQueries.listar()
           setProdutosSemEan(prods.filter(p => !p.ean))
           setModalCadastro({ ean: val.trim() })
           setFormCadastro({ descricao: '', tipo_produto: 'Materia Prima', status_curva: 'C', valor_unitario: '', grupo: '', produtoVinculado: null })
         } else {
-          // Ciclico / outros: abre modal rapido de vinculacao de EAN
           setEanDesconhecido(val.trim())
           setModalEanOpen(true)
         }
@@ -170,13 +174,37 @@ export function InventarioOperador() {
       
       const { produto, eanUnico } = resultado
 
-      // Se não for único (é EAN genérico) e NÃO for CargaInicial, 
-      // pedimos para converter em SSCC gerando código único
       if (!eanUnico && inventarioAtivo?.tipo !== 'CargaInicial') {
         setProdutoGenerico(produto)
         setEanGenerico(val)
         setModalSSCCOpen(true)
         return
+      }
+
+      let caixaSSCC = null
+      if (eanUnico && val.trim().length >= 14) {
+        try {
+          const { db } = await import('../lib/db.js')
+          const res = await db.execute({
+            sql: `SELECT peso_kg, validade, ean_caixa FROM estoque_caixas WHERE ean_caixa = ? AND status = 'DISPONIVEL' LIMIT 1`,
+            args: [val.trim()]
+          })
+          if (res.rows.length > 0) caixaSSCC = res.rows[0]
+        } catch (_) {}
+      }
+
+      setSsccDadosCaixa(caixaSSCC)
+
+      if (caixaSSCC) {
+        setQtdCaixas('1')
+        setQtdKg(String(caixaSSCC.peso_kg))
+        setQtdValidade(caixaSSCC.validade || '')
+        setSsccModoConfirmacao(true)
+      } else {
+        setQtdCaixas('1')
+        setQtdKg('')
+        setQtdValidade('')
+        setSsccModoConfirmacao(false)
       }
 
       setItemAtual({
@@ -191,7 +219,7 @@ export function InventarioOperador() {
         status_item: 'Pendente'
       })
       setStep(3)
-      setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
+      if (!caixaSSCC) setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
     } catch (err) {
       return toastError('Erro', err.message)
     }
@@ -675,7 +703,7 @@ export function InventarioOperador() {
         <div className={`mov-step ${step === 3 ? 'active' : ''}`} style={{ opacity: step >= 3 ? 1 : 0.5, display: step >= 3 ? 'block' : 'none' }}>
           <div className="mov-step__header">
             <div className="mov-step__number">3</div>
-            <div className="mov-step__label">Informe as Quantidades</div>
+            <div className="mov-step__label">{ssccModoConfirmacao ? 'Confirmar Caixa SSCC' : 'Informar as Quantidades'}</div>
           </div>
           {step === 3 && itemAtual && (
             <form onSubmit={submitContagem} className="flex-col gap-16">
@@ -703,38 +731,90 @@ export function InventarioOperador() {
                   <Settings size={16}/>
                 </button>
               </div>
-              
-              <div className="form-group">
-                <label className="form-label">Validade da Caixa (Física) *</label>
-                <input
-                  id="inv-validade"
-                  type="date"
-                  className="form-input"
-                  value={qtdValidade}
-                  onChange={e => setQtdValidade(e.target.value)}
-                  required
-                />
-              </div>
 
-              <div className="flex gap-16 items-end">
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Caixas Físicas *</label>
-                  <input id="inv-caixas" type="number" step="0.01" className="form-input form-input--number" value={qtdCaixas} onChange={e => setQtdCaixas(e.target.value)} required />
-                </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">KG Físicos *</label>
-                  <input type="number" step="0.01" className="form-input form-input--number" value={qtdKg} onChange={e => setQtdKg(e.target.value)} required />
-                </div>
-              </div>
-              
-              <div className="flex gap-8 mt-8">
-                <button type="submit" className="btn btn--primary btn--lg w-full">
-                  <CheckCircle2 size={18}/> {jaBipado ? 'Somar Quantidade' : 'Salvar Volume'}
-                </button>
-                <button type="button" className="btn btn--ghost" onClick={voltarParaProduto}>
-                  Cancelar
-                </button>
-              </div>
+              {/* ── MODO CONFIRMAÇÃO SSCC ── */}
+              {ssccModoConfirmacao && ssccDadosCaixa ? (
+                <>
+                  <div style={{ background: 'var(--bg-2)', border: '1px solid var(--primary)', borderRadius: 10, padding: '16px 20px' }}>
+                    <div className="text-xs text-muted font-bold mb-12 uppercase tracking-widest">✅ Dados da Caixa no Sistema</div>
+                    <div className="flex gap-24">
+                      <div>
+                        <div className="text-xs text-muted mb-2">Peso Cadastrado</div>
+                        <div className="font-bold text-cyan" style={{ fontSize: 22 }}>{ssccDadosCaixa.peso_kg} kg</div>
+                      </div>
+                      {ssccDadosCaixa.validade && (
+                        <div>
+                          <div className="text-xs text-muted mb-2">Validade</div>
+                          <div className="font-bold" style={{ fontSize: 18 }}>
+                            {(() => { try { return new Date(ssccDadosCaixa.validade + 'T00:00:00').toLocaleDateString('pt-BR') } catch(_) { return ssccDadosCaixa.validade } })()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-sm font-bold mt-16 mb-8">O peso e validade físicos estão corretos?</div>
+                    <div className="flex gap-8">
+                      <button
+                        type="submit"
+                        className="btn btn--primary flex-1"
+                        style={{ background: 'var(--success)', borderColor: 'var(--success)' }}
+                      >
+                        <CheckCircle2 size={16}/> SIM, está correto
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}
+                        onClick={() => setSsccModoConfirmacao(false)}
+                      >
+                        NÃO, editar
+                      </button>
+                    </div>
+                  </div>
+                  <button type="button" className="btn btn--ghost text-muted" onClick={voltarParaProduto} style={{ marginTop: 8 }}>Cancelar</button>
+                </>
+              ) : (
+                /* ── MODO EDIÇÃO (normal ou após clicar NÃO) ── */
+                <>
+                  {ssccDadosCaixa && !ssccModoConfirmacao && (
+                    <div style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: '8px 12px', marginBottom: 4 }} className="text-sm text-warning">
+                      Ajuste os valores corretos da caixa física:
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label className="form-label">Validade da Caixa (Física) *</label>
+                    <input
+                      id="inv-validade"
+                      type="date"
+                      className="form-input"
+                      value={qtdValidade}
+                      onChange={e => setQtdValidade(e.target.value)}
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="flex gap-16 items-end">
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Caixas Físicas *</label>
+                      <input id="inv-caixas" type="number" step="0.01" className="form-input form-input--number" value={qtdCaixas} onChange={e => setQtdCaixas(e.target.value)} required />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">KG Físicos *</label>
+                      <input type="number" step="0.01" className="form-input form-input--number" value={qtdKg} onChange={e => setQtdKg(e.target.value)} required />
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-8 mt-8">
+                    <button type="submit" className="btn btn--primary btn--lg w-full">
+                      <CheckCircle2 size={18}/> {jaBipado ? 'Somar Quantidade' : 'Salvar Volume'}
+                    </button>
+                    <button type="button" className="btn btn--ghost" onClick={voltarParaProduto}>
+                      Cancelar
+                    </button>
+                  </div>
+                </>
+              )}
             </form>
           )}
         </div>
