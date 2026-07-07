@@ -73,7 +73,11 @@ export async function buscarPorCodigo(codigo) {
   if (regrasRes.rows.length > 0) return regrasRes.rows[0]
 
   // 3. Extração Inteligente Legada (últimos 6 dígitos)
-  if (codigoStr.length >= 8) {
+  // ATENÇÃO: Só aplica para EANs curtos (< 14 dígitos).
+  // EANs longos (≥ 14 dígitos) são SSCCs/GTINs únicos por caixa e NUNCA devem ser
+  // resolvidos por sufixo — isso causaria correspondências erradas (ex: sufixo 6115
+  // de um EAN de Contra File acertando CARVÃO IPÊ 7KG que tem código 6115).
+  if (codigoStr.length >= 8 && codigoStr.length < 14) {
     const ultimos6 = codigoStr.slice(-6)
     const ultimos6Norm = ultimos6.replace(/^0+/, '') || ultimos6
     
@@ -119,7 +123,9 @@ export async function buscarPorCodigoComInfo(codigo) {
   if (regrasRes.rows.length > 0) return { produto: regrasRes.rows[0], eanUnico: false }
 
   // 3. Extração legada (últimos 6 dígitos) = genérico
-  if (codigoStr.length >= 8) {
+  // ATENÇÃO: Bloqueado para EANs longos (≥ 14 dígitos) — SSCCs/GTINs de caixas são
+  // únicos e o sufixo pode coincidir com o código de um produto completamente diferente.
+  if (codigoStr.length >= 8 && codigoStr.length < 14) {
     const ultimos6 = codigoStr.slice(-6)
     const ultimos6Norm = ultimos6.replace(/^0+/, '') || ultimos6
     const resExtraido = await db.execute({
