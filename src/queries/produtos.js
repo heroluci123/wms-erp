@@ -91,6 +91,47 @@ export async function buscarPorCodigo(codigo) {
   return undefined
 }
 
+/**
+ * Igual ao buscarPorCodigo mas retorna também como o produto foi encontrado:
+ * - eanUnico: true = o codigo bipado é único dessa caixa (match direto no EAN/codigo do produto)
+ * - eanUnico: false = foi encontrado via regra genérica (CONTEM/EXATO via produtos_eans)
+ *   Neste caso, o EAN bipado é genérico e NÃO deve ser usado como chave única de caixa.
+ */
+export async function buscarPorCodigoComInfo(codigo) {
+  const codigoStr = String(codigo).trim()
+  if (!codigoStr) return undefined
+
+  const codigoNorm = codigoStr.replace(/^0+/, '') || codigoStr
+  const codigoExato = codigoStr
+
+  // 1. Match direto no campo codigo ou ean do produto = EAN único
+  const res = await db.execute({
+    sql: `SELECT id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo FROM produtos WHERE codigo = ? OR ean = ? OR codigo = ? OR ean = ?`,
+    args: [codigoNorm, codigoExato, codigoExato, codigoNorm]
+  })
+  if (res.rows.length > 0) return { produto: res.rows[0], eanUnico: true }
+
+  // 2. Match via regra (CONTEM ou EXATO em produtos_eans) = EAN genérico
+  const regrasRes = await db.execute({
+    sql: `SELECT p.* FROM produtos_eans pe JOIN produtos p ON pe.produto_id = p.id WHERE pe.codigo_barras = ? OR (pe.tipo_regra = 'CONTEM' AND ? LIKE '%' || pe.codigo_barras) ORDER BY pe.tipo_regra DESC LIMIT 1`,
+    args: [codigoExato, codigoExato]
+  })
+  if (regrasRes.rows.length > 0) return { produto: regrasRes.rows[0], eanUnico: false }
+
+  // 3. Extração legada (últimos 6 dígitos) = genérico
+  if (codigoStr.length >= 8) {
+    const ultimos6 = codigoStr.slice(-6)
+    const ultimos6Norm = ultimos6.replace(/^0+/, '') || ultimos6
+    const resExtraido = await db.execute({
+      sql: `SELECT id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo FROM produtos WHERE codigo = ? OR ean = ? OR codigo = ? OR ean = ?`,
+      args: [ultimos6, ultimos6, ultimos6Norm, ultimos6Norm]
+    })
+    if (resExtraido.rows.length > 0) return { produto: resExtraido.rows[0], eanUnico: false }
+  }
+
+  return undefined
+}
+
 export async function salvarRegraEan(produto_id, codigo_barras, tipo_regra = 'EXATO') {
   try {
     await db.execute({

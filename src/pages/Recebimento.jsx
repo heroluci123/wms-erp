@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { UploadCloud, Check, History, Download, Trash2, Package, Layers, Plus, X } from 'lucide-react'
+import { UploadCloud, Check, History, Download, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
@@ -20,6 +20,8 @@ export function Recebimento() {
   
   // Formulário de Caixa SSCC
   const [eanBipado, setEanBipado] = useState('')
+  const [eanCaixaReal, setEanCaixaReal] = useState('') // EAN que vai ser salvo (pode ser gerado internamente)
+  const [eanEhUnico, setEanEhUnico] = useState(true) // false = EAN genérico, gerou código interno
   const [produtoDetectado, setProdutoDetectado] = useState(null)
   const [boxData, setBoxData] = useState({ peso_kg: '', validade: '' })
   
@@ -113,11 +115,21 @@ export function Recebimento() {
       setProdutoDetectado(null)
       
       try {
-        // Verifica se é EAN Exato ou regra CONTEM
-        const p = await produtosQueries.buscarPorCodigo(val)
-        if (p) {
-          setProdutoDetectado(p)
-          toastSuccess('Produto Reconhecido', p.descricao)
+        const resultado = await produtosQueries.buscarPorCodigoComInfo(val)
+        if (resultado) {
+          const { produto, eanUnico } = resultado
+          setProdutoDetectado(produto)
+          setEanEhUnico(eanUnico)
+          if (eanUnico) {
+            // EAN real único: usa o próprio EAN bipado como chave da caixa
+            setEanCaixaReal(val)
+            toastSuccess('Caixa SSCC Identificada', produto.descricao)
+          } else {
+            // EAN genérico: gera um código interno único para essa caixa
+            const codigoInterno = `INT-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
+            setEanCaixaReal(codigoInterno)
+            toastWarning('EAN Genérico', `${produto.descricao} — informe peso e validade únicos desta caixa.`)
+          }
           setTimeout(() => document.getElementById('box-peso')?.focus(), 100)
         } else {
           setEanDesconhecido(val)
@@ -137,7 +149,7 @@ export function Recebimento() {
 
     try {
       const res = await movimentacoesQueries.receberCaixaSerializada({
-        ean_caixa: eanBipado,
+        ean_caixa: eanCaixaReal, // usa o código correto (real ou gerado internamente)
         produto_id: produtoDetectado.id,
         palete_id: paleteAtivo.id,
         peso_kg: parseFloat(boxData.peso_kg),
@@ -149,8 +161,10 @@ export function Recebimento() {
       if (res.success) {
         toastSuccess('Caixa Adicionada', `${produtoDetectado.descricao} adicionado ao ${paleteAtivo.codigo}.`)
         setEanBipado('')
+        setEanCaixaReal('')
+        setEanEhUnico(true)
         setProdutoDetectado(null)
-        setBoxData({ peso_kg: '', validade: boxData.validade }) // Mantém a validade para facilitar a próxima caixa
+        setBoxData({ peso_kg: '', validade: boxData.validade })
         selecionarPalete(paleteAtivo)
         carregarPaletesAbertos()
         codigoRef.current?.focus()
@@ -286,10 +300,17 @@ export function Recebimento() {
               </div>
 
               {produtoDetectado && (
-                <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 10, border: '1px solid var(--primary)', marginBottom: 16 }}>
-                  <div className="text-xs text-primary font-bold mb-4 uppercase">Produto Reconhecido</div>
+                <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
+                  <div className="text-xs font-bold mb-4 uppercase" style={{ color: eanEhUnico ? 'var(--primary)' : 'var(--warning)' }}>
+                    {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico — Código único gerado internamente'}
+                  </div>
                   <div className="font-bold" style={{ fontSize: 16 }}>{produtoDetectado.descricao}</div>
-                  <div className="text-sm text-muted mb-12">Código: {produtoDetectado.codigo || '-'}</div>
+                  <div className="text-sm text-muted mb-4">Código: {produtoDetectado.codigo || '-'}</div>
+                  {!eanEhUnico && (
+                    <div style={{ fontSize: 11, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '6px 10px', color: 'var(--warning)', marginBottom: 8 }}>
+                      🏷️ EAN bipado ({eanBipado}) é genérico — esta caixa receberá o código interno: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
+                    </div>
+                  )}
 
                   <div className="form-grid form-grid--2">
                     <div className="form-group">
@@ -341,9 +362,14 @@ export function Recebimento() {
         isOpen={modalEanOpen} 
         onClose={() => { setModalEanOpen(false); setTimeout(() => codigoRef.current?.focus(), 100); }} 
         codigoDesconhecido={eanDesconhecido} 
-        onRegraSalva={(p) => { 
-          setProdutoDetectado(p); 
-          setTimeout(() => document.getElementById('box-peso')?.focus(), 100); 
+        onRegraSalva={(p) => {
+          // EAN desconhecido foi vinculado: verifica se era genérico
+          // Como veio do modal, a regra foi salva como CONTEM/EXATO
+          // Usamos o EAN original como chave da caixa pois é o primeiro do lote
+          setProdutoDetectado(p)
+          setEanCaixaReal(eanDesconhecido)
+          setEanEhUnico(true) // Primeira vez que esse EAN é cadastrado = trata como único
+          setTimeout(() => document.getElementById('box-peso')?.focus(), 100)
         }} 
       />
     </div>
