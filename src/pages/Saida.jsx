@@ -28,6 +28,7 @@ function MontarRomaneio({ onRomaneioFechado }) {
   const [eanResto, setEanResto] = useState('')
   const [stepBipagem, setStepBipagem] = useState('SCAN') // SCAN | CONFIRMAR | PARCIAL_EAN
   const [salvandoCaixa, setSalvandoCaixa] = useState(false)
+  const eanRestoRef = useRef(null)
 
   const resetBipagem = () => {
     setEanBipado('')
@@ -41,14 +42,11 @@ function MontarRomaneio({ onRomaneioFechado }) {
 
   const { inputRef: eanRef, handleKeyDown: handleEanKeyDown } = useBarcodeScanner({
     onScan: async (val) => {
-      if (stepBipagem === 'PARCIAL_EAN') {
-        setEanResto(val)
-        return
-      }
       setEanBipado(val)
       setCaixaEncontrada(null)
       setPesoSaida('')
       setEanResto('')
+      setStepBipagem('SCAN')
 
       try {
         const res = await movimentacoesQueries.identificarCodigoMovimentacao(val.toUpperCase().trim())
@@ -230,13 +228,15 @@ function MontarRomaneio({ onRomaneioFechado }) {
                   A sobra precisará de uma etiqueta nova.
                 </div>
                 <input
-                  ref={eanRef}
+                  ref={eanRestoRef}
                   type="text"
                   className="form-input form-input--scanner"
                   placeholder="Bipe a etiqueta da caixa restante..."
                   value={eanResto}
                   onChange={e => setEanResto(e.target.value)}
-                  onKeyDown={handleEanKeyDown}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && eanResto.trim()) handleConfirmarCaixa()
+                  }}
                   autoFocus
                 />
                 {eanResto && (

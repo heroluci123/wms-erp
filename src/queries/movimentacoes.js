@@ -202,13 +202,15 @@ export async function identificarCodigoMovimentacao(codigo) {
   }
 
   // 2. Tentar como Caixa SSCC Específica
+  // Tenta EAN exato E sem zeros à esquerda (coletor pode emitir 0000072245006840 em vez de 72245006840)
+  const codigoSemZeros = codigo.replace(/^0+/, '') || codigo;
   const resCaixa = await db.execute({ 
     sql: `SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo, pal.codigo as palete_codigo 
           FROM estoque_caixas c 
           JOIN produtos p ON c.produto_id = p.id
           LEFT JOIN paletes pal ON c.palete_id = pal.id
-          WHERE c.ean_caixa = ? AND c.status = 'DISPONIVEL'`, 
-    args: [codigo] 
+          WHERE (c.ean_caixa = ? OR c.ean_caixa = ?) AND c.status = 'DISPONIVEL'`, 
+    args: [codigo, codigoSemZeros] 
   });
   
   if (resCaixa.rows.length > 0) {
@@ -967,4 +969,43 @@ export async function saidaPorCaixaSSCC({ caixa_id, peso_saida_kg, num_pedido, c
   } catch (err) {
     return { success: false, error: err.message }
   }
+}
+
+/**
+ * Histórico de Transferências Internas
+ * Busca registros do log filtrando por tipo TRANSFERENCIA, com opções de filtro por endereço ou produto
+ */
+export async function listarHistoricoTransferencias({ filtroEndereco = '', filtroProduto = '', dataInicio = '', dataFim = '', limit = 200 } = {}) {
+  let where = `WHERE ml.tipo = 'TRANSFERENCIA'`
+  const args = []
+
+  if (filtroEndereco && filtroEndereco.trim()) {
+    where += ` AND (ml.endereco_origem LIKE ? OR ml.endereco_destino LIKE ?)`
+    args.push(`%${filtroEndereco.trim()}%`, `%${filtroEndereco.trim()}%`)
+  }
+  if (filtroProduto && filtroProduto.trim()) {
+    where += ` AND p.descricao LIKE ?`
+    args.push(`%${filtroProduto.trim()}%`)
+  }
+  if (dataInicio) {
+    where += ` AND DATE(ml.created_at) >= ?`
+    args.push(dataInicio)
+  }
+  if (dataFim) {
+    where += ` AND DATE(ml.created_at) <= ?`
+    args.push(dataFim)
+  }
+
+  args.push(limit)
+
+  const res = await db.execute({
+    sql: `SELECT ml.*, p.descricao as produto_descricao, p.codigo as produto_codigo
+          FROM movimentacoes_log ml
+          LEFT JOIN produtos p ON p.id = ml.produto_id
+          ${where}
+          ORDER BY ml.created_at DESC
+          LIMIT ?`,
+    args
+  })
+  return res.rows
 }
