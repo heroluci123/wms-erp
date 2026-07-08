@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -81,6 +81,11 @@ function Sidebar() {
       {operador?.permissoes?.movimentacao && (
         <NavLink to="/movimentacao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ArrowRightLeft size={18} /> Movimentação Interna
+        </NavLink>
+      )}
+      {operador?.permissoes?.movimentacao && (
+        <NavLink to="/producao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <Factory size={18} /> Retorno de Produção
         </NavLink>
       )}
       {operador?.permissoes?.saida && (

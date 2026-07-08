@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Barcode, Search, CheckCircle, AlertTriangle, RefreshCw, Edit2, X, Check } from 'lucide-react'
+import { Barcode, Search, CheckCircle, AlertTriangle, RefreshCw, Edit2, X, Check, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { db } from '../lib/db.js'
+import * as movimentacoesQueries from '../queries/movimentacoes.js'
 
 // Busca todas as caixas com EAN interno (INT-...)
 async function listarCaixasComEanInt({ filtroEndereco = '', filtroProduto = '' } = {}) {
@@ -83,6 +84,24 @@ export function EanEditor() {
         toastError('Erro', res.error)
       }
     } catch (e) {
+      toastError('Erro', e.message)
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Deseja realmente apagar esta caixa gerada internamente e seu estoque (INT-)?")) return
+    setSalvando(true)
+    try {
+      const res = await movimentacoesQueries.removerCaixaSerializada(id, operador?.id, operador?.nome)
+      if (res.success) {
+        toastSuccess('Sucesso', 'Caixa e estoque removidos.')
+        await carregar()
+      } else {
+        toastError('Erro', res.error)
+      }
+    } catch(e) {
       toastError('Erro', e.message)
     } finally {
       setSalvando(false)
@@ -234,6 +253,14 @@ export function EanEditor() {
                       style={{ padding:'8px 12px', color:'var(--primary)' }}
                     >
                       <Edit2 size={15} />
+                    </button>
+                    <button
+                      className="btn btn--ghost btn--icon text-danger"
+                      onClick={() => handleDelete(cx.id)}
+                      title="Excluir Caixa INT"
+                      style={{ padding:'8px 12px' }}
+                    >
+                      <Trash2 size={15} />
                     </button>
                   </>
                 )}

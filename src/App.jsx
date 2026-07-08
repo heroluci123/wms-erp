@@ -13,6 +13,7 @@ import { Inventario } from './pages/Inventario'
 import { InventarioOperador } from './pages/InventarioOperador'
 import { InventarioConciliacao } from './pages/InventarioConciliacao'
 import { Produtos } from './pages/Produtos'
+import { Producao } from './pages/Producao'
 import { Saida } from './pages/Saida'
 import { Locais } from './pages/Locais'
 import { Operadores } from './pages/Operadores'
@@ -37,6 +38,7 @@ function App() {
           <Route path="estoque" element={<EstoqueEnderecos />} />
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="movimentacao" element={<Movimentacao />} />
+          <Route path="producao" element={<Producao />} />
           <Route path="saida" element={<Saida />} />
           <Route path="expedicao" element={<Expedicao />} />
           <Route path="inventario" element={<Inventario />} />

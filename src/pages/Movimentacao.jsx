@@ -8,7 +8,6 @@ import * as produtosQueries from '../queries/produtos.js';
 import * as estoqueQueries from '../queries/estoque.js';
 import * as movimentacoesQueries from '../queries/movimentacoes.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
-import { ConverterSSCCModal } from '../components/shared/ConverterSSCCModal.jsx'
 
 export function Movimentacao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -30,14 +29,9 @@ export function Movimentacao() {
   const [qtdKg, setQtdKg] = useState('')
   const [sugestoes, setSugestoes] = useState([])
 
-  // Modal EAN (completamente desconhecido)
+  // Modal Cadastro EAN
   const [modalEanOpen, setModalEanOpen] = useState(false)
   const [eanDesconhecido, setEanDesconhecido] = useState('')
-
-  // Modal Converter SSCC (EAN generico conhecido)
-  const [modalSSCCOpen, setModalSSCCOpen] = useState(false)
-  const [produtoGenerico, setProdutoGenerico] = useState(null)
-  const [eanGenerico, setEanGenerico] = useState('')
 
   const [destino, setDestino] = useState('')
 
@@ -156,15 +150,7 @@ export function Movimentacao() {
         return
       }
 
-      const { produto, eanUnico } = resultado
-
-      if (!eanUnico) {
-        // EAN genérico (legado): pede para converter para SSCC unico
-        setProdutoGenerico(produto)
-        setEanGenerico(val)
-        setModalSSCCOpen(true)
-        return
-      }
+      const { produto } = resultado
 
       // EAN unico: continua fluxo normal
       const saldos = await estoqueQueries.buscarPorEnderecoProduto(enderecoOrigem, produto.id)
@@ -563,23 +549,6 @@ export function Movimentacao() {
             setSaldoOpcoes(saldos)
             setStep('ANTIGO_SELECIONAR_LOTE')
           }
-        }}
-      />
-
-      <ConverterSSCCModal
-        isOpen={modalSSCCOpen}
-        onClose={() => { setModalSSCCOpen(false); setTimeout(() => document.getElementById('input-universal')?.focus(), 100) }}
-        produto={produtoGenerico}
-        eanGenerico={eanGenerico}
-        onConvertido={async ({ ean_gerado }) => {
-          toastSuccess('Caixa SSCC Adicionada para Movimentação', produtoGenerico.descricao)
-          setEntidadeTipo('CAIXAS')
-          setCaixasSelecionadas(prev => [{
-            id: 'temp-' + ean_gerado,
-            ean_caixa: ean_gerado,
-            produto_descricao: produtoGenerico.descricao,
-            peso_kg: 0,
-          }, ...prev])
         }}
       />
     </div>

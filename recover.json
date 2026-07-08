@@ -1,0 +1,137 @@
+[
+  {
+    "step": 6155,
+    "args": {
+      "Description": "Add OP selection logic to Movimentacao.jsx",
+      "Instruction": "Import producaoQueries, add OP state, handle PRODUCAO destination, update UI for OP selection.",
+      "ReplacementChunks": [
+        {
+          "AllowMultiple": false,
+          "EndLine": 10,
+          "ReplacementContent": "import * as movimentacoesQueries from '../queries/movimentacoes.js';\nimport * as producaoQueries from '../queries/producao.js';\nimport { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'",
+          "StartLine": 9,
+          "TargetContent": "import * as movimentacoesQueries from '../queries/movimentacoes.js';\nimport { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 24,
+          "ReplacementContent": "  const [caixasSelecionadas, setCaixasSelecionadas] = useState([])\n  const [enderecoOrigem, setEnderecoOrigem] = useState(null) // Para o modo antigo\n  \n  // Estado OP (Produção)\n  const [opsAbertas, setOpsAbertas] = useState([])\n  const [opSelecionada, setOpSelecionada] = useState(null)\n  const [nomeNovaOp, setNomeNovaOp] = useState('')",
+          "StartLine": 22,
+          "TargetContent": "  const [caixasSelecionadas, setCaixasSelecionadas] = useState([])\n  const [enderecoOrigem, setEnderecoOrigem] = useState(null) // Para o modo antigo"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 69,
+          "ReplacementContent": "    setDestino('')\n    setSugestoes([])\n    setOpSelecionada(null)\n    setNomeNovaOp('')\n    setTimeout(() => document.getElementById('input-universal')?.focus(), 100)",
+          "StartLine": 66,
+          "TargetContent": "    setDestino('')\n    setSugestoes([])\n    setTimeout(() => document.getElementById('input-universal')?.focus(), 100)"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 147,
+          "ReplacementContent": "  const processarScanDestino = async (val) => {\n    const dst = val.toUpperCase().trim()\n    if (dst === 'REC' || dst === 'EXPEDICAO') {\n      return toastError('Destino Proibido', `Não é permitido transferir para \"${dst}\" pela Movimentação. Use a tela de Recebimento ou Saída.`)\n    }\n    \n    if (dst === 'PRODUCAO') {\n      if (entidadeTipo === 'ANTIGO') return toastError('Proibido', 'Use CAIXAS reais para enviar à produção.')\n      const ops = await producaoQueries.listarOPs('ABERTA')\n      setOpsAbertas(ops)\n      setDestino(dst)\n      setStep('SELECIONAR_OP')\n      return\n    }\n\n    const localDst = await locaisQueries.buscarPorEndereco(dst)\n    if (!localDst) {\n      return toastError('Endereço Inválido', `O endereço \"${dst}\" não está cadastrado.`)\n    }\n    setDestino(dst)\n  }",
+          "StartLine": 137,
+          "TargetContent": "  const processarScanDestino = async (val) => {\n    const dst = val.toUpperCase().trim()\n    if (dst === 'REC' || dst === 'EXPEDICAO') {\n      return toastError('Destino Proibido', `Não é permitido transferir para \"${dst}\" pela Movimentação. Use a tela de Recebimento ou Saída.`)\n    }\n    const localDst = await locaisQueries.buscarPorEndereco(dst)\n    if (!localDst) {\n      return toastError('Endereço Inválido', `O endereço \"${dst}\" não está cadastrado.`)\n    }\n    setDestino(dst)\n  }"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 214,
+          "ReplacementContent": "    try {\n      if (destino === 'PRODUCAO') {\n        let opId = opSelecionada?.id\n        if (!opId) {\n          if (!nomeNovaOp) return toastWarning('Aviso', 'Informe um nome para criar a Ordem de Produção ou selecione uma existente.')\n          const resOP = await producaoQueries.criarOP(nomeNovaOp, operador.id, operador.nome)\n          if (!resOP.success) return toastError('Erro', resOP.error)\n          opId = resOP.op.id\n        }\n        \n        let caixasParaAlocar = entidadeTipo === 'PALETE' ? paleteSelecionado.caixas : caixasSelecionadas\n        const res = await producaoQueries.alocarInsumos(opId, caixasParaAlocar, operador.id, operador.nome)\n        if (res.success) {\n          toastSuccess('Sucesso', 'Materiais enviados para produção.')\n          resetAll()\n        } else {\n          toastError('Erro', res.error)\n        }\n        return\n      }\n\n      let res;\n      if (entidadeTipo === 'PALETE') {\n        res = await movimentacoesQueries.transferirPalete({\n          palete_id: paleteSelecionado.id,",
+          "StartLine": 205,
+          "TargetContent": "    try {\n      let res;\n      if (entidadeTipo === 'PALETE') {\n        res = await movimentacoesQueries.transferirPalete({\n          palete_id: paleteSelecionado.id,"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 438,
+          "ReplacementContent": "          {/* STEP DESTINO E CONFIRMAÇÃO */}\n          {entidadeTipo && (step === 'DESTINO' || step === 'SELECIONAR_OP' || destino) && (\n            <div className={`mov-step active`}>\n              <div className=\"mov-step__header\">\n                <div className=\"mov-step__number\">{entidadeTipo === 'ANTIGO' ? 4 : 2}</div>\n                <div className=\"mov-step__label\">Endereço Destino</div>\n              </div>",
+          "StartLine": 432,
+          "TargetContent": "          {/* STEP DESTINO E CONFIRMAÇÃO */}\n          {entidadeTipo && (step === 'DESTINO' || destino) && (\n            <div className={`mov-step active`}>\n              <div className=\"mov-step__header\">\n                <div className=\"mov-step__number\">{entidadeTipo === 'ANTIGO' ? 4 : 2}</div>\n                <div className=\"mov-step__label\">Endereço Destino</div>\n              </div>"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 463,
+          "ReplacementContent": "              {!destino ? (\n                <input \n                  id=\"input-destino\"\n                  className=\"form-input form-input--scanner\" \n                  placeholder=\"Bipar endereço de destino (ou digite PRODUCAO)...\" \n                  onKeyDown={(e) => e.key === 'Enter' && processarScanDestino(e.target.value)} \n                  autoFocus \n                />\n              ) : step === 'SELECIONAR_OP' ? (\n                <div style={{ padding: 16, background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--border)' }}>\n                  <h3 className=\"mb-16 text-cyan font-bold flex items-center gap-8\"><Layers size={20}/> Vinculando à Produção</h3>\n                  \n                  <div className=\"form-group mb-16\">\n                    <label className=\"form-label\">Nome para Nova Ordem de Produção</label>\n                    <input className=\"form-input\" placeholder=\"ex: Blend da Maria\" value={nomeNovaOp} onChange={e => {setNomeNovaOp(e.target.value); setOpSelecionada(null)}} />\n                  </div>\n\n                  {opsAbertas.length > 0 && (\n                    <div className=\"form-group mb-16\">\n                      <label className=\"form-label text-muted\">Ou selecione uma OP já aberta:</label>\n                      <div className=\"flex-col gap-8\" style={{ maxHeight: 150, overflowY: 'auto' }}>\n                        {opsAbertas.map(op => (\n                          <div \n                            key={op.id} \n                            onClick={() => { setOpSelecionada(op); setNomeNovaOp('') }} \n                            style={{ padding: 12, borderRadius: 8, border: opSelecionada?.id === op.id ? '2px solid var(--primary)' : '1px solid var(--border)', cursor: 'pointer', background: 'var(--bg-1)' }}\n                          >\n                            <span className=\"font-bold\">{op.codigo}</span> - {op.nome}\n                          </div>\n                        ))}\n                      </div>\n                    </div>\n                  )}\n\n                  <div className=\"flex gap-16 mt-24\">\n                    <button className=\"btn btn--ghost\" onClick={() => setDestino('')}>Cancelar</button>\n                    <button className=\"btn btn--primary\" style={{ flex: 1 }} onClick={confirmarMovimentacao}>\n                      ENVIAR PARA PRODUÇÃO <Check size={18}/>\n                    </button>\n                  </div>\n                </div>\n              ) : (\n                <div style={{ background: 'var(--success-muted)', border: '1px solid var(--success)', borderRadius: 8, padding: 24, textAlign: 'center' }}>\n                  <div className=\"text-muted text-sm uppercase font-bold mb-8\">Movimentar para</div>\n                  <div className=\"font-mono text-success flex items-center justify-center gap-12\" style={{ fontSize: 24, fontWeight: 700, marginBottom: 24 }}>\n                    <MapPin size={28} /> {destino}\n                  </div>\n                  \n                  <div className=\"flex gap-16 justify-center\">\n                    <button className=\"btn btn--ghost btn--lg\" onClick={() => setDestino('')}>Alterar Destino</button>\n                    <button className=\"btn btn--primary btn--lg\" onClick={confirmarMovimentacao} style={{ paddingLeft: 40, paddingRight: 40 }}>\n                      <Check size={20} /> CONFIRMAR MOVIMENTAÇÃO\n                    </button>\n                  </div>\n                </div>\n              )}\n            </div>\n          )}",
+          "StartLine": 440,
+          "TargetContent": "              {!destino ? (\n                <input \n                  id=\"input-destino\"\n                  className=\"form-input form-input--scanner\" \n                  placeholder=\"Bipar endereço de destino...\" \n                  onKeyDown={(e) => e.key === 'Enter' && processarScanDestino(e.target.value)} \n                  autoFocus \n                />\n              ) : (\n                <div style={{ background: 'var(--success-muted)', border: '1px solid var(--success)', borderRadius: 8, padding: 24, textAlign: 'center' }}>\n                  <div className=\"text-muted text-sm uppercase font-bold mb-8\">Movimentar para</div>\n                  <div className=\"font-mono text-success flex items-center justify-center gap-12\" style={{ fontSize: 24, fontWeight: 700, marginBottom: 24 }}>\n                    <MapPin size={28} /> {destino}\n                  </div>\n                  \n                  <div className=\"flex gap-16 justify-center\">\n                    <button className=\"btn btn--ghost btn--lg\" onClick={() => setDestino('')}>Alterar Destino</button>\n                    <button className=\"btn btn--primary btn--lg\" onClick={confirmarMovimentacao} style={{ paddingLeft: 40, paddingRight: 40 }}>\n                      <Check size={20} /> CONFIRMAR MOVIMENTAÇÃO\n                    </button>\n                  </div>\n                </div>\n              )}\n            </div>\n          )}"
+        }
+      ],
+      "TargetFile": "C:\\Users\\lucia\\.gemini\\antigravity\\scratch\\wms-erp\\src\\pages\\Movimentacao.jsx",
+      "toolAction": "Update Movimentacao.jsx",
+      "toolSummary": "Update Movimentacao.jsx"
+    }
+  },
+  {
+    "step": 6287,
+    "args": {
+      "Description": "Fix Movimentacao to accept shorter EANs as valid boxes",
+      "Instruction": "Change length check from 14 to 4 to allow shorter EANs to be checked against estoque_caixas.",
+      "ReplacementChunks": [
+        {
+          "AllowMultiple": false,
+          "EndLine": 115,
+          "ReplacementContent": "    // 2. É uma caixa serializada (EAN de caixa longo ou curto se já estiver no estoque)?\n    if (val.trim().length >= 4 || val.trim().startsWith('INT-')) {\n      const res = await estoqueQueries.buscarCaixa(val.trim())\n      if (res && res.status === 'DISPONIVEL') {\n        if (entidadeTipo === 'PALETE') return toastWarning('Atenção', 'Você já selecionou um palete inteiro.')\n        if (caixasSelecionadas.find(c => c.id === res.id)) return toastWarning('Aviso', 'Esta caixa já foi bipada.')\n        setEntidadeTipo('CAIXAS')\n        setCaixasSelecionadas(prev => [res, ...prev])\n        return toastSuccess('Caixa SSCC Adicionada', res.produto_descricao)\n      }\n    }",
+          "StartLine": 105,
+          "TargetContent": "    // 2. É uma caixa serializada (EAN de caixa longo)?\n    if (val.trim().length >= 14 || val.trim().startsWith('INT-')) {\n      const res = await estoqueQueries.buscarCaixa(val.trim())\n      if (res && res.status === 'DISPONIVEL') {\n        if (entidadeTipo === 'PALETE') return toastWarning('Atenção', 'Você já selecionou um palete inteiro.')\n        if (caixasSelecionadas.find(c => c.id === res.id)) return toastWarning('Aviso', 'Esta caixa já foi bipada.')\n        setEntidadeTipo('CAIXAS')\n        setCaixasSelecionadas(prev => [res, ...prev])\n        return toastSuccess('Caixa SSCC Adicionada', res.produto_descricao)\n      }\n    }"
+        }
+      ],
+      "TargetFile": "C:\\Users\\lucia\\.gemini\\antigravity\\scratch\\wms-erp\\src\\pages\\Movimentacao.jsx",
+      "toolAction": "Update Movimentacao length check",
+      "toolSummary": "Fix Movimentacao length check"
+    }
+  },
+  {
+    "step": 6305,
+    "args": {
+      "Description": "Remove ConverterSSCCModal from Movimentacao.jsx",
+      "Instruction": "Remove imports, state, modal rendering and eanUnico check in processarScanProdutoAntigo",
+      "ReplacementChunks": [
+        {
+          "AllowMultiple": false,
+          "EndLine": 14,
+          "ReplacementContent": "import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'",
+          "StartLine": 11,
+          "TargetContent": "import { useBarcodeScanner } from '../hooks/useBarcodeScanner.js'\nimport { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'\nimport { ConverterSSCCModal } from '../components/shared/ConverterSSCCModal.jsx'"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 46,
+          "ReplacementContent": "  // Modal Cadastro EAN\n  const [modalEanOpen, setModalEanOpen] = useState(false)\n  const [eanDesconhecido, setEanDesconhecido] = useState('')",
+          "StartLine": 41,
+          "TargetContent": "  // Modal Cadastro EAN\n  const [modalEanOpen, setModalEanOpen] = useState(false)\n  const [eanDesconhecido, setEanDesconhecido] = useState('')\n  const [modalSSCCOpen, setModalSSCCOpen] = useState(false)\n  const [produtoGenerico, setProdutoGenerico] = useState(null)\n  const [eanGenerico, setEanGenerico] = useState('')"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 186,
+          "ReplacementContent": "      const { produto } = resultado\n\n      // EAN unico: continua fluxo normal",
+          "StartLine": 176,
+          "TargetContent": "      const { produto, eanUnico } = resultado\n\n      if (!eanUnico) {\n        // EAN genérico (legado): pede para converter para SSCC unico\n        setProdutoGenerico(produto)\n        setEanGenerico(val)\n        setModalSSCCOpen(true)\n        return\n      }\n\n      // EAN unico: continua fluxo normal"
+        },
+        {
+          "AllowMultiple": false,
+          "EndLine": 659,
+          "ReplacementContent": "      />\n    </div>\n  )\n}",
+          "StartLine": 639,
+          "TargetContent": "      />\n\n      <ConverterSSCCModal\n        isOpen={modalSSCCOpen}\n        onClose={() => { setModalSSCCOpen(false); setTimeout(() => document.getElementById('input-universal')?.focus(), 100) }}\n        produto={produtoGenerico}\n        eanGenerico={eanGenerico}\n        onConvertido={({ ean_gerado }) => {\n          // Após converter em SSCC, a caixa já foi criada no banco!\n          // Agora vamos forçar o fluxo como se o usuário tivesse bipado essa CAIXA\n          toastSuccess('Sucesso', 'Caixa serializada gerada.')\n          setEntidadeTipo(null) // reseta modo antigo\n          setProdutoAntigo(null)\n          \n          // Simula bip da caixa SSCC\n          setTimeout(() => {\n            const el = document.getElementById('input-universal')\n            if (el) {\n              el.value = ean_gerado\n              // disparamos o onKeyDown simulando Enter\n              el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))\n            }\n          }, 300)\n        }}\n      />\n    </div>\n  )\n}"
+        }
+      ],
+      "TargetFile": "C:\\Users\\lucia\\.gemini\\antigravity\\scratch\\wms-erp\\src\\pages\\Movimentacao.jsx",
+      "toolAction": "Remove ConverterSSCCModal from Movimentacao.jsx",
+      "toolSummary": "Remove ConverterSSCCModal"
+    }
+  },
+  {
+    "step": 6351,
+    "args": {
+      "AllowMultiple": false,
+      "Description": "Fix syntax error in Movimentacao.jsx",
+      "EndLine": 640,
+      "Instruction": "Remove the extra /> that is causing the syntax error.",
+      "ReplacementContent": "      />\n    </div>\n  )\n}",
+      "StartLine": 630,
+      "TargetContent": "          }\n        }}\n      />\n      />\n    </div>\n  )\n}",
+      "TargetFile": "C:\\Users\\lucia\\.gemini\\antigravity\\scratch\\wms-erp\\src\\pages\\Movimentacao.jsx",
+      "toolAction": "Fix Movimentacao.jsx syntax error",
+      "toolSummary": "Fix Movimentacao error"
+    }
+  }
+]

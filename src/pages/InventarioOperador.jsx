@@ -5,7 +5,6 @@ import * as inventariosQueries from '../queries/inventarios.js';
 import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
-import { ConverterSSCCModal } from '../components/shared/ConverterSSCCModal.jsx'
 
 export function InventarioOperador() {
   const { toastSuccess, toastError, toastWarning } = useAppStore()
@@ -40,11 +39,6 @@ export function InventarioOperador() {
   // Modal de vinculação rápida de EAN (todos os tipos de inventário)
   const [modalEanOpen, setModalEanOpen] = useState(false)
   const [eanDesconhecido, setEanDesconhecido] = useState('')
-
-  // Modal Converter SSCC (EAN genérico conhecido)
-  const [modalSSCCOpen, setModalSSCCOpen] = useState(false)
-  const [produtoGenerico, setProdutoGenerico] = useState(null)
-  const [eanGenerico, setEanGenerico] = useState('')
 
   // SSCC: dados pré-preenchidos da caixa quando EAN já está cadastrado
   const [ssccDadosCaixa, setSsccDadosCaixa] = useState(null)       // { peso_kg, validade, ean_caixa }
@@ -174,15 +168,12 @@ export function InventarioOperador() {
       
       const { produto, eanUnico } = resultado
 
-      if (!eanUnico && inventarioAtivo?.tipo !== 'CargaInicial') {
-        setProdutoGenerico(produto)
-        setEanGenerico(val)
-        setModalSSCCOpen(true)
-        return
+      if (val.trim() === produto.codigo) {
+        return toastError('Código Inválido', 'Não é permitido usar o código interno do produto no inventário. Bipe a etiqueta da caixa!')
       }
 
       let caixaSSCC = null
-      if (eanUnico && val.trim().length >= 14) {
+      if (val.trim().length >= 8) {
         try {
           const { db } = await import('../lib/db.js')
           const res = await db.execute({
@@ -211,7 +202,7 @@ export function InventarioOperador() {
         id: null,
         produto_id: produto.id,
         endereco: enderecoAtual,
-        codigo: produto.codigo || produto.ean,
+        codigo: val.trim(),
         descricao: produto.descricao,
         status_curva: produto.status_curva,
         tipo_produto: produto.tipo_produto,
@@ -329,7 +320,7 @@ export function InventarioOperador() {
     const valNorm = val ? val.toString().substring(0, 10) : null
     const itemMatch = itensDoEndereco.find(i => {
       const ivNorm = i.validade ? i.validade.toString().substring(0, 10) : (i.validade_contada ? i.validade_contada.toString().substring(0, 10) : null)
-      return i.codigo === itemAtual.codigo && ivNorm === valNorm
+      return i.produto_id === itemAtual.produto_id && ivNorm === valNorm
     })
     
     let item_id
@@ -841,35 +832,6 @@ export function InventarioOperador() {
           })
           setStep(3)
           setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
-        }}
-      />
-
-      {/* Modal para converter EAN genérico em SSCC */}
-      <ConverterSSCCModal
-        isOpen={modalSSCCOpen}
-        onClose={() => { setModalSSCCOpen(false); setTimeout(() => document.getElementById('inv-produto')?.focus(), 100) }}
-        produto={produtoGenerico}
-        eanGenerico={eanGenerico}
-        onConvertido={async ({ ean_gerado, peso_kg, validade }) => {
-          // A caixa já foi salva no estoque_caixas na doca (sem palete) pelo modal.
-          // Aqui no cíclico, o ideal é que ele conte essa caixa no endereço atual.
-          // Podemos mockar a contagem local pra ele, ou melhor: se já foi criado o registro
-          // da caixa, nós apenas registramos que contamos ela.
-          toastSuccess('Inventariado', `Caixa SSCC convertida e bipada.`)
-          
-          setContagemLocal(prev => [{
-            item_id: null,
-            produto_id: produtoGenerico.id,
-            codigo: ean_gerado,
-            descricao: produtoGenerico.descricao,
-            caixas: 1,
-            kg: peso_kg
-          }, ...prev])
-          
-          // Volta pra bipar próximo produto
-          setStep(2)
-          setItemAtual(null)
-          setTimeout(() => document.getElementById('inv-produto')?.focus(), 100)
         }}
       />
     </div>
