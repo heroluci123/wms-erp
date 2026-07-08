@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { UploadCloud, Check, History, Download, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag } from 'lucide-react'
+import { UploadCloud, Check, History, Download, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
