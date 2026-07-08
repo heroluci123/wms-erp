@@ -124,6 +124,59 @@ export async function listarPaletesAbertos() {
   return res.rows;
 }
 
+export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {}) {
+  let where = '1=1';
+  const args = [];
+
+  if (dataInicio) {
+    where += ' AND date(p.created_at) >= ?';
+    args.push(dataInicio);
+  }
+  if (dataFim) {
+    where += ' AND date(p.created_at) <= ?';
+    args.push(dataFim);
+  }
+  if (status && status !== 'TODOS') {
+    where += ' AND p.status = ?';
+    args.push(status);
+  }
+
+  const res = await db.execute({
+    sql: `
+      SELECT 
+        p.*,
+        count(c.id) as qtd_caixas,
+        coalesce(sum(c.peso_kg), 0) as peso_total,
+        min(c.created_at) as primeira_caixa,
+        max(c.created_at) as ultima_caixa
+      FROM paletes p
+      LEFT JOIN estoque_caixas c ON c.palete_id = p.id
+      WHERE ${where}
+      GROUP BY p.id
+      ORDER BY p.created_at DESC
+      LIMIT 200
+    `,
+    args
+  });
+  return res.rows;
+}
+
+export async function listarTodasCaixasDoPalete(palete_id) {
+  const res = await db.execute({
+    sql: `
+      SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo, p.tipo_produto
+      FROM estoque_caixas c
+      JOIN produtos p ON c.produto_id = p.id
+      WHERE c.palete_id = ?
+      ORDER BY c.created_at ASC
+    `,
+    args: [palete_id]
+  });
+  return res.rows;
+}
+
+
+
 // ───────────────────────────────────────────────────
 
 /**
