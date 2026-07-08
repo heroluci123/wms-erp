@@ -266,14 +266,30 @@ export function InventarioConciliacao() {
               const diffCx = item.qtd_contada_caixas !== null 
                 ? (item.qtd_contada_caixas || 0) - (item.qtd_sistema_caixas || 0) 
                 : null
+              const diffKg = item.qtd_contada_kg !== null 
+                ? (item.qtd_contada_kg || 0) - (item.qtd_sistema_kg || 0) 
+                : null
               const hasDivergencia = item.status_item === 'Aguardando Ajuste'
+              
+              let tipoDivergencia = ''
+              if (diffCx !== null) {
+                if (item.qtd_sistema_caixas === 1 && (item.qtd_contada_caixas || 0) === 0) {
+                  tipoDivergencia = 'Falta'
+                } else if (item.qtd_sistema_caixas === 0 && (item.qtd_contada_caixas || 0) === 1) {
+                  tipoDivergencia = 'Sobra'
+                } else if (diffKg !== 0 || item.validade !== item.validade_contada) {
+                  tipoDivergencia = 'Peso/Validade'
+                } else if (diffCx !== 0) {
+                  tipoDivergencia = `${diffCx > 0 ? '+' : ''}${diffCx} cx`
+                }
+              }
               
               return (
                 <tr key={item.id} style={{ background: hasDivergencia ? 'rgba(var(--danger-rgb, 239,68,68), 0.04)' : undefined }}>
                   <td className="td-mono">{item.endereco}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{item.descricao}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Lote: {item.lote || '-'} | {item.codigo}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>EAN/SSCC: {item.ean_caixa || '-'} | Lote: {item.lote || '-'} | {item.codigo}</div>
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div className="text-muted font-bold text-xs">
@@ -300,9 +316,14 @@ export function InventarioConciliacao() {
                     ) : <span className="text-muted">Aguardando...</span>}
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    {diffCx !== null ? (
-                      <span style={{ fontWeight: 700, color: diffCx === 0 ? 'var(--success)' : diffCx < 0 ? 'var(--danger)' : 'var(--warning)' }}>
-                        {diffCx > 0 ? '+' : ''}{diffCx.toFixed(2)} cx
+                    {tipoDivergencia ? (
+                      <span style={{ 
+                        fontWeight: 700, 
+                        color: tipoDivergencia === '' ? 'var(--success)' : 
+                               tipoDivergencia === 'Falta' ? 'var(--danger)' : 
+                               tipoDivergencia === 'Sobra' ? 'var(--warning)' : 'var(--warning)' 
+                      }}>
+                        {tipoDivergencia || '-'}
                       </span>
                     ) : <span className="text-muted">—</span>}
                   </td>

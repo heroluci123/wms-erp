@@ -135,7 +135,9 @@ export function Saida() {
   }
 
   useEffect(() => {
-    if (abaAtiva === 'EXPEDICAO') {
+    if (abaAtiva === 'MONTAR') {
+      carregarRomaneiosList('MONTANDO')
+    } else if (abaAtiva === 'EXPEDICAO') {
       carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
     } else if (abaAtiva === 'HISTORICO') {
       carregarRomaneiosList('EXPEDIDO')
@@ -195,17 +197,41 @@ export function Saida() {
       {abaAtiva === 'MONTAR' && (
         <div className="grid-responsive">
           {!romaneioAtual ? (
-            <div className="card">
-              <h3 className="font-bold text-primary flex items-center gap-8 mb-20"><ClipboardList size={20}/> Novo Romaneio</h3>
-              <div className="form-group mb-16">
-                <label className="form-label">Cliente / Destino *</label>
-                <input type="text" className="form-input" placeholder="ex: Maria Martineli" value={formRomaneio.cliente} onChange={e => setFormRomaneio(p => ({ ...p, cliente: e.target.value }))} autoFocus />
+            <div className="flex-col gap-16">
+              <div className="card">
+                <h3 className="font-bold text-primary flex items-center gap-8 mb-20"><ClipboardList size={20}/> Novo Romaneio</h3>
+                <div className="form-group mb-16">
+                  <label className="form-label">Cliente / Destino *</label>
+                  <input type="text" className="form-input" placeholder="ex: Maria Martineli" value={formRomaneio.cliente} onChange={e => setFormRomaneio(p => ({ ...p, cliente: e.target.value }))} autoFocus />
+                </div>
+                <div className="form-group mb-20">
+                  <label className="form-label">Previsão de Entrega</label>
+                  <input type="date" className="form-input" value={formRomaneio.previsao_entrega} onChange={e => setFormRomaneio(p => ({ ...p, previsao_entrega: e.target.value }))} />
+                </div>
+                <button className="btn btn--primary btn--lg w-full" onClick={handleAbrirRomaneio}><Plus size={18}/> Iniciar Montagem</button>
               </div>
-              <div className="form-group mb-20">
-                <label className="form-label">Previsão de Entrega</label>
-                <input type="date" className="form-input" value={formRomaneio.previsao_entrega} onChange={e => setFormRomaneio(p => ({ ...p, previsao_entrega: e.target.value }))} />
-              </div>
-              <button className="btn btn--primary btn--lg w-full" onClick={handleAbrirRomaneio}><Plus size={18}/> Iniciar Montagem</button>
+
+              {romaneiosLista.length > 0 && (
+                <div className="card">
+                  <h3 className="font-bold text-warning flex items-center gap-8 mb-16"><Clock size={20}/> Romaneios em Montagem</h3>
+                  <div className="flex-col gap-12">
+                    {romaneiosLista.map(rom => (
+                      <div key={rom.id} className="card card--elevated cursor-pointer" onClick={async () => {
+                        const det = await saidaQueries.detalhesRomaneio(rom.id)
+                        setRomaneioAtual(det)
+                        setTimeout(() => eanRef.current?.focus(), 100)
+                      }} style={{ borderLeft: '4px solid var(--warning)' }}>
+                        <div className="flex justify-between items-center mb-8">
+                          <strong className="text-primary">{rom.codigo}</strong>
+                          <span className="text-xs text-muted">{rom.qtd_caixas} caixas</span>
+                        </div>
+                        <div className="text-sm text-white font-bold">{rom.cliente}</div>
+                        <div className="text-xs text-muted">Previsão: {rom.previsao_entrega ? new Date(rom.previsao_entrega + 'T00:00:00').toLocaleDateString() : '-'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="card">
@@ -215,7 +241,7 @@ export function Saida() {
                   <div className="text-muted text-sm">Cliente: <strong className="text-white">{romaneioAtual.cliente}</strong></div>
                   <div className="text-muted text-sm">Previsão: {romaneioAtual.previsao_entrega ? new Date(romaneioAtual.previsao_entrega + 'T00:00:00').toLocaleDateString() : 'N/A'}</div>
                 </div>
-                <button className="btn btn--ghost text-danger" onClick={() => {if(window.confirm('Cancelar a montagem?')){setRomaneioAtual(null)}}}>Cancelar</button>
+                <button className="btn btn--ghost text-muted" onClick={() => { setRomaneioAtual(null); carregarRomaneiosList('MONTANDO') }}>Voltar</button>
               </div>
 
               <div className="mb-24">

@@ -311,6 +311,10 @@ export function InventarioOperador() {
     const jaExiste = contagemLocal.find(c => c.chave === chave)
     
     if (jaExiste) {
+      if (itemAtual.codigo.length >= 8) {
+        toastError('Erro', 'Este código SSCC já foi bipado neste endereço!')
+        return
+      }
       setContagemLocal(prev => prev.map(c => c.chave === chave ? { ...c, caixas: c.caixas + cx, kg: c.kg + kg } : c))
       toastSuccess('Somado', `Volume adicionado à contagem de ${itemAtual.codigo} (Val: ${val}).`)
       voltarParaProduto()
@@ -318,10 +322,9 @@ export function InventarioOperador() {
     }
     
     const valNorm = val ? val.toString().substring(0, 10) : null
-    const itemMatch = itensDoEndereco.find(i => {
-      const ivNorm = i.validade ? i.validade.toString().substring(0, 10) : (i.validade_contada ? i.validade_contada.toString().substring(0, 10) : null)
-      return i.produto_id === itemAtual.produto_id && ivNorm === valNorm
-    })
+    
+    // Na nova lógica caixa-por-caixa, procuramos pelo ean_caixa
+    const itemMatch = itensDoEndereco.find(i => i.ean_caixa === itemAtual.codigo)
     
     let item_id
     if (itemMatch) {
@@ -331,7 +334,8 @@ export function InventarioOperador() {
         inventario_id: inventarioAtivo.id,
         endereco: enderecoAtual,
         produto_id: itemAtual.produto_id,
-        validade: val
+        validade: val,
+        ean_caixa: itemAtual.codigo
       })
       if (!res.success) return toastError('Erro', res.error)
       item_id = res.item_id
@@ -804,12 +808,8 @@ export function InventarioOperador() {
 
                   <div className="flex gap-16 items-end">
                     <div className="form-group" style={{ flex: 1 }}>
-                      <label className="form-label">Caixas Físicas *</label>
-                      <input id="inv-caixas" type="number" step="0.01" className="form-input form-input--number" value={qtdCaixas} onChange={e => setQtdCaixas(e.target.value)} required />
-                    </div>
-                    <div className="form-group" style={{ flex: 1 }}>
-                      <label className="form-label">KG Físicos *</label>
-                      <input type="number" step="0.01" className="form-input form-input--number" value={qtdKg} onChange={e => setQtdKg(e.target.value)} required />
+                      <label className="form-label">Peso (KG Físico) *</label>
+                      <input id="inv-kg" type="number" step="0.01" className="form-input form-input--number" value={qtdKg} onChange={e => setQtdKg(e.target.value)} required />
                     </div>
                   </div>
                   

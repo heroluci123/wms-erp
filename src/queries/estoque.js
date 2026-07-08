@@ -51,7 +51,7 @@ export async function listarGeralCaixas({ incluirRec = false } = {}) {
       WHERE c.status = 'DISPONIVEL'
         AND c.endereco IS NOT NULL
         AND c.endereco != ''
-        AND c.endereco != 'EXPEDICAO'
+        AND c.endereco NOT IN ('EXPEDICAO', 'PERDIDO')
         AND (? = 1 OR c.endereco != 'REC')
       ORDER BY c.endereco, p.descricao, c.validade
     `,
@@ -141,7 +141,7 @@ export async function sugestaoPutaway(produto_id, lote) {
       SELECT endereco, lote, qtd_caixas, qtd_kg, validade
       FROM estoque_posicao
       WHERE produto_id = ?
-        AND endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA')
+        AND endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO')
         AND (qtd_caixas > 0 OR qtd_kg > 0)
       ORDER BY
         CASE WHEN lote = ? THEN 0 ELSE 1 END,
@@ -162,7 +162,7 @@ export async function verificarFEFO(produto_id, validade_bipada) {
       WHERE ep.produto_id = ?
         AND ep.validade IS NOT NULL
         AND ep.validade < ?
-        AND ep.endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA')
+        AND ep.endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO')
         AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0)
       ORDER BY ep.validade ASC
     `,
