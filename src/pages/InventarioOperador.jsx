@@ -391,25 +391,25 @@ export function InventarioOperador() {
       setEnderecoAtual('')
       setItensDoEndereco([])
 
+      // Sempre registrar a caixa no estoque_caixas se for SSCC (EAN >= 8)
+      // para que a visão serializada mostre o EAN certinho!
+      const caixasSSCC = contagemLocal
+        .filter(c => c.codigo && c.codigo.length >= 8)
+        .map(c => ({
+          ean_caixa: c.codigo,
+          produto_id: c.produto_id,
+          endereco: enderecoAtual,
+          validade: c.validade,
+          peso_kg: c.kg / (c.caixas || 1) // peso médio caso tenha mais de 1 (embora ean unico seja sempre 1)
+        }))
+
+      if (caixasSSCC.length > 0) {
+        const { estoqueQueries } = await import('../queries/estoque.js')
+        await estoqueQueries.inserirCaixasCargaInicial(caixasSSCC)
+      }
+
       const isCarga = inventarioAtivo?.tipo === 'CargaInicial'
       if (isCarga) {
-        // Se for Carga Inicial, além de registrar no inventário, a gente já "recebe" a caixa no estoque_caixas
-        // para que a visão serializada mostre o EAN certinho! (Filtra apenas caixas SSCC/EAN longo)
-        const caixasSSCC = contagemLocal
-          .filter(c => c.codigo && c.codigo.length >= 8)
-          .map(c => ({
-            ean_caixa: c.codigo,
-            produto_id: c.produto_id,
-            endereco: enderecoAtual,
-            validade: c.validade,
-            peso_kg: c.kg / (c.caixas || 1) // peso médio caso tenha mais de 1 (embora ean unico seja sempre 1)
-          }))
-
-        if (caixasSSCC.length > 0) {
-          const { estoqueQueries } = await import('../queries/estoque.js')
-          await estoqueQueries.inserirCaixasCargaInicial(caixasSSCC)
-        }
-
         // Na carga inicial volta para o step 1 para bipar novo endereço
         setStep(1)
         setTimeout(() => document.getElementById('inv-endereco')?.focus(), 100)
