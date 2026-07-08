@@ -1,0 +1,18 @@
+{
+  "short_name": "WMSphere",
+  "name": "WMSphere - Tricarnes",
+  "description": "Sistema de Gerenciamento de Estoque Offline-First",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#1e1e2f",
+  "background_color": "#1e1e2f",
+  "orientation": "portrait"
+}
