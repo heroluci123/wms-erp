@@ -11,7 +11,7 @@ export function Produtos() {
   
   // Form State
   const [isEditing, setIsEditing] = useState(false)
-  const [formData, setFormData] = useState({ id: null, codigo: '', ean: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '' })
+  const [formData, setFormData] = useState({ id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '' })
 
   const carregar = async () => {
     try {
@@ -31,12 +31,11 @@ export function Produtos() {
       const payload = {
         ...formData,
         codigo: formData.codigo.trim(),
-        ean: formData.ean.trim(),
         valor_unitario: parseFloat(formData.valor_unitario) || 0
       }
 
-      if (!payload.codigo && !payload.ean) {
-        return toastError('Atenção', 'É necessário informar pelo menos o Código Interno ou o EAN.')
+      if (!payload.codigo) {
+        return toastError('Atenção', 'É obrigatório informar o Código Interno.')
       }
 
       if (isEditing) {
@@ -77,12 +76,11 @@ export function Produtos() {
 
   const resetForm = () => {
     setIsEditing(false)
-    setFormData({ id: null, codigo: '', ean: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '' })
+    setFormData({ id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '' })
   }
 
   const filtrados = produtos.filter(p => 
     (p.codigo || '').toLowerCase().includes(busca.toLowerCase()) || 
-    (p.ean || '').toLowerCase().includes(busca.toLowerCase()) ||
     (p.descricao || '').toLowerCase().includes(busca.toLowerCase())
   )
 
@@ -92,9 +90,9 @@ export function Produtos() {
 
   const exportarCSV = async () => {
     if (produtos.length === 0) return
-    const header = "ID;CODIGO;EAN;DESCRICAO;GRUPO;TIPO;CURVA;UNIDADE;VALOR_UNIT\n"
+    const header = "ID;CODIGO;DESCRICAO;GRUPO;TIPO;CURVA;UNIDADE;VALOR_UNIT\n"
     const rows = produtos.map(p =>
-      `${p.id};${p.codigo || ''};${p.ean || ''};${p.descricao};${p.grupo || ''};${p.tipo_produto};${p.status_curva};${p.unidade};${p.valor_unitario || 0}`
+      `${p.id};${p.codigo || ''};${p.descricao};${p.grupo || ''};${p.tipo_produto};${p.status_curva};${p.unidade};${p.valor_unitario || 0}`
     ).join("\n")
     
     const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' })
@@ -127,12 +125,8 @@ export function Produtos() {
           <form onSubmit={handleSubmit} className="flex-col gap-12">
             <div className="flex gap-12">
               <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">Código Interno (SKU)</label>
-                <input type="text" className="form-input" value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value.toUpperCase()})} placeholder="Opcional se tiver EAN" disabled={isEditing} />
-              </div>
-              <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">EAN (Cód. Barras)</label>
-                <input type="text" className="form-input" value={formData.ean} onChange={e => setFormData({...formData, ean: e.target.value})} placeholder="Opcional" />
+                <label className="form-label">Código Interno (SKU) *</label>
+                <input type="text" className="form-input" value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value.toUpperCase()})} placeholder="Ex: 7063" required />
               </div>
             </div>
             <div className="form-group">
@@ -203,7 +197,6 @@ export function Produtos() {
                   <th>Código</th>
                   <th>Descrição</th>
                   <th>Grupo</th>
-                  <th style={{ width: 120 }}>EAN</th>
                   <th style={{ width: 120 }}>Curva</th>
                   <th style={{ textAlign: 'right' }}>Valor Unit.</th>
                   <th style={{ textAlign: 'right' }}>Ações</th>
@@ -215,7 +208,6 @@ export function Produtos() {
                     <td className="td-mono">{p.codigo || '-'}</td>
                     <td className="truncate" style={{ maxWidth: 150 }} title={p.descricao}>{p.descricao}</td>
                     <td>{p.grupo || '-'}</td>
-                    <td className="td-mono text-muted">{p.ean || '-'}</td>
                     <td><CurvaBadge curva={p.status_curva} /></td>
                     <td style={{ textAlign: 'right' }} className="text-success font-bold">R$ {parseFloat(p.valor_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                     <td style={{ textAlign: 'right' }}>

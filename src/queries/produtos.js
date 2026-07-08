@@ -170,33 +170,20 @@ export async function removerRegraEan(id) {
   }
 }
 
-export async function criar({ codigo, ean, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {
+export async function criar({ codigo, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
-  let eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
 
-  if (eanVal && eanVal.length >= 15) {
-    if (!codVal) {
-      const u6 = eanVal.slice(-6)
-      codVal = u6.replace(/^0+/, '') || u6
-    }
-    eanVal = null
-  }
-  if (codVal && codVal.length >= 15) {
-    const u6 = codVal.slice(-6)
-    codVal = u6.replace(/^0+/, '') || u6
-  }
-  
-  if (!codVal && !eanVal) {
-    throw new Error('É necessário informar pelo menos o Código Interno ou o EAN.')
+  if (!codVal) {
+    throw new Error('É obrigatório informar o Código Interno do Produto.')
   }
 
   try {
     const result = await db.execute({
       sql: `
-        INSERT INTO produtos (codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO produtos (codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
-      args: [codVal, eanVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo]
+      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo]
     })
     return { id: result.lastInsertRowid.toString(), success: true }
   } catch (err) {
@@ -207,33 +194,20 @@ export async function criar({ codigo, ean, descricao, valor_unitario = 0, tipo_p
   }
 }
 
-export async function atualizar({ id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo }) {
+export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo }) {
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
-  let eanVal = (ean && String(ean).trim() !== '') ? String(ean).trim() : null
 
-  if (eanVal && eanVal.length >= 15) {
-    if (!codVal) {
-      const u6 = eanVal.slice(-6)
-      codVal = u6.replace(/^0+/, '') || u6
-    }
-    eanVal = null
-  }
-  if (codVal && codVal.length >= 15) {
-    const u6 = codVal.slice(-6)
-    codVal = u6.replace(/^0+/, '') || u6
-  }
-
-  if (!codVal && !eanVal) {
-    throw new Error('É necessário informar pelo menos o Código Interno ou o EAN.')
+  if (!codVal) {
+    throw new Error('É obrigatório informar o Código Interno do Produto.')
   }
 
   try {
     await db.execute({
       sql: `
-        UPDATE produtos SET codigo=?, ean=?, descricao=?, valor_unitario=?, tipo_produto=?, status_curva=?, unidade=?, grupo=?
+        UPDATE produtos SET codigo=?, descricao=?, valor_unitario=?, tipo_produto=?, status_curva=?, unidade=?, grupo=?
         WHERE id=?
       `,
-      args: [codVal, eanVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, id]
+      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, id]
     })
     return { success: true }
   } catch (err) {
