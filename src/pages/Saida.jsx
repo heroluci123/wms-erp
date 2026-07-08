@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock } from 'lucide-react'
+import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import * as saidaQueries from '../queries/saida.js'
@@ -170,6 +170,22 @@ export function Saida() {
     }
   }
 
+  const handleExcluirRomaneio = async () => {
+    if (!window.confirm('Tem certeza que deseja excluir este romaneio? Se houver caixas nele, elas voltarão para o estoque e ficarão DISPONÍVEIS.')) return
+    try {
+      const res = await saidaQueries.excluirRomaneio(romaneioAtual.id)
+      if (res.success) {
+        toastSuccess('Sucesso', 'Romaneio excluído.')
+        setRomaneioAtual(null)
+        carregarRomaneiosList('MONTANDO')
+      } else {
+        toastError('Erro', res.error)
+      }
+    } catch (e) {
+      toastError('Erro', e.message)
+    }
+  }
+
   return (
     <div style={{ maxWidth: 1000 }}>
       <div className="page-header mb-24">
@@ -241,7 +257,10 @@ export function Saida() {
                   <div className="text-muted text-sm">Cliente: <strong className="text-white">{romaneioAtual.cliente}</strong></div>
                   <div className="text-muted text-sm">Previsão: {romaneioAtual.previsao_entrega ? new Date(romaneioAtual.previsao_entrega + 'T00:00:00').toLocaleDateString() : 'N/A'}</div>
                 </div>
-                <button className="btn btn--ghost text-muted" onClick={() => { setRomaneioAtual(null); carregarRomaneiosList('MONTANDO') }}>Voltar</button>
+                <div className="flex gap-8">
+                  <button className="btn btn--ghost text-danger" onClick={handleExcluirRomaneio} title="Excluir Romaneio"><Trash2 size={18}/></button>
+                  <button className="btn btn--ghost text-muted" onClick={() => { setRomaneioAtual(null); carregarRomaneiosList('MONTANDO') }}>Voltar</button>
+                </div>
               </div>
 
               <div className="mb-24">

@@ -1,4 +1,4 @@
-import { db } from '../lib/db.js';
+﻿import { db } from '../lib/db.js';
 
 export async function listarRomaneios(status = 'TODOS') {
   let query = `
@@ -87,7 +87,7 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
     return { success: true }
   } catch (err) {
     if (err.message.includes('UNIQUE constraint')) {
-      return { success: false, error: 'Esta caixa já foi adicionada.' }
+      return { success: false, error: 'Esta caixa jÃ¡ foi adicionada.' }
     }
     return { success: false, error: err.message }
   }
@@ -131,7 +131,7 @@ export async function finalizarMontagem(romaneio_id) {
 
 export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
   try {
-    // Busca todas as caixas deste romaneio para gerar log de saída
+    // Busca todas as caixas deste romaneio para gerar log de saÃ­da
     const itensRes = await db.execute({
       sql: `
         SELECT ri.caixa_id, ri.produto_id, ri.peso_kg, c.endereco
@@ -155,7 +155,7 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
         args: [item.caixa_id]
       })
 
-      // Adiciona no log de movimentações como SAIDA definitiva
+      // Adiciona no log de movimentaÃ§Ãµes como SAIDA definitiva
       queries.push({
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'CLIENTE', 1, ?, ?, ?, 'SAIDA')`,
         args: [item.produto_id, item.endereco || 'REC', item.peso_kg, operador_id || null, operador_nome || 'Sistema']
@@ -168,3 +168,38 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
     return { success: false, error: err.message }
   }
 }
+
+export async function excluirRomaneio(romaneio_id) {
+  try {
+    const romRes = await db.execute({ sql: `SELECT status FROM romaneios WHERE id = ?`, args: [romaneio_id] })
+    if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado' }
+    if (romRes.rows[0].status === 'EXPEDIDO') return { success: false, error: 'Não é possível excluir um romaneio já expedido' }
+
+    const itensRes = await db.execute({
+      sql: `SELECT ri.caixa_id, ri.produto_id, ri.peso_kg, c.endereco FROM romaneios_itens ri JOIN estoque_caixas c ON c.id = ri.caixa_id WHERE ri.romaneio_id = ?`,
+      args: [romaneio_id]
+    })
+
+    const queries = []
+    
+    for (const item of itensRes.rows) {
+      queries.push({
+        sql: `UPDATE estoque_caixas SET status = 'DISPONIVEL' WHERE id = ?`,
+        args: [item.caixa_id]
+      })
+      queries.push({
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', NULL, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [item.produto_id, item.endereco || 'REC', item.peso_kg]
+      })
+    }
+
+    queries.push({ sql: `DELETE FROM romaneios_itens WHERE romaneio_id = ?`, args: [romaneio_id] })
+    queries.push({ sql: `DELETE FROM romaneios WHERE id = ?`, args: [romaneio_id] })
+
+    await db.batch(queries, 'write')
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
