@@ -123,10 +123,10 @@ export async function buscarPorCodigoComInfo(codigo) {
   if (regrasRes.rows.length > 0) return { produto: regrasRes.rows[0], eanUnico: false }
 
   // 3. Extração legada (últimos 6 dígitos) = genérico
-  // ATENÇÃO: Bloqueado para EANs longos (≥ 14 dígitos) — SSCCs/GTINs de caixas são
-  // únicos e o sufixo pode coincidir com o código de um produto completamente diferente.
-  if (codigoStr.length >= 8 && codigoStr.length < 14) {
-    const ultimos6 = codigoStr.slice(-6)
+  // ATENÇÃO: Bloqueado para EANs longos reais (sem zeros à esquerda ≥ 14 dígitos).
+  const codigoSemZeros = codigoStr.replace(/^0+/, '')
+  if (codigoSemZeros.length >= 8 && codigoSemZeros.length < 14) {
+    const ultimos6 = codigoSemZeros.slice(-6)
     const ultimos6Norm = ultimos6.replace(/^0+/, '') || ultimos6
     const resExtraido = await db.execute({
       sql: `SELECT id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo FROM produtos WHERE codigo = ? OR ean = ? OR codigo = ? OR ean = ?`,
