@@ -17,7 +17,17 @@ export async function listarGeral() {
         WHERE ec.produto_id = ep.produto_id
           AND ec.endereco = ep.endereco
           AND ec.status = 'DISPONIVEL'
-      ) as palete_codigos
+      ) as palete_codigos,
+      (
+        SELECT CASE
+          WHEN COUNT(*) = 1 THEN MIN(ec2.ean_caixa)
+          ELSE COUNT(*) || ' caixas'
+        END
+        FROM estoque_caixas ec2
+        WHERE ec2.produto_id = ep.produto_id
+          AND ec2.endereco = ep.endereco
+          AND ec2.status = 'DISPONIVEL'
+      ) as ean_caixas
     FROM estoque_posicao ep
     JOIN produtos p ON p.id = ep.produto_id
     WHERE ep.qtd_caixas > 0 OR ep.qtd_kg > 0

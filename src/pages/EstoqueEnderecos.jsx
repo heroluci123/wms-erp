@@ -174,6 +174,7 @@ export function EstoqueEnderecos() {
                   <th>Lote</th>
                   <th>Validade</th>
                   <th>Palete/Doca</th>
+                  <th>EAN Caixa</th>
                   <th style={{ textAlign: 'right' }}>Caixas</th>
                   <th style={{ textAlign: 'right' }}>KG</th>
                   {isExecutivo && <th style={{ textAlign: 'right' }}>Valor Total</th>}
@@ -195,6 +196,18 @@ export function EstoqueEnderecos() {
                       <td>{renderValidade(item.validade)}</td>
                       <td className="td-mono" style={{ fontSize: 10, color: item.palete_codigos ? 'var(--primary)' : 'var(--text-muted)', fontWeight: item.palete_codigos ? 700 : 400 }}>
                         {item.palete_codigos || '—'}
+                      </td>
+                      <td className="td-mono" style={{ fontSize: 10, maxWidth: 140,
+                        color: item.ean_caixas?.startsWith('INT-') ? 'var(--warning)' : 'var(--text-muted)',
+                        title: item.ean_caixas
+                      }}>
+                        <span title={item.ean_caixas}>
+                          {item.ean_caixas
+                            ? item.ean_caixas.length > 18
+                              ? item.ean_caixas.substring(0, 16) + '…'
+                              : item.ean_caixas
+                            : '—'}
+                        </span>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{item.qtd_caixas}</td>
                       <td style={{ textAlign: 'right' }} className="td-muted">{item.qtd_kg}</td>
