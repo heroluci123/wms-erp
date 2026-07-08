@@ -11,6 +11,9 @@ export function Producao() {
   const [ops, setOps] = useState([])
   const [opSelecionada, setOpSelecionada] = useState(null)
   const [detalhes, setDetalhes] = useState(null)
+  
+  const [modalInsumo, setModalInsumo] = useState(null)
+  const [modalRetorno, setModalRetorno] = useState(null)
 
   const carregarOPs = async () => {
     try {
@@ -53,16 +56,7 @@ export function Producao() {
           if (caixa.status !== 'DISPONIVEL') {
             return toastError('Inválido', `Esta caixa não está disponível (Status: ${caixa.status}).`)
           }
-          
-          if (!window.confirm(`Alocar caixa de ${caixa.peso_kg}kg (${caixa.produto_descricao}) como INSUMO nesta OP?`)) return
-
-          const resAlo = await producaoQueries.alocarInsumos(opSelecionada.id, [caixa], operador.id, operador.nome)
-          if (resAlo.success) {
-            toastSuccess('Insumo Adicionado', `Caixa alocada com sucesso.`)
-            carregarDetalhes(opSelecionada.id)
-          } else {
-            toastError('Erro ao Alocar', resAlo.error)
-          }
+          setModalInsumo(caixa)
           return
         }
 
@@ -72,26 +66,7 @@ export function Producao() {
           return toastError('Erro', 'Código EAN não corresponde a nenhum produto cadastrado nem caixa existente.')
         }
 
-        const { produto } = resultado
-        
-        const pesoStr = window.prompt(`[RETORNO DE PRODUÇÃO]\n\nQual o peso da nova caixa para ${produto.descricao} (EAN: ${codigo})?`)
-        if (!pesoStr) return
-        const peso = parseFloat(pesoStr.replace(',', '.'))
-        if (isNaN(peso) || peso <= 0) return toastError('Aviso', 'Peso inválido.')
-
-        const res = await producaoQueries.adicionarRetorno(
-          opSelecionada.id,
-          { ean_caixa: codigo, produto_id: produto.id, peso_kg: peso, validade: null },
-          operador.id,
-          operador.nome
-        )
-
-        if (res.success) {
-          toastSuccess('Retorno Registrado', `Nova caixa de ${peso}kg adicionada à Produção.`)
-          carregarDetalhes(opSelecionada.id)
-        } else {
-          toastError('Erro', res.error)
-        }
+        setModalRetorno({ codigo, produto: resultado.produto })
 
       } catch (err) {
         toastError('Erro fatal', err.message)
@@ -248,6 +223,69 @@ export function Producao() {
           </div>
         )
       )}
+
+      {/* MODAL INSUMO */}
+      {modalInsumo && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-primary">Confirmar Insumo</h3>
+            <p className="mb-24">Deseja alocar a caixa de <strong>{modalInsumo.peso_kg}kg</strong> de <strong>{modalInsumo.produto_descricao}</strong> como insumo nesta OP?</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalInsumo(null)}>Cancelar</button>
+              <button className="btn btn--primary flex-1" onClick={async () => {
+                const resAlo = await producaoQueries.alocarInsumos(opSelecionada.id, [modalInsumo], operador.id, operador.nome)
+                if (resAlo.success) {
+                  toastSuccess('Insumo Adicionado', `Caixa alocada com sucesso.`)
+                  carregarDetalhes(opSelecionada.id)
+                } else {
+                  toastError('Erro ao Alocar', resAlo.error)
+                }
+                setModalInsumo(null)
+              }}>Confirmar Alocação</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RETORNO */}
+      {modalRetorno && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-success">Registrar Retorno</h3>
+            <p className="mb-16">Nova caixa de <strong>{modalRetorno.produto.descricao}</strong>.</p>
+            <div className="form-group mb-24">
+              <label className="form-label">Peso da Caixa (kg)</label>
+              <input type="number" step="0.01" className="form-input" autoFocus id="input-peso-retorno" placeholder="Ex: 25.5" onKeyDown={(e) => {
+                if (e.key === 'Enter') document.getElementById('btn-confirm-retorno').click()
+              }} />
+            </div>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalRetorno(null)}>Cancelar</button>
+              <button id="btn-confirm-retorno" className="btn btn--primary flex-1" onClick={async () => {
+                const pesoStr = document.getElementById('input-peso-retorno').value
+                const peso = parseFloat(pesoStr.replace(',', '.'))
+                if (isNaN(peso) || peso <= 0) return toastError('Aviso', 'Peso inválido.')
+
+                const res = await producaoQueries.adicionarRetorno(
+                  opSelecionada.id,
+                  { ean_caixa: modalRetorno.codigo, produto_id: modalRetorno.produto.id, peso_kg: peso, validade: null },
+                  operador.id,
+                  operador.nome
+                )
+
+                if (res.success) {
+                  toastSuccess('Retorno Registrado', `Nova caixa de ${peso}kg adicionada à Produção.`)
+                  carregarDetalhes(opSelecionada.id)
+                  setModalRetorno(null)
+                } else {
+                  toastError('Erro', res.error)
+                }
+              }}>Salvar Retorno</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

@@ -76,7 +76,7 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
     
     for (const c of caixas) {
       queries.push({
-        sql: `UPDATE estoque_caixas SET status = 'EM_PRODUCAO' WHERE id = ?`,
+        sql: `UPDATE estoque_caixas SET status = 'RESERVADA' WHERE id = ?`,
         args: [c.id]
       })
       
