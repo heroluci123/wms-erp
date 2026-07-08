@@ -74,7 +74,7 @@ function HistoricoPaletes() {
   const exportarPaletesCSV = () => {
     const paletesExport = paletesFiltrados.map(p => ({
       Codigo: p.codigo,
-      Status: p.status === 'ATIVO' ? 'Em Montagem' : 'Concluído',
+      Status: p.status === 'EM_MONTAGEM' ? 'Em Montagem' : p.status === 'FECHADO' ? 'Fechado' : 'Finalizado',
       Endereco: p.endereco_atual,
       QtdCaixas: p.qtd_caixas || 0,
       PesoTotalKg: parseFloat(p.peso_total || 0).toFixed(3),
@@ -125,7 +125,7 @@ function HistoricoPaletes() {
               <div>
                 <div className="font-bold text-primary" style={{ fontSize: 18 }}>{paleteAberto.codigo}</div>
                 <div className="text-xs text-muted">
-                  {paleteAberto.status === 'ATIVO' ? '🟡 Em Montagem' : '✅ Concluído'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
+                  {paleteAberto.status === 'EM_MONTAGEM' ? '🟡 Em Montagem' : paleteAberto.status === 'FECHADO' ? '✅ Fechado' : '🏁 Finalizado'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
                 </div>
               </div>
             </div>
@@ -235,8 +235,9 @@ function HistoricoPaletes() {
             <label className="form-label">Status</label>
             <select className="form-input" value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}>
               <option value="TODOS">Todos os paletes</option>
-              <option value="ATIVO">Em Montagem (Abertos)</option>
-              <option value="DESMONTADO">Concluídos</option>
+              <option value="EM_MONTAGEM">Em Montagem (Abertos)</option>
+              <option value="FECHADO">Fechados</option>
+              <option value="FINALIZADO">Finalizados (Vazios)</option>
             </select>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
@@ -293,7 +294,8 @@ function HistoricoPaletes() {
             <span className="text-xs text-muted font-bold uppercase">Histórico de Paletes — {paletesFiltrados.length} resultados</span>
           </div>
           {paletesFiltrados.map((p, i) => {
-            const isAtivo = p.status === 'ATIVO';
+            const isAtivo = p.status === 'EM_MONTAGEM';
+            const isFinalizado = p.status === 'FINALIZADO';
             return (
               <div
                 key={p.id}
@@ -312,10 +314,10 @@ function HistoricoPaletes() {
                     <span className="font-bold font-mono" style={{ fontSize: 15 }}>{p.codigo}</span>
                     <span style={{
                       fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-                      background: isAtivo ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)',
-                      color: isAtivo ? 'var(--primary)' : 'var(--success)'
+                      background: isAtivo ? 'rgba(59,130,246,0.15)' : isFinalizado ? 'rgba(107,114,128,0.15)' : 'rgba(16,185,129,0.15)',
+                      color: isAtivo ? 'var(--primary)' : isFinalizado ? 'var(--text-muted)' : 'var(--success)'
                     }}>
-                      {isAtivo ? '🟡 EM MONTAGEM' : '✅ CONCLUÍDO'}
+                      {isAtivo ? '🟡 EM MONTAGEM' : isFinalizado ? '🏁 FINALIZADO' : '✅ FECHADO'}
                     </span>
                   </div>
                   <div className="text-xs text-muted">

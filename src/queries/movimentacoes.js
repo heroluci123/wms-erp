@@ -13,7 +13,7 @@ export async function criarPalete() {
   const codigo = `PLT-${num}`;
   
   await db.execute({
-    sql: `INSERT INTO paletes (codigo, endereco_atual, status) VALUES (?, 'REC', 'ATIVO')`,
+    sql: `INSERT INTO paletes (codigo, endereco_atual, status) VALUES (?, 'REC', 'EM_MONTAGEM')`,
     args: [codigo]
   });
   
@@ -86,7 +86,7 @@ export async function removerCaixaSerializada(caixa_id, operador_id, operador_no
 export async function concluirPalete(palete_id) {
   try {
     await db.execute({
-      sql: `UPDATE paletes SET status = 'DESMONTADO', endereco_atual = 'DOCA' WHERE id = ?`,
+      sql: `UPDATE paletes SET status = 'FECHADO', endereco_atual = 'DOCA' WHERE id = ?`,
       args: [palete_id]
     });
     return { success: true };
@@ -116,7 +116,7 @@ export async function listarPaletesAbertos() {
       SELECT p.*, count(c.id) as qtd_caixas, sum(c.peso_kg) as peso_total
       FROM paletes p
       LEFT JOIN estoque_caixas c ON c.palete_id = p.id AND c.status = 'DISPONIVEL'
-      WHERE p.status = 'ATIVO' AND p.endereco_atual = 'REC'
+      WHERE p.status = 'EM_MONTAGEM' AND p.endereco_atual = 'REC'
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `
@@ -240,7 +240,7 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
     const blocos = [];
 
     // 1. Atualizar palete e suas caixas (caso a caixa tivesse endereço solto)
-    blocos.push({ sql: `UPDATE paletes SET endereco_atual = ?, status = 'ATIVO' WHERE id = ?`, args: [destino, palete_id] });
+    blocos.push({ sql: `UPDATE paletes SET endereco_atual = ?, status = 'FECHADO' WHERE id = ?`, args: [destino, palete_id] });
     blocos.push({ sql: `UPDATE estoque_caixas SET endereco = ? WHERE palete_id = ?`, args: [destino, palete_id] });
 
     // 2. Agrupar as caixas por produto e validade para ajustar os saldos agregados (estoque_posicao)
@@ -304,6 +304,14 @@ export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, o
 
       // Remove a caixa do palete (desmembramento) e atualiza o endereço
       blocos.push({ sql: `UPDATE estoque_caixas SET palete_id = NULL, endereco = ? WHERE id = ?`, args: [destino, c.id] });
+      
+      // Se a caixa estava num palete, verifica se ele esvaziou para finalizar
+      if (c.palete_id) {
+        blocos.push({
+          sql: `UPDATE paletes SET status = 'FINALIZADO' WHERE id = ? AND (SELECT COUNT(*) FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL') = 0`,
+          args: [c.palete_id, c.palete_id]
+        });
+      }
 
       const key = `${c.produto_id}_${c.validade}_${origem_real}`;
       if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, origem: origem_real, caixas: 0, kg: 0 };
@@ -902,6 +910,12 @@ export async function saidaPorCaixaSSCC({ caixa_id, peso_saida_kg, num_pedido, c
               VALUES (?, ?, 'EXPEDICAO', '', 1, ?, ?, ?, 'DESPACHO', ?, ?)`,
         args: [caixa.produto_id, endereco, pesoCaixa, operador_id || null, operador_nome || 'Sistema', num_pedido || null, cliente || null]
       })
+      if (caixa.palete_id) {
+        blocos.push({
+          sql: `UPDATE paletes SET status = 'FINALIZADO' WHERE id = ? AND (SELECT COUNT(*) FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL') = 0`,
+          args: [caixa.palete_id, caixa.palete_id]
+        })
+      }
     } else {
       // ── SAÍDA PARCIAL (DESMEMBRAMENTO) ───────────────────────────────────────
       if (!ean_caixa_resto || ean_caixa_resto.trim() === '') {
@@ -932,6 +946,12 @@ export async function saidaPorCaixaSSCC({ caixa_id, peso_saida_kg, num_pedido, c
               VALUES (?, ?, 'EXPEDICAO', '', 1, ?, ?, ?, 'DESPACHO', ?, ?)`,
         args: [caixa.produto_id, endereco, pesoSaida, operador_id || null, operador_nome || 'Sistema', num_pedido || null, cliente || null]
       })
+      if (caixa.palete_id) {
+        blocos.push({
+          sql: `UPDATE paletes SET status = 'FINALIZADO' WHERE id = ? AND (SELECT COUNT(*) FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL') = 0`,
+          args: [caixa.palete_id, caixa.palete_id]
+        })
+      }
     }
 
     await db.batch(blocos, 'write')
