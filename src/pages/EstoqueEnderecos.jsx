@@ -25,15 +25,18 @@ export function EstoqueEnderecos() {
   const [filtroDescricao, setFiltroDescricao] = useState('')
   const [filtroCodigo,    setFiltroCodigo]    = useState('')
   const [filtroEndereco,  setFiltroEndereco]  = useState('')
+  const [filtroEan,       setFiltroEan]       = useState('')
+  const [filtroPalete,    setFiltroPalete]    = useState('')
   const [filtroVencimento,setFiltroVencimento]= useState('todos') // 'todos', 'vencidos_proximos'
 
   const carregarDados = useCallback(async () => {
     setLoading(true)
     try {
-      const estoqueData = await estoqueQueries.listarGeral()
-      setEstoque(incluirInsumos
-        ? estoqueData.filter(i => i.tipo_produto === 'Insumos')
-        : estoqueData.filter(i => i.tipo_produto !== 'Insumos')
+      const rows = await estoqueQueries.listarGeralCaixas()
+      setEstoque(
+        incluirInsumos
+          ? rows.filter(i => i.tipo_produto === 'Insumos')
+          : rows.filter(i => i.tipo_produto !== 'Insumos')
       )
     } catch (err) {
       console.error(err)
@@ -52,22 +55,26 @@ export function EstoqueEnderecos() {
       const dias = differenceInDays(new Date(dataStr), new Date())
       if (dias > 30) return false
     }
-    return (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
-           (item.codigo || '').toLowerCase().includes(filtroCodigo.toLowerCase()) &&
-           (item.endereco || '').toLowerCase().includes(filtroEndereco.toLowerCase())
+    return (
+      (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
+      (item.codigo    || '').toLowerCase().includes(filtroCodigo.toLowerCase())    &&
+      (item.endereco  || '').toLowerCase().includes(filtroEndereco.toLowerCase())  &&
+      (item.ean_caixa || '').toLowerCase().includes(filtroEan.toLowerCase())       &&
+      (item.palete_codigo || '').toLowerCase().includes(filtroPalete.toLowerCase())
+    )
   })
 
   if (filtroVencimento === 'vencidos_proximos') {
     estoqueFiltrado = estoqueFiltrado.sort((a, b) => new Date(a.validade) - new Date(b.validade))
   }
 
-  const exportarCSV = async () => {
+  const exportarCSV = () => {
     if (estoqueFiltrado.length === 0) return
-    const header = "ENDERECO;PRODUTO_ID;CODIGO;DESCRICAO;GRUPO;LOTE;VALIDADE;CAIXAS;KG;CURVA;VALOR_UNIT\n"
+    const header = "ENDERECO;EAN_CAIXA;PRODUTO_ID;CODIGO;DESCRICAO;GRUPO;VALIDADE;KG;PALETE;CURVA;VALOR_UNIT\n"
     const rows = estoqueFiltrado.map(i =>
-      `${i.endereco};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.lote || ''};${i.validade || ''};${String(i.qtd_caixas).replace('.', ',')};${String(i.qtd_kg).replace('.', ',')};${i.status_curva};${String(i.valor_unitario || 0).replace('.', ',')}`
+      `${i.endereco};${i.ean_caixa};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.validade || ''};${String(i.peso_kg).replace('.', ',')};${i.palete_codigo || ''};${i.status_curva};${String(i.valor_unitario || 0).replace('.', ',')}`
     ).join("\n")
-    await downloadCSV(header + rows)
+    downloadCSV(header + rows)
   }
 
   const renderValidade = (data) => {
@@ -81,10 +88,9 @@ export function EstoqueEnderecos() {
   }
 
   // Totais baseados no filtro atual
-  const totalCx = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_caixas) || 0), 0)
-  const totalKg = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_kg) || 0), 0)
-  const totalVal = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.qtd_kg) * (parseFloat(i.valor_unitario) || 0)), 0)
-  const totalItens = estoqueFiltrado.length
+  const totalCx  = estoqueFiltrado.length
+  const totalKg  = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.peso_kg) || 0), 0)
+  const totalVal = estoqueFiltrado.reduce((acc, i) => acc + (parseFloat(i.peso_kg) * (parseFloat(i.valor_unitario) || 0)), 0)
 
   return (
     <div style={{ paddingBottom: 40 }}>
@@ -95,7 +101,7 @@ export function EstoqueEnderecos() {
             <Layers size={26} /> Estoque por Endereço
           </h1>
           <p className="page-header__subtitle">
-            Consulta de saldos detalhados por posição
+            Consulta serializada — 1 linha = 1 caixa física com EAN único
           </p>
         </div>
         <div className="flex gap-12 items-center">
@@ -119,9 +125,16 @@ export function EstoqueEnderecos() {
           min-width: 150px;
           max-width: 250px;
         }
+        .td-ean {
+          font-family: monospace;
+          font-size: 10.5px !important;
+          max-width: 160px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
       `}</style>
 
-      {/* ── Body: Layout responsivo (Tabela esq, Totais dir) ──────────── */}
+      {/* ── Body: Layout responsivo ──────────── */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
         
         {/* Lado Esquerdo: Tabela */}
@@ -132,10 +145,10 @@ export function EstoqueEnderecos() {
               <Search size={18} /> Filtros
             </div>
             
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', flex: 1, minWidth: 400, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', flex: 1, minWidth: 400, justifyContent: 'flex-end' }}>
               <select
                 className="form-input bg-bg-card"
-                style={{ flex: '1 1 160px', fontWeight: 600 }}
+                style={{ flex: '1 1 150px', fontWeight: 600 }}
                 value={incluirInsumos ? 'insumos' : 'operacao'}
                 onChange={e => setIncluirInsumos(e.target.value === 'insumos')}
               >
@@ -144,19 +157,23 @@ export function EstoqueEnderecos() {
               </select>
               <select
                 className="form-input bg-bg-card"
-                style={{ flex: '1 1 180px', fontWeight: 600 }}
+                style={{ flex: '1 1 170px', fontWeight: 600 }}
                 value={filtroVencimento}
                 onChange={e => setFiltroVencimento(e.target.value)}
               >
                 <option value="todos">Validade: Todas</option>
                 <option value="vencidos_proximos">⚠️ Vencidos e Próximos (30d)</option>
               </select>
-              <input type="text" className="form-input" style={{ flex: '1 1 100px' }}
+              <input type="text" className="form-input" style={{ flex: '1 1 90px' }}
                 placeholder="Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
-              <input type="text" className="form-input" style={{ flex: '1 1 100px' }}
+              <input type="text" className="form-input" style={{ flex: '1 1 90px' }}
                 placeholder="Código..." value={filtroCodigo} onChange={e => setFiltroCodigo(e.target.value)} />
-              <input type="text" className="form-input" style={{ flex: '1 1 140px' }}
+              <input type="text" className="form-input" style={{ flex: '1 1 130px' }}
                 placeholder="Descrição..." value={filtroDescricao} onChange={e => setFiltroDescricao(e.target.value)} />
+              <input type="text" className="form-input" style={{ flex: '1 1 130px' }}
+                placeholder="EAN..." value={filtroEan} onChange={e => setFiltroEan(e.target.value)} />
+              <input type="text" className="form-input" style={{ flex: '1 1 90px' }}
+                placeholder="Palete..." value={filtroPalete} onChange={e => setFiltroPalete(e.target.value)} />
             </div>
           </div>
 
@@ -171,18 +188,18 @@ export function EstoqueEnderecos() {
                   <th>Grupo</th>
                   <th>Tipo</th>
                   <th>Curva</th>
-                  <th>Lote</th>
                   <th>Validade</th>
                   <th>Palete/Doca</th>
                   <th>EAN Caixa</th>
-                  <th style={{ textAlign: 'right' }}>Caixas</th>
                   <th style={{ textAlign: 'right' }}>KG</th>
                   {isExecutivo && <th style={{ textAlign: 'right' }}>Valor Total</th>}
                 </tr>
               </thead>
               <tbody>
-                {estoqueFiltrado.length === 0 ? (
-                  <tr><td colSpan={isExecutivo ? 11 : 10} className="text-center text-muted py-24">Nenhum saldo encontrado.</td></tr>
+                {loading ? (
+                  <tr><td colSpan={isExecutivo ? 11 : 10} className="text-center text-muted py-24">Carregando...</td></tr>
+                ) : estoqueFiltrado.length === 0 ? (
+                  <tr><td colSpan={isExecutivo ? 11 : 10} className="text-center text-muted py-24">Nenhuma caixa encontrada.</td></tr>
                 ) : (
                   estoqueFiltrado.map((item) => (
                     <tr key={item.id}>
@@ -192,28 +209,18 @@ export function EstoqueEnderecos() {
                       <td>{item.grupo || '-'}</td>
                       <td><span className="badge" style={{ backgroundColor: 'var(--color-bg-2)', fontSize: 10 }}>{item.tipo_produto || 'N/A'}</span></td>
                       <td><CurvaBadge curva={item.status_curva} /></td>
-                      <td className="td-mono">{item.lote || '-'}</td>
                       <td>{renderValidade(item.validade)}</td>
-                      <td className="td-mono" style={{ fontSize: 10, color: item.palete_codigos ? 'var(--primary)' : 'var(--text-muted)', fontWeight: item.palete_codigos ? 700 : 400 }}>
-                        {item.palete_codigos || '—'}
+                      <td className="td-mono" style={{ fontSize: 10, color: item.palete_codigo ? 'var(--primary)' : 'var(--text-muted)', fontWeight: item.palete_codigo ? 700 : 400 }}>
+                        {item.palete_codigo || '—'}
                       </td>
-                      <td className="td-mono" style={{ fontSize: 10, maxWidth: 140,
-                        color: item.ean_caixas?.startsWith('INT-') ? 'var(--warning)' : 'var(--text-muted)',
-                        title: item.ean_caixas
-                      }}>
-                        <span title={item.ean_caixas}>
-                          {item.ean_caixas
-                            ? item.ean_caixas.length > 18
-                              ? item.ean_caixas.substring(0, 16) + '…'
-                              : item.ean_caixas
-                            : '—'}
-                        </span>
+                      <td className="td-ean" style={{ color: item.ean_caixa?.startsWith('INT-') ? 'var(--warning)' : 'var(--text-muted)' }}
+                          title={item.ean_caixa}>
+                        {item.ean_caixa?.startsWith('INT-') ? '⚠️ ' : ''}{item.ean_caixa || '—'}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{item.qtd_caixas}</td>
-                      <td style={{ textAlign: 'right' }} className="td-muted">{item.qtd_kg}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{parseFloat(item.peso_kg).toFixed(3)}</td>
                       {isExecutivo && (
                         <td style={{ textAlign: 'right' }} className="text-success font-bold">
-                          R$ {(item.qtd_kg * (item.valor_unitario || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          R$ {(item.peso_kg * (item.valor_unitario || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </td>
                       )}
                     </tr>
@@ -238,13 +245,8 @@ export function EstoqueEnderecos() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Linhas Retornadas</div>
-                <div style={{ fontWeight: 700, fontSize: 24, color: 'var(--primary)' }}>{totalItens}</div>
-              </div>
-
-              <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Total de Caixas</div>
-                <div style={{ fontWeight: 700, fontSize: 28, color: 'var(--cyan)' }}>{totalCx.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</div>
+                <div style={{ fontWeight: 700, fontSize: 28, color: 'var(--primary)' }}>{totalCx.toLocaleString('pt-BR')}</div>
               </div>
 
               <div style={{ textAlign: 'center', background: 'rgba(16, 185, 129, 0.05)', borderRadius: 12, padding: '16px 8px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>

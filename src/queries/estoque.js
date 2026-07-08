@@ -36,6 +36,30 @@ export async function listarGeral() {
   return res.rows
 }
 
+// Listagem caixa a caixa (serializada) com EAN individual — usa estoque_caixas direto
+export async function listarGeralCaixas({ incluirRec = false } = {}) {
+  const res = await db.execute({
+    sql: `
+      SELECT
+        c.id, c.ean_caixa, c.endereco, c.validade, c.peso_kg, c.status, c.palete_id,
+        p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
+        p.status_curva, p.valor_unitario, p.unidade, p.grupo,
+        pl.codigo as palete_codigo
+      FROM estoque_caixas c
+      JOIN produtos p ON p.id = c.produto_id
+      LEFT JOIN paletes pl ON pl.id = c.palete_id
+      WHERE c.status = 'DISPONIVEL'
+        AND c.endereco IS NOT NULL
+        AND c.endereco != ''
+        AND c.endereco != 'EXPEDICAO'
+        AND (? = 1 OR c.endereco != 'REC')
+      ORDER BY c.endereco, p.descricao, c.validade
+    `,
+    args: [incluirRec ? 1 : 0]
+  })
+  return res.rows
+}
+
 // Busca saldo de um produto em um endereço específico (apenas lotes com saldo > 0)
 export async function buscarPorEnderecoProduto(endereco, produto_id) {
   const res = await db.execute({
