@@ -74,7 +74,7 @@ function HistoricoPaletes() {
   const exportarPaletesCSV = () => {
     const paletesExport = paletesFiltrados.map(p => ({
       Codigo: p.codigo,
-      Status: p.status === 'EM_MONTAGEM' ? 'Em Montagem' : p.status === 'FECHADO' ? 'Fechado' : 'Finalizado',
+      Status: p.status === 'EM_MONTAGEM' ? 'Na Doca' : p.status === 'FECHADO' ? 'Armazenado' : 'Finalizado',
       Endereco: p.endereco_atual,
       QtdCaixas: p.qtd_caixas || 0,
       PesoTotalKg: parseFloat(p.peso_total || 0).toFixed(3),
@@ -125,7 +125,7 @@ function HistoricoPaletes() {
               <div>
                 <div className="font-bold text-primary" style={{ fontSize: 18 }}>{paleteAberto.codigo}</div>
                 <div className="text-xs text-muted">
-                  {paleteAberto.status === 'EM_MONTAGEM' ? '🟡 Em Montagem' : paleteAberto.status === 'FECHADO' ? '✅ Fechado' : '🏁 Finalizado'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
+                  {paleteAberto.status === 'EM_MONTAGEM' ? '🟡 Na Doca' : paleteAberto.status === 'FECHADO' ? '✅ Armazenado' : '🏁 Finalizado'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
                 </div>
               </div>
             </div>
@@ -149,7 +149,7 @@ function HistoricoPaletes() {
               <div className="font-bold text-success" style={{ fontSize: 20 }}>{qtdDisponiveis}</div>
             </div>
             <div style={{ background: 'var(--bg-3)', borderRadius: 8, padding: '8px 16px', textAlign: 'center', flex: 1, minWidth: 80 }}>
-              <div className="text-xs text-muted mb-2">Expedidas</div>
+              <div className="text-xs text-muted mb-2">Retiradas</div>
               <div className="font-bold text-warning" style={{ fontSize: 20 }}>{qtdConsumidas}</div>
             </div>
           </div>
@@ -195,7 +195,7 @@ function HistoricoPaletes() {
                       background: c.status === 'DISPONIVEL' ? 'rgba(16,185,129,0.15)' : 'rgba(251,191,36,0.15)',
                       color: c.status === 'DISPONIVEL' ? 'var(--success)' : 'var(--warning)'
                     }}>
-                      {c.status === 'DISPONIVEL' ? '✅ Estoque' : '📤 Expedida'}
+                      {c.status === 'DISPONIVEL' ? '✅ Estoque' : '📤 Retirada'}
                     </div>
                   </div>
                 </div>
@@ -235,8 +235,8 @@ function HistoricoPaletes() {
             <label className="form-label">Status</label>
             <select className="form-input" value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}>
               <option value="TODOS">Todos os paletes</option>
-              <option value="EM_MONTAGEM">Em Montagem (Abertos)</option>
-              <option value="FECHADO">Fechados</option>
+              <option value="EM_MONTAGEM">Na Doca</option>
+              <option value="FECHADO">Armazenados</option>
               <option value="FINALIZADO">Finalizados (Vazios)</option>
             </select>
           </div>
@@ -317,7 +317,7 @@ function HistoricoPaletes() {
                       background: isAtivo ? 'rgba(59,130,246,0.15)' : isFinalizado ? 'rgba(107,114,128,0.15)' : 'rgba(16,185,129,0.15)',
                       color: isAtivo ? 'var(--primary)' : isFinalizado ? 'var(--text-muted)' : 'var(--success)'
                     }}>
-                      {isAtivo ? '🟡 EM MONTAGEM' : isFinalizado ? '🏁 FINALIZADO' : '✅ FECHADO'}
+                      {isAtivo ? '🟡 NA DOCA' : isFinalizado ? '🏁 FINALIZADO' : '✅ ARMAZENADO'}
                     </span>
                   </div>
                   <div className="text-xs text-muted">
@@ -542,7 +542,7 @@ export function Recebimento() {
 
               {paletesAbertos.length > 0 ? (
                 <div className="mb-16">
-                  <label className="text-xs text-muted font-bold mb-8 block">PALETES EM MONTAGEM NA DOCA</label>
+                  <label className="text-xs text-muted font-bold mb-8 block">PALETES NA DOCA</label>
                   <div className="flex flex-col gap-8">
                   {paletesAbertos.map(p => (
                     <div
@@ -571,7 +571,7 @@ export function Recebimento() {
               ) : (
                 <div className="p-32 text-center text-muted" style={{ border: '2px dashed var(--border)', borderRadius: 10 }}>
                   <Layers size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                  <div className="mb-12">Nenhum palete em montagem.</div>
+                  <div className="mb-12">Nenhum palete na doca.</div>
                   <button className="btn btn--primary" onClick={handleCriarPalete}><Plus size={14}/> Abrir um novo palete</button>
                 </div>
               )}
