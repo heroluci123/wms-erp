@@ -81,8 +81,8 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
       })
       
       queries.push({
-        sql: `INSERT INTO op_insumos (op_id, caixa_id, produto_id, peso_kg) VALUES (?, ?, ?, ?)`,
-        args: [op_id, c.id, c.produto_id, c.peso_kg]
+        sql: `INSERT INTO op_insumos (op_id, caixa_id, produto_id, peso_kg, operador_nome) VALUES (?, ?, ?, ?, ?)`,
+        args: [op_id, c.id, c.produto_id, c.peso_kg, operador_nome || 'Sistema']
       })
 
       // Subtract from estoque_posicao
@@ -92,7 +92,7 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
       })
       
       queries.push({
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'PRODUCAO', 1, ?, ?, ?, 'SAIDA')`,
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'PRODUCAO', 1, ?, ?, ?, 'TRANSFERENCIA')`,
         args: [c.produto_id, c.endereco || 'REC', c.peso_kg, operador_id || null, operador_nome || 'Sistema']
       })
     }
@@ -121,15 +121,15 @@ export async function adicionarRetorno(op_id, { ean_caixa, produto_id, peso_kg, 
 
     const batch = [
       {
-        sql: `INSERT INTO op_retornos (op_id, caixa_id, produto_id, peso_kg) VALUES (?, ?, ?, ?)`,
-        args: [op_id, newCaixaId, produto_id, peso_kg]
+        sql: `INSERT INTO op_retornos (op_id, caixa_id, produto_id, peso_kg, operador_nome) VALUES (?, ?, ?, ?, ?)`,
+        args: [op_id, newCaixaId, produto_id, peso_kg, operador_nome || 'Sistema']
       },
       {
         sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'PRODUCAO', '', ?, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
         args: [produto_id, validade || null, peso_kg]
       },
       {
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'PRODUCAO', 'PRODUCAO', 1, ?, ?, ?, 'RETORNO_PRODUCAO')`,
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'PRODUCAO', 'PRODUCAO', 1, ?, ?, ?, 'TRANSFERENCIA')`,
         args: [produto_id, peso_kg, operador_id || null, operador_nome || 'Sistema']
       }
     ]

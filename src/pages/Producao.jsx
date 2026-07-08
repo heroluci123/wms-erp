@@ -15,6 +15,11 @@ export function Producao() {
   const [modalInsumo, setModalInsumo] = useState(null)
   const [modalRetorno, setModalRetorno] = useState(null)
 
+  const historico = detalhes ? [
+    ...detalhes.insumos.map(i => ({ ...i, tipoMov: 'INSUMO' })),
+    ...detalhes.retornos.map(r => ({ ...r, tipoMov: 'RETORNO' }))
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : []
+
   const carregarOPs = async () => {
     try {
       const d = await producaoQueries.listarOPs('ABERTA')
@@ -196,28 +201,43 @@ export function Producao() {
               </div>
             </div>
 
-            {detalhes.retornos.length > 0 && (
-              <div className="table-container mt-24">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Produto</th>
-                      <th>EAN Caixa</th>
-                      <th style={{ textAlign: 'right' }}>Peso (kg)</th>
-                      <th style={{ textAlign: 'right' }}>Hora</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detalhes.retornos.map(r => (
-                      <tr key={r.id}>
-                        <td>{r.produto_codigo} - {r.produto_descricao}</td>
-                        <td className="td-mono text-muted">{r.ean_caixa}</td>
-                        <td className="font-bold text-success" style={{ textAlign: 'right' }}>{r.peso_kg.toFixed(2)}</td>
-                        <td className="text-muted text-sm" style={{ textAlign: 'right' }}>{new Date(r.created_at).toLocaleTimeString()}</td>
+            {historico.length > 0 && (
+              <div className="card mt-24 p-0">
+                <h3 className="font-bold text-lg text-primary p-16" style={{ borderBottom: '1px solid var(--border)' }}>Histórico de Movimentações</h3>
+                <div className="table-container m-0">
+                  <table style={{ border: 'none' }}>
+                    <thead>
+                      <tr>
+                        <th>Ação</th>
+                        <th>Produto</th>
+                        <th>EAN Caixa</th>
+                        <th style={{ textAlign: 'right' }}>Peso (kg)</th>
+                        <th>Operador</th>
+                        <th style={{ textAlign: 'right' }}>Data/Hora</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {historico.map(h => (
+                        <tr key={h.tipoMov + h.id}>
+                          <td>
+                            <span className={`badge ${h.tipoMov === 'INSUMO' ? 'badge--primary' : 'badge--success'}`}>
+                              {h.tipoMov === 'INSUMO' ? 'Saída Insumo' : 'Entrada Retorno'}
+                            </span>
+                          </td>
+                          <td>{h.produto_codigo} - {h.produto_descricao}</td>
+                          <td className="td-mono text-muted">{h.ean_caixa}</td>
+                          <td className={`font-bold ${h.tipoMov === 'INSUMO' ? 'text-primary' : 'text-success'}`} style={{ textAlign: 'right' }}>
+                            {h.peso_kg.toFixed(2)}
+                          </td>
+                          <td className="text-muted text-sm">{h.operador_nome || 'Sistema'}</td>
+                          <td className="text-muted text-sm" style={{ textAlign: 'right' }}>
+                            {new Date(h.created_at).toLocaleDateString()} {new Date(h.created_at).toLocaleTimeString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
