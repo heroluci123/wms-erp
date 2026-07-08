@@ -27,7 +27,7 @@ export async function criarPalete() {
 export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id, peso_kg, validade, operador_id, operador_nome }) {
   try {
     // 1. Inserir a caixa serializada
-    await db.batch([
+    const queries = [
       {
         sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, palete_id, peso_kg, validade, status) VALUES (?, ?, ?, ?, ?, 'DISPONIVEL')`,
         args: [ean_caixa, produto_id, palete_id || null, peso_kg, validade || null]
@@ -42,7 +42,16 @@ export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'FORNECEDOR', 'REC', '', 1, ?, ?, ?, 'RECEBIMENTO')`,
         args: [produto_id, peso_kg, operador_id || null, operador_nome || 'Sistema']
       }
-    ], 'write');
+    ]
+
+    if (palete_id) {
+      queries.push({
+        sql: `UPDATE paletes SET ultimo_operador = ? WHERE id = ?`,
+        args: [operador_nome || 'Sistema', palete_id]
+      })
+    }
+
+    await db.batch(queries, 'write');
     return { success: true };
   } catch (err) {
     if (err.message.includes('UNIQUE constraint failed: estoque_caixas.ean_caixa')) {

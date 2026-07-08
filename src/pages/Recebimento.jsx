@@ -74,12 +74,13 @@ function HistoricoPaletes() {
   const exportarPaletesCSV = () => {
     const paletesExport = paletesFiltrados.map(p => ({
       Codigo: p.codigo,
-      Status: p.status === 'EM_MONTAGEM' ? 'Na Doca' : p.status === 'FECHADO' ? 'Armazenado' : 'Finalizado',
-      Endereco: p.endereco_atual,
-      QtdCaixas: p.qtd_caixas || 0,
-      PesoTotalKg: parseFloat(p.peso_total || 0).toFixed(3),
-      CriadoEm: p.created_at ? format(new Date(p.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
-      UltimaCaixa: p.ultima_caixa ? format(new Date(p.ultima_caixa), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+      Status: p.status === 'EM_MONTAGEM' ? 'Na Doca' : (p.status === 'FECHADO' && p.endereco_atual === 'DOCA') ? 'Na Doca (Finalizado)' : (p.status === 'FECHADO' && p.endereco_atual !== 'DOCA') ? 'Armazenado' : 'Finalizado',
+      'Endereço': p.endereco_atual,
+      'Qtd Caixas': p.qtd_caixas || 0,
+      'Peso Total': parseFloat(p.peso_total || 0).toFixed(2),
+      'Aberto Em': p.created_at ? format(new Date(p.created_at + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-',
+      'Última Bipagem': p.ultima_caixa ? format(new Date(p.ultima_caixa + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-',
+      'Último Operador': p.ultimo_operador || '-'
     }));
     downloadCSV(paletesExport, `historico_paletes_${format(new Date(), 'yyyy-MM-dd')}.csv`);
   };
@@ -123,10 +124,15 @@ function HistoricoPaletes() {
                 <ArrowLeft size={16} /> Voltar
               </button>
               <div>
-                <div className="font-bold text-primary" style={{ fontSize: 18 }}>{paleteAberto.codigo}</div>
-                <div className="text-xs text-muted">
-                  {paleteAberto.status === 'EM_MONTAGEM' ? '🟡 Na Doca' : paleteAberto.status === 'FECHADO' ? '✅ Armazenado' : '🏁 Finalizado'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
-                </div>
+                <h2 className="text-xl" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {paleteAberto.codigo}
+                  <span className="badge text-sm" style={{ 
+                    background: paleteAberto.status === 'EM_MONTAGEM' ? 'var(--warning-muted)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA') ? 'var(--info-muted)' : 'var(--success-muted)', 
+                    color: paleteAberto.status === 'EM_MONTAGEM' ? 'var(--warning)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA') ? 'var(--info)' : 'var(--success)' 
+                  }}>
+                    {paleteAberto.status === 'EM_MONTAGEM' ? '🟡 Na Doca' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA') ? '🏁 Na Doca (Finalizado)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual !== 'DOCA') ? '✅ Armazenado' : '✅ Finalizado'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
+                  </span>
+                </h2>
               </div>
             </div>
             <button className="btn btn--ghost btn--sm" onClick={exportarCaixasCSV}>
@@ -236,7 +242,7 @@ function HistoricoPaletes() {
             <select className="form-input" value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}>
               <option value="TODOS">Todos os paletes</option>
               <option value="EM_MONTAGEM">Na Doca</option>
-              <option value="FECHADO">Armazenados</option>
+              <option value="FECHADO">Finalizados / Armazenados</option>
               <option value="FINALIZADO">Finalizados (Vazios)</option>
             </select>
           </div>
@@ -295,7 +301,7 @@ function HistoricoPaletes() {
           </div>
           {paletesFiltrados.map((p, i) => {
             const isAtivo = p.status === 'EM_MONTAGEM';
-            const isFinalizado = p.status === 'FINALIZADO';
+            const isFinalizado = p.status === 'FECHADO';
             return (
               <div
                 key={p.id}
@@ -311,13 +317,13 @@ function HistoricoPaletes() {
               >
                 <div style={{ flex: 1 }}>
                   <div className="flex items-center gap-8 mb-4">
-                    <span className="font-bold font-mono" style={{ fontSize: 15 }}>{p.codigo}</span>
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-                      background: isAtivo ? 'rgba(59,130,246,0.15)' : isFinalizado ? 'rgba(107,114,128,0.15)' : 'rgba(16,185,129,0.15)',
-                      color: isAtivo ? 'var(--primary)' : isFinalizado ? 'var(--text-muted)' : 'var(--success)'
+                    <span style={{ fontWeight: 600, fontSize: 16, color: 'var(--text-primary)' }}>{p.codigo}</span>
+                    <span className="badge" style={{ 
+                      fontSize: 10, 
+                      background: isAtivo ? 'var(--warning-muted)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info-muted)' : 'var(--success-muted)', 
+                      color: isAtivo ? 'var(--warning)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info)' : 'var(--success)' 
                     }}>
-                      {isAtivo ? '🟡 NA DOCA' : isFinalizado ? '🏁 FINALIZADO' : '✅ ARMAZENADO'}
+                      {isAtivo ? '🟡 NA DOCA' : (isFinalizado && p.endereco_atual === 'DOCA') ? '🏁 NA DOCA (FINALIZADO)' : '✅ ARMAZENADO'}
                     </span>
                   </div>
                   <div className="text-xs text-muted">
@@ -327,8 +333,8 @@ function HistoricoPaletes() {
                   </div>
                   {p.created_at && (
                     <div className="text-xs text-muted mt-2">
-                      🕐 Aberto em {format(new Date(p.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
-                      {p.ultima_caixa && ` · Última bipagem: ${format(new Date(p.ultima_caixa), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`}
+                      🕐 Aberto em {format(new Date(p.created_at + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+                      {p.ultima_caixa && ` · Última bipagem: ${format(new Date(p.ultima_caixa + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR })}${p.ultimo_operador ? ` por ${p.ultimo_operador}` : ''}`}
                     </div>
                   )}
                 </div>
