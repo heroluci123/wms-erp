@@ -844,6 +844,7 @@ export async function relatorioExecutivo(filtros = {}) {
     }
   ]
 
+  const res = await db.batch(batchQueries, 'read')
   const totais = res[1].rows[0] || {}
 
   return {

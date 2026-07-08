@@ -91,6 +91,7 @@ export function Dashboard() {
   const [kpis, setKpis]       = useState(null)
   const [estoque, setEstoque] = useState([])
   const [relatorio, setRelatorio] = useState(null)
+  const [errorMsg, setErrorMsg] = useState(null)
   const [loading, setLoading] = useState(true)
   const [presetAtivo, setPresetAtivo] = useState(2) // "30 dias" por padrão
 
@@ -107,6 +108,7 @@ export function Dashboard() {
 
   const carregarDados = useCallback(async () => {
     setLoading(true)
+    setErrorMsg(null)
     try {
       const filtros = { incluirInsumos, data_inicio: dataInicio, data_fim: dataFim }
       const [kpisData, estoqueData] = await Promise.all([
@@ -120,11 +122,17 @@ export function Dashboard() {
       )
 
       if (isExecutivo) {
-        const rel = await movimentacoesQueries.relatorioExecutivo(filtros)
-        setRelatorio(rel)
+        try {
+          const rel = await movimentacoesQueries.relatorioExecutivo(filtros)
+          setRelatorio(rel)
+        } catch (execErr) {
+          console.error("Erro no relatorioExecutivo:", execErr)
+          setErrorMsg(execErr.message || String(execErr))
+        }
       }
     } catch (err) {
       console.error(err)
+      setErrorMsg(err.message || String(err))
     } finally {
       setLoading(false)
     }
@@ -217,6 +225,12 @@ export function Dashboard() {
           <KpiCard icon={Scale}       label="Peso Total em Estoque" value={pesoTotalTon.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} sub="Toneladas" color="var(--info)" />
           <KpiCard icon={UploadCloud} label="Aguardando (REC)"      value={kpis.itensREC}   sub="Lotes na doca" color="var(--warning)" />
           {isExecutivo && <KpiCard icon={DollarSign} label="Valor Total do Estoque" prefix="R$ " value={valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} sub="Custo × KG em estoque" color="var(--success)" />}
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="card" style={{ background: 'var(--danger-muted)', border: '1px solid var(--danger)', color: 'var(--danger)', marginBottom: 24 }}>
+          <strong>Erro ao carregar Dashboard:</strong> {errorMsg}
         </div>
       )}
 
