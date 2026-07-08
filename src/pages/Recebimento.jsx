@@ -451,9 +451,10 @@ export function Recebimento() {
             setEanCaixaReal(val)
             toastSuccess('Caixa SSCC Identificada', produto.descricao)
           } else {
-            const codigoInterno = `INT-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
-            setEanCaixaReal(codigoInterno)
-            toastWarning('EAN Genérico', `${produto.descricao} — informe peso e validade únicos desta caixa.`)
+            // EAN genérico (identificado por sufixo/regra): usa o EAN original como identificador da caixa
+            // O EAN completo é único por caixa física — apenas o produto é identificado por sufixo
+            setEanCaixaReal(val)
+            toastWarning('EAN Genérico', `${produto.descricao} — EAN identificado por sufixo. Informe peso e validade.`)
           }
           setTimeout(() => document.getElementById('box-peso')?.focus(), 100)
         } else {
@@ -629,13 +630,13 @@ export function Recebimento() {
                   {produtoDetectado && (
                     <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
                       <div className="text-xs font-bold mb-4 uppercase" style={{ color: eanEhUnico ? 'var(--primary)' : 'var(--warning)' }}>
-                        {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico — Código único gerado internamente'}
+                        {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico — Produto identificado por sufixo do EAN'}
                       </div>
                       <div className="font-bold" style={{ fontSize: 16 }}>{produtoDetectado.descricao}</div>
                       <div className="text-sm text-muted mb-4">Código: {produtoDetectado.codigo || '-'}</div>
                       {!eanEhUnico && (
                         <div style={{ fontSize: 11, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '6px 10px', color: 'var(--warning)', marginBottom: 8 }}>
-                          🏷️ EAN bipado ({eanBipado}) é genérico — esta caixa receberá o código interno: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
+                          🏷️ EAN bipado identificado por sufixo — caixa salva com EAN original: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
                         </div>
                       )}
 
