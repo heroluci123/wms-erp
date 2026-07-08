@@ -78,6 +78,45 @@ export async function buscarPorEnderecoProduto(endereco, produto_id) {
   return res.rows
 }
 
+// Remove uma caixa do estoque
+export async function removerCaixa(id) {
+  await db.execute({
+    sql: `DELETE FROM estoque_caixas WHERE id = ?`,
+    args: [id]
+  })
+  return { success: true }
+}
+
+// Cria caixas no estoque_caixas durante a Carga Inicial
+export async function inserirCaixasCargaInicial(caixas) {
+  if (!caixas || caixas.length === 0) return { success: true };
+  const tx = await db.transaction('write');
+  try {
+    for (const c of caixas) {
+      const { rows } = await tx.execute({
+        sql: `SELECT id FROM estoque_caixas WHERE ean_caixa = ?`,
+        args: [c.ean_caixa]
+      });
+      if (rows.length === 0) {
+        await tx.execute({
+          sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, '', ?, ?, 'DISPONIVEL')`,
+          args: [c.ean_caixa, c.produto_id, c.endereco, c.validade || null, c.peso_kg]
+        });
+      } else {
+        await tx.execute({
+          sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL' WHERE ean_caixa = ?`,
+          args: [c.endereco, c.peso_kg, c.validade || null, c.ean_caixa]
+        });
+      }
+    }
+    await tx.commit();
+    return { success: true };
+  } catch (err) {
+    await tx.rollback();
+    return { success: false, error: err.message };
+  }
+}
+
 // Tudo em um endereço
 export async function buscarPorEndereco(endereco) {
   const res = await db.execute({
