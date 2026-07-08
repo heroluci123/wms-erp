@@ -32,11 +32,72 @@ export function EstoqueEnderecos() {
   const carregarDados = useCallback(async () => {
     setLoading(true)
     try {
-      const rows = await estoqueQueries.listarGeralCaixas()
+      const [posicoes, caixasSeriais] = await Promise.all([
+        estoqueQueries.listarGeral(),
+        estoqueQueries.listarGeralCaixas()
+      ])
+
+      // Mescla posições agregadas com caixas serializadas
+      const estoqueMesclado = []
+
+      for (const pos of posicoes) {
+        // Encontra caixas serializadas correspondentes a esta posição
+        const caixasDaPosicao = caixasSeriais.filter(c => 
+          c.produto_id === pos.produto_id && 
+          c.endereco === pos.endereco &&
+          (c.validade === pos.validade || (!c.validade && !pos.validade))
+        )
+
+        if (caixasDaPosicao.length > 0) {
+          // Adiciona 1 linha para cada caixa serializada encontrada
+          caixasDaPosicao.forEach(cx => {
+            estoqueMesclado.push({
+              id: `cx_${cx.id}`,
+              endereco: pos.endereco,
+              codigo: pos.codigo,
+              descricao: pos.descricao,
+              grupo: pos.grupo,
+              tipo_produto: pos.tipo_produto,
+              status_curva: pos.status_curva,
+              lote: pos.lote,
+              validade: pos.validade,
+              palete_codigo: cx.palete_codigo || pos.palete_codigos,
+              ean_caixa: cx.ean_caixa,
+              peso_kg: cx.peso_kg || (pos.qtd_kg / pos.qtd_caixas),
+              qtd_caixas: 1,
+              valor_unitario: pos.valor_unitario,
+              produto_id: pos.produto_id
+            })
+          })
+
+          // Se tiver faltado caixas (legado sem EAN), adiciona o saldo restante
+          const caixasFaltantes = pos.qtd_caixas - caixasDaPosicao.length
+          if (caixasFaltantes > 0) {
+            estoqueMesclado.push({
+              ...pos,
+              id: `pos_resto_${pos.id}`,
+              ean_caixa: null,
+              palete_codigo: pos.palete_codigos,
+              qtd_caixas: caixasFaltantes,
+              peso_kg: (pos.qtd_kg / pos.qtd_caixas) * caixasFaltantes
+            })
+          }
+        } else {
+          // Nenhuma caixa serializada encontrada, exibe a posição inteira (legado)
+          estoqueMesclado.push({
+            ...pos,
+            id: `pos_${pos.id}`,
+            ean_caixa: null,
+            palete_codigo: pos.palete_codigos,
+            peso_kg: pos.qtd_kg
+          })
+        }
+      }
+
       setEstoque(
         incluirInsumos
-          ? rows.filter(i => i.tipo_produto === 'Insumos')
-          : rows.filter(i => i.tipo_produto !== 'Insumos')
+          ? estoqueMesclado.filter(i => i.tipo_produto === 'Insumos')
+          : estoqueMesclado.filter(i => i.tipo_produto !== 'Insumos')
       )
     } catch (err) {
       console.error(err)
@@ -191,15 +252,16 @@ export function EstoqueEnderecos() {
                   <th>Validade</th>
                   <th>Palete/Doca</th>
                   <th>EAN Caixa</th>
+                  <th style={{ textAlign: 'right' }}>Caixas</th>
                   <th style={{ textAlign: 'right' }}>KG</th>
                   {isExecutivo && <th style={{ textAlign: 'right' }}>Valor Total</th>}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={isExecutivo ? 11 : 10} className="text-center text-muted py-24">Carregando...</td></tr>
+                  <tr><td colSpan={isExecutivo ? 12 : 11} className="text-center text-muted py-24">Carregando...</td></tr>
                 ) : estoqueFiltrado.length === 0 ? (
-                  <tr><td colSpan={isExecutivo ? 11 : 10} className="text-center text-muted py-24">Nenhuma caixa encontrada.</td></tr>
+                  <tr><td colSpan={isExecutivo ? 12 : 11} className="text-center text-muted py-24">Nenhuma caixa encontrada.</td></tr>
                 ) : (
                   estoqueFiltrado.map((item) => (
                     <tr key={item.id}>
@@ -217,10 +279,11 @@ export function EstoqueEnderecos() {
                           title={item.ean_caixa}>
                         {item.ean_caixa?.startsWith('INT-') ? '⚠️ ' : ''}{item.ean_caixa || '—'}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{parseFloat(item.peso_kg).toFixed(3)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{item.qtd_caixas}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-secondary)' }}>{parseFloat(item.peso_kg || 0).toFixed(3)}</td>
                       {isExecutivo && (
                         <td style={{ textAlign: 'right' }} className="text-success font-bold">
-                          R$ {(item.peso_kg * (item.valor_unitario || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          R$ {(parseFloat(item.peso_kg || 0) * (parseFloat(item.valor_unitario) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </td>
                       )}
                     </tr>
