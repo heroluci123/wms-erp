@@ -18,6 +18,7 @@ import { Locais } from './pages/Locais'
 import { Operadores } from './pages/Operadores'
 import { MapaCapacidade } from './pages/MapaCapacidade'
 import { ColetorHome } from './pages/ColetorHome'
+import { EanEditor } from './pages/EanEditor'
 
 function HomeWrapper() {
   const isMobile = window.innerWidth <= 768
@@ -45,6 +46,7 @@ function App() {
           <Route path="locais" element={<Locais />} />
           <Route path="operadores" element={<Operadores />} />
           <Route path="mapa" element={<MapaCapacidade />} />
+          <Route path="ean-editor" element={<EanEditor />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

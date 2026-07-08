@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -106,6 +106,11 @@ function Sidebar() {
       {operador?.permissoes?.produtos && (
         <NavLink to="/produtos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <Search size={18} /> Consulta & Produtos
+        </NavLink>
+      )}
+      {operador?.permissoes?.produtos && (
+        <NavLink to="/ean-editor" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <Barcode size={18} /> Editor de EAN
         </NavLink>
       )}
       

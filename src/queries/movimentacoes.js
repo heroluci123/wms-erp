@@ -255,13 +255,7 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
     }
 
     for (const g of Object.values(agrupamento)) {
-      // Retira da Origem
-      blocos.push({
-        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
-        args: [g.caixas, g.kg, g.produto_id, origem, g.validade || '']
-      });
-
-      // Insere no Destino
+      // Insere/Soma no Destino
       blocos.push({
         sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
         args: [g.produto_id, destino, g.validade || null, g.caixas, g.kg]
@@ -275,7 +269,30 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
     }
 
     await db.batch(blocos, 'write');
-    // Limpar posições zeradas
+
+    // Remove TODOS os registros da origem para os produtos movimentados (evita duplicatas por mismatch de validade/lote)
+    // Somente remove se o estoque_caixas confirma que nenhuma caixa real permanece na origem
+    for (const g of Object.values(agrupamento)) {
+      const restantes = await db.execute({
+        sql: `SELECT COUNT(*) as total FROM estoque_caixas WHERE produto_id = ? AND endereco = ? AND status = 'DISPONIVEL'`,
+        args: [g.produto_id, origem]
+      });
+      if (restantes.rows[0].total === 0) {
+        // Sem caixas físicas na origem → pode limpar toda a posição
+        await db.execute({
+          sql: `DELETE FROM estoque_posicao WHERE produto_id = ? AND endereco = ?`,
+          args: [g.produto_id, origem]
+        });
+      } else {
+        // Ainda tem caixas — subtrai só a quantidade correta
+        await db.execute({
+          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ?`,
+          args: [g.caixas, g.kg, g.produto_id, origem]
+        });
+      }
+    }
+
+    // Limpar posições zeradas ou negativas
     await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`);
 
     return { success: true };

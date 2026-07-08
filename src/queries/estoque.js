@@ -9,7 +9,15 @@ export async function listarGeral() {
       ep.id, ep.endereco, ep.lote, ep.validade,
       ep.qtd_caixas, ep.qtd_kg, ep.updated_at,
       p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
-      p.status_curva, p.valor_unitario, p.unidade, p.grupo
+      p.status_curva, p.valor_unitario, p.unidade, p.grupo,
+      (
+        SELECT GROUP_CONCAT(DISTINCT pl.codigo)
+        FROM estoque_caixas ec
+        JOIN paletes pl ON pl.id = ec.palete_id
+        WHERE ec.produto_id = ep.produto_id
+          AND ec.endereco = ep.endereco
+          AND ec.status = 'DISPONIVEL'
+      ) as palete_codigos
     FROM estoque_posicao ep
     JOIN produtos p ON p.id = ep.produto_id
     WHERE ep.qtd_caixas > 0 OR ep.qtd_kg > 0
