@@ -783,8 +783,12 @@ export async function relatorioExecutivo(filtros = {}) {
     {
       sql: `
         SELECT 
-          SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg ELSE 0 END) as total_entradas,
-          SUM(CASE WHEN m.tipo = 'DESPACHO' THEN m.qtd_kg ELSE 0 END) as total_saidas
+          SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg ELSE 0 END) as total_entrada_kg,
+          SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_caixas ELSE 0 END) as total_entrada_cx,
+          SUM(CASE WHEN m.tipo = 'RECEBIMENTO' THEN m.qtd_kg * IFNULL(p.valor_unitario, 0) ELSE 0 END) as total_entrada_valor,
+          SUM(CASE WHEN m.tipo = 'DESPACHO' THEN m.qtd_kg ELSE 0 END) as total_saida_kg,
+          SUM(CASE WHEN m.tipo = 'DESPACHO' THEN m.qtd_caixas ELSE 0 END) as total_saida_cx,
+          SUM(CASE WHEN m.tipo = 'DESPACHO' THEN m.qtd_kg * IFNULL(p.valor_unitario, 0) ELSE 0 END) as total_saida_valor
         FROM movimentacoes_log m
         JOIN produtos p ON p.id = m.produto_id
         WHERE date(m.data_hora) >= ? AND date(m.data_hora) <= ? ${filterSQL}
@@ -840,9 +844,7 @@ export async function relatorioExecutivo(filtros = {}) {
     }
   ]
 
-  const res = await db.batch(batchQueries, 'read')
-
-  const totais = res[1].rows[0] || { total_entradas: 0, total_saidas: 0 }
+  const totais = res[1].rows[0] || {}
 
   return {
     fluxoDiario: res[0].rows,
