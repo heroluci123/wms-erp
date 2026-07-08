@@ -186,9 +186,110 @@ function MontarRomaneio({ onRomaneioFechado }) {
 
   // ── TELA: Bipagem das caixas ──
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start', maxWidth: 1000 }}>
+    <div className="grid-responsive" style={{ maxWidth: 1000 }}>
 
-      {/* COLUNA ESQUERDA: Resumo do Romaneio */}
+      {/* COLUNA 1: Bipagem */}
+      <div className="card">
+        <h3 className="font-bold text-warning flex items-center gap-8 mb-16"><ScanBarcode size={18}/> Bipar Caixa</h3>
+
+        {/* Input de scan */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <input
+            ref={eanRef}
+            type="text"
+            className="form-input form-input--scanner"
+            placeholder="Bipe o EAN da caixa..."
+            value={eanBipado}
+            onChange={e => setEanBipado(e.target.value)}
+            onKeyDown={handleEanKeyDown}
+          />
+          {eanBipado && (
+            <button type="button" className="btn btn--ghost text-muted" onClick={resetBipagem}><X size={16}/></button>
+          )}
+        </div>
+
+        {/* Card da caixa encontrada */}
+        {caixaEncontrada && stepBipagem !== 'SCAN' && (
+          <div>
+            <div style={{ background: 'var(--bg-2)', border: '1px solid var(--primary)', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
+              <div className="text-xs text-muted font-bold mb-2 uppercase">✅ Caixa em Estoque</div>
+              <div className="font-bold" style={{ fontSize: 15 }}>{caixaEncontrada.produto_descricao}</div>
+              <div className="flex gap-16 text-sm mt-6">
+                <div>📦 <strong>{caixaEncontrada.peso_kg} kg</strong></div>
+                {caixaEncontrada.validade && <div>📅 <strong>{new Date(caixaEncontrada.validade + 'T00:00:00').toLocaleDateString('pt-BR')}</strong></div>}
+                <div className="text-muted font-mono" style={{ fontSize: 11 }}>{caixaEncontrada.endereco}</div>
+              </div>
+            </div>
+
+            {/* PARCIAL_EAN: aguarda bipe do restante */}
+            {stepBipagem === 'PARCIAL_EAN' && (
+              <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid var(--warning)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div className="flex items-center gap-8 font-bold text-warning mb-8"><Scissors size={15}/> Bipe a etiqueta da caixa restante</div>
+                <div className="text-sm text-muted mb-10">
+                  Saindo: <strong>{pesoSaidaNum} kg</strong> → Fica: <strong>{pesoResto} kg</strong><br/>
+                  A sobra precisará de uma etiqueta nova.
+                </div>
+                <input
+                  ref={eanRef}
+                  type="text"
+                  className="form-input form-input--scanner"
+                  placeholder="Bipe a etiqueta da caixa restante..."
+                  value={eanResto}
+                  onChange={e => setEanResto(e.target.value)}
+                  onKeyDown={handleEanKeyDown}
+                  autoFocus
+                />
+                {eanResto && (
+                  <>
+                    <div className="text-success text-sm mt-6">✅ EAN capturado: <strong className="font-mono">{eanResto}</strong></div>
+                    <button className="btn btn--primary w-full mt-12" onClick={handleConfirmarCaixa}>
+                      <Check size={16}/> Confirmar Saída e Desmembramento
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* CONFIRMAR: exibe os dados para validar o peso */}
+            {stepBipagem === 'CONFIRMAR' && (
+              <div>
+                <div className="form-group mb-12">
+                  <label className="form-label">Peso da Saída (kg) *</label>
+                  <input
+                    id="rom-peso"
+                    type="number"
+                    step="0.001"
+                    min="0.001"
+                    max={pesoCaixaNum}
+                    className="form-input form-input--number"
+                    value={pesoSaida}
+                    onChange={e => setPesoSaida(e.target.value)}
+                  />
+                  {isParcial && (
+                    <div className="text-warning text-xs mt-4 flex items-center gap-4">
+                      <Scissors size={11}/> Saída parcial — fica: <strong>{pesoResto} kg</strong>
+                    </div>
+                  )}
+                </div>
+                {isParcial && (
+                  <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }} className="text-sm text-warning">
+                    <AlertTriangle size={12} style={{ display: 'inline', marginRight: 4 }}/>
+                    Saída parcial: você bipará a etiqueta da caixa restante ({pesoResto} kg) no próximo passo.
+                  </div>
+                )}
+                <div className="flex gap-8">
+                  <button className="btn btn--ghost" onClick={resetBipagem}><X size={16}/> Cancelar</button>
+                  <button className="btn btn--primary flex-1" onClick={handleConfirmarCaixa}>
+                    <Plus size={16}/> {isParcial ? `Adicionar (${pesoSaidaNum} kg)` : 'Adicionar ao Romaneio'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* COLUNA 2: Resumo do Romaneio */}
       <div className="card">
         <div className="flex justify-between items-center mb-16">
           <div>

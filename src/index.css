@@ -401,8 +401,21 @@ tbody td {
   gap: 16px;
 }
 
-.form-grid--2 { grid-template-columns: 1fr 1fr; }
-.form-grid--3 { grid-template-columns: 1fr 1fr 1fr; }
+.form-grid--2 { grid-template-columns: 1fr; }
+.form-grid--3 { grid-template-columns: 1fr; }
+
+.grid-responsive {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (min-width: 768px) {
+  .form-grid--2 { grid-template-columns: 1fr 1fr; }
+  .form-grid--3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-responsive { grid-template-columns: 1fr 1fr; }
+}
 
 .form-group {
   display: flex;

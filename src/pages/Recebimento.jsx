@@ -201,19 +201,20 @@ export function Recebimento() {
       </div>
 
       {activeTab === 'palete' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start' }}>
+        <div className="grid-responsive">
           
-          {/* COLUNA ESQUERDA: Gerenciamento do Palete */}
-          <div className="card">
-            <div className="flex justify-between items-center mb-16">
-              <h3 className="font-bold text-primary flex items-center gap-8"><Layers size={18} /> Palete de Entrada</h3>
-              <button className="btn btn--sm btn--primary" onClick={handleCriarPalete}><Plus size={14}/> Abrir Novo</button>
-            </div>
+          {/* MASTER: Seleção de Palete (Esconde se tiver um palete ativo no mobile) */}
+          {!paleteAtivo && (
+            <div className="card">
+              <div className="flex justify-between items-center mb-16">
+                <h3 className="font-bold text-primary flex items-center gap-8"><Layers size={18} /> Paletes de Entrada</h3>
+                <button className="btn btn--sm btn--primary" onClick={handleCriarPalete}><Plus size={14}/> Novo Palete</button>
+              </div>
 
-            {paletesAbertos.length > 0 && (
-              <div className="mb-16">
-                <label className="text-xs text-muted font-bold mb-4 block">PALETES EM MONTAGEM NA DOCA</label>
-                <div className="flex gap-8 overflow-x-auto pb-8">
+              {paletesAbertos.length > 0 ? (
+                <div className="mb-16">
+                  <label className="text-xs text-muted font-bold mb-8 block">PALETES EM MONTAGEM NA DOCA</label>
+                  <div className="flex flex-col gap-8">
                   {paletesAbertos.map(p => (
                     <div 
                       key={p.id} 
@@ -228,125 +229,130 @@ export function Recebimento() {
                       <div className="text-xs text-muted">{p.qtd_caixas || 0} cx • {p.peso_total || 0} kg</div>
                     </div>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {!paleteAtivo ? (
-              <div className="p-24 text-center text-muted border border-dashed border-border rounded-lg">
-                Abra um novo palete para começar a bipar caixas.
-              </div>
-            ) : (
-              <div style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
-                <div style={{ background: 'var(--bg-2)', padding: '12px 16px', borderBottom: '1px solid var(--border)', borderTopLeftRadius: 10, borderTopRightRadius: 10 }}>
-                  <div className="flex justify-between items-center mb-4">
-                    <div className="text-sm font-bold text-primary">Conteúdo do {paleteAtivo.codigo}</div>
-                    <button className="btn btn--sm btn--secondary" onClick={handleConcluirPalete} title="Fechar o palete na doca para liberar para movimentação"><Check size={14}/> Concluir Palete</button>
-                  </div>
-                  <div className="flex gap-16 text-sm">
-                    <div>Caixas: <strong>{caixasDoPalete.length}</strong></div>
-                    <div>Peso Total: <strong>{caixasDoPalete.reduce((sum, c) => sum + c.peso_kg, 0).toFixed(2)} kg</strong></div>
                   </div>
                 </div>
-                <div style={{ maxHeight: 300, overflowY: 'auto', padding: 8 }}>
-                  {caixasDoPalete.length === 0 ? (
-                    <div className="text-center text-muted p-16 text-sm">Nenhuma caixa bipada ainda.</div>
-                  ) : (
-                    caixasDoPalete.map((c, i) => (
-                      <div key={c.id} style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div className="font-bold text-sm">{c.produto_descricao}</div>
-                          <div className="text-xs text-muted font-mono">{c.ean_caixa}</div>
-                        </div>
-                        <div className="text-right flex items-center gap-12">
-                          <div>
-                            <div className="font-bold text-cyan">{c.peso_kg} kg</div>
-                            <div className="text-xs text-muted">Venc: {format(new Date(c.validade + 'T00:00:00'), 'dd/MM/yy')}</div>
-                          </div>
-                          <button className="btn btn--ghost text-danger p-4" onClick={() => handleRemoverCaixa(c)} title="Excluir caixa do palete"><Trash2 size={16}/></button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* COLUNA DIREITA: Bipagem SSCC */}
-          <div className="card">
-            <h3 className="font-bold text-warning flex items-center gap-8 mb-16"><Package size={18} /> Adicionar Caixa ao Palete</h3>
-            
-            <form onSubmit={handleAdicionarCaixa}>
-              <div className="form-group mb-16">
-                <label className="form-label text-warning">1. Bipar EAN Único da Caixa</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    ref={codigoRef}
-                    type="text"
-                    className="form-input form-input--scanner"
-                    placeholder="Bipe o código de barras..."
-                    value={eanBipado}
-                    onChange={(e) => setEanBipado(e.target.value)}
-                    onKeyDown={handleCodigoKeyDown}
-                    disabled={!paleteAtivo}
-                  />
-                  {eanBipado && (
-                    <button type="button" className="btn btn--ghost text-muted" onClick={() => { setEanBipado(''); setProdutoDetectado(null); codigoRef.current?.focus() }}>
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {produtoDetectado && (
-                <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
-                  <div className="text-xs font-bold mb-4 uppercase" style={{ color: eanEhUnico ? 'var(--primary)' : 'var(--warning)' }}>
-                    {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico — Código único gerado internamente'}
-                  </div>
-                  <div className="font-bold" style={{ fontSize: 16 }}>{produtoDetectado.descricao}</div>
-                  <div className="text-sm text-muted mb-4">Código: {produtoDetectado.codigo || '-'}</div>
-                  {!eanEhUnico && (
-                    <div style={{ fontSize: 11, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '6px 10px', color: 'var(--warning)', marginBottom: 8 }}>
-                      🏷️ EAN bipado ({eanBipado}) é genérico — esta caixa receberá o código interno: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
-                    </div>
-                  )}
-
-                  <div className="form-grid form-grid--2">
-                    <div className="form-group">
-                      <label className="form-label">Peso Real (KG) *</label>
-                      <input
-                        id="box-peso"
-                        type="number"
-                        step="0.001"
-                        className="form-input form-input--number"
-                        value={boxData.peso_kg}
-                        onChange={e => setBoxData({ ...boxData, peso_kg: e.target.value })}
-                        required
-                        autoComplete="off"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Data de Validade *</label>
-                      <input
-                        type="date"
-                        className="form-input"
-                        value={boxData.validade}
-                        onChange={e => setBoxData({ ...boxData, validade: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="mt-16 text-right">
-                    <button type="submit" className="btn btn--primary btn--lg w-full">
-                      <Check size={18} /> Salvar Caixa
-                    </button>
-                  </div>
+              ) : (
+                <div className="p-32 text-center text-muted border border-dashed border-border rounded-lg">
+                  <div className="mb-8">Nenhum palete em montagem.</div>
+                  <button className="btn btn--primary" onClick={handleCriarPalete}>Abrir um novo palete</button>
                 </div>
               )}
-            </form>
-          </div>
+            </div>
+          )}
+
+          {/* DETAIL: Conteúdo do Palete e Bipagem (Esconde se NÃO tiver palete ativo) */}
+          {paleteAtivo && (
+            <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+              <div style={{ background: 'var(--bg-2)', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+                <div className="flex justify-between items-center mb-10">
+                  <button className="btn btn--ghost btn--sm text-muted p-0" onClick={() => setPaleteAtivo(null)}>
+                    <ArrowLeft size={16}/> Voltar
+                  </button>
+                  <div className="text-sm font-bold text-primary">{paleteAtivo.codigo}</div>
+                  <button className="btn btn--sm btn--secondary" onClick={() => { handleConcluirPalete(); setPaleteAtivo(null); }} title="Fechar o palete na doca para liberar para movimentação"><Check size={14}/> Concluir</button>
+                </div>
+                <div className="flex justify-between text-sm px-4">
+                  <div>Caixas: <strong>{caixasDoPalete.length}</strong></div>
+                  <div>Peso Total: <strong>{caixasDoPalete.reduce((sum, c) => sum + c.peso_kg, 0).toFixed(2)} kg</strong></div>
+                </div>
+              </div>
+              
+              <div style={{ padding: '16px' }}>
+                <h3 className="font-bold text-warning flex items-center gap-8 mb-16"><ScanBarcode size={18} /> Bipar Caixa SSCC</h3>
+                <form onSubmit={handleAdicionarCaixa}>
+                  <div className="form-group mb-16">
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        ref={codigoRef}
+                        type="text"
+                        className="form-input form-input--scanner"
+                        placeholder="Bipe o código de barras..."
+                        value={eanBipado}
+                        onChange={(e) => setEanBipado(e.target.value)}
+                        onKeyDown={handleCodigoKeyDown}
+                      />
+                      {eanBipado && (
+                        <button type="button" className="btn btn--ghost text-muted" onClick={() => { setEanBipado(''); setProdutoDetectado(null); codigoRef.current?.focus() }}>
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {produtoDetectado && (
+                    <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
+                      <div className="text-xs font-bold mb-4 uppercase" style={{ color: eanEhUnico ? 'var(--primary)' : 'var(--warning)' }}>
+                        {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico — Código único gerado internamente'}
+                      </div>
+                      <div className="font-bold" style={{ fontSize: 16 }}>{produtoDetectado.descricao}</div>
+                      <div className="text-sm text-muted mb-4">Código: {produtoDetectado.codigo || '-'}</div>
+                      {!eanEhUnico && (
+                        <div style={{ fontSize: 11, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '6px 10px', color: 'var(--warning)', marginBottom: 8 }}>
+                          🏷️ EAN bipado ({eanBipado}) é genérico — esta caixa receberá o código interno: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
+                        </div>
+                      )}
+
+                      <div className="form-grid form-grid--2">
+                        <div className="form-group">
+                          <label className="form-label">Peso Real (KG) *</label>
+                          <input
+                            id="box-peso"
+                            type="number"
+                            step="0.001"
+                            className="form-input form-input--number"
+                            value={boxData.peso_kg}
+                            onChange={e => setBoxData({ ...boxData, peso_kg: e.target.value })}
+                            required
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Data de Validade *</label>
+                          <input
+                            type="date"
+                            className="form-input"
+                            value={boxData.validade}
+                            onChange={e => setBoxData({ ...boxData, validade: e.target.value })}
+                            required
+                          />
+                        </div>
+                      </div>
+                      
+                      <div className="mt-16 text-right">
+                        <button type="submit" className="btn btn--primary btn--lg w-full">
+                          <Check size={18} /> Salvar Caixa
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </form>
+
+                <div className="mt-24">
+                  <h4 className="text-xs text-muted font-bold mb-8 uppercase tracking-wider">Histórico de Bipagem</h4>
+                  <div style={{ maxHeight: 250, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                    {caixasDoPalete.length === 0 ? (
+                      <div className="text-center text-muted p-24 text-sm">Nenhuma caixa bipada ainda.</div>
+                    ) : (
+                      caixasDoPalete.map((c, i) => (
+                        <div key={c.id} style={{ padding: '10px 12px', borderBottom: i < caixasDoPalete.length - 1 ? '1px solid var(--border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div className="font-bold text-sm" style={{ lineHeight: 1.2 }}>{c.produto_descricao}</div>
+                            <div className="text-xs text-muted font-mono mt-4">{c.ean_caixa}</div>
+                          </div>
+                          <div className="text-right flex items-center gap-12">
+                            <div>
+                              <div className="font-bold text-cyan text-sm">{c.peso_kg} kg</div>
+                              <div className="text-xs text-muted">Venc: {format(new Date(c.validade + 'T00:00:00'), 'dd/MM/yy')}</div>
+                            </div>
+                            <button className="btn btn--ghost text-danger p-4" onClick={() => handleRemoverCaixa(c)} title="Excluir caixa do palete"><Trash2 size={16}/></button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
