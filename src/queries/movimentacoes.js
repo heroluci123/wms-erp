@@ -240,7 +240,7 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
     const blocos = [];
 
     // 1. Atualizar palete e suas caixas (caso a caixa tivesse endereço solto)
-    blocos.push({ sql: `UPDATE paletes SET endereco_atual = ?, status = 'ARMAZENADO' WHERE id = ?`, args: [destino, palete_id] });
+    blocos.push({ sql: `UPDATE paletes SET endereco_atual = ?, status = 'ATIVO' WHERE id = ?`, args: [destino, palete_id] });
     blocos.push({ sql: `UPDATE estoque_caixas SET endereco = ? WHERE palete_id = ?`, args: [destino, palete_id] });
 
     // 2. Agrupar as caixas por produto e validade para ajustar os saldos agregados (estoque_posicao)
