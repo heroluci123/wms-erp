@@ -187,7 +187,7 @@ function HistoricoPaletes() {
                     <div className="text-xs font-mono text-muted mt-2" style={{ wordBreak: 'break-all' }}>{c.ean_caixa}</div>
                     {c.created_at && (
                       <div className="text-xs text-muted mt-2">
-                        🕐 {format(new Date(c.created_at), 'dd/MM/yy HH:mm', { locale: ptBR })}
+                        🕐 {format(new Date(c.created_at + 'Z'), 'dd/MM/yy HH:mm', { locale: ptBR })}
                       </div>
                     )}
                   </div>
