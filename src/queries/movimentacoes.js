@@ -86,7 +86,7 @@ export async function removerCaixaSerializada(caixa_id, operador_id, operador_no
 export async function concluirPalete(palete_id) {
   try {
     await db.execute({
-      sql: `UPDATE paletes SET status = 'FECHADO_DOCA' WHERE id = ?`,
+      sql: `UPDATE paletes SET status = 'DESMONTADO', endereco_atual = 'DOCA' WHERE id = ?`,
       args: [palete_id]
     });
     return { success: true };
@@ -94,6 +94,7 @@ export async function concluirPalete(palete_id) {
     return { success: false, error: err.message };
   }
 }
+
 
 export async function listarCaixasDoPalete(palete_id) {
   const res = await db.execute({
