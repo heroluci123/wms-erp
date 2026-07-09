@@ -148,7 +148,7 @@ export async function finalizarOP(op_id) {
   try {
     const queries = [
       {
-        sql: `UPDATE ordens_producao SET status = 'FECHADA', data_fim = CURRENT_TIMESTAMP WHERE id = ?`,
+        sql: `UPDATE ordens_producao SET status = 'FECHADA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
         args: [op_id]
       },
       {

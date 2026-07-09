@@ -14,6 +14,8 @@ export function Producao() {
   
   const [modalInsumo, setModalInsumo] = useState(null)
   const [modalRetorno, setModalRetorno] = useState(null)
+  const [modalFinalizarOP, setModalFinalizarOP] = useState(false)
+  const [modalNovaOP, setModalNovaOP] = useState(false)
 
   const historico = detalhes ? [
     ...detalhes.insumos.map(i => ({ ...i, tipoMov: 'INSUMO' })),
@@ -80,7 +82,6 @@ export function Producao() {
   })
 
   const finalizarOP = async () => {
-    if (!window.confirm('Deseja realmente finalizar esta Ordem de Produção? Os insumos serão baixados e não será possível bipar novos retornos.')) return
     try {
       const res = await producaoQueries.finalizarOP(opSelecionada.id)
       if (res.success) {
@@ -95,9 +96,7 @@ export function Producao() {
     }
   }
 
-  const handleNovaOP = async () => {
-    const nome = window.prompt("Nome / Descrição da Ordem de Produção (Ex: Produção de Picanha):")
-    if (!nome) return
+  const handleNovaOP = async (nome) => {
     try {
       const res = await producaoQueries.criarOP(nome, operador.id, operador.nome)
       if (res.success) {
@@ -127,7 +126,7 @@ export function Producao() {
       {!opSelecionada ? (
         <div>
           <div className="mb-24">
-            <button className="btn btn--primary btn--lg w-full max-w-sm" onClick={handleNovaOP}>
+            <button className="btn btn--primary w-full" onClick={() => setModalNovaOP(true)}>
               <Plus size={18}/> Abrir Nova Ordem de Produção
             </button>
           </div>
@@ -155,7 +154,7 @@ export function Producao() {
                   <h2 className="font-bold text-xl text-primary">{detalhes.codigo} - {detalhes.nome}</h2>
                   <div className="text-muted text-sm mt-4">Criado em: {new Date(detalhes.created_at).toLocaleString()}</div>
                 </div>
-                <button className="btn btn--primary" onClick={finalizarOP}>
+                <button className="btn btn--primary flex items-center gap-8" onClick={() => setModalFinalizarOP(true)}>
                   Finalizar OP <Check size={18}/>
                 </button>
               </div>
@@ -301,6 +300,48 @@ export function Producao() {
                   toastError('Erro', res.error)
                 }
               }}>Salvar Retorno</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NOVA OP */}
+      {modalNovaOP && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-primary">Nova Ordem de Produção</h3>
+            <p className="mb-16">Informe um nome ou descrição para identificar esta OP.</p>
+            <div className="form-group mb-24">
+              <label className="form-label">Nome da OP</label>
+              <input type="text" className="form-input" autoFocus id="input-nome-op" placeholder="Ex: Produção de Picanha" onKeyDown={(e) => {
+                if (e.key === 'Enter') document.getElementById('btn-confirm-op').click()
+              }} />
+            </div>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalNovaOP(false)}>Cancelar</button>
+              <button id="btn-confirm-op" className="btn btn--primary flex-1" onClick={async () => {
+                const nome = document.getElementById('input-nome-op').value
+                if (!nome) return toastError('Aviso', 'O nome da OP é obrigatório.')
+                await handleNovaOP(nome)
+                setModalNovaOP(false)
+              }}>Criar OP</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL FINALIZAR OP */}
+      {modalFinalizarOP && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-warning">Finalizar OP</h3>
+            <p className="mb-24">Deseja realmente finalizar esta Ordem de Produção? Os insumos serão baixados do estoque permanentemente e não será possível bipar novos retornos.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalFinalizarOP(false)}>Cancelar</button>
+              <button className="btn btn--primary flex-1" onClick={async () => {
+                await finalizarOP()
+                setModalFinalizarOP(false)
+              }}>Confirmar e Finalizar</button>
             </div>
           </div>
         </div>
