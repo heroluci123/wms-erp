@@ -20,6 +20,7 @@ export function Saida() {
   const [modalFinalizarMontagem, setModalFinalizarMontagem] = useState(false)
   const [modalExpedir, setModalExpedir] = useState(null)
   const [modalExcluirRomaneio, setModalExcluirRomaneio] = useState(false)
+  const [modalReabrirRomaneio, setModalReabrirRomaneio] = useState(null)
   
   // Bipagem
   const [eanBipado, setEanBipado] = useState('')
@@ -208,6 +209,26 @@ export function Saida() {
     setModalExcluirRomaneio(false)
   }
 
+  const handleReabrirRomaneio = (id) => {
+    setModalReabrirRomaneio(id)
+  }
+
+  const confirmarReabrirRomaneio = async (id) => {
+    try {
+      const res = await saidaQueries.reabrirRomaneio(id)
+      if (res.success) {
+        toastSuccess('Sucesso', 'Romaneio reaberto para montagem.')
+        setRomaneioExpandido(null)
+        carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
+      } else {
+        toastError('Erro', res.error)
+      }
+    } catch (e) {
+      toastError('Erro', e.message)
+    }
+    setModalReabrirRomaneio(null)
+  }
+
   return (
     <div style={{ maxWidth: 1000 }}>
       <div className="page-header mb-24">
@@ -359,9 +380,14 @@ export function Saida() {
                   </div>
                 </div>
                 {abaAtiva === 'EXPEDICAO' && romaneioExpandido?.id === rom.id && (
-                  <button className="btn btn--primary" onClick={(e) => { e.stopPropagation(); handleExpedir(rom.id) }}>
-                    REALIZAR EXPEDIÇÃO
-                  </button>
+                  <div className="flex gap-8">
+                    <button className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); handleReabrirRomaneio(rom.id) }}>
+                      REABRIR
+                    </button>
+                    <button className="btn btn--primary" onClick={(e) => { e.stopPropagation(); handleExpedir(rom.id) }}>
+                      REALIZAR EXPEDIÇÃO
+                    </button>
+                  </div>
                 )}
               </div>
               
@@ -451,6 +477,19 @@ export function Saida() {
             <div className="flex gap-16">
               <button className="btn btn--ghost" onClick={() => setModalExcluirRomaneio(false)}>Cancelar</button>
               <button className="btn btn--danger flex-1" onClick={confirmarExcluirRomaneio}>Excluir Romaneio</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalReabrirRomaneio && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-warning">Reabrir Romaneio</h3>
+            <p className="mb-24">Deseja reabrir este romaneio? Ele voltará para a aba de "Montar Romaneio", permitindo adicionar ou remover caixas.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalReabrirRomaneio(null)}>Cancelar</button>
+              <button className="btn btn--primary flex-1" onClick={() => confirmarReabrirRomaneio(modalReabrirRomaneio)}>Confirmar</button>
             </div>
           </div>
         </div>

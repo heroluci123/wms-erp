@@ -8,7 +8,7 @@ import { Dashboard } from './pages/Dashboard'
 import { EstoqueEnderecos } from './pages/EstoqueEnderecos'
 import { Recebimento } from './pages/Recebimento'
 import { Movimentacao } from './pages/Movimentacao'
-import { Expedicao } from './pages/Expedicao'
+
 import { Inventario } from './pages/Inventario'
 import { InventarioOperador } from './pages/InventarioOperador'
 import { InventarioConciliacao } from './pages/InventarioConciliacao'
@@ -40,7 +40,7 @@ function App() {
           <Route path="movimentacao" element={<Movimentacao />} />
           <Route path="producao" element={<Producao />} />
           <Route path="saida" element={<Saida />} />
-          <Route path="expedicao" element={<Expedicao />} />
+
           <Route path="inventario" element={<Inventario />} />
           <Route path="inventario/coletor" element={<InventarioOperador />} />
           <Route path="inventario/conciliacao/:id" element={<InventarioConciliacao />} />

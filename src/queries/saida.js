@@ -129,6 +129,18 @@ export async function finalizarMontagem(romaneio_id) {
   }
 }
 
+export async function reabrirRomaneio(romaneio_id) {
+  try {
+    await db.execute({
+      sql: `UPDATE romaneios SET status = 'MONTANDO' WHERE id = ?`,
+      args: [romaneio_id]
+    })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
   try {
     // Busca todas as caixas deste romaneio para gerar log de saÃ­da

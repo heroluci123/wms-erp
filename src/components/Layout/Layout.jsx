@@ -93,11 +93,7 @@ function Sidebar() {
           <LogOut size={18} /> Saída de Materiais
         </NavLink>
       )}
-      {operador?.permissoes?.expedicao && (
-        <NavLink to="/expedicao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <Box size={18} /> Área de Expedição
-        </NavLink>
-      )}
+
 
       { (operador?.permissoes?.inventario_coletor || operador?.permissoes?.inventario_gestao || operador?.permissoes?.produtos) && (
         <div className="sidebar__section-label">Controle</div>
