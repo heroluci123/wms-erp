@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Package, ArrowRightLeft, ClipboardList, LogOut, PackageOpen } from 'lucide-react'
+import { Package, ArrowRightLeft, ClipboardList, LogOut, PackageOpen, MapPin, Search, Factory, Scissors } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 
 export function ColetorHome() {
@@ -37,7 +37,32 @@ export function ColetorHome() {
       rota: '/inventario/coletor',
       cor: '#22c55e',
     },
+    {
+      label: 'Consulta de\nEndereço',
+      icon: <MapPin size={44} />,
+      rota: '/consulta-endereco',
+      cor: '#a855f7',
+    },
+    {
+      label: 'Rastreabilidade\nde Caixa',
+      icon: <Search size={44} />,
+      rota: '/rastreabilidade',
+      cor: '#ec4899',
+    },
+    {
+      label: 'Retorno de\nProdução',
+      icon: <Factory size={44} />,
+      rota: '/producao',
+      cor: '#f97316',
+    },
+    {
+      label: 'Desmembra-\nmento',
+      icon: <Scissors size={44} />,
+      rota: '/desmembramento',
+      cor: '#14b8a6',
+    },
   ]
+
 
   return (
     <div className="coletor-home">
