@@ -1,11 +1,12 @@
 import { db } from '../lib/db.js';
 
-export async function listarRomaneios(status = 'TODOS', filtroPeriodo = 'todos') {
+export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataFim = null) {
   let query = `
     SELECT 
       r.*,
       (SELECT count(*) FROM romaneios_itens WHERE romaneio_id = r.id) as qtd_caixas,
-      (SELECT sum(peso_kg) FROM romaneios_itens WHERE romaneio_id = r.id) as peso_total
+      (SELECT sum(peso_kg) FROM romaneios_itens WHERE romaneio_id = r.id) as peso_total,
+      (SELECT sum(ri.peso_kg * COALESCE(p.valor_unitario, 0)) FROM romaneios_itens ri JOIN produtos p ON p.id = ri.produto_id WHERE ri.romaneio_id = r.id) as valor_total
     FROM romaneios r
     WHERE 1=1
   `
@@ -16,12 +17,9 @@ export async function listarRomaneios(status = 'TODOS', filtroPeriodo = 'todos')
     args.push(status)
   }
 
-  if (filtroPeriodo === 'hoje') {
-    query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') = date('now', 'localtime')`
-  } else if (filtroPeriodo === '7d') {
-    query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') >= date('now', '-7 days', 'localtime')`
-  } else if (filtroPeriodo === '30d') {
-    query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') >= date('now', '-30 days', 'localtime')`
+  if (dataInicio && dataFim) {
+    query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') >= ? AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') <= ?`
+    args.push(dataInicio, dataFim)
   }
   
   query += ` ORDER BY r.created_at DESC`

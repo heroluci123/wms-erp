@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock, Trash2 } from 'lucide-react'
+import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
+import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock, Trash2, Calendar, Scale, DollarSign } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import * as saidaQueries from '../queries/saida.js'
@@ -9,6 +10,14 @@ import * as producaoQueries from '../queries/producao.js'
 export function Saida() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   
+const PRESETS = [
+  { label: 'Hoje', getRange: () => [new Date().toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
+  { label: '7 dias', getRange: () => [subDays(new Date(), 6).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
+  { label: '30 dias', getRange: () => [subDays(new Date(), 29).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
+  { label: 'Este mês', getRange: () => [startOfMonth(new Date()).toISOString().slice(0,10), endOfMonth(new Date()).toISOString().slice(0,10)] },
+  { label: 'Este ano', getRange: () => [startOfYear(new Date()).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
+]
+
   // Abas: MONTAR | EXPEDICAO | HISTORICO
   const [abaAtiva, setAbaAtiva] = useState('MONTAR')
 
@@ -167,12 +176,22 @@ export function Saida() {
   // --- ABA EXPEDIÇÃO & HISTORICO ---
   const [romaneiosLista, setRomaneiosLista] = useState([])
   const [romaneioExpandido, setRomaneioExpandido] = useState(null)
-  const [filtroDataHistorico, setFiltroDataHistorico] = useState('hoje')
-  const [dataEspecificaHistorico, setDataEspecificaHistorico] = useState(() => new Date().toISOString().substring(0, 10))
+  
+  // Período personalizado
+  const [dataInicio, setDataInicio] = useState(() => new Date().toISOString().slice(0,10))
+  const [dataFim,    setDataFim]    = useState(() => new Date().toISOString().slice(0,10))
+  const [presetAtivo, setPresetAtivo] = useState(0) // "Hoje" por padrão
 
-  const carregarRomaneiosList = async (statusBusca, dataBusca = null) => {
+  const aplicarPreset = (idx) => {
+    setPresetAtivo(idx)
+    const [ini, fim] = PRESETS[idx].getRange()
+    setDataInicio(ini)
+    setDataFim(fim)
+  }
+
+  const carregarRomaneiosList = async (statusBusca, inicio = null, fim = null) => {
     try {
-      const lista = await saidaQueries.listarRomaneios(statusBusca, dataBusca)
+      const lista = await saidaQueries.listarRomaneios(statusBusca, inicio, fim)
       setRomaneiosLista(lista)
     } catch (e) {
       toastError('Erro', 'Falha ao buscar romaneios')
@@ -185,11 +204,10 @@ export function Saida() {
     } else if (abaAtiva === 'EXPEDICAO') {
       carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
     } else if (abaAtiva === 'HISTORICO') {
-      const periodo = filtroDataHistorico === 'especifico' ? dataEspecificaHistorico : filtroDataHistorico
-      carregarRomaneiosList('EXPEDIDO', periodo)
+      carregarRomaneiosList('EXPEDIDO', dataInicio, dataFim)
     }
     setRomaneioExpandido(null)
-  }, [abaAtiva, filtroDataHistorico, dataEspecificaHistorico])
+  }, [abaAtiva, dataInicio, dataFim])
 
   const carregarDetalhesExpansao = async (id) => {
     try {
@@ -393,38 +411,44 @@ export function Saida() {
         <div className="flex-col gap-16">
           {abaAtiva === 'HISTORICO' && (
             <div className="flex-col gap-16 mb-8">
-              <div className="flex justify-end gap-8">
-                <select 
-                  className="form-input" 
-                  value={filtroDataHistorico} 
-                  onChange={e => setFiltroDataHistorico(e.target.value)}
-                  style={{ width: 'auto' }}
-                >
-                  <option value="hoje">Hoje</option>
-                  <option value="7d">Últimos 7 dias</option>
-                  <option value="30d">Últimos 30 dias</option>
-                  <option value="todos">Todo o período</option>
-                  <option value="especifico">Data específica...</option>
-                </select>
-                {filtroDataHistorico === 'especifico' && (
-                  <input 
-                    type="date" 
-                    className="form-input" 
-                    value={dataEspecificaHistorico} 
-                    onChange={e => setDataEspecificaHistorico(e.target.value)}
-                    style={{ width: 'auto' }}
-                  />
-                )}
+              <div className="card card--elevated">
+                <div className="flex items-center gap-16 flex-wrap">
+                  <div className="flex items-center gap-8" style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 600 }}>
+                    <Calendar size={16} /> Período de análise:
+                  </div>
+                  <div className="flex gap-8 flex-wrap">
+                    {PRESETS.map((p, i) => (
+                      <button key={i} onClick={() => aplicarPreset(i)} style={{
+                        padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1.5px solid',
+                        borderColor: presetAtivo === i ? 'var(--accent)' : 'var(--border)',
+                        background: presetAtivo === i ? 'var(--accent-muted)' : 'transparent',
+                        color: presetAtivo === i ? 'var(--accent)' : 'var(--text-muted)',
+                        cursor: 'pointer', transition: 'all 0.15s'
+                      }}>{p.label}</button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-8 ml-auto">
+                    <input type="date" value={dataInicio} onChange={e => { setDataInicio(e.target.value); setPresetAtivo(null) }}
+                      style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13 }} />
+                    <span style={{ color: 'var(--text-muted)' }}>até</span>
+                    <input type="date" value={dataFim} onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }}
+                      style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13 }} />
+                  </div>
+                </div>
               </div>
               
-              <div className="flex gap-16" style={{ flexWrap: 'wrap' }}>
-                <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '12px 16px', flex: 1, minWidth: 200, border: '1px solid var(--border)' }}>
-                  <div className="text-xs text-muted mb-4 uppercase font-bold">Caixas Expedidas</div>
-                  <div className="font-bold text-primary" style={{ fontSize: 24 }}>{romaneiosLista.reduce((sum, r) => sum + (r.qtd_caixas || 0), 0)}</div>
+              <div className="kpi-grid">
+                <div className="kpi-card" style={{ borderColor: 'var(--primary)' }}>
+                  <span className="kpi-card__label flex items-center gap-8" style={{ color: 'var(--primary)' }}><Package size={14} /> Caixas Expedidas</span>
+                  <span className="kpi-card__value">{romaneiosLista.reduce((sum, r) => sum + (r.qtd_caixas || 0), 0)}</span>
                 </div>
-                <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '12px 16px', flex: 1, minWidth: 200, border: '1px solid var(--border)' }}>
-                  <div className="text-xs text-muted mb-4 uppercase font-bold">Kg Expedido</div>
-                  <div className="font-bold text-cyan" style={{ fontSize: 24 }}>{romaneiosLista.reduce((sum, r) => sum + parseFloat(r.peso_total || 0), 0).toFixed(2)}</div>
+                <div className="kpi-card" style={{ borderColor: 'var(--info)' }}>
+                  <span className="kpi-card__label flex items-center gap-8" style={{ color: 'var(--info)' }}><Scale size={14} /> KG Expedido</span>
+                  <span className="kpi-card__value">{romaneiosLista.reduce((sum, r) => sum + parseFloat(r.peso_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="kpi-card" style={{ borderColor: 'var(--success)' }}>
+                  <span className="kpi-card__label flex items-center gap-8" style={{ color: 'var(--success)' }}><DollarSign size={14} /> Valor Expedido</span>
+                  <span className="kpi-card__value">R$ {romaneiosLista.reduce((sum, r) => sum + parseFloat(r.valor_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
