@@ -81,13 +81,12 @@ export function Desmembramento() {
       return
     }
     
-    // Alerta se o peso divergir muito, mas permite.
+    // Alerta se o peso divergir muito
     const pesoTotal = novasCaixas.reduce((acc, c) => acc + c.peso_kg, 0)
     const diff = Math.abs(caixaOriginal.peso_kg - pesoTotal)
-    if (diff > 5) {
-      if (!window.confirm(`Atenção: A diferença de peso é grande (${diff.toFixed(2)} kg). Tem certeza que deseja continuar?`)) {
-        return
-      }
+    if (diff > 1) {
+      toastError('Erro de Peso', `A soma das novas caixas difere muito do peso original. A diferença máxima permitida é de 1 kg (Diferença atual: ${diff.toFixed(2)} kg).`)
+      return
     }
 
     setLoading(true)
