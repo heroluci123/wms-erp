@@ -10,6 +10,7 @@ export function Producao() {
   const { toastSuccess, toastError, toastWarning, operador } = useAppStore()
   const [ops, setOps] = useState([])
   const [opsFechadas, setOpsFechadas] = useState([])
+  const [activeTab, setActiveTab] = useState('abertas')
   const [opSelecionada, setOpSelecionada] = useState(null)
   const [detalhes, setDetalhes] = useState(null)
   
@@ -144,47 +145,66 @@ export function Producao() {
 
       {!opSelecionada ? (
         <div className="flex-col gap-24">
-          <div>
-            <div className="mb-24">
-              <button className="btn btn--primary w-full" onClick={() => setModalNovaOP(true)}>
-                <Plus size={18}/> Abrir Nova Ordem de Produção
-              </button>
-            </div>
-            
-            <h2 className="font-bold text-lg mb-16 text-primary">Ordens em Aberto</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 mb-24">
-              {ops.length === 0 && <div className="text-muted col-span-3">Nenhuma Ordem de Produção em aberto.</div>}
-              {ops.map(op => (
-                <div key={op.id} className="card cursor-pointer hover:border-primary" onClick={() => setOpSelecionada(op)}>
-                  <div className="flex items-center justify-between mb-8">
-                    <span className="font-bold text-lg text-primary">{op.codigo}</span>
-                    <Factory size={20} className="text-muted"/>
-                  </div>
-                  <div className="mb-12 font-bold">{op.nome}</div>
-                  <div className="text-sm text-muted mb-4">Insumos Alocados: <strong className="text-white">{(op.peso_insumos || 0).toFixed(2)} kg</strong></div>
-                  <div className="text-sm text-muted">Retorno até o momento: <strong className="text-white">{(op.peso_retornos || 0).toFixed(2)} kg</strong></div>
-                </div>
-              ))}
-            </div>
+          <div className="flex gap-16 mb-24">
+            <button 
+              className={`btn ${activeTab === 'abertas' ? 'btn--primary' : 'btn--ghost'} flex-1`}
+              onClick={() => setActiveTab('abertas')}
+            >
+              Ordens em Aberto
+            </button>
+            <button 
+              className={`btn ${activeTab === 'historico' ? 'btn--primary' : 'btn--ghost'} flex-1`}
+              onClick={() => setActiveTab('historico')}
+            >
+              Histórico (Finalizadas)
+            </button>
           </div>
 
-          <div className="card">
-            <h2 className="font-bold text-lg mb-16 text-muted">Histórico de Produções (Finalizadas)</h2>
-            <div className="flex flex-col gap-12">
-              {opsFechadas.map(op => (
-                <div key={op.id} className="card bg-bg-0 cursor-pointer flex justify-between items-center hover:border-primary transition-colors" onClick={() => setOpSelecionada(op)}>
-                  <div>
-                    <h3 className="font-bold text-primary">{op.codigo} - {op.nome}</h3>
-                    <div className="text-sm text-muted">
-                      Abertura: {new Date(op.created_at).toLocaleDateString()}
+          {activeTab === 'abertas' && (
+            <div>
+              <div className="mb-24">
+                <button className="btn btn--primary w-full" onClick={() => setModalNovaOP(true)}>
+                  <Plus size={18}/> Abrir Nova Ordem de Produção
+                </button>
+              </div>
+              
+              <h2 className="font-bold text-lg mb-16 text-primary">Ordens em Aberto</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 mb-24">
+                {ops.length === 0 && <div className="text-muted col-span-3">Nenhuma Ordem de Produção em aberto.</div>}
+                {ops.map(op => (
+                  <div key={op.id} className="card cursor-pointer hover:border-primary" onClick={() => setOpSelecionada(op)}>
+                    <div className="flex items-center justify-between mb-8">
+                      <span className="font-bold text-lg text-primary">{op.codigo}</span>
+                      <Factory size={20} className="text-muted"/>
                     </div>
+                    <div className="mb-12 font-bold">{op.nome}</div>
+                    <div className="text-sm text-muted mb-4">Insumos Alocados: <strong className="text-white">{(op.peso_insumos || 0).toFixed(2)} kg</strong></div>
+                    <div className="text-sm text-muted">Retorno até o momento: <strong className="text-white">{(op.peso_retornos || 0).toFixed(2)} kg</strong></div>
                   </div>
-                  <ArrowRight className="text-muted"/>
-                </div>
-              ))}
-              {opsFechadas.length === 0 && <p className="text-muted text-sm py-16 text-center">Nenhuma OP finalizada.</p>}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {activeTab === 'historico' && (
+            <div className="card">
+              <h2 className="font-bold text-lg mb-16 text-muted">Histórico de Produções (Finalizadas)</h2>
+              <div className="flex flex-col gap-12">
+                {opsFechadas.map(op => (
+                  <div key={op.id} className="card bg-bg-0 cursor-pointer flex justify-between items-center hover:border-primary transition-colors" onClick={() => setOpSelecionada(op)}>
+                    <div>
+                      <h3 className="font-bold text-primary">{op.codigo} - {op.nome}</h3>
+                      <div className="text-sm text-muted">
+                        Abertura: {new Date(op.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <ArrowRight className="text-muted"/>
+                  </div>
+                ))}
+                {opsFechadas.length === 0 && <p className="text-muted text-sm py-16 text-center">Nenhuma OP finalizada.</p>}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         detalhes && (
