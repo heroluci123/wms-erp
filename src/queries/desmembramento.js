@@ -29,10 +29,12 @@ export async function desmembrarCaixa(caixa_original, novas_caixas, operador_id,
       args: [caixa_original.id]
     });
     
+    const eansGerados = novas_caixas.map(c => c.ean_caixa).join(', ');
+    
     // 2. Histórico da caixa original
     queries.push({
-      sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'DESMEMBRADA', 'Caixa dividida em ' || ? || ' novas caixas.', ?)`,
-      args: [caixa_original.id, caixa_original.ean_caixa, novas_caixas.length, operador_nome || 'Sistema']
+      sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'DESMEMBRADA', ?, ?)`,
+      args: [caixa_original.id, caixa_original.ean_caixa, `Caixa dividida nas etiquetas: ${eansGerados}`, operador_nome || 'Sistema']
     });
     
     // 3. Atualizar estoque agregado (remover original)
