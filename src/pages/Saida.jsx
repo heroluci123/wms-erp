@@ -180,7 +180,7 @@ const PRESETS = [
   // Período personalizado
   const [dataInicio, setDataInicio] = useState(() => new Date().toISOString().slice(0,10))
   const [dataFim,    setDataFim]    = useState(() => new Date().toISOString().slice(0,10))
-  const [validadeBusca, setValidadeBusca] = useState('')
+  const [previsaoBusca, setPrevisaoBusca] = useState('')
   const [presetAtivo, setPresetAtivo] = useState(0) // "Hoje" por padrão
 
   const aplicarPreset = (idx) => {
@@ -190,9 +190,9 @@ const PRESETS = [
     setDataFim(fim)
   }
 
-  const carregarRomaneiosList = async (statusBusca, inicio = null, fim = null, validade = null) => {
+  const carregarRomaneiosList = async (statusBusca, inicio = null, fim = null, previsao = null) => {
     try {
-      const lista = await saidaQueries.listarRomaneios(statusBusca, inicio, fim, validade)
+      const lista = await saidaQueries.listarRomaneios(statusBusca, inicio, fim, previsao)
       setRomaneiosLista(lista)
     } catch (e) {
       toastError('Erro', 'Falha ao buscar romaneios')
@@ -205,10 +205,10 @@ const PRESETS = [
     } else if (abaAtiva === 'EXPEDICAO') {
       carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
     } else if (abaAtiva === 'HISTORICO') {
-      carregarRomaneiosList('EXPEDIDO', dataInicio, dataFim, validadeBusca)
+      carregarRomaneiosList('EXPEDIDO', dataInicio, dataFim, previsaoBusca)
     }
     setRomaneioExpandido(null)
-  }, [abaAtiva, dataInicio, dataFim, validadeBusca])
+  }, [abaAtiva, dataInicio, dataFim, previsaoBusca])
 
   const carregarDetalhesExpansao = async (id) => {
     try {
@@ -436,8 +436,8 @@ const PRESETS = [
                       style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13, marginRight: 8 }} />
                     
                     <div style={{ height: 24, width: 1, background: 'var(--border)' }}></div>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>Validade:</span>
-                    <input type="date" value={validadeBusca} onChange={e => setValidadeBusca(e.target.value)}
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>Previsão:</span>
+                    <input type="date" value={previsaoBusca} onChange={e => setPrevisaoBusca(e.target.value)}
                       style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }} />
                   </div>
                 </div>
