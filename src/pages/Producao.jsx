@@ -93,6 +93,8 @@ export function Producao() {
 
       } catch (err) {
         toastError('Erro fatal', err.message)
+      } finally {
+        if (inputRef.current) inputRef.current.value = ''
       }
     }
   })
