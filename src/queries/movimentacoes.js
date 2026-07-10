@@ -104,6 +104,14 @@ export async function removerCaixaSerializada(caixa_id, operador_id, operador_no
 
 export async function concluirPalete(palete_id) {
   try {
+    const resCount = await db.execute({
+      sql: `SELECT count(*) as qtd FROM estoque_caixas WHERE palete_id = ?`,
+      args: [palete_id]
+    });
+    if (resCount.rows[0].qtd === 0) {
+      return { success: false, error: 'Não é possível finalizar um palete vazio. Por favor, adicione caixas ou feche esta aba.' };
+    }
+
     await db.execute({
       sql: `UPDATE paletes SET status = 'FECHADO', endereco_atual = 'DOCA' WHERE id = ?`,
       args: [palete_id]
@@ -165,6 +173,7 @@ export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {
       SELECT 
         p.*,
         count(c.id) as qtd_caixas,
+        coalesce(sum(case when c.status = 'DISPONIVEL' then 1 else 0 end), 0) as qtd_disponiveis,
         coalesce(sum(c.peso_kg), 0) as peso_total,
         min(c.created_at) as primeira_caixa,
         max(c.created_at) as ultima_caixa

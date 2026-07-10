@@ -74,7 +74,7 @@ function HistoricoPaletes() {
   const exportarPaletesCSV = () => {
     const paletesExport = paletesFiltrados.map(p => ({
       Codigo: p.codigo,
-      Status: p.status === 'EM_MONTAGEM' ? 'Na Doca' : (p.status === 'FECHADO' && p.endereco_atual === 'DOCA') ? 'Na Doca (Finalizado)' : (p.status === 'FECHADO' && p.endereco_atual !== 'DOCA') ? 'Armazenado' : 'Finalizado',
+      Status: p.status === 'EM_MONTAGEM' ? 'Na Doca' : (p.status === 'FECHADO' && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'Na Doca (Finalizado)' : 'Armazenado',
       'Endereço': p.endereco_atual,
       'Qtd Caixas': p.qtd_caixas || 0,
       'Peso Total': parseFloat(p.peso_total || 0).toFixed(2),
@@ -320,10 +320,10 @@ function HistoricoPaletes() {
                     <span style={{ fontWeight: 600, fontSize: 16, color: 'var(--text-primary)' }}>{p.codigo}</span>
                     <span className="badge" style={{ 
                       fontSize: 10, 
-                      background: isAtivo ? 'var(--warning-muted)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info-muted)' : 'var(--success-muted)', 
-                      color: isAtivo ? 'var(--warning)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info)' : 'var(--success)' 
+                      background: isAtivo ? 'var(--warning-muted)' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'var(--info-muted)' : 'var(--success-muted)', 
+                      color: isAtivo ? 'var(--warning)' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'var(--info)' : 'var(--success)' 
                     }}>
-                      {isAtivo ? '🟡 NA DOCA' : (isFinalizado && p.endereco_atual === 'DOCA') ? '🏁 NA DOCA (FINALIZADO)' : '✅ ARMAZENADO'}
+                      {isAtivo ? '🟡 NA DOCA' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? '🏁 NA DOCA (FINALIZADO)' : '✅ ARMAZENADO'}
                     </span>
                   </div>
                   <div className="text-xs text-muted">
