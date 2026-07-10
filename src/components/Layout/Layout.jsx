@@ -124,7 +124,7 @@ function Sidebar() {
           <Barcode size={18} /> Editor de EAN
         </NavLink>
       )}
-      {operador?.permissoes?.produtos && (
+      {operador?.permissoes?.consulta_endereco && (
         <NavLink to="/consulta-endereco" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ScanLine size={18} /> Consulta de Endereço
         </NavLink>

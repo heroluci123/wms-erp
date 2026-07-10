@@ -28,7 +28,11 @@ export function Operadores() {
       dashboard_executivo: false,
       estoque_enderecos: false,
       inventario_carga_inicial: false,
-      deletar_historico: false
+      deletar_historico: false,
+      consulta_endereco: false,
+      rastreabilidade: false,
+      retorno_producao: false,
+      desmembramento: false
     }
   })
 
@@ -105,7 +109,11 @@ export function Operadores() {
         operadores: !!permissoesObj.operadores,
         dashboard_executivo: !!permissoesObj.dashboard_executivo,
         inventario_carga_inicial: !!permissoesObj.inventario_carga_inicial,
-        deletar_historico: !!permissoesObj.deletar_historico
+        deletar_historico: !!permissoesObj.deletar_historico,
+        consulta_endereco: !!permissoesObj.consulta_endereco,
+        rastreabilidade: !!permissoesObj.rastreabilidade,
+        retorno_producao: !!permissoesObj.retorno_producao,
+        desmembramento: !!permissoesObj.desmembramento
       }
     })
     setIsEditing(true)
@@ -133,7 +141,11 @@ export function Operadores() {
         operadores: false,
         dashboard_executivo: false,
         inventario_carga_inicial: false,
-        deletar_historico: false
+        deletar_historico: false,
+        consulta_endereco: false,
+        rastreabilidade: false,
+        retorno_producao: false,
+        desmembramento: false
       }
     })
   }
@@ -252,6 +264,27 @@ export function Operadores() {
                 <label className="flex items-center gap-8 cursor-pointer text-sm text-danger">
                   <input type="checkbox" checked={formData.permissoes.operadores} onChange={() => togglePermissao('operadores')} />
                   Operadores e Permissões
+                </label>
+
+                {/* ── Coletor: módulos extras ─────────────────────── */}
+                <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)' }}>Módulos Coletor</span>
+                </div>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.consulta_endereco} onChange={() => togglePermissao('consulta_endereco')} />
+                  Consulta de Endereço
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.rastreabilidade} onChange={() => togglePermissao('rastreabilidade')} />
+                  Rastreabilidade de Caixa
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.retorno_producao} onChange={() => togglePermissao('retorno_producao')} />
+                  Retorno de Produção
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.desmembramento} onChange={() => togglePermissao('desmembramento')} />
+                  Desmembramento
                 </label>
               </div>
               <p className="text-xs text-muted mt-8">* Dashboard e Mapa de Capacidade estão sempre disponíveis para todos.</p>
