@@ -184,8 +184,8 @@ export function Desmembramento() {
             <div className="card p-24 h-full">
               <h3 className="font-bold mb-16 text-cyan flex items-center gap-8"><ArrowRight size={20}/> 2. Novas Caixas Geradas</h3>
               
-              <form onSubmit={handleAddNovaCaixa} className="flex gap-12 items-end mb-24 bg-bg-1 p-16 rounded-md border border-border">
-                <div className="flex-[2]">
+              <form onSubmit={handleAddNovaCaixa} className="flex gap-12 items-end mb-24 bg-bg-1 p-16 rounded-md border border-border" style={{ flexWrap: 'wrap' }}>
+                <div style={{ flex: '1 1 200px', minWidth: '100%' }}>
                   <label className="form-label">Novo EAN</label>
                   <input 
                     ref={inputRef}
@@ -197,7 +197,7 @@ export function Desmembramento() {
                     placeholder="Bipe a nova etiqueta" 
                   />
                 </div>
-                <div className="flex-1">
+                <div style={{ flex: '1 1 120px' }}>
                   <label className="form-label">Peso (kg)</label>
                   <input 
                     type="number" 
@@ -208,7 +208,7 @@ export function Desmembramento() {
                     placeholder="Ex: 25.00" 
                   />
                 </div>
-                <div className="flex-1">
+                <div style={{ flex: '1 1 140px' }}>
                   <label className="form-label">Validade</label>
                   <input 
                     type="date"
@@ -217,7 +217,7 @@ export function Desmembramento() {
                     onChange={e => setNovaValidade(e.target.value)} 
                   />
                 </div>
-                <button type="submit" className="btn btn--ghost" style={{ padding: '0 16px', height: 40 }}><Plus size={20}/></button>
+                <button type="submit" className="btn btn--primary" style={{ height: 40, flex: '1 1 100%', display: 'flex', justifyContent: 'center', gap: 8 }}><Plus size={20}/> Adicionar Caixa</button>
               </form>
 
               {novasCaixas.length === 0 ? (
