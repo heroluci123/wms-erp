@@ -16,14 +16,14 @@ export async function buscarResumoProduto(produto_id) {
 
   // Entradas (RECEBIMENTO)
   const entradasRes = await db.execute({
-    sql: `SELECT COUNT(*) as entradasCaixas FROM caixas_historico WHERE produto_id = ? AND tipo_operacao = 'RECEBIMENTO'`,
+    sql: `SELECT SUM(qtd_caixas) as entradasCaixas FROM movimentacoes_log WHERE produto_id = ? AND tipo = 'RECEBIMENTO'`,
     args: [produto_id]
   });
   const entradasCaixas = entradasRes.rows[0]?.entradasCaixas || 0;
 
-  // Saídas (EXPEDICAO)
+  // Saídas (EXPEDICAO e SAIDAS)
   const saidasRes = await db.execute({
-    sql: `SELECT COUNT(*) as saidasCaixas FROM caixas_historico WHERE produto_id = ? AND tipo_operacao = 'EXPEDICAO'`,
+    sql: `SELECT SUM(qtd_caixas) as saidasCaixas FROM movimentacoes_log WHERE produto_id = ? AND tipo IN ('EXPEDICAO', 'SAIDA_PRODUCAO', 'AJUSTE_SAIDA')`,
     args: [produto_id]
   });
   const saidasCaixas = saidasRes.rows[0]?.saidasCaixas || 0;
@@ -76,9 +76,9 @@ export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
   const res = await db.execute({
     sql: `
       SELECT *
-      FROM caixas_historico
+      FROM movimentacoes_log
       WHERE produto_id = ?
-      ORDER BY data_hora DESC
+      ORDER BY created_at DESC
       LIMIT ?
     `,
     args: [produto_id, limite]

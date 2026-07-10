@@ -386,7 +386,7 @@ export function ConsultaEstoque() {
                           <tr>
                             <th>Data/Hora</th>
                             <th>Operação</th>
-                            <th>Caixa EAN</th>
+                            <th>Quantidade / Peso</th>
                             <th>Origem &rarr; Destino</th>
                             <th>Operador</th>
                           </tr>
@@ -394,9 +394,9 @@ export function ConsultaEstoque() {
                         <tbody>
                           {historicoProd.map(log => (
                             <tr key={log.id}>
-                              <td className="text-muted whitespace-nowrap">{new Date(log.data_hora).toLocaleString()}</td>
-                              <td><span className={`badge ${log.tipo_operacao === 'RECEBIMENTO' ? 'badge--primary' : log.tipo_operacao === 'SAIDA' || log.tipo_operacao === 'EXPEDICAO' ? 'badge--info' : 'badge--warning'}`}>{log.tipo_operacao}</span></td>
-                              <td className="td-mono">{log.ean_caixa}</td>
+                              <td className="text-muted whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</td>
+                              <td><span className={`badge ${log.tipo === 'RECEBIMENTO' ? 'badge--primary' : log.tipo === 'SAIDA' || log.tipo === 'EXPEDICAO' ? 'badge--info' : 'badge--warning'}`}>{log.tipo}</span></td>
+                              <td className="font-bold">{log.qtd_caixas} cx <span className="text-muted font-normal ml-4 text-xs">({log.qtd_kg?.toFixed(2)} kg)</span></td>
                               <td>
                                 {log.endereco_origem || '-'} <span className="text-muted mx-4">&rarr;</span> <span className="font-bold">{log.endereco_destino || '-'}</span>
                               </td>
