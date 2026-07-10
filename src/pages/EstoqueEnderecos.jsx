@@ -42,8 +42,11 @@ export function EstoqueEnderecos() {
       ])
 
       const estoqueMesclado = []
-      // Conjunto de IDs de posições já cobertas por caixas serializadas
-      const posicoesCobertasCaixas = new Set()
+      // Rastrear combinações produto+endereço que já possuem caixas serializadas (EAN).
+      // Usar chave composta porque estoque_posicao pode ter MÚLTIPLAS linhas para o mesmo
+      // produto+endereço (uma por validade diferente). Antes rastreávamos por pos.id e isso
+      // marcava só UMA das linhas, deixando as outras aparecerem como linhas fantasmas sem EAN.
+      const combinacoesComCaixaSerial = new Set()
 
       // PASSO 1: adicionar TODAS as caixas serializadas diretamente
       for (const cx of caixasSeriais) {
@@ -69,12 +72,18 @@ export function EstoqueEnderecos() {
           valor_unitario: cx.valor_unitario,
           produto_id: cx.produto_id
         })
-        if (posMatch) posicoesCobertasCaixas.add(posMatch.id)
+        // Marcar a COMBINAÇÃO produto+endereço como coberta (não apenas uma linha específica).
+        // Isso garante que todas as linhas de estoque_posicao desse produto neste endereço
+        // sejam ignoradas no PASSO 2, evitando linhas fantasmas sem EAN.
+        combinacoesComCaixaSerial.add(`${cx.produto_id}__${cx.endereco}`)
       }
 
-      // PASSO 2: incluir posições de legado que NÃO têm nenhuma caixa serializada
+      // PASSO 2: incluir APENAS posições de legado (sem EAN) que não têm NENHUMA caixa
+      // serializada para aquele produto+endereço. Se existe qualquer caixa serializada,
+      // as caixas físicas são a fonte de verdade — ignorar estoque_posicao completamente.
       for (const pos of posicoes) {
-        if (!posicoesCobertasCaixas.has(pos.id)) {
+        const chave = `${pos.produto_id}__${pos.endereco}`
+        if (!combinacoesComCaixaSerial.has(chave)) {
           estoqueMesclado.push({
             ...pos,
             id: `pos_${pos.id}`,
@@ -84,6 +93,7 @@ export function EstoqueEnderecos() {
           })
         }
       }
+
 
       setEstoque(
         incluirInsumos
