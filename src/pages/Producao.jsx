@@ -216,7 +216,7 @@ export function Producao() {
               <div className="grid grid-cols-2 gap-16 mb-16">
                 <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
                   <div className="text-muted text-sm uppercase font-bold mb-8">Entradas (Insumos)</div>
-                  <div className="text-2xl font-bold font-mono text-cyan mb-8">{detalhes.peso_insumos.toFixed(2)} kg</div>
+                  <div className="text-2xl font-bold font-mono text-cyan mb-8">{(detalhes.peso_insumos || 0).toFixed(2)} kg</div>
                   <div className="text-xs text-muted">
                     {detalhes.insumos.map((i, idx) => (
                       <div key={idx}>• {i.produto_descricao} ({i.peso_kg}kg) [EAN: {i.ean_caixa}]</div>
@@ -227,7 +227,7 @@ export function Producao() {
 
                 <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
                   <div className="text-muted text-sm uppercase font-bold mb-8">Saídas (Retornos)</div>
-                  <div className="text-2xl font-bold font-mono text-success mb-8">{detalhes.peso_retornos.toFixed(2)} kg</div>
+                  <div className="text-2xl font-bold font-mono text-success mb-8">{(detalhes.peso_retornos || 0).toFixed(2)} kg</div>
                   <div className="text-xs text-muted">
                     {detalhes.retornos.map((r, idx) => (
                       <div key={idx}>• {r.produto_descricao} ({r.peso_kg}kg) [EAN: {r.ean_caixa}]</div>
