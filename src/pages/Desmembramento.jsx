@@ -96,11 +96,11 @@ export function Desmembramento() {
           <h3 className="font-bold mb-16 flex items-center gap-8"><Package size={20}/> 1. Bipar Caixa Original</h3>
           <form onSubmit={handleBuscarOriginal} className="flex gap-12 items-end">
             <div className="flex-1">
-              <label className="label">EAN da Caixa Original</label>
+              <label className="form-label">EAN da Caixa Original</label>
               <input 
                 autoFocus
                 type="text" 
-                className="input" 
+                className="form-input" 
                 value={eanOriginal} 
                 onChange={e => setEanOriginal(e.target.value)} 
                 placeholder="Bipe ou digite o EAN..." 
@@ -166,23 +166,23 @@ export function Desmembramento() {
               
               <form onSubmit={handleAddNovaCaixa} className="flex gap-12 items-end mb-24 bg-bg-1 p-16 rounded-md border border-border">
                 <div className="flex-[2]">
-                  <label className="label">Novo EAN</label>
+                  <label className="form-label">Novo EAN</label>
                   <input 
                     ref={inputRef}
                     autoFocus
                     type="text" 
-                    className="input" 
+                    className="form-input" 
                     value={novoEan} 
                     onChange={e => setNovoEan(e.target.value)} 
                     placeholder="Bipe a nova etiqueta" 
                   />
                 </div>
                 <div className="flex-1">
-                  <label className="label">Peso (kg)</label>
+                  <label className="form-label">Peso (kg)</label>
                   <input 
                     type="number" 
                     step="0.01"
-                    className="input" 
+                    className="form-input" 
                     value={novoPeso} 
                     onChange={e => setNovoPeso(e.target.value)} 
                     placeholder="Ex: 25.00" 
