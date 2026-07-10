@@ -1,18 +1,24 @@
 import { db } from '../lib/db.js';
 
-export async function listarRomaneios(status = 'TODOS') {
+export async function listarRomaneios(status = 'TODOS', dataBusca = null) {
   let query = `
     SELECT 
       r.*,
       (SELECT count(*) FROM romaneios_itens WHERE romaneio_id = r.id) as qtd_caixas,
       (SELECT sum(peso_kg) FROM romaneios_itens WHERE romaneio_id = r.id) as peso_total
     FROM romaneios r
+    WHERE 1=1
   `
   const args = []
   
   if (status !== 'TODOS') {
-    query += ` WHERE r.status = ?`
+    query += ` AND r.status = ?`
     args.push(status)
+  }
+
+  if (dataBusca) {
+    query += ` AND (date(r.created_at) = ? OR date(r.expedido_at) = ?)`
+    args.push(dataBusca, dataBusca)
   }
   
   query += ` ORDER BY r.created_at DESC`

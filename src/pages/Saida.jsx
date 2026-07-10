@@ -167,10 +167,11 @@ export function Saida() {
   // --- ABA EXPEDIÇÃO & HISTORICO ---
   const [romaneiosLista, setRomaneiosLista] = useState([])
   const [romaneioExpandido, setRomaneioExpandido] = useState(null)
+  const [filtroDataHistorico, setFiltroDataHistorico] = useState(() => new Date().toISOString().substring(0, 10))
 
-  const carregarRomaneiosList = async (statusBusca) => {
+  const carregarRomaneiosList = async (statusBusca, dataBusca = null) => {
     try {
-      const lista = await saidaQueries.listarRomaneios(statusBusca)
+      const lista = await saidaQueries.listarRomaneios(statusBusca, dataBusca)
       setRomaneiosLista(lista)
     } catch (e) {
       toastError('Erro', 'Falha ao buscar romaneios')
@@ -183,10 +184,10 @@ export function Saida() {
     } else if (abaAtiva === 'EXPEDICAO') {
       carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
     } else if (abaAtiva === 'HISTORICO') {
-      carregarRomaneiosList('EXPEDIDO')
+      carregarRomaneiosList('EXPEDIDO', filtroDataHistorico || null)
     }
     setRomaneioExpandido(null)
-  }, [abaAtiva])
+  }, [abaAtiva, filtroDataHistorico])
 
   const carregarDetalhesExpansao = async (id) => {
     try {
@@ -388,6 +389,16 @@ export function Saida() {
 
       {(abaAtiva === 'EXPEDICAO' || abaAtiva === 'HISTORICO') && (
         <div className="flex-col gap-16">
+          {abaAtiva === 'HISTORICO' && (
+            <div className="flex justify-end mb-8">
+              <input 
+                type="date" 
+                className="form-input" 
+                value={filtroDataHistorico} 
+                onChange={e => setFiltroDataHistorico(e.target.value)}
+              />
+            </div>
+          )}
           {romaneiosLista.length === 0 && (
             <div className="text-muted text-center p-24">Nenhum romaneio nesta etapa.</div>
           )}
@@ -402,8 +413,11 @@ export function Saida() {
                     {abaAtiva === 'EXPEDICAO' ? <Truck size={20}/> : <Check size={20}/>} <span>{rom.codigo}</span>
                   </div>
                   <div className="text-sm">Cliente: <strong className="text-white">{rom.cliente}</strong></div>
-                  <div className="text-xs text-muted flex items-center gap-12 mt-4">
-                    <span><Clock size={12} className="inline mr-4"/> Montado em: {new Date(rom.created_at).toLocaleString()}</span>
+                  <div className="text-xs text-muted flex items-center gap-12 mt-4 flex-wrap">
+                    <span><Clock size={12} className="inline mr-4"/> Montado em: {new Date(rom.created_at).toLocaleString()} por {rom.operador_nome || 'Sistema'}</span>
+                    {rom.expedido_at && (
+                      <span><Check size={12} className="inline mr-4"/> Finalizado em: {new Date(rom.expedido_at).toLocaleString()} por {rom.operador_expedicao_nome || 'Sistema'}</span>
+                    )}
                     <span><Package size={12} className="inline mr-4"/> {rom.qtd_caixas} cx ({(rom.peso_total || 0).toFixed(2)} kg)</span>
                   </div>
                 </div>
