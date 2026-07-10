@@ -74,10 +74,14 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
   try {
     const queries = []
     
+    // Pegar o código da OP para usar como endereço
+    const opRes = await db.execute({ sql: `SELECT codigo FROM ordens_producao WHERE id = ?`, args: [op_id] })
+    const opCodigo = opRes.rows[0]?.codigo || 'PRODUCAO'
+    
     for (const c of caixas) {
       queries.push({
-        sql: `UPDATE estoque_caixas SET status = 'RESERVADA' WHERE id = ?`,
-        args: [c.id]
+        sql: `UPDATE estoque_caixas SET status = 'RESERVADA', endereco = ? WHERE id = ?`,
+        args: [opCodigo, c.id]
       })
       
       queries.push({
@@ -85,20 +89,34 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
         args: [op_id, c.id, c.produto_id, c.peso_kg, operador_nome || 'Sistema']
       })
 
-      // Subtract from estoque_posicao
+      // Subtrair do estoque no endereço antigo
       queries.push({
         sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ?`,
         args: [c.peso_kg, c.produto_id, c.endereco || 'REC']
       })
       
+      // Adicionar no novo endereço (OP)
       queries.push({
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'PRODUCAO', 1, ?, ?, ?, 'TRANSFERENCIA')`,
-        args: [c.produto_id, c.endereco || 'REC', c.peso_kg, operador_id || null, operador_nome || 'Sistema']
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [c.produto_id, opCodigo, c.validade || null, c.peso_kg]
+      })
+      
+      // Se estava num palete que estava na doca (FINALIZADO), forçar para ARMAZENADO (pois saiu da doca)
+      if (c.palete_id) {
+        queries.push({
+          sql: `UPDATE paletes SET status = 'ARMAZENADO' WHERE id = ? AND status = 'FINALIZADO'`,
+          args: [c.palete_id]
+        })
+      }
+      
+      queries.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, ?, 1, ?, ?, ?, 'TRANSFERENCIA')`,
+        args: [c.produto_id, c.endereco || 'REC', opCodigo, c.peso_kg, operador_id || null, operador_nome || 'Sistema']
       })
       
       queries.push({
-        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'ALOCADA_PRODUCAO', 'Enviada para a OP ' || (SELECT codigo FROM ordens_producao WHERE id = ?), ?)`,
-        args: [c.id, c.ean_caixa, op_id, operador_nome || 'Sistema']
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'ALOCADA_PRODUCAO', 'Enviada para a OP ' || ?, ?)`,
+        args: [c.id, c.ean_caixa, opCodigo, operador_nome || 'Sistema']
       })
     }
 
@@ -183,15 +201,9 @@ export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
 
     if (tipo === 'INSUMO') {
       queries.push({ sql: `DELETE FROM op_insumos WHERE id = ?`, args: [item_id] })
+      // Muda pra disponivel mas mantém no endereço que estava (OP-XXX) para o operador poder movimentar
       queries.push({ sql: `UPDATE estoque_caixas SET status = 'DISPONIVEL' WHERE id = ?`, args: [caixa_id] })
-      queries.push({
-        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
-        args: [caixa.produto_id, caixa.endereco, caixa.lote || '', caixa.validade || null, caixa.peso_kg]
-      })
-      queries.push({
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_nome, tipo) VALUES (?, 'PRODUCAO', ?, 1, ?, 'Sistema', 'TRANSFERENCIA')`,
-        args: [caixa.produto_id, caixa.endereco, caixa.peso_kg]
-      })
+      
       queries.push({
         sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'ESTORNO_INSUMO', 'Removida da OP ' || (SELECT codigo FROM ordens_producao WHERE id = ?) || ' e devolvida ao estoque', 'Sistema')`,
         args: [caixa.id, caixa.ean_caixa, op_id]
@@ -260,6 +272,21 @@ export async function finalizarOP(op_id) {
         args: [op_id]
       }
     ]
+    
+    // Precisamos decrementar as caixas de insumo de estoque_posicao já que agora elas ficavam no endereço da OP
+    const insumosRes = await db.execute({
+      sql: `SELECT c.produto_id, c.endereco, c.validade, c.peso_kg FROM op_insumos oi JOIN estoque_caixas c ON c.id = oi.caixa_id WHERE oi.op_id = ?`,
+      args: [op_id]
+    })
+    
+    for (const c of insumosRes.rows) {
+      queries.push({
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ?`,
+        args: [c.peso_kg, c.produto_id, c.endereco]
+      })
+    }
+    
+    queries.push(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`)
 
     await db.batch(queries, 'write')
     return { success: true }
