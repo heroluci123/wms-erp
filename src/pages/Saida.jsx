@@ -124,6 +124,7 @@ export function Saida() {
       if (res.success) {
         toastSuccess('Sucesso', 'Montagem finalizada. Vá para a aba Expedição para despachar.')
         setRomaneioAtual(null)
+        carregarRomaneiosList('MONTANDO')
       } else {
         toastError('Erro', res.error)
       }
@@ -347,9 +348,9 @@ export function Saida() {
                 className="p-16 flex justify-between items-center cursor-pointer hover:bg-bg-2 transition-colors"
                 onClick={() => setRomaneioExpandido(romaneioExpandido?.id === rom.id ? null : rom)}
               >
-                <div>
+                <div className="ml-8">
                   <div className="font-bold text-lg text-primary mb-4 flex items-center gap-8">
-                    {abaAtiva === 'EXPEDICAO' ? <Truck size={20}/> : <Check size={20}/>} {rom.codigo}
+                    {abaAtiva === 'EXPEDICAO' ? <Truck size={20}/> : <Check size={20}/>} <span>{rom.codigo}</span>
                   </div>
                   <div className="text-sm">Cliente: <strong className="text-white">{rom.cliente}</strong></div>
                   <div className="text-xs text-muted flex items-center gap-12 mt-4">
