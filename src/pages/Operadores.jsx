@@ -32,7 +32,8 @@ export function Operadores() {
       consulta_endereco: false,
       rastreabilidade: false,
       retorno_producao: false,
-      desmembramento: false
+      desmembramento: false,
+      consulta_estoque: false
     }
   })
 
@@ -113,7 +114,8 @@ export function Operadores() {
         consulta_endereco: !!permissoesObj.consulta_endereco,
         rastreabilidade: !!permissoesObj.rastreabilidade,
         retorno_producao: !!permissoesObj.retorno_producao,
-        desmembramento: !!permissoesObj.desmembramento
+        desmembramento: !!permissoesObj.desmembramento,
+        consulta_estoque: !!permissoesObj.consulta_estoque
       }
     })
     setIsEditing(true)
@@ -145,7 +147,8 @@ export function Operadores() {
         consulta_endereco: false,
         rastreabilidade: false,
         retorno_producao: false,
-        desmembramento: false
+        desmembramento: false,
+        consulta_estoque: false
       }
     })
   }
@@ -243,7 +246,11 @@ export function Operadores() {
                 </label>
                 <label className="flex items-center gap-8 cursor-pointer text-sm">
                   <input type="checkbox" checked={formData.permissoes.produtos} onChange={() => togglePermissao('produtos')} />
-                  Consulta & Produtos
+                  Cadastro de Produtos
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.consulta_estoque} onChange={() => togglePermissao('consulta_estoque')} />
+                  Consulta de Estoque (Geral)
                 </label>
                 <label className="flex items-center gap-8 cursor-pointer p-8 hover:bg-bg-card rounded-md">
                   <input type="checkbox" checked={formData.permissoes.dashboard_executivo} onChange={() => togglePermissao('dashboard_executivo')} />
