@@ -109,14 +109,14 @@ function Sidebar() {
           <CheckSquare size={18} /> Inventário
         </NavLink>
       )}
-      {operador?.permissoes?.cadastros && (
+      {operador?.permissoes?.produtos && (
         <NavLink to="/rastreabilidade" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <Search size={18} /> Rastreabilidade
+          <Search size={18} /> Rastreabilidade de Caixa
         </NavLink>
       )}
-      {operador?.permissoes?.cadastros && (
+      {operador?.permissoes?.produtos && (
         <NavLink to="/produtos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <Box size={18} /> Produtos e Insumos
+          <Box size={18} /> Consulta e Produtos
         </NavLink>
       )}
       {operador?.permissoes?.produtos && (
