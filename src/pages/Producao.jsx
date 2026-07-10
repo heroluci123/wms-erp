@@ -16,6 +16,7 @@ export function Producao() {
   const [modalInsumo, setModalInsumo] = useState(null)
   const [modalRetorno, setModalRetorno] = useState(null)
   const [modalFefo, setModalFefo] = useState(null)
+  const [modalRemoverItem, setModalRemoverItem] = useState(null)
   const [modalFinalizarOP, setModalFinalizarOP] = useState(false)
   const [modalNovaOP, setModalNovaOP] = useState(false)
 
@@ -109,20 +110,8 @@ export function Producao() {
     }
   }
 
-  const handleRemoverItem = async (item) => {
-    if (!window.confirm(`Deseja realmente remover este item (${item.produto_descricao}) da OP? Ele será devolvido ao estoque original.`)) return
-    
-    try {
-      const res = await producaoQueries.removerItemOP(opSelecionada.id, item.tipoMov, item.id, item.caixa_id)
-      if (res.success) {
-        toastSuccess('Sucesso', 'Item removido da OP e estoque atualizado.')
-        carregarDetalhes(opSelecionada.id)
-      } else {
-        toastError('Erro', res.error)
-      }
-    } catch (err) {
-      toastError('Erro', err.message)
-    }
+  const handleRemoverItem = (item) => {
+    setModalRemoverItem(item)
   }
 
   const handleNovaOP = async (nome) => {
@@ -436,6 +425,34 @@ export function Producao() {
                 setModalInsumo(modalFefo.atual)
                 setModalFefo(null)
               }}>Ignorar e Usar Atual</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REMOVER ITEM */}
+      {modalRemoverItem && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-danger">Remover Item da OP</h3>
+            <p className="mb-24">Deseja realmente remover este item (<strong>{modalRemoverItem.produto_descricao}</strong>) da OP? Ele será devolvido ao estoque original.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalRemoverItem(null)}>Cancelar</button>
+              <button className="btn btn--danger flex-1" onClick={async () => {
+                const item = modalRemoverItem
+                try {
+                  const res = await producaoQueries.removerItemOP(opSelecionada.id, item.tipoMov, item.id, item.caixa_id)
+                  if (res.success) {
+                    toastSuccess('Sucesso', 'Item removido da OP e estoque atualizado.')
+                    carregarDetalhes(opSelecionada.id)
+                  } else {
+                    toastError('Erro', res.error)
+                  }
+                } catch (err) {
+                  toastError('Erro', err.message)
+                }
+                setModalRemoverItem(null)
+              }}>Confirmar Remoção</button>
             </div>
           </div>
         </div>
