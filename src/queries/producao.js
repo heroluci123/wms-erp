@@ -22,8 +22,9 @@ export async function listarOPs(status = 'TODAS') {
 }
 
 export async function criarOP(nome, operador_id, operador_nome) {
-  const resCount = await db.execute("SELECT count(*) as total FROM ordens_producao");
-  const num = (resCount.rows[0].total + 1).toString().padStart(4, '0');
+  const resMax = await db.execute("SELECT MAX(CAST(SUBSTR(codigo, 4) AS INTEGER)) as max_num FROM ordens_producao WHERE codigo LIKE 'OP-%'");
+  const maxNum = resMax.rows[0].max_num || 0;
+  const num = (maxNum + 1).toString().padStart(4, '0');
   const codigo = `OP-${num}`;
   
   const res = await db.execute({
