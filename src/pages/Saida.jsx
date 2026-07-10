@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import * as saidaQueries from '../queries/saida.js'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
+import * as producaoQueries from '../queries/producao.js'
 
 export function Saida() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
@@ -21,6 +22,7 @@ export function Saida() {
   const [modalExpedir, setModalExpedir] = useState(null)
   const [modalExcluirRomaneio, setModalExcluirRomaneio] = useState(false)
   const [modalReabrirRomaneio, setModalReabrirRomaneio] = useState(null)
+  const [modalFefo, setModalFefo] = useState(null)
   
   // Bipagem
   const [eanBipado, setEanBipado] = useState('')
@@ -47,6 +49,13 @@ export function Saida() {
           return toastWarning('Atenção', 'Esta caixa já foi bipada neste romaneio.')
         }
 
+        const alertaFefo = await producaoQueries.verificarFEFO(cx.produto_id, cx.validade)
+        if (alertaFefo && alertaFefo.id !== cx.id) {
+          setModalFefo({ caixaBipada: cx, caixaAntiga: alertaFefo })
+          setEanBipado('')
+          return
+        }
+
         const addRes = await saidaQueries.adicionarCaixa(romaneioAtual.id, cx, operador.id, operador.nome)
         if (addRes.success) {
           toastSuccess('Caixa Adicionada', cx.produto_descricao)
@@ -61,6 +70,25 @@ export function Saida() {
       }
     }
   })
+  
+  const confirmarBiparFefo = async () => {
+    if (!modalFefo) return
+    const cx = modalFefo.caixaBipada
+    try {
+      const addRes = await saidaQueries.adicionarCaixa(romaneioAtual.id, cx, operador.id, operador.nome)
+      if (addRes.success) {
+        toastSuccess('Caixa Adicionada', cx.produto_descricao)
+        carregarDetalhesRomaneioAtual()
+      } else {
+        toastError('Erro', addRes.error)
+      }
+    } catch (err) {
+      toastError('Erro', err.message)
+    } finally {
+      setModalFefo(null)
+      setTimeout(() => eanRef.current?.focus(), 100)
+    }
+  }
 
   const carregarDetalhesRomaneioAtual = async () => {
     if (!romaneioAtual) return
@@ -430,6 +458,39 @@ export function Saida() {
       )}
 
       {/* MODALS */}
+      {modalFefo && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24 animate-scale-in" style={{ width: 500, maxWidth: '90%', borderTop: '4px solid var(--warning)' }}>
+            <h3 className="font-bold text-xl mb-16 text-warning flex items-center gap-8"><Clock size={24} /> Alerta de FEFO!</h3>
+            <p className="mb-16">
+              Você bipou uma caixa com vencimento em <strong className="text-white">{new Date(modalFefo.caixaBipada.validade + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone:'UTC'})}</strong>,
+              mas existe uma caixa <strong>mais antiga</strong> deste produto no estoque:
+            </p>
+            <div className="bg-bg-1 p-16 rounded-md mb-24 border border-border">
+              <div className="font-bold text-cyan mb-8">{modalFefo.caixaAntiga.produto_descricao}</div>
+              <div className="grid grid-cols-2 gap-8 text-sm">
+                <div><strong>Vencimento:</strong> <span className="text-warning font-bold">{new Date(modalFefo.caixaAntiga.validade + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone:'UTC'})}</span></div>
+                <div><strong>Endereço:</strong> <span className="text-white font-bold">{modalFefo.caixaAntiga.endereco || 'REC'}</span></div>
+                <div><strong>EAN:</strong> {modalFefo.caixaAntiga.ean_caixa}</div>
+                <div><strong>Peso:</strong> {modalFefo.caixaAntiga.peso_kg?.toFixed(2)} kg</div>
+              </div>
+            </div>
+            <p className="mb-24 text-sm text-muted">Deseja ignorar o alerta e utilizar a caixa mais nova mesmo assim?</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost flex-1" onClick={() => {
+                setModalFefo(null)
+                setTimeout(() => eanRef.current?.focus(), 100)
+              }}>
+                Cancelar
+              </button>
+              <button className="btn btn--warning flex-1" onClick={confirmarBiparFefo}>
+                Ignorar e Bipar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modalRemoverCaixa && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
