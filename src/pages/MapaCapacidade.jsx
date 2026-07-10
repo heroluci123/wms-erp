@@ -10,6 +10,7 @@ export function MapaCapacidade() {
   const [estoque, setEstoque] = useState([])
   const [loading, setLoading] = useState(true)
   const [incluirInsumos, setIncluirInsumos] = useState(false)
+  const [filtroArmazenamento, setFiltroArmazenamento] = useState('todos')
 
   const carregar = async () => {
     setLoading(true)
@@ -30,8 +31,14 @@ export function MapaCapacidade() {
   }, [])
 
   // Aplicar filtros de visão
-  const locaisFiltrados = locais.filter(l => incluirInsumos ? l.is_insumo === 1 : l.is_insumo !== 1)
-  const estoqueFiltrado = estoque.filter(e => incluirInsumos ? e.tipo_produto === 'Insumos' : e.tipo_produto !== 'Insumos')
+  const locaisFiltrados = locais.filter(l => 
+    (incluirInsumos ? l.is_insumo === 1 : l.is_insumo !== 1) &&
+    (filtroArmazenamento === 'todos' || l.tipo_armazenamento === filtroArmazenamento)
+  )
+  const estoqueFiltrado = estoque.filter(e => 
+    (incluirInsumos ? e.tipo_produto === 'Insumos' : e.tipo_produto !== 'Insumos') &&
+    (filtroArmazenamento === 'todos' || e.tipo_armazenamento === filtroArmazenamento)
+  )
 
   // Agrupar estoque por endereco
   const estoquePorEndereco = estoqueFiltrado.reduce((acc, item) => {
@@ -78,6 +85,17 @@ export function MapaCapacidade() {
           >
             <option value="operacao">Visão: Operação (MP/PA)</option>
             <option value="insumos">Visão: Insumos</option>
+          </select>
+          <select 
+            className="form-input bg-bg-card" 
+            style={{ width: 180, fontWeight: 600, border: '1px solid var(--border)' }}
+            value={filtroArmazenamento} 
+            onChange={e => setFiltroArmazenamento(e.target.value)}
+          >
+            <option value="todos">Tipo de Armazenagem</option>
+            <option value="SECO">📦 Seco</option>
+            <option value="FRIO">❄️ Frio</option>
+            <option value="CONGELADO">🧊 Congelado</option>
           </select>
           <button className="btn btn--secondary" onClick={carregar}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} /> Atualizar

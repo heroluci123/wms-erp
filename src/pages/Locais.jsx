@@ -9,7 +9,7 @@ export function Locais() {
   const [busca, setBusca] = useState('')
   
   const [isEditing, setIsEditing] = useState(false)
-  const [formData, setFormData] = useState({ id: null, endereco: '', capacidade_max_caixas: 0, is_insumo: 0 })
+  const [formData, setFormData] = useState({ id: null, endereco: '', capacidade_max_caixas: 0, is_insumo: 0, tipo_armazenamento: 'SECO' })
 
   const carregar = async () => {
     try {
@@ -69,14 +69,14 @@ export function Locais() {
 
   const resetForm = () => {
     setIsEditing(false)
-    setFormData({ id: null, endereco: '', capacidade_max_caixas: 0, is_insumo: 0 })
+    setFormData({ id: null, endereco: '', capacidade_max_caixas: 0, is_insumo: 0, tipo_armazenamento: 'SECO' })
   }
 
   const filtrados = locais.filter(l => l.endereco.toLowerCase().includes(busca.toLowerCase()))
 
   const exportarCSV = async () => {
-    const header = ['Endereço,Tipo,Capacidade Máx (CX)']
-    const rows = filtrados.map(l => `${l.endereco},${l.is_insumo === 1 ? 'Insumos' : 'Geral'},${l.capacidade_max_caixas || 0}`)
+    const header = ['Endereço,Temperatura,Tipo,Capacidade Máx (CX)']
+    const rows = filtrados.map(l => `${l.endereco},${l.tipo_armazenamento || 'SECO'},${l.is_insumo === 1 ? 'Insumos' : 'Geral'},${l.capacidade_max_caixas || 0}`)
     const content = [...header, ...rows].join('\n')
     await downloadCSV(content)
   }
@@ -125,6 +125,18 @@ export function Locais() {
               />
               <span className="text-muted text-sm mt-4 inline-block">Deixe 0 para limite infinito.</span>
             </div>
+            <div className="form-group">
+              <label className="form-label">Tipo de Armazenagem</label>
+              <select 
+                className="form-input" 
+                value={formData.tipo_armazenamento || 'SECO'}
+                onChange={e => setFormData({...formData, tipo_armazenamento: e.target.value})}
+              >
+                <option value="SECO">Seco</option>
+                <option value="FRIO">Frio (Resfriado)</option>
+                <option value="CONGELADO">Congelado</option>
+              </select>
+            </div>
             <div className="form-group flex items-center gap-8 mt-4">
               <input 
                 type="checkbox" 
@@ -162,6 +174,7 @@ export function Locais() {
               <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                 <tr>
                   <th>Endereço</th>
+                  <th>Armazenagem</th>
                   <th>Tipo</th>
                   <th style={{ textAlign: 'right' }}>Capacidade Máx (CX)</th>
                   <th style={{ textAlign: 'right' }}>Ações</th>
@@ -174,6 +187,11 @@ export function Locais() {
                   filtrados.map(l => (
                     <tr key={l.id}>
                       <td className="font-mono text-cyan font-bold">{l.endereco}</td>
+                      <td>
+                        <span className="badge" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)' }}>
+                          {l.tipo_armazenamento === 'FRIO' ? '❄️ Frio' : l.tipo_armazenamento === 'CONGELADO' ? '🧊 Congelado' : '📦 Seco'}
+                        </span>
+                      </td>
                       <td>
                         {l.is_insumo === 1 
                           ? <span className="badge" style={{ backgroundColor: 'var(--warning-muted)', color: 'var(--warning)' }}>Insumos</span>

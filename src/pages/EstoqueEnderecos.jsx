@@ -27,6 +27,7 @@ export function EstoqueEnderecos() {
   const [filtroEndereco,  setFiltroEndereco]  = useState('')
   const [filtroEan,       setFiltroEan]       = useState('')
   const [filtroPalete,    setFiltroPalete]    = useState('')
+  const [filtroArmazenamento, setFiltroArmazenamento] = useState('todos')
   const [filtroVencimento,setFiltroVencimento]= useState('todos') // 'todos', 'vencidos_proximos'
 
   const carregarDados = useCallback(async () => {
@@ -70,7 +71,8 @@ export function EstoqueEnderecos() {
           peso_kg: cx.peso_kg,
           qtd_caixas: 1,
           valor_unitario: cx.valor_unitario,
-          produto_id: cx.produto_id
+          produto_id: cx.produto_id,
+          tipo_armazenamento: cx.tipo_armazenamento || posMatch?.tipo_armazenamento || 'SECO'
         })
         // Marcar a COMBINAÇÃO produto+endereço como coberta (não apenas uma linha específica).
         // Isso garante que todas as linhas de estoque_posicao desse produto neste endereço
@@ -118,6 +120,7 @@ export function EstoqueEnderecos() {
       if (dias > 30) return false
     }
     return (
+      (filtroArmazenamento === 'todos' || item.tipo_armazenamento === filtroArmazenamento) &&
       (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
       (item.codigo    || '').toLowerCase().includes(filtroCodigo.toLowerCase())    &&
       (item.endereco  || '').toLowerCase().includes(filtroEndereco.toLowerCase())  &&
@@ -216,6 +219,17 @@ export function EstoqueEnderecos() {
               >
                 <option value="operacao">Visão: Operação (MP/PA)</option>
                 <option value="insumos">Visão: Insumos</option>
+              </select>
+              <select
+                className="form-input bg-bg-card"
+                style={{ flex: '1 1 160px', fontWeight: 600 }}
+                value={filtroArmazenamento}
+                onChange={e => setFiltroArmazenamento(e.target.value)}
+              >
+                <option value="todos">Tipo de Armazenagem</option>
+                <option value="SECO">📦 Seco</option>
+                <option value="FRIO">❄️ Frio</option>
+                <option value="CONGELADO">🧊 Congelado</option>
               </select>
               <select
                 className="form-input bg-bg-card"

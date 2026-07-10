@@ -15,11 +15,11 @@ export async function buscarPorEndereco(endereco) {
   return res.rows[0]
 }
 
-export async function criar({ endereco, capacidade_max_caixas, is_insumo = 0 }) {
+export async function criar({ endereco, capacidade_max_caixas, is_insumo = 0, tipo_armazenamento = 'SECO' }) {
   try {
     const res = await db.execute({
-      sql: 'INSERT INTO locais (endereco, capacidade_max_caixas, is_insumo) VALUES (?, ?, ?)',
-      args: [endereco.toUpperCase(), capacidade_max_caixas, is_insumo ? 1 : 0]
+      sql: 'INSERT INTO locais (endereco, capacidade_max_caixas, is_insumo, tipo_armazenamento) VALUES (?, ?, ?, ?)',
+      args: [endereco.toUpperCase(), capacidade_max_caixas, is_insumo ? 1 : 0, tipo_armazenamento]
     })
     return { success: true, id: res.lastInsertRowid.toString() }
   } catch (err) {
@@ -30,11 +30,11 @@ export async function criar({ endereco, capacidade_max_caixas, is_insumo = 0 }) 
   }
 }
 
-export async function atualizar({ id, endereco, capacidade_max_caixas, is_insumo = 0 }) {
+export async function atualizar({ id, endereco, capacidade_max_caixas, is_insumo = 0, tipo_armazenamento = 'SECO' }) {
   try {
     await db.execute({
-      sql: 'UPDATE locais SET endereco = ?, capacidade_max_caixas = ?, is_insumo = ? WHERE id = ?',
-      args: [endereco.toUpperCase(), capacidade_max_caixas, is_insumo ? 1 : 0, id]
+      sql: 'UPDATE locais SET endereco = ?, capacidade_max_caixas = ?, is_insumo = ?, tipo_armazenamento = ? WHERE id = ?',
+      args: [endereco.toUpperCase(), capacidade_max_caixas, is_insumo ? 1 : 0, tipo_armazenamento, id]
     })
     return { success: true }
   } catch (err) {

@@ -10,6 +10,7 @@ export async function listarGeral() {
       ep.qtd_caixas, ep.qtd_kg, ep.updated_at,
       p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
       p.status_curva, p.valor_unitario, p.unidade, p.grupo,
+      l.tipo_armazenamento as tipo_armazenamento,
       (
         SELECT GROUP_CONCAT(DISTINCT pl.codigo)
         FROM estoque_caixas ec
@@ -30,6 +31,7 @@ export async function listarGeral() {
       ) as ean_caixas
     FROM estoque_posicao ep
     JOIN produtos p ON p.id = ep.produto_id
+    LEFT JOIN locais l ON l.endereco = ep.endereco
     WHERE ep.qtd_caixas > 0 OR ep.qtd_kg > 0
     ORDER BY ep.endereco, p.descricao, ep.validade
   `)
@@ -44,10 +46,12 @@ export async function listarGeralCaixas({ incluirRec = false } = {}) {
         c.id, c.ean_caixa, c.endereco, c.validade, c.peso_kg, c.status, c.palete_id,
         p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
         p.status_curva, p.valor_unitario, p.unidade, p.grupo,
-        pl.codigo as palete_codigo
+        pl.codigo as palete_codigo,
+        l.tipo_armazenamento as tipo_armazenamento
       FROM estoque_caixas c
       JOIN produtos p ON p.id = c.produto_id
       LEFT JOIN paletes pl ON pl.id = c.palete_id
+      LEFT JOIN locais l ON l.endereco = c.endereco
       WHERE c.status = 'DISPONIVEL'
         AND c.endereco IS NOT NULL
         AND c.endereco != ''
