@@ -352,7 +352,7 @@ export function Saida() {
               </div>
 
               {romaneioAtual.itens && romaneioAtual.itens.length > 0 && (
-                <div className="table-container mb-24" style={{ maxHeight: 300 }}>
+                <div className="table-container mb-24" style={{ maxHeight: 300, overflowY: 'auto' }}>
                   <table>
                     <thead>
                       <tr>
@@ -423,7 +423,7 @@ export function Saida() {
                 <div className="p-16 border-t border-border bg-bg-1">
                   <h4 className="font-bold mb-12 text-sm text-muted uppercase">Itens do Romaneio</h4>
                   {romaneioExpandido.itens && romaneioExpandido.itens.length > 0 ? (
-                    <div className="table-container" style={{ maxHeight: 250 }}>
+                    <div className="table-container" style={{ maxHeight: 250, overflowY: 'auto' }}>
                       <table>
                         <thead>
                           <tr>
