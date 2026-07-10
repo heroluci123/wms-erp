@@ -250,3 +250,27 @@ export async function finalizarOP(op_id) {
     return { success: false, error: err.message }
   }
 }
+
+export async function cancelarOP(op_id) {
+  try {
+    const opStats = await db.execute({
+      sql: `
+        SELECT 
+          (SELECT count(*) FROM op_insumos WHERE op_id = ?) as qtd_insumos,
+          (SELECT count(*) FROM op_retornos WHERE op_id = ?) as qtd_retornos
+      `,
+      args: [op_id, op_id]
+    })
+    
+    const { qtd_insumos, qtd_retornos } = opStats.rows[0]
+    
+    if (qtd_insumos > 0 || qtd_retornos > 0) {
+      return { success: false, error: 'Não é possível cancelar. A OP já possui itens alocados. Remova os itens ou finalize a OP.' }
+    }
+
+    await db.execute({ sql: `DELETE FROM ordens_producao WHERE id = ?`, args: [op_id] })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}

@@ -20,6 +20,7 @@ export function Producao() {
   const [modalRemoverItem, setModalRemoverItem] = useState(null)
   const [modalFinalizarOP, setModalFinalizarOP] = useState(false)
   const [modalNovaOP, setModalNovaOP] = useState(false)
+  const [modalCancelarOP, setModalCancelarOP] = useState(false)
 
   const historico = detalhes ? [
     ...detalhes.insumos.map(i => ({ ...i, tipoMov: 'INSUMO' })),
@@ -215,11 +216,18 @@ export function Producao() {
                   <h2 className="font-bold text-xl text-primary">{detalhes.codigo} - {detalhes.nome}</h2>
                   <div className="text-muted text-sm mt-4">Criado em: {new Date(detalhes.created_at).toLocaleString()}</div>
                 </div>
-                {detalhes.status !== 'FECHADA' && (
-                  <button className="btn btn--primary flex items-center gap-8" onClick={() => setModalFinalizarOP(true)}>
-                    Finalizar OP <Check size={18}/>
-                  </button>
-                )}
+                <div className="flex gap-12">
+                  {detalhes.status !== 'FECHADA' && detalhes.insumos.length === 0 && detalhes.retornos.length === 0 && (
+                    <button className="btn btn--danger flex items-center gap-8" onClick={() => setModalCancelarOP(true)}>
+                      Cancelar OP Vazia
+                    </button>
+                  )}
+                  {detalhes.status !== 'FECHADA' && (
+                    <button className="btn btn--primary flex items-center gap-8" onClick={() => setModalFinalizarOP(true)}>
+                      Finalizar OP <Check size={18}/>
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-16 mb-16">
@@ -473,6 +481,30 @@ export function Producao() {
                 }
                 setModalRemoverItem(null)
               }}>Confirmar Remoção</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CANCELAR OP */}
+      {modalCancelarOP && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-danger">Cancelar OP</h3>
+            <p className="mb-24">Deseja realmente cancelar e excluir esta OP? Ela está vazia, mas esta ação não pode ser desfeita.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalCancelarOP(false)}>Manter OP</button>
+              <button className="btn btn--danger flex-1" onClick={async () => {
+                const res = await producaoQueries.cancelarOP(opSelecionada.id)
+                if (res.success) {
+                  toastSuccess('Sucesso', 'OP cancelada e excluída.')
+                  setOpSelecionada(null)
+                  carregarOPs()
+                } else {
+                  toastError('Erro', res.error)
+                }
+                setModalCancelarOP(false)
+              }}>Sim, Excluir</button>
             </div>
           </div>
         </div>
