@@ -1,16 +1,17 @@
 import { db } from '../lib/db.js';
 
-export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataFim = null) {
+export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataFim = null, validade = null) {
   let query = `
     SELECT 
       r.*,
-      (SELECT count(*) FROM romaneios_itens WHERE romaneio_id = r.id) as qtd_caixas,
-      (SELECT sum(peso_kg) FROM romaneios_itens WHERE romaneio_id = r.id) as peso_total,
-      (SELECT sum(ri.peso_kg * COALESCE(p.valor_unitario, 0)) FROM romaneios_itens ri JOIN produtos p ON p.id = ri.produto_id WHERE ri.romaneio_id = r.id) as valor_total
+      (SELECT count(*) FROM romaneios_itens ri WHERE ri.romaneio_id = r.id ${validade ? 'AND EXISTS (SELECT 1 FROM estoque_caixas ec WHERE ec.id = ri.caixa_id AND date(ec.validade) = date(?))' : ''}) as qtd_caixas,
+      (SELECT sum(peso_kg) FROM romaneios_itens ri WHERE ri.romaneio_id = r.id ${validade ? 'AND EXISTS (SELECT 1 FROM estoque_caixas ec WHERE ec.id = ri.caixa_id AND date(ec.validade) = date(?))' : ''}) as peso_total,
+      (SELECT sum(ri.peso_kg * COALESCE(p.valor_unitario, 0)) FROM romaneios_itens ri JOIN produtos p ON p.id = ri.produto_id WHERE ri.romaneio_id = r.id ${validade ? 'AND EXISTS (SELECT 1 FROM estoque_caixas ec WHERE ec.id = ri.caixa_id AND date(ec.validade) = date(?))' : ''}) as valor_total
     FROM romaneios r
     WHERE 1=1
   `
   const args = []
+  if (validade) args.push(validade, validade, validade)
   
   if (status !== 'TODOS') {
     query += ` AND r.status = ?`
@@ -20,6 +21,11 @@ export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataF
   if (dataInicio && dataFim) {
     query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') >= ? AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') <= ?`
     args.push(dataInicio, dataFim)
+  }
+
+  if (validade) {
+    query += ` AND EXISTS (SELECT 1 FROM romaneios_itens ri JOIN estoque_caixas ec ON ec.id = ri.caixa_id WHERE ri.romaneio_id = r.id AND date(ec.validade) = date(?))`
+    args.push(validade)
   }
   
   query += ` ORDER BY r.created_at DESC`

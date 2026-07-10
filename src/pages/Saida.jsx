@@ -180,6 +180,7 @@ const PRESETS = [
   // Período personalizado
   const [dataInicio, setDataInicio] = useState(() => new Date().toISOString().slice(0,10))
   const [dataFim,    setDataFim]    = useState(() => new Date().toISOString().slice(0,10))
+  const [validadeBusca, setValidadeBusca] = useState('')
   const [presetAtivo, setPresetAtivo] = useState(0) // "Hoje" por padrão
 
   const aplicarPreset = (idx) => {
@@ -189,9 +190,9 @@ const PRESETS = [
     setDataFim(fim)
   }
 
-  const carregarRomaneiosList = async (statusBusca, inicio = null, fim = null) => {
+  const carregarRomaneiosList = async (statusBusca, inicio = null, fim = null, validade = null) => {
     try {
-      const lista = await saidaQueries.listarRomaneios(statusBusca, inicio, fim)
+      const lista = await saidaQueries.listarRomaneios(statusBusca, inicio, fim, validade)
       setRomaneiosLista(lista)
     } catch (e) {
       toastError('Erro', 'Falha ao buscar romaneios')
@@ -204,10 +205,10 @@ const PRESETS = [
     } else if (abaAtiva === 'EXPEDICAO') {
       carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
     } else if (abaAtiva === 'HISTORICO') {
-      carregarRomaneiosList('EXPEDIDO', dataInicio, dataFim)
+      carregarRomaneiosList('EXPEDIDO', dataInicio, dataFim, validadeBusca)
     }
     setRomaneioExpandido(null)
-  }, [abaAtiva, dataInicio, dataFim])
+  }, [abaAtiva, dataInicio, dataFim, validadeBusca])
 
   const carregarDetalhesExpansao = async (id) => {
     try {
@@ -432,7 +433,12 @@ const PRESETS = [
                       style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13 }} />
                     <span style={{ color: 'var(--text-muted)' }}>até</span>
                     <input type="date" value={dataFim} onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }}
-                      style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13 }} />
+                      style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13, marginRight: 8 }} />
+                    
+                    <div style={{ height: 24, width: 1, background: 'var(--border)' }}></div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>Validade:</span>
+                    <input type="date" value={validadeBusca} onChange={e => setValidadeBusca(e.target.value)}
+                      style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }} />
                   </div>
                 </div>
               </div>
@@ -474,6 +480,11 @@ const PRESETS = [
                     )}
                     <span><Package size={12} className="inline mr-4"/> {rom.qtd_caixas} cx ({(rom.peso_total || 0).toFixed(2)} kg)</span>
                   </div>
+                  {rom.previsao_entrega && (
+                    <div className="text-xs text-info mt-4 font-bold flex items-center gap-4">
+                       <Clock size={12}/> Previsão de Entrega: {new Date(rom.previsao_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    </div>
+                  )}
                 </div>
                 {abaAtiva === 'EXPEDICAO' && romaneioExpandido?.id === rom.id && (
                   <div className="flex gap-8">
