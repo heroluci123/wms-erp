@@ -164,6 +164,73 @@ export async function adicionarRetorno(op_id, { ean_caixa, produto_id, peso_kg, 
 
 
 
+export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
+  try {
+    const queries = []
+    
+    const caixaRes = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE id = ?`, args: [caixa_id] })
+    if (caixaRes.rows.length === 0) return { success: false, error: 'Caixa não encontrada' }
+    const caixa = caixaRes.rows[0]
+
+    if (tipo === 'INSUMO') {
+      queries.push({ sql: `DELETE FROM op_insumos WHERE id = ?`, args: [item_id] })
+      queries.push({ sql: `UPDATE estoque_caixas SET status = 'DISPONIVEL' WHERE id = ?`, args: [caixa_id] })
+      queries.push({
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [caixa.produto_id, caixa.endereco, caixa.lote || '', caixa.validade || null, caixa.peso_kg]
+      })
+      queries.push({
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_nome, tipo) VALUES (?, 'PRODUCAO', ?, 1, ?, 'Sistema', 'TRANSFERENCIA')`,
+        args: [caixa.produto_id, caixa.endereco, caixa.peso_kg]
+      })
+    } else if (tipo === 'RETORNO') {
+      queries.push({ sql: `DELETE FROM op_retornos WHERE id = ?`, args: [item_id] })
+      queries.push({ sql: `DELETE FROM estoque_caixas WHERE id = ?`, args: [caixa_id] })
+      queries.push({
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = 'PRODUCAO'`,
+        args: [caixa.peso_kg, caixa.produto_id]
+      })
+      queries.push(`DELETE FROM estoque_posicao WHERE (qtd_caixas <= 0 OR qtd_kg <= 0) AND endereco = 'PRODUCAO'`)
+    }
+
+    await db.batch(queries, 'write')
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+export async function verificarFEFO(produto_id, validadeAtual) {
+  if (!validadeAtual) return null 
+  
+  const res = await db.execute({
+    sql: `
+      SELECT c.*, p.descricao as produto_descricao 
+      FROM estoque_caixas c
+      JOIN produtos p ON p.id = c.produto_id
+      WHERE c.produto_id = ? 
+        AND c.status = 'DISPONIVEL'
+        AND c.validade IS NOT NULL
+      ORDER BY c.validade ASC
+      LIMIT 1
+    `,
+    args: [produto_id]
+  })
+  
+  if (res.rows.length === 0) return null
+  
+  const caixaMaisVelha = res.rows[0]
+  
+  const vMaisVelha = new Date(caixaMaisVelha.validade)
+  const vAtual = new Date(validadeAtual)
+  
+  if (vMaisVelha < vAtual) {
+    return caixaMaisVelha 
+  }
+  
+  return null
+}
+
 export async function finalizarOP(op_id) {
   try {
     const queries = [

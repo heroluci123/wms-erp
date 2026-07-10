@@ -15,6 +15,7 @@ export function Producao() {
   
   const [modalInsumo, setModalInsumo] = useState(null)
   const [modalRetorno, setModalRetorno] = useState(null)
+  const [modalFefo, setModalFefo] = useState(null)
   const [modalFinalizarOP, setModalFinalizarOP] = useState(false)
   const [modalNovaOP, setModalNovaOP] = useState(false)
 
@@ -66,6 +67,15 @@ export function Producao() {
           if (caixa.status !== 'DISPONIVEL') {
             return toastError('Inválido', `Esta caixa não está disponível (Status: ${caixa.status}).`)
           }
+          
+          if (caixa.validade) {
+            const caixaMaisVelha = await producaoQueries.verificarFEFO(caixa.produto_id, caixa.validade)
+            if (caixaMaisVelha && caixaMaisVelha.id !== caixa.id) {
+              setModalFefo({ atual: caixa, velha: caixaMaisVelha })
+              return
+            }
+          }
+          
           setModalInsumo(caixa)
           return
         }
@@ -91,6 +101,22 @@ export function Producao() {
         toastSuccess('Sucesso', 'Ordem de Produção Finalizada.')
         setOpSelecionada(null)
         carregarOPs()
+      } else {
+        toastError('Erro', res.error)
+      }
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleRemoverItem = async (item) => {
+    if (!window.confirm(`Deseja realmente remover este item (${item.produto_descricao}) da OP? Ele será devolvido ao estoque original.`)) return
+    
+    try {
+      const res = await producaoQueries.removerItemOP(opSelecionada.id, item.tipoMov, item.id, item.caixa_id)
+      if (res.success) {
+        toastSuccess('Sucesso', 'Item removido da OP e estoque atualizado.')
+        carregarDetalhes(opSelecionada.id)
       } else {
         toastError('Erro', res.error)
       }
@@ -248,6 +274,7 @@ export function Producao() {
                         <th style={{ textAlign: 'right' }}>Peso (kg)</th>
                         <th>Operador</th>
                         <th style={{ textAlign: 'right' }}>Data/Hora</th>
+                        {detalhes.status !== 'FECHADA' && <th style={{ width: 50 }}></th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -267,6 +294,13 @@ export function Producao() {
                           <td className="text-muted text-sm" style={{ textAlign: 'right' }}>
                             {new Date(h.created_at).toLocaleDateString()} {new Date(h.created_at).toLocaleTimeString()}
                           </td>
+                          {detalhes.status !== 'FECHADA' && (
+                            <td style={{ textAlign: 'center' }}>
+                              <button className="text-danger p-4 hover:bg-danger hover:text-white rounded" onClick={() => handleRemoverItem(h)}>
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -381,6 +415,27 @@ export function Producao() {
                 await finalizarOP()
                 setModalFinalizarOP(false)
               }}>Confirmar e Finalizar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL FEFO */}
+      {modalFefo && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24 border border-warning" style={{ width: 500, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-warning flex items-center gap-8"><Info /> Alerta FEFO</h3>
+            <p className="mb-16">Você está bipando uma caixa que vence em <strong>{new Date(modalFefo.atual.validade).toLocaleDateString()}</strong>.</p>
+            <p className="mb-24 text-muted">
+              Porém, existe outra caixa de <strong>{modalFefo.velha.produto_descricao}</strong> no endereço <strong className="text-white">{modalFefo.velha.endereco}</strong> que vence antes, no dia <strong className="text-warning">{new Date(modalFefo.velha.validade).toLocaleDateString()}</strong>!
+            </p>
+            <p className="mb-24 font-bold">Recomendamos fortemente que você utilize a caixa mais antiga para evitar perdas.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--primary flex-1" onClick={() => setModalFefo(null)}>Cancelar e Pegar Outra</button>
+              <button className="btn btn--ghost" onClick={() => {
+                setModalInsumo(modalFefo.atual)
+                setModalFefo(null)
+              }}>Ignorar e Usar Atual</button>
             </div>
           </div>
         </div>
