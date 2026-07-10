@@ -628,6 +628,10 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
             sql: `UPDATE estoque_caixas SET endereco = 'PERDIDO', status = 'BLOQUEADO', updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
             args: [item.ean_caixa]
           })
+          await tx.execute({
+            sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_PERDA', 'Caixa declarada perdida no inventário ' || ?, ?)`,
+            args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
+          })
           // Deduz da posicao atual (que é o item.endereco)
           await tx.execute({
             sql: `UPDATE estoque_posicao SET qtd_caixas = MAX(0, qtd_caixas - 1), qtd_kg = MAX(0, qtd_kg - ?), updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND validade IS ?`,
@@ -642,11 +646,19 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
               sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
               args: [item.endereco, item.qtd_contada_kg, validadeReal, item.ean_caixa]
             })
+            await tx.execute({
+              sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_SOBRA', 'Caixa reencontrada no inventário ' || ?, ?)`,
+              args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
+            })
           } else {
             // Cria a caixa
             await tx.execute({
               sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
               args: [item.ean_caixa, item.produto_id, item.endereco, item.lote || '', validadeReal, item.qtd_contada_kg]
+            })
+            await tx.execute({
+              sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_SOBRA', 'Caixa criada como sobra no inventário ' || ?, ?)`,
+              args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
             })
           }
           // Adiciona na posição atual
@@ -661,6 +673,10 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
           await tx.execute({
             sql: `UPDATE estoque_caixas SET peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
             args: [item.qtd_contada_kg, validadeReal, item.ean_caixa]
+          })
+          await tx.execute({
+            sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_AJUSTE', 'Peso/Validade ajustados no inventário ' || ?, ?)`,
+            args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
           })
           // Atualiza posição subtraindo a diferença de peso
           await tx.execute({

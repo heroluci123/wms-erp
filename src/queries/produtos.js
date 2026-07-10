@@ -241,3 +241,11 @@ export async function deletar(id) {
     throw err
   }
 }
+
+export async function buscarHistoricoCaixa(ean) {
+  const res = await db.execute({
+    sql: `SELECT * FROM caixas_historico WHERE ean_caixa = ? ORDER BY data_hora ASC`,
+    args: [ean]
+  })
+  return res.rows
+}

@@ -15,6 +15,7 @@ import { InventarioConciliacao } from './pages/InventarioConciliacao'
 import { Produtos } from './pages/Produtos'
 import { Producao } from './pages/Producao'
 import { Saida } from './pages/Saida'
+import { Desmembramento } from './pages/Desmembramento'
 import { Locais } from './pages/Locais'
 import { Operadores } from './pages/Operadores'
 import { MapaCapacidade } from './pages/MapaCapacidade'
@@ -39,6 +40,7 @@ function App() {
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="movimentacao" element={<Movimentacao />} />
           <Route path="producao" element={<Producao />} />
+          <Route path="desmembramento" element={<Desmembramento />} />
           <Route path="saida" element={<Saida />} />
 
           <Route path="inventario" element={<Inventario />} />

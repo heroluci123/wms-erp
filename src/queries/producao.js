@@ -95,6 +95,11 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'PRODUCAO', 1, ?, ?, ?, 'TRANSFERENCIA')`,
         args: [c.produto_id, c.endereco || 'REC', c.peso_kg, operador_id || null, operador_nome || 'Sistema']
       })
+      
+      queries.push({
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'ALOCADA_PRODUCAO', 'Enviada para a OP ' || (SELECT codigo FROM ordens_producao WHERE id = ?), ?)`,
+        args: [c.id, c.ean_caixa, op_id, operador_nome || 'Sistema']
+      })
     }
 
     // Clean up empty records
@@ -149,6 +154,10 @@ export async function adicionarRetorno(op_id, { ean_caixa, produto_id, peso_kg, 
       {
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'PRODUCAO', 'PRODUCAO', 1, ?, ?, ?, 'TRANSFERENCIA')`,
         args: [produto_id, peso_kg, operador_id || null, operador_nome || 'Sistema']
+      },
+      {
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'RETORNO_PRODUCAO', 'Nova caixa gerada a partir da OP ' || (SELECT codigo FROM ordens_producao WHERE id = ?), ?)`,
+        args: [newCaixaId, ean_caixa, op_id, operador_nome || 'Sistema']
       }
     ]
 
@@ -183,6 +192,10 @@ export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_nome, tipo) VALUES (?, 'PRODUCAO', ?, 1, ?, 'Sistema', 'TRANSFERENCIA')`,
         args: [caixa.produto_id, caixa.endereco, caixa.peso_kg]
       })
+      queries.push({
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'ESTORNO_INSUMO', 'Removida da OP ' || (SELECT codigo FROM ordens_producao WHERE id = ?) || ' e devolvida ao estoque', 'Sistema')`,
+        args: [caixa.id, caixa.ean_caixa, op_id]
+      })
     } else if (tipo === 'RETORNO') {
       queries.push({ sql: `DELETE FROM op_retornos WHERE id = ?`, args: [item_id] })
       queries.push({ sql: `DELETE FROM estoque_caixas WHERE id = ?`, args: [caixa_id] })
@@ -191,6 +204,10 @@ export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
         args: [caixa.peso_kg, caixa.produto_id]
       })
       queries.push(`DELETE FROM estoque_posicao WHERE (qtd_caixas <= 0 OR qtd_kg <= 0) AND endereco = 'PRODUCAO'`)
+      queries.push({
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'ESTORNO_RETORNO', 'Caixa excluída. Estorno de retorno da OP ' || (SELECT codigo FROM ordens_producao WHERE id = ?), 'Sistema')`,
+        args: [caixa.id, caixa.ean_caixa, op_id]
+      })
     }
 
     await db.batch(queries, 'write')

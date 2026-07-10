@@ -41,6 +41,11 @@ export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id
       {
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'FORNECEDOR', 'REC', '', 1, ?, ?, ?, 'RECEBIMENTO')`,
         args: [produto_id, peso_kg, operador_id || null, operador_nome || 'Sistema']
+      },
+      // 4. Histórico da caixa
+      {
+        sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'RECEBIMENTO', 'Recebida do Fornecedor (Endereço: REC)', ?)`,
+        args: [ean_caixa, operador_nome || 'Sistema']
       }
     ]
 
@@ -80,6 +85,11 @@ export async function removerCaixaSerializada(caixa_id, operador_id, operador_no
       {
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'REC', 'EXCLUIDO', '', 1, ?, ?, ?, 'AJUSTE')`,
         args: [caixa.produto_id, caixa.peso_kg, operador_id || null, operador_nome || 'Sistema']
+      },
+      // 4. Histórico da caixa
+      {
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'EXCLUIDA', 'Caixa excluída no recebimento', ?)`,
+        args: [caixa.id, caixa.ean_caixa, operador_nome || 'Sistema']
       }
     ], 'write');
 
@@ -254,6 +264,14 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
     blocos.push({ sql: `UPDATE paletes SET endereco_atual = ?, status = 'FECHADO' WHERE id = ?`, args: [destino, palete_id] });
     blocos.push({ sql: `UPDATE estoque_caixas SET endereco = ? WHERE palete_id = ?`, args: [destino, palete_id] });
 
+    // 1.5. Inserir histórico para cada caixa do palete
+    for (const c of caixas) {
+      blocos.push({
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'TRANSFERENCIA', 'Transferida via Palete (' || ? || ') de ' || ? || ' para ' || ?, ?)`,
+        args: [c.id, c.ean_caixa, p.codigo, origem, destino, operador_nome || 'Sistema']
+      });
+    }
+
     // 2. Agrupar as caixas por produto e validade para ajustar os saldos agregados (estoque_posicao)
     const agrupamento = {};
     for (const c of caixas) {
@@ -345,6 +363,12 @@ export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, o
       if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, origem: origem_real, caixas: 0, kg: 0 };
       agrupamento[key].caixas += 1;
       agrupamento[key].kg += c.peso_kg;
+      
+      // Histórico
+      blocos.push({
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'TRANSFERENCIA', 'Transferida de ' || ? || ' para ' || ?, ?)`,
+        args: [c.id, c.ean_caixa, origem_real, destino, operador_nome || 'Sistema']
+      });
     }
 
     for (const g of Object.values(agrupamento)) {

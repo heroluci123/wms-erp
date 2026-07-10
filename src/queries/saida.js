@@ -74,6 +74,12 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
       args: [romaneio_id, caixa.id, caixa.produto_id, caixa.peso_kg]
     })
 
+    // Histórico
+    queries.push({
+      sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'ROMANEIO', 'Adicionada ao Romaneio', ?)`,
+      args: [caixa.id, caixa.ean_caixa, operador_nome || 'Sistema']
+    })
+
     // Subtrair do estoque disponivel
     queries.push({
       sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ?`,
@@ -107,6 +113,11 @@ export async function removerCaixa(romaneio_id, caixa_id, produto_id, peso_kg, e
       {
         sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', NULL, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
         args: [produto_id, endereco_origem || 'REC', peso_kg]
+      },
+      // Histórico
+      {
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, (SELECT ean_caixa FROM estoque_caixas WHERE id = ?), 'ROMANEIO_REMOVIDA', 'Removida do Romaneio e devolvida para ' || ?, ?)`,
+        args: [caixa_id, caixa_id, endereco_origem || 'REC', operador_nome || 'Sistema']
       }
     ]
 
@@ -146,7 +157,7 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
     // Busca todas as caixas deste romaneio para gerar log de saÃ­da
     const itensRes = await db.execute({
       sql: `
-        SELECT ri.caixa_id, ri.produto_id, ri.peso_kg, c.endereco
+        SELECT ri.caixa_id, ri.produto_id, ri.peso_kg, c.endereco, c.ean_caixa
         FROM romaneios_itens ri
         JOIN estoque_caixas c ON c.id = ri.caixa_id
         WHERE ri.romaneio_id = ?
@@ -171,6 +182,12 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
       queries.push({
         sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'CLIENTE', 1, ?, ?, ?, 'DESPACHO')`,
         args: [item.produto_id, item.endereco || 'REC', item.peso_kg, operador_id || null, operador_nome || 'Sistema']
+      })
+      
+      // Histórico
+      queries.push({
+        sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'EXPEDICAO', 'Expedida ao Cliente pelo Romaneio', ?)`,
+        args: [item.caixa_id, item.ean_caixa, operador_nome || 'Sistema']
       })
     }
 
