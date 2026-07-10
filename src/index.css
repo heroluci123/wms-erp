@@ -1052,6 +1052,13 @@ tbody td {
 .mb-24  { margin-bottom: 24px; }
 .mt-16  { margin-top: 16px; }
 .mt-24  { margin-top: 24px; }
+.ml-4   { margin-left: 4px; }
+.ml-8   { margin-left: 8px; }
+.mr-4   { margin-right: 4px; }
+.mr-8   { margin-right: 8px; }
+.p-8    { padding: 8px; }
+.p-16   { padding: 16px; }
+.p-24   { padding: 24px; }
 .w-full { width: 100%; }
 .text-muted    { color: var(--text-muted); }
 .text-mono     { font-family: var(--font-mono); }
