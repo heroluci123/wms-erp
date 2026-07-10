@@ -147,7 +147,7 @@ export function ConsultaEndereco() {
                 📭 VAZIO
               </div>
             ) : (
-              <div className="flex items-center justify-center mt-16" style={{ flexWrap: 'wrap', gap: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', width: '100%', marginTop: 20 }}>
                 <div style={{ textAlign: 'center', padding: '0 40px' }}>
                   <div style={{ fontSize: 36, fontWeight: 900, color: 'var(--primary)', lineHeight: 1 }}>{totalCx}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>Caixas</div>
