@@ -61,14 +61,23 @@ export function Rastreabilidade() {
         {historicoCaixa && historicoCaixa.length > 0 && (
           <div className="card p-24">
             <h3 className="font-bold mb-24 text-lg">Timeline da Caixa</h3>
-            <div className="relative border-l-2 border-border ml-12 pl-24 space-y-24">
+            <div style={{ position: 'relative', borderLeft: '2px solid var(--border)', marginLeft: 12, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
               {historicoCaixa.map((ev, i) => (
-                <div key={i} className="relative">
-                  <div className="absolute w-12 h-12 bg-primary rounded-full" style={{ left: -31, top: 4, border: '3px solid var(--bg-0)' }}></div>
-                  <div className="font-bold text-primary">{ev.operacao}</div>
-                  <div className="text-sm text-white mt-4">{ev.detalhes}</div>
-                  <div className="text-xs text-muted flex items-center gap-8 mt-8">
-                    <span><Clock size={12} className="inline mr-4"/> {new Date(ev.data_hora).toLocaleString()}</span>
+                <div key={i} style={{ position: 'relative' }}>
+                  <div style={{ 
+                    position: 'absolute', 
+                    width: 14, 
+                    height: 14, 
+                    background: 'var(--accent)', 
+                    borderRadius: '50%', 
+                    left: -32, 
+                    top: 4, 
+                    border: '3px solid var(--surface)' 
+                  }}></div>
+                  <div style={{ fontWeight: 'bold', color: 'var(--accent)' }}>{ev.operacao}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 4 }}>{ev.detalhes}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                    <span><Clock size={12} style={{ display: 'inline', marginRight: 4 }}/> {new Date(ev.data_hora).toLocaleString()}</span>
                     <span>• Operador: {ev.operador_nome || 'Sistema'}</span>
                   </div>
                 </div>
