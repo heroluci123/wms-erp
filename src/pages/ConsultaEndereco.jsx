@@ -147,20 +147,23 @@ export function ConsultaEndereco() {
                 📭 VAZIO
               </div>
             ) : (
-              <div className="flex items-center justify-center gap-32 mt-12" style={{ flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: 'var(--primary)' }}>{totalCx}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Caixas</div>
+              <div className="flex items-center justify-center mt-16" style={{ flexWrap: 'wrap', gap: 0 }}>
+                <div style={{ textAlign: 'center', padding: '0 40px' }}>
+                  <div style={{ fontSize: 36, fontWeight: 900, color: 'var(--primary)', lineHeight: 1 }}>{totalCx}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>Caixas</div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: 'var(--success)' }}>{totalKg.toFixed(2)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>kg total</div>
+                <div style={{ width: 1, height: 48, background: 'var(--border)', opacity: 0.6 }} />
+                <div style={{ textAlign: 'center', padding: '0 40px' }}>
+                  <div style={{ fontSize: 36, fontWeight: 900, color: 'var(--success)', lineHeight: 1 }}>{totalKg.toFixed(2)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>kg total</div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: 'var(--warning)' }}>{Object.keys(porProduto).length}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Produtos</div>
+                <div style={{ width: 1, height: 48, background: 'var(--border)', opacity: 0.6 }} />
+                <div style={{ textAlign: 'center', padding: '0 40px' }}>
+                  <div style={{ fontSize: 36, fontWeight: 900, color: 'var(--warning)', lineHeight: 1 }}>{Object.keys(porProduto).length}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>Produtos</div>
                 </div>
               </div>
+
             )}
           </div>
 
