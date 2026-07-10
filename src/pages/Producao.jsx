@@ -14,7 +14,6 @@ export function Producao() {
   const [opSelecionada, setOpSelecionada] = useState(null)
   const [detalhes, setDetalhes] = useState(null)
   
-  const [modalInsumo, setModalInsumo] = useState(null)
   const [modalRetorno, setModalRetorno] = useState(null)
   const [modalFefo, setModalFefo] = useState(null)
   const [modalRemoverItem, setModalRemoverItem] = useState(null)
@@ -79,7 +78,13 @@ export function Producao() {
             }
           }
           
-          setModalInsumo(caixa)
+          const resAlo = await producaoQueries.alocarInsumos(opSelecionada.id, [caixa], operador.id, operador.nome)
+          if (resAlo.success) {
+            toastSuccess('Insumo Adicionado', `Caixa de ${caixa.peso_kg}kg alocada com sucesso.`)
+            carregarDetalhes(opSelecionada.id)
+          } else {
+            toastError('Erro ao Alocar', resAlo.error)
+          }
           return
         }
 
@@ -313,7 +318,7 @@ export function Producao() {
                           <td className="text-muted text-sm" style={{ textAlign: 'right' }}>
                             {new Date(h.created_at).toLocaleDateString()} {new Date(h.created_at).toLocaleTimeString()}
                           </td>
-                          {detalhes.status !== 'FECHADA' && (
+                          {detalhes.status !== 'FECHADA' && (operador?.is_adm === 1 || operador?.permissoes?.produtos) && (
                             <td style={{ textAlign: 'center' }}>
                               <button className="text-danger p-4 hover:bg-danger hover:text-white rounded" onClick={() => handleRemoverItem(h)}>
                                 <Trash2 size={16} />
@@ -329,29 +334,6 @@ export function Producao() {
             )}
           </div>
         )
-      )}
-
-      {/* MODAL INSUMO */}
-      {modalInsumo && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-primary">Confirmar Insumo</h3>
-            <p className="mb-24">Deseja alocar a caixa de <strong>{modalInsumo.peso_kg}kg</strong> de <strong>{modalInsumo.produto_descricao}</strong> como insumo nesta OP?</p>
-            <div className="flex gap-16">
-              <button className="btn btn--ghost" onClick={() => setModalInsumo(null)}>Cancelar</button>
-              <button className="btn btn--primary flex-1" onClick={async () => {
-                const resAlo = await producaoQueries.alocarInsumos(opSelecionada.id, [modalInsumo], operador.id, operador.nome)
-                if (resAlo.success) {
-                  toastSuccess('Insumo Adicionado', `Caixa alocada com sucesso.`)
-                  carregarDetalhes(opSelecionada.id)
-                } else {
-                  toastError('Erro ao Alocar', resAlo.error)
-                }
-                setModalInsumo(null)
-              }}>Confirmar Alocação</button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* MODAL RETORNO */}
