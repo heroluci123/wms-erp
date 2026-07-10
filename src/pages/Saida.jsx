@@ -168,6 +168,7 @@ export function Saida() {
   const [romaneiosLista, setRomaneiosLista] = useState([])
   const [romaneioExpandido, setRomaneioExpandido] = useState(null)
   const [filtroDataHistorico, setFiltroDataHistorico] = useState('hoje')
+  const [dataEspecificaHistorico, setDataEspecificaHistorico] = useState(() => new Date().toISOString().substring(0, 10))
 
   const carregarRomaneiosList = async (statusBusca, dataBusca = null) => {
     try {
@@ -184,10 +185,11 @@ export function Saida() {
     } else if (abaAtiva === 'EXPEDICAO') {
       carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
     } else if (abaAtiva === 'HISTORICO') {
-      carregarRomaneiosList('EXPEDIDO', filtroDataHistorico)
+      const periodo = filtroDataHistorico === 'especifico' ? dataEspecificaHistorico : filtroDataHistorico
+      carregarRomaneiosList('EXPEDIDO', periodo)
     }
     setRomaneioExpandido(null)
-  }, [abaAtiva, filtroDataHistorico])
+  }, [abaAtiva, filtroDataHistorico, dataEspecificaHistorico])
 
   const carregarDetalhesExpansao = async (id) => {
     try {
@@ -391,7 +393,7 @@ export function Saida() {
         <div className="flex-col gap-16">
           {abaAtiva === 'HISTORICO' && (
             <div className="flex-col gap-16 mb-8">
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-8">
                 <select 
                   className="form-input" 
                   value={filtroDataHistorico} 
@@ -402,7 +404,17 @@ export function Saida() {
                   <option value="7d">Últimos 7 dias</option>
                   <option value="30d">Últimos 30 dias</option>
                   <option value="todos">Todo o período</option>
+                  <option value="especifico">Data específica...</option>
                 </select>
+                {filtroDataHistorico === 'especifico' && (
+                  <input 
+                    type="date" 
+                    className="form-input" 
+                    value={dataEspecificaHistorico} 
+                    onChange={e => setDataEspecificaHistorico(e.target.value)}
+                    style={{ width: 'auto' }}
+                  />
+                )}
               </div>
               
               <div className="flex gap-16" style={{ flexWrap: 'wrap' }}>
