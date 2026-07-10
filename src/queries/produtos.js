@@ -249,3 +249,14 @@ export async function buscarHistoricoCaixa(ean) {
   })
   return res.rows
 }
+
+export async function buscarCaixaPorEan(ean) {
+  const res = await db.execute({
+    sql: `SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo 
+          FROM estoque_caixas c 
+          JOIN produtos p ON c.produto_id = p.id 
+          WHERE c.ean_caixa = ?`,
+    args: [ean]
+  })
+  return res.rows.length > 0 ? res.rows[0] : null
+}

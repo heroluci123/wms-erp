@@ -7,6 +7,7 @@ export function Rastreabilidade() {
   const { toastError } = useAppStore()
   const [eanRastreio, setEanRastreio] = useState('')
   const [historicoCaixa, setHistoricoCaixa] = useState(null)
+  const [caixaInfo, setCaixaInfo] = useState(null)
   const [loadingRastreio, setLoadingRastreio] = useState(false)
 
   const handleBuscarHistorico = async (e) => {
@@ -14,8 +15,10 @@ export function Rastreabilidade() {
     if (!eanRastreio.trim()) return
     setLoadingRastreio(true)
     try {
-      const res = await produtosQueries.buscarHistoricoCaixa(eanRastreio.trim())
-      setHistoricoCaixa(res)
+      const hist = await produtosQueries.buscarHistoricoCaixa(eanRastreio.trim())
+      const caixa = await produtosQueries.buscarCaixaPorEan(eanRastreio.trim())
+      setHistoricoCaixa(hist)
+      setCaixaInfo(caixa)
     } catch (err) {
       toastError('Erro', 'Falha ao buscar histórico')
     }
@@ -59,7 +62,33 @@ export function Rastreabilidade() {
         )}
 
         {historicoCaixa && historicoCaixa.length > 0 && (
-          <div className="card p-24">
+          <>
+            {caixaInfo && (
+              <div className="card p-24 mb-24" style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <div className="text-xs text-muted mb-4 font-bold uppercase">Produto</div>
+                  <div className="font-bold text-lg text-primary">{caixaInfo.produto_descricao}</div>
+                  <div className="text-sm text-muted">Cód: {caixaInfo.produto_codigo}</div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="text-xs text-muted mb-4 font-bold uppercase">Peso e Validade</div>
+                  <div className="font-bold text-cyan">{caixaInfo.peso_kg.toFixed(2)} kg</div>
+                  <div className="text-sm text-muted">Venc: {caixaInfo.validade ? new Date(caixaInfo.validade + 'T00:00:00').toLocaleDateString() : '-'}</div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="text-xs text-muted mb-4 font-bold uppercase">Status Atual</div>
+                  <div className="font-bold" style={{ 
+                    fontSize: 18,
+                    color: caixaInfo.status === 'CONSUMIDA' ? 'var(--warning)' : caixaInfo.status === 'EXPEDIDA' ? 'var(--info)' : 'var(--success)'
+                  }}>
+                    {caixaInfo.status === 'CONSUMIDA' ? 'DESMEMBRADA' : caixaInfo.status === 'EXPEDIDA' ? 'EXPEDIDA' : caixaInfo.endereco}
+                  </div>
+                  {caixaInfo.status === 'DISPONIVEL' && <div className="text-sm text-muted">Em Estoque</div>}
+                </div>
+              </div>
+            )}
+
+            <div className="card p-24">
             <h3 className="font-bold mb-24 text-lg">Timeline da Caixa</h3>
             <div style={{ position: 'relative', borderLeft: '2px solid var(--border)', marginLeft: 12, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
               {historicoCaixa.map((ev, i) => (
@@ -83,7 +112,8 @@ export function Rastreabilidade() {
                 </div>
               ))}
             </div>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>
