@@ -15,6 +15,12 @@ export function Saida() {
   const [formRomaneio, setFormRomaneio] = useState({ cliente: '', previsao_entrega: '' })
   const [romaneioAtual, setRomaneioAtual] = useState(null)
   
+  // Modals
+  const [modalRemoverCaixa, setModalRemoverCaixa] = useState(null)
+  const [modalFinalizarMontagem, setModalFinalizarMontagem] = useState(false)
+  const [modalExpedir, setModalExpedir] = useState(null)
+  const [modalExcluirRomaneio, setModalExcluirRomaneio] = useState(false)
+  
   // Bipagem
   const [eanBipado, setEanBipado] = useState('')
 
@@ -84,8 +90,11 @@ export function Saida() {
     }
   }
 
-  const handleRemoverCaixa = async (item) => {
-    if (!window.confirm(`Remover a caixa de ${item.produto_descricao}?`)) return
+  const handleRemoverCaixa = (item) => {
+    setModalRemoverCaixa(item)
+  }
+
+  const confirmarRemoverCaixa = async (item) => {
     try {
       const res = await saidaQueries.removerCaixa(
         romaneioAtual.id, item.caixa_id, item.produto_id, item.peso_kg, 'REC', operador.id, operador.nome
@@ -99,14 +108,17 @@ export function Saida() {
     } catch (e) {
       toastError('Erro', e.message)
     }
+    setModalRemoverCaixa(null)
   }
 
-  const handleFinalizarMontagem = async () => {
+  const handleFinalizarMontagem = () => {
     if (!romaneioAtual.itens || romaneioAtual.itens.length === 0) {
       return toastWarning('Aviso', 'Adicione pelo menos uma caixa para finalizar a montagem.')
     }
-    if (!window.confirm(`Finalizar montagem do ${romaneioAtual.codigo}? Ele será enviado para a aba de Expedição.`)) return
+    setModalFinalizarMontagem(true)
+  }
 
+  const confirmarFinalizarMontagem = async () => {
     try {
       const res = await saidaQueries.finalizarMontagem(romaneioAtual.id)
       if (res.success) {
@@ -118,6 +130,7 @@ export function Saida() {
     } catch (e) {
       toastError('Erro', e.message)
     }
+    setModalFinalizarMontagem(false)
   }
 
 
@@ -154,8 +167,11 @@ export function Saida() {
     }
   }
 
-  const handleExpedir = async (id) => {
-    if (!window.confirm('Atenção: Ao confirmar, todas as caixas serão baixadas do estoque definitivamente. Deseja realizar a expedição?')) return
+  const handleExpedir = (id) => {
+    setModalExpedir(id)
+  }
+
+  const confirmarExpedir = async (id) => {
     try {
       const res = await saidaQueries.expedirRomaneio(id, operador.id, operador.nome)
       if (res.success) {
@@ -168,10 +184,14 @@ export function Saida() {
     } catch (e) {
       toastError('Erro', e.message)
     }
+    setModalExpedir(null)
   }
 
-  const handleExcluirRomaneio = async () => {
-    if (!window.confirm('Tem certeza que deseja excluir este romaneio? Se houver caixas nele, elas voltarão para o estoque e ficarão DISPONÍVEIS.')) return
+  const handleExcluirRomaneio = () => {
+    setModalExcluirRomaneio(true)
+  }
+
+  const confirmarExcluirRomaneio = async () => {
     try {
       const res = await saidaQueries.excluirRomaneio(romaneioAtual.id)
       if (res.success) {
@@ -184,6 +204,7 @@ export function Saida() {
     } catch (e) {
       toastError('Erro', e.message)
     }
+    setModalExcluirRomaneio(false)
   }
 
   return (
@@ -381,6 +402,58 @@ export function Saida() {
         </div>
       )}
 
+      {/* MODALS */}
+      {modalRemoverCaixa && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-danger">Remover Caixa</h3>
+            <p className="mb-24">Remover a caixa de <strong>{modalRemoverCaixa.produto_descricao}</strong> do romaneio?</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalRemoverCaixa(null)}>Cancelar</button>
+              <button className="btn btn--danger flex-1" onClick={() => confirmarRemoverCaixa(modalRemoverCaixa)}>Remover</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalFinalizarMontagem && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-primary">Finalizar Montagem</h3>
+            <p className="mb-24">Finalizar montagem do <strong>{romaneioAtual?.codigo}</strong>? Ele será enviado para a aba de Expedição e não poderá mais receber caixas.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalFinalizarMontagem(false)}>Cancelar</button>
+              <button className="btn btn--primary flex-1" onClick={confirmarFinalizarMontagem}>Finalizar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalExpedir && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 450, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-primary">Confirmar Expedição</h3>
+            <p className="mb-24">Atenção: Ao confirmar, todas as caixas serão baixadas do estoque definitivamente. Deseja realizar a expedição?</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalExpedir(null)}>Cancelar</button>
+              <button className="btn btn--primary flex-1" onClick={() => confirmarExpedir(modalExpedir)}>Expedir Romaneio</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalExcluirRomaneio && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-danger">Excluir Romaneio</h3>
+            <p className="mb-24">Tem certeza que deseja excluir este romaneio? Se houver caixas nele, elas voltarão para o estoque e ficarão disponíveis.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalExcluirRomaneio(false)}>Cancelar</button>
+              <button className="btn btn--danger flex-1" onClick={confirmarExcluirRomaneio}>Excluir Romaneio</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
