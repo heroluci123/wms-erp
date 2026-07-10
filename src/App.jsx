@@ -13,6 +13,7 @@ import { Inventario } from './pages/Inventario'
 import { InventarioOperador } from './pages/InventarioOperador'
 import { InventarioConciliacao } from './pages/InventarioConciliacao'
 import { Produtos } from './pages/Produtos'
+import { Rastreabilidade } from './pages/Rastreabilidade'
 import { Producao } from './pages/Producao'
 import { Saida } from './pages/Saida'
 import { Desmembramento } from './pages/Desmembramento'
@@ -46,6 +47,7 @@ function App() {
           <Route path="inventario" element={<Inventario />} />
           <Route path="inventario/coletor" element={<InventarioOperador />} />
           <Route path="inventario/conciliacao/:id" element={<InventarioConciliacao />} />
+          <Route path="rastreabilidade" element={<Rastreabilidade />} />
           <Route path="produtos" element={<Produtos />} />
           <Route path="locais" element={<Locais />} />
           <Route path="operadores" element={<Operadores />} />
