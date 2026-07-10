@@ -55,7 +55,7 @@ export async function desmembrarCaixa(caixa_original, novas_caixas, operador_id,
       
       queries.push({
         sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, validade, peso_kg, status) VALUES (?, ?, ?, ?, ?, 'DISPONIVEL')`,
-        args: [nova.ean_caixa, caixa_original.produto_id, caixa_original.endereco || 'REC', caixa_original.validade || null, nova.peso_kg]
+        args: [nova.ean_caixa, caixa_original.produto_id, caixa_original.endereco || 'REC', nova.validade || null, nova.peso_kg]
       });
       
       queries.push({
@@ -66,7 +66,7 @@ export async function desmembrarCaixa(caixa_original, novas_caixas, operador_id,
       // Atualizar estoque agregado (inserir nova)
       queries.push({
         sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
-        args: [caixa_original.produto_id, caixa_original.endereco || 'REC', caixa_original.validade || null, nova.peso_kg]
+        args: [caixa_original.produto_id, caixa_original.endereco || 'REC', nova.validade || null, nova.peso_kg]
       });
     }
 

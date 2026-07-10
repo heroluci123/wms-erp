@@ -11,6 +11,7 @@ export function Desmembramento() {
   const [novasCaixas, setNovasCaixas] = useState([])
   const [novoEan, setNovoEan] = useState('')
   const [novoPeso, setNovoPeso] = useState('')
+  const [novaValidade, setNovaValidade] = useState('')
   
   const [loading, setLoading] = useState(false)
   const inputRef = useRef(null)
@@ -23,6 +24,7 @@ export function Desmembramento() {
     setLoading(false)
     if (res.success) {
       setCaixaOriginal(res.caixa)
+      if (res.caixa.validade) setNovaValidade(res.caixa.validade)
       setEanOriginal('')
     } else {
       toastError('Erro', res.error)
@@ -37,12 +39,16 @@ export function Desmembramento() {
       toastError('Erro', 'Peso inválido.')
       return
     }
+    if (novoEan.trim() === caixaOriginal.ean_caixa) {
+      toastError('Erro', 'O novo EAN não pode ser igual ao da caixa original.')
+      return
+    }
     if (novasCaixas.some(c => c.ean_caixa === novoEan.trim())) {
       toastError('Erro', 'Esta etiqueta já foi adicionada na lista.')
       return
     }
     
-    setNovasCaixas([...novasCaixas, { ean_caixa: novoEan.trim(), peso_kg: peso }])
+    setNovasCaixas([...novasCaixas, { ean_caixa: novoEan.trim(), peso_kg: peso, validade: novaValidade || null }])
     setNovoEan('')
     setNovoPeso('')
     inputRef.current?.focus()
@@ -188,6 +194,15 @@ export function Desmembramento() {
                     placeholder="Ex: 25.00" 
                   />
                 </div>
+                <div className="flex-1">
+                  <label className="form-label">Validade</label>
+                  <input 
+                    type="date"
+                    className="form-input" 
+                    value={novaValidade} 
+                    onChange={e => setNovaValidade(e.target.value)} 
+                  />
+                </div>
                 <button type="submit" className="btn btn--ghost" style={{ padding: '0 16px', height: 40 }}><Plus size={20}/></button>
               </form>
 
@@ -202,6 +217,7 @@ export function Desmembramento() {
                     <thead>
                       <tr>
                         <th>EAN Novo</th>
+                        <th>Validade</th>
                         <th style={{ textAlign: 'right' }}>Peso</th>
                         <th style={{ width: 50 }}></th>
                       </tr>
@@ -210,6 +226,7 @@ export function Desmembramento() {
                       {novasCaixas.map((c, i) => (
                         <tr key={i}>
                           <td className="td-mono">{c.ean_caixa}</td>
+                          <td>{c.validade || '-'}</td>
                           <td className="font-bold text-cyan" style={{ textAlign: 'right' }}>{c.peso_kg.toFixed(2)} kg</td>
                           <td>
                             <button className="btn btn--ghost btn--icon text-danger" onClick={() => removerNovaCaixa(i)}>
