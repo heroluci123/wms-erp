@@ -9,6 +9,7 @@ import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 export function Producao() {
   const { toastSuccess, toastError, toastWarning, operador } = useAppStore()
   const [ops, setOps] = useState([])
+  const [opsFechadas, setOpsFechadas] = useState([])
   const [opSelecionada, setOpSelecionada] = useState(null)
   const [detalhes, setDetalhes] = useState(null)
   
@@ -24,8 +25,10 @@ export function Producao() {
 
   const carregarOPs = async () => {
     try {
-      const d = await producaoQueries.listarOPs('ABERTA')
-      setOps(d)
+      const dAbertas = await producaoQueries.listarOPs('ABERTA')
+      const dFechadas = await producaoQueries.listarOPs('FECHADA')
+      setOps(dAbertas)
+      setOpsFechadas(dFechadas)
     } catch (e) {
       toastError('Erro', 'Falha ao carregar OPs')
     }
@@ -123,26 +126,49 @@ export function Producao() {
         )}
       </div>
 
+
       {!opSelecionada ? (
-        <div>
-          <div className="mb-24">
-            <button className="btn btn--primary w-full" onClick={() => setModalNovaOP(true)}>
-              <Plus size={18}/> Abrir Nova Ordem de Produção
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16">
-            {ops.length === 0 && <div className="text-muted col-span-3">Nenhuma Ordem de Produção em aberto.</div>}
-            {ops.map(op => (
-              <div key={op.id} className="card cursor-pointer hover:border-primary" onClick={() => setOpSelecionada(op)}>
-                <div className="flex items-center justify-between mb-8">
-                  <span className="font-bold text-lg text-primary">{op.codigo}</span>
-                  <Factory size={20} className="text-muted"/>
+        <div className="flex-col gap-24">
+          <div>
+            <div className="mb-24">
+              <button className="btn btn--primary w-full" onClick={() => setModalNovaOP(true)}>
+                <Plus size={18}/> Abrir Nova Ordem de Produção
+              </button>
+            </div>
+            
+            <h2 className="font-bold text-lg mb-16 text-primary">Ordens em Aberto</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 mb-24">
+              {ops.length === 0 && <div className="text-muted col-span-3">Nenhuma Ordem de Produção em aberto.</div>}
+              {ops.map(op => (
+                <div key={op.id} className="card cursor-pointer hover:border-primary" onClick={() => setOpSelecionada(op)}>
+                  <div className="flex items-center justify-between mb-8">
+                    <span className="font-bold text-lg text-primary">{op.codigo}</span>
+                    <Factory size={20} className="text-muted"/>
+                  </div>
+                  <div className="mb-12 font-bold">{op.nome}</div>
+                  <div className="text-sm text-muted mb-4">Insumos Alocados: <strong className="text-white">{(op.peso_insumos || 0).toFixed(2)} kg</strong></div>
+                  <div className="text-sm text-muted">Retorno até o momento: <strong className="text-white">{(op.peso_retornos || 0).toFixed(2)} kg</strong></div>
                 </div>
-                <div className="mb-12 font-bold">{op.nome}</div>
-                <div className="text-sm text-muted mb-4">Insumos Alocados: <strong className="text-white">{(op.peso_insumos || 0).toFixed(2)} kg</strong></div>
-                <div className="text-sm text-muted">Retorno até o momento: <strong className="text-white">{(op.peso_retornos || 0).toFixed(2)} kg</strong></div>
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 className="font-bold text-lg mb-16 text-muted">Histórico de Produções (Finalizadas)</h2>
+            <div className="flex flex-col gap-12">
+              {opsFechadas.map(op => (
+                <div key={op.id} className="card bg-bg-0 cursor-pointer flex justify-between items-center hover:border-primary transition-colors" onClick={() => setOpSelecionada(op)}>
+                  <div>
+                    <h3 className="font-bold text-primary">{op.codigo} - {op.nome}</h3>
+                    <div className="text-sm text-muted">
+                      Abertura: {new Date(op.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <ArrowRight className="text-muted"/>
+                </div>
+              ))}
+              {opsFechadas.length === 0 && <p className="text-muted text-sm py-16 text-center">Nenhuma OP finalizada.</p>}
+            </div>
           </div>
         </div>
       ) : (
@@ -154,9 +180,11 @@ export function Producao() {
                   <h2 className="font-bold text-xl text-primary">{detalhes.codigo} - {detalhes.nome}</h2>
                   <div className="text-muted text-sm mt-4">Criado em: {new Date(detalhes.created_at).toLocaleString()}</div>
                 </div>
-                <button className="btn btn--primary flex items-center gap-8" onClick={() => setModalFinalizarOP(true)}>
-                  Finalizar OP <Check size={18}/>
-                </button>
+                {detalhes.status !== 'FECHADA' && (
+                  <button className="btn btn--primary flex items-center gap-8" onClick={() => setModalFinalizarOP(true)}>
+                    Finalizar OP <Check size={18}/>
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-16 mb-16">
@@ -183,21 +211,28 @@ export function Producao() {
                 </div>
               </div>
 
-              <div className="bg-bg-0 p-16 rounded border border-border">
-                <h3 className="font-bold mb-8 flex items-center gap-8 text-warning"><Plus size={18}/> Bipar Itens para OP</h3>
-                <p className="text-sm text-muted mb-16">
-                  Bipe o EAN da caixa: 
-                  <br/>- <strong>Insumo:</strong> Se a caixa existir no estoque, será consumida como insumo.
-                  <br/>- <strong>Retorno:</strong> Se a caixa for nova, será tratada como produto acabado (retorno).
-                </p>
-                <input
-                  ref={inputRef}
-                  className="form-input form-input--scanner"
-                  placeholder="Bipe a caixa..."
-                  onKeyDown={handleKeyDown}
-                  autoFocus
-                />
-              </div>
+              {detalhes.status === 'FECHADA' ? (
+                <div className="bg-bg-0 p-16 rounded border border-warning" style={{ color: 'var(--warning)' }}>
+                  <div className="font-bold flex items-center gap-8 mb-8"><Info size={18}/> OP Finalizada</div>
+                  <p className="text-sm">Esta Ordem de Produção está fechada e não pode receber novas movimentações (insumos ou retornos).</p>
+                </div>
+              ) : (
+                <div className="bg-bg-0 p-16 rounded border border-border">
+                  <h3 className="font-bold mb-8 flex items-center gap-8 text-warning"><Plus size={18}/> Bipar Itens para OP</h3>
+                  <p className="text-sm text-muted mb-16">
+                    Bipe o EAN da caixa: 
+                    <br/>- <strong>Insumo:</strong> Se a caixa existir no estoque, será consumida como insumo.
+                    <br/>- <strong>Retorno:</strong> Se a caixa for nova, será tratada como produto acabado (retorno).
+                  </p>
+                  <input
+                    ref={inputRef}
+                    className="form-input form-input--scanner"
+                    placeholder="Bipe a caixa..."
+                    onKeyDown={handleKeyDown}
+                    autoFocus
+                  />
+                </div>
+              )}
             </div>
 
             {historico.length > 0 && (
@@ -272,9 +307,13 @@ export function Producao() {
           <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
             <h3 className="font-bold text-xl mb-16 text-success">Registrar Retorno</h3>
             <p className="mb-16">Nova caixa de <strong>{modalRetorno.produto.descricao}</strong>.</p>
-            <div className="form-group mb-24">
+            <div className="form-group mb-16">
               <label className="form-label">Peso da Caixa (kg)</label>
-              <input type="number" step="0.01" className="form-input" autoFocus id="input-peso-retorno" placeholder="Ex: 25.5" onKeyDown={(e) => {
+              <input type="number" step="0.01" className="form-input" autoFocus id="input-peso-retorno" placeholder="Ex: 25.5" />
+            </div>
+            <div className="form-group mb-24">
+              <label className="form-label">Data de Validade</label>
+              <input type="date" className="form-input" id="input-validade-retorno" onKeyDown={(e) => {
                 if (e.key === 'Enter') document.getElementById('btn-confirm-retorno').click()
               }} />
             </div>
@@ -287,7 +326,7 @@ export function Producao() {
 
                 const res = await producaoQueries.adicionarRetorno(
                   opSelecionada.id,
-                  { ean_caixa: modalRetorno.codigo, produto_id: modalRetorno.produto.id, peso_kg: peso, validade: null },
+                  { ean_caixa: modalRetorno.codigo, produto_id: modalRetorno.produto.id, peso_kg: peso, validade: document.getElementById('input-validade-retorno').value || null },
                   operador.id,
                   operador.nome
                 )
