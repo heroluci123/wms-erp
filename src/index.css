@@ -180,7 +180,12 @@ body {
   flex-direction: column;
   padding: 12px 0;
   flex-shrink: 0;
+  overflow-y: auto;
 }
+
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 .sidebar__section-label {
   font-size: 10px;
