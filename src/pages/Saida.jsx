@@ -167,7 +167,7 @@ export function Saida() {
   // --- ABA EXPEDIÇÃO & HISTORICO ---
   const [romaneiosLista, setRomaneiosLista] = useState([])
   const [romaneioExpandido, setRomaneioExpandido] = useState(null)
-  const [filtroDataHistorico, setFiltroDataHistorico] = useState(() => new Date().toISOString().substring(0, 10))
+  const [filtroDataHistorico, setFiltroDataHistorico] = useState('hoje')
 
   const carregarRomaneiosList = async (statusBusca, dataBusca = null) => {
     try {
@@ -184,7 +184,7 @@ export function Saida() {
     } else if (abaAtiva === 'EXPEDICAO') {
       carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
     } else if (abaAtiva === 'HISTORICO') {
-      carregarRomaneiosList('EXPEDIDO', filtroDataHistorico || null)
+      carregarRomaneiosList('EXPEDIDO', filtroDataHistorico)
     }
     setRomaneioExpandido(null)
   }, [abaAtiva, filtroDataHistorico])
@@ -390,13 +390,31 @@ export function Saida() {
       {(abaAtiva === 'EXPEDICAO' || abaAtiva === 'HISTORICO') && (
         <div className="flex-col gap-16">
           {abaAtiva === 'HISTORICO' && (
-            <div className="flex justify-end mb-8">
-              <input 
-                type="date" 
-                className="form-input" 
-                value={filtroDataHistorico} 
-                onChange={e => setFiltroDataHistorico(e.target.value)}
-              />
+            <div className="flex-col gap-16 mb-8">
+              <div className="flex justify-end">
+                <select 
+                  className="form-input" 
+                  value={filtroDataHistorico} 
+                  onChange={e => setFiltroDataHistorico(e.target.value)}
+                  style={{ width: 'auto' }}
+                >
+                  <option value="hoje">Hoje</option>
+                  <option value="7d">Últimos 7 dias</option>
+                  <option value="30d">Últimos 30 dias</option>
+                  <option value="todos">Todo o período</option>
+                </select>
+              </div>
+              
+              <div className="flex gap-16" style={{ flexWrap: 'wrap' }}>
+                <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '12px 16px', flex: 1, minWidth: 200, border: '1px solid var(--border)' }}>
+                  <div className="text-xs text-muted mb-4 uppercase font-bold">Caixas Expedidas</div>
+                  <div className="font-bold text-primary" style={{ fontSize: 24 }}>{romaneiosLista.reduce((sum, r) => sum + (r.qtd_caixas || 0), 0)}</div>
+                </div>
+                <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '12px 16px', flex: 1, minWidth: 200, border: '1px solid var(--border)' }}>
+                  <div className="text-xs text-muted mb-4 uppercase font-bold">Kg Expedido</div>
+                  <div className="font-bold text-cyan" style={{ fontSize: 24 }}>{romaneiosLista.reduce((sum, r) => sum + parseFloat(r.peso_total || 0), 0).toFixed(2)}</div>
+                </div>
+              </div>
             </div>
           )}
           {romaneiosLista.length === 0 && (

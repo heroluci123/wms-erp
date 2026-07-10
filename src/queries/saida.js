@@ -1,6 +1,6 @@
 import { db } from '../lib/db.js';
 
-export async function listarRomaneios(status = 'TODOS', dataBusca = null) {
+export async function listarRomaneios(status = 'TODOS', filtroPeriodo = 'todos') {
   let query = `
     SELECT 
       r.*,
@@ -16,9 +16,12 @@ export async function listarRomaneios(status = 'TODOS', dataBusca = null) {
     args.push(status)
   }
 
-  if (dataBusca) {
-    query += ` AND (date(r.created_at) = ? OR date(r.expedido_at) = ?)`
-    args.push(dataBusca, dataBusca)
+  if (filtroPeriodo === 'hoje') {
+    query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') = date('now', 'localtime')`
+  } else if (filtroPeriodo === '7d') {
+    query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') >= date('now', '-7 days', 'localtime')`
+  } else if (filtroPeriodo === '30d') {
+    query += ` AND date(COALESCE(r.expedido_at, r.created_at), 'localtime') >= date('now', '-30 days', 'localtime')`
   }
   
   query += ` ORDER BY r.created_at DESC`
