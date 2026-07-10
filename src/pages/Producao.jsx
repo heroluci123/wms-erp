@@ -205,6 +205,11 @@ export function Producao() {
                       <div className="text-sm text-muted">
                         Abertura: {new Date(op.created_at).toLocaleDateString()}
                       </div>
+                      <div className="text-sm text-muted mt-4">
+                        Insumos: <strong>{(op.peso_insumos || 0).toFixed(2)} kg</strong> |{' '} 
+                        Retorno: <strong>{(op.peso_retornos || 0).toFixed(2)} kg</strong> |{' '} 
+                        Subproduto: <strong className="text-warning">{Math.max(0, (op.peso_insumos || 0) - (op.peso_retornos || 0)).toFixed(2)} kg</strong>
+                      </div>
                     </div>
                     <ArrowRight className="text-muted"/>
                   </div>
@@ -237,7 +242,7 @@ export function Producao() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-16 mb-16">
+              <div className="grid grid-cols-3 gap-16 mb-16">
                 <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
                   <div className="text-muted text-sm uppercase font-bold mb-8">Entradas (Insumos)</div>
                   <div className="text-2xl font-bold font-mono text-cyan mb-8">{(detalhes.peso_insumos || 0).toFixed(2)} kg</div>
@@ -257,6 +262,16 @@ export function Producao() {
                       <div key={idx}>• {r.produto_descricao} ({r.peso_kg}kg) [EAN: {r.ean_caixa}]</div>
                     ))}
                     {detalhes.retornos.length === 0 && 'Nenhum retorno'}
+                  </div>
+                </div>
+
+                <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+                  <div className="text-muted text-sm uppercase font-bold mb-8">Subproduto (Líquido/Osso)</div>
+                  <div className="text-2xl font-bold font-mono text-warning mb-8">
+                    {Math.max(0, (detalhes.peso_insumos || 0) - (detalhes.peso_retornos || 0)).toFixed(2)} kg
+                  </div>
+                  <div className="text-xs text-muted">
+                    Calculado em tempo real com base na diferença de peso.
                   </div>
                 </div>
               </div>
@@ -409,7 +424,15 @@ export function Producao() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
             <h3 className="font-bold text-xl mb-16 text-warning">Finalizar OP</h3>
-            <p className="mb-24">Deseja realmente finalizar esta Ordem de Produção? Os insumos serão baixados do estoque permanentemente e não será possível bipar novos retornos.</p>
+            <div className="bg-bg-1 p-16 rounded mb-16 border border-border">
+              <div className="flex justify-between mb-4"><span>Entradas (Insumos):</span> <strong>{(detalhes?.peso_insumos || 0).toFixed(2)} kg</strong></div>
+              <div className="flex justify-between mb-4"><span>Saídas (Retornos):</span> <strong>{(detalhes?.peso_retornos || 0).toFixed(2)} kg</strong></div>
+              <div className="flex justify-between text-warning font-bold border-t border-border pt-4 mt-4">
+                <span>Subproduto (Líquido/Osso):</span> 
+                <span>{Math.max(0, (detalhes?.peso_insumos || 0) - (detalhes?.peso_retornos || 0)).toFixed(2)} kg</span>
+              </div>
+            </div>
+            <p className="mb-24">Tem certeza que deseja confirmar a finalização? Esta ação baixará os insumos permanentemente e o saldo de subproduto será contabilizado como quebra.</p>
             <div className="flex gap-16">
               <button className="btn btn--ghost" onClick={() => setModalFinalizarOP(false)}>Cancelar</button>
               <button className="btn btn--primary flex-1" onClick={async () => {
