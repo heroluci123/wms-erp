@@ -110,6 +110,26 @@ export async function recontarItem(item_id) {
   } catch (err) { return { success: false, error: err.message } }
 }
 
+// Recontar endereço inteiro — reseta TODOS os itens de um endereço para Pendente
+// O coletor vai carregar todos os itens deste endereço na próxima vez que bipá-lo
+export async function recontarEndereco(inventario_id, endereco) {
+  try {
+    await db.execute({
+      sql: `UPDATE inventario_itens 
+            SET qtd_contada_caixas = NULL, qtd_contada_kg = NULL, 
+                status_item = 'Pendente', contagem_atual = contagem_atual + 1
+            WHERE inventario_id = ? AND endereco = ? AND status_item IN ('Aguardando Ajuste', '2ª Contagem', '3ª Contagem')`,
+      args: [inventario_id, endereco]
+    })
+    // Também reabrir o inventário caso esteja em 'Aguardando Ajuste'
+    await db.execute({
+      sql: `UPDATE inventarios SET status = 'Em Contagem' WHERE id = ? AND status = 'Aguardando Ajuste'`,
+      args: [inventario_id]
+    })
+    return { success: true }
+  } catch (err) { return { success: false, error: err.message } }
+}
+
 export async function validarEstoqueSemAjuste(item_id, operador_id, operador_nome) {
   const tx = await db.transaction('write')
   try {

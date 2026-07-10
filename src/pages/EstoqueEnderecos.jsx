@@ -32,58 +32,49 @@ export function EstoqueEnderecos() {
   const carregarDados = useCallback(async () => {
     setLoading(true)
     try {
+      // Bug fix: usar estoque_caixas como fonte primária de verdade.
+      // Antes, o sistema iterava sobre estoque_posicao e tentava "encaixar" as caixas.
+      // Isso fazia caixas desaparecerem quando havia diferença de lote/validade entre as tabelas.
+      // Agora: todas as caixas serializadas aparecem primeiro; o legado (sem EAN) é complementar.
       const [posicoes, caixasSeriais] = await Promise.all([
         estoqueQueries.listarGeral(),
         estoqueQueries.listarGeralCaixas()
       ])
 
-      // Mescla posições agregadas com caixas serializadas
       const estoqueMesclado = []
+      // Conjunto de IDs de posições já cobertas por caixas serializadas
+      const posicoesCobertasCaixas = new Set()
 
-      for (const pos of posicoes) {
-        // Encontra caixas serializadas correspondentes a esta posição
-        const caixasDaPosicao = caixasSeriais.filter(c => 
-          c.produto_id === pos.produto_id && 
-          c.endereco === pos.endereco &&
-          (c.validade === pos.validade || (!c.validade && !pos.validade))
+      // PASSO 1: adicionar TODAS as caixas serializadas diretamente
+      for (const cx of caixasSeriais) {
+        // Tenta achar a posição agregada correspondente para pegar valor_unitario, grupo etc.
+        const posMatch = posicoes.find(p =>
+          p.produto_id === cx.produto_id &&
+          p.endereco === cx.endereco
         )
+        estoqueMesclado.push({
+          id: `cx_${cx.id}`,
+          endereco: cx.endereco,
+          codigo: cx.codigo,
+          descricao: cx.descricao,
+          grupo: cx.grupo,
+          tipo_produto: cx.tipo_produto,
+          status_curva: cx.status_curva,
+          lote: cx.lote || (posMatch?.lote ?? null),
+          validade: cx.validade,
+          palete_codigo: cx.palete_codigo,
+          ean_caixa: cx.ean_caixa,
+          peso_kg: cx.peso_kg,
+          qtd_caixas: 1,
+          valor_unitario: cx.valor_unitario,
+          produto_id: cx.produto_id
+        })
+        if (posMatch) posicoesCobertasCaixas.add(posMatch.id)
+      }
 
-        if (caixasDaPosicao.length > 0) {
-          // Adiciona 1 linha para cada caixa serializada encontrada
-          caixasDaPosicao.forEach(cx => {
-            estoqueMesclado.push({
-              id: `cx_${cx.id}`,
-              endereco: pos.endereco,
-              codigo: pos.codigo,
-              descricao: pos.descricao,
-              grupo: pos.grupo,
-              tipo_produto: pos.tipo_produto,
-              status_curva: pos.status_curva,
-              lote: pos.lote,
-              validade: pos.validade,
-              palete_codigo: cx.palete_codigo || pos.palete_codigos,
-              ean_caixa: cx.ean_caixa,
-              peso_kg: cx.peso_kg || (pos.qtd_kg / pos.qtd_caixas),
-              qtd_caixas: 1,
-              valor_unitario: pos.valor_unitario,
-              produto_id: pos.produto_id
-            })
-          })
-
-          // Se tiver faltado caixas (legado sem EAN), adiciona o saldo restante
-          const caixasFaltantes = pos.qtd_caixas - caixasDaPosicao.length
-          if (caixasFaltantes > 0) {
-            estoqueMesclado.push({
-              ...pos,
-              id: `pos_resto_${pos.id}`,
-              ean_caixa: null,
-              palete_codigo: pos.palete_codigos,
-              qtd_caixas: caixasFaltantes,
-              peso_kg: (pos.qtd_kg / pos.qtd_caixas) * caixasFaltantes
-            })
-          }
-        } else {
-          // Nenhuma caixa serializada encontrada, exibe a posição inteira (legado)
+      // PASSO 2: incluir posições de legado que NÃO têm nenhuma caixa serializada
+      for (const pos of posicoes) {
+        if (!posicoesCobertasCaixas.has(pos.id)) {
           estoqueMesclado.push({
             ...pos,
             id: `pos_${pos.id}`,

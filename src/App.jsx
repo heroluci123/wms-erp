@@ -22,6 +22,7 @@ import { Operadores } from './pages/Operadores'
 import { MapaCapacidade } from './pages/MapaCapacidade'
 import { ColetorHome } from './pages/ColetorHome'
 import { EanEditor } from './pages/EanEditor'
+import { ConsultaEndereco } from './pages/ConsultaEndereco'
 
 function HomeWrapper() {
   const isMobile = window.innerWidth <= 768
@@ -53,6 +54,7 @@ function App() {
           <Route path="operadores" element={<Operadores />} />
           <Route path="mapa" element={<MapaCapacidade />} />
           <Route path="ean-editor" element={<EanEditor />} />
+          <Route path="consulta-endereco" element={<ConsultaEndereco />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

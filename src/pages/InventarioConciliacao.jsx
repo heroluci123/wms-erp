@@ -68,10 +68,15 @@ export function InventarioConciliacao() {
     }
   }
 
-  const handleRecontar = async (item_id) => {
+  // Bug 4 fix: recontagem por endereço inteiro (não por item individual)
+  const handleRecontarEndereco = async (endereco) => {
+    if (!window.confirm(`Deseja resetar o endereço "${endereco}" para recontagem completa? Todos os itens deste endereço voltarão para Pendente e o coletor poderá recontar o endereço inteiro.`)) return
     try {
-      const res = await inventariosQueries.recontarItem(item_id)
-      if (res.success) { toastSuccess('Resetado', 'Item voltou para Pendente.'); carregar() }
+      const res = await inventariosQueries.recontarEndereco(parseInt(id), endereco)
+      if (res.success) {
+        toastSuccess('Endereço Resetado', `${endereco} voltou para Pendente — coletor pode recontar agora.`)
+        carregar()
+      } else toastError('Erro', res.error)
     } catch (err) { toastError('Erro', err.message) }
   }
 
@@ -241,7 +246,7 @@ export function InventarioConciliacao() {
         </div>
       )}
 
-      {/* ── Tabela de Itens ─────────────────────────────────────────────────── */}
+      {/* ── Tabela de Itens agrupada por endereço ──────────────────────────── */}
       <div className="table-container">
         <div className="table-toolbar">
           <h2 className="table-title">Itens do Inventário</h2>
@@ -250,7 +255,6 @@ export function InventarioConciliacao() {
         <table>
           <thead>
             <tr>
-              <th>Endereço</th>
               <th>Produto</th>
               <th style={{ textAlign: 'right' }}>Validade Sistema</th>
               <th style={{ textAlign: 'right' }}>Validade Contada</th>
@@ -262,109 +266,128 @@ export function InventarioConciliacao() {
             </tr>
           </thead>
           <tbody>
-            {itens.map(item => {
-              const diffCx = item.qtd_contada_caixas !== null 
-                ? (item.qtd_contada_caixas || 0) - (item.qtd_sistema_caixas || 0) 
-                : null
-              const diffKg = item.qtd_contada_kg !== null 
-                ? (item.qtd_contada_kg || 0) - (item.qtd_sistema_kg || 0) 
-                : null
-              const hasDivergencia = item.status_item === 'Aguardando Ajuste'
-              
-              let tipoDivergencia = ''
-              if (diffCx !== null) {
-                if (item.qtd_sistema_caixas === 1 && (item.qtd_contada_caixas || 0) === 0) {
-                  tipoDivergencia = 'Falta'
-                } else if (item.qtd_sistema_caixas === 0 && (item.qtd_contada_caixas || 0) === 1) {
-                  tipoDivergencia = 'Sobra'
-                } else if (diffKg !== 0 || item.validade !== item.validade_contada) {
-                  tipoDivergencia = 'Peso/Validade'
-                } else if (diffCx !== 0) {
-                  tipoDivergencia = `${diffCx > 0 ? '+' : ''}${diffCx} cx`
-                }
-              }
-              
-              return (
-                <tr key={item.id} style={{ background: hasDivergencia ? 'rgba(var(--danger-rgb, 239,68,68), 0.04)' : undefined }}>
-                  <td className="td-mono">{item.endereco}</td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{item.descricao}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>EAN/SSCC: {item.ean_caixa || '-'} | Lote: {item.lote || '-'} | {item.codigo}</div>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div className="text-muted font-bold text-xs">
-                      {item.validade ? item.validade.toString().substring(0,10) : <span style={{ opacity: 0.4 }}>—</span>}
-                    </div>
-                  </td>
-                  <td style={{ textAlign: 'right' }} title={JSON.stringify(item)}>
-                    <div className="text-warning font-bold text-xs">
-                      {item.validade_contada ? item.validade_contada.toString().substring(0,10) : <span style={{ opacity: 0.4 }}>—</span>}
-                    </div>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div className="text-cyan font-bold">{item.qtd_sistema_caixas ?? '-'} cx</div>
-                    <div className="text-muted text-xs">{item.qtd_sistema_kg ?? '-'} kg</div>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {item.qtd_contada_caixas !== null ? (
-                      <>
-                        <div style={{ fontWeight: 700, color: hasDivergencia ? 'var(--danger)' : 'var(--success)' }}>
-                          {item.qtd_contada_caixas} cx
+            {(() => {
+              const enderecos = [...new Set(itens.map(i => i.endereco))].sort()
+              return enderecos.map(endereco => {
+                const itensDoEndereco = itens.filter(i => i.endereco === endereco)
+                const temPendente = itensDoEndereco.some(i => ['Pendente', '2ª Contagem', '3ª Contagem', 'Aguardando Ajuste'].includes(i.status_item))
+                return (
+                  <React.Fragment key={endereco}>
+                    {/* Linha separadora de endereço com botão Recontar Endereço */}
+                    <tr style={{ background: 'var(--bg-2)' }}>
+                      <td colSpan={8} style={{ padding: '8px 12px' }}>
+                        <div className="flex items-center justify-between">
+                          <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14, color: 'var(--primary)' }}>
+                            📍 {endereco}
+                          </span>
+                          {!isClosed && temPendente && (
+                            <button
+                              className="btn btn--ghost btn--sm"
+                              style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
+                              title="Resetar todos os itens deste endereço para o coletor recontar"
+                              onClick={() => handleRecontarEndereco(endereco)}
+                            >
+                              <RefreshCcw size={13} /> Recontar Endereço
+                            </button>
+                          )}
                         </div>
-                        <div className="text-muted text-xs">{item.qtd_contada_kg} kg</div>
-                      </>
-                    ) : <span className="text-muted">Aguardando...</span>}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {tipoDivergencia ? (
-                      <span style={{ 
-                        fontWeight: 700, 
-                        color: tipoDivergencia === '' ? 'var(--success)' : 
-                               tipoDivergencia === 'Falta' ? 'var(--danger)' : 
-                               tipoDivergencia === 'Sobra' ? 'var(--warning)' : 'var(--warning)' 
-                      }}>
-                        {tipoDivergencia || '-'}
-                      </span>
-                    ) : <span className="text-muted">—</span>}
-                  </td>
-                  <td><StatusItemBadge status={item.status_item} /></td>
-                  <td style={{ textAlign: 'right' }}>
-                    {!isClosed && (
-                      <div className="flex justify-end gap-4">
-                        {/* Reset: disponível para qualquer item já contado (exceto OK em inv finalizado) */}
-                        {item.qtd_contada_caixas !== null && item.status_item !== 'OK' && (
-                          <button 
-                            className="btn btn--ghost btn--sm btn--icon" 
-                            title="Resetar para Pendente"
-                            onClick={() => handleRecontar(item.id)}
-                          >
-                            <RefreshCcw size={13}/>
-                          </button>
-                        )}
-                        {/* Cancelar item */}
-                        <button 
-                          className="btn btn--ghost btn--sm btn--icon text-danger" 
-                          title="Cancelar este item (remover do inventário)"
-                          onClick={() => handleCancelarItem(item.id, item.descricao)}
-                        >
-                          <X size={13}/>
-                        </button>
-                        {/* Validar Físico (Sem Ajuste) */}
-                        {hasDivergencia && (
-                          <button
-                            className="btn btn--ghost btn--sm btn--icon text-success"
-                            title="Estoque Validado (Resolver sem ajuste no sistema)"
-                            onClick={() => setItemParaValidar(item)}
-                          >
-                            <CheckCircle size={13}/>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
+                      </td>
+                    </tr>
+                    {itensDoEndereco.map(item => {
+                      const diffCx = item.qtd_contada_caixas !== null
+                        ? (item.qtd_contada_caixas || 0) - (item.qtd_sistema_caixas || 0)
+                        : null
+                      const diffKg = item.qtd_contada_kg !== null
+                        ? (item.qtd_contada_kg || 0) - (item.qtd_sistema_kg || 0)
+                        : null
+                      const hasDivergencia = item.status_item === 'Aguardando Ajuste'
+
+                      let tipoDivergencia = ''
+                      if (diffCx !== null) {
+                        if (item.qtd_sistema_caixas === 1 && (item.qtd_contada_caixas || 0) === 0) {
+                          tipoDivergencia = 'Falta'
+                        } else if (item.qtd_sistema_caixas === 0 && (item.qtd_contada_caixas || 0) === 1) {
+                          tipoDivergencia = 'Sobra'
+                        } else if (diffKg !== 0 || item.validade !== item.validade_contada) {
+                          tipoDivergencia = 'Peso/Validade'
+                        } else if (diffCx !== 0) {
+                          tipoDivergencia = `${diffCx > 0 ? '+' : ''}${diffCx} cx`
+                        }
+                      }
+
+                      return (
+                        <tr key={item.id} style={{ background: hasDivergencia ? 'rgba(var(--danger-rgb, 239,68,68), 0.04)' : undefined }}>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{item.descricao}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>EAN/SSCC: {item.ean_caixa || '-'} | Lote: {item.lote || '-'} | {item.codigo}</div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div className="text-muted font-bold text-xs">
+                              {item.validade ? item.validade.toString().substring(0,10) : <span style={{ opacity: 0.4 }}>—</span>}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div className="text-warning font-bold text-xs">
+                              {item.validade_contada ? item.validade_contada.toString().substring(0,10) : <span style={{ opacity: 0.4 }}>—</span>}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div className="text-cyan font-bold">{item.qtd_sistema_caixas ?? '-'} cx</div>
+                            <div className="text-muted text-xs">{item.qtd_sistema_kg ?? '-'} kg</div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {item.qtd_contada_caixas !== null ? (
+                              <>
+                                <div style={{ fontWeight: 700, color: hasDivergencia ? 'var(--danger)' : 'var(--success)' }}>
+                                  {item.qtd_contada_caixas} cx
+                                </div>
+                                <div className="text-muted text-xs">{item.qtd_contada_kg} kg</div>
+                              </>
+                            ) : <span className="text-muted">Aguardando...</span>}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {tipoDivergencia ? (
+                              <span style={{
+                                fontWeight: 700,
+                                color: tipoDivergencia === 'Falta' ? 'var(--danger)' :
+                                       tipoDivergencia === 'Sobra' ? 'var(--warning)' : 'var(--warning)'
+                              }}>
+                                {tipoDivergencia}
+                              </span>
+                            ) : <span className="text-muted">—</span>}
+                          </td>
+                          <td><StatusItemBadge status={item.status_item} /></td>
+                          <td style={{ textAlign: 'right' }}>
+                            {!isClosed && (
+                              <div className="flex justify-end gap-4">
+                                {/* Cancelar item */}
+                                <button
+                                  className="btn btn--ghost btn--sm btn--icon text-danger"
+                                  title="Cancelar este item (remover do inventário)"
+                                  onClick={() => handleCancelarItem(item.id, item.descricao)}
+                                >
+                                  <X size={13}/>
+                                </button>
+                                {/* Validar Físico (Sem Ajuste) */}
+                                {hasDivergencia && (
+                                  <button
+                                    className="btn btn--ghost btn--sm btn--icon text-success"
+                                    title="Estoque Validado (Resolver sem ajuste no sistema)"
+                                    onClick={() => setItemParaValidar(item)}
+                                  >
+                                    <CheckCircle size={13}/>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </React.Fragment>
+                )
+              })
+            })()}
           </tbody>
         </table>
       </div>

@@ -323,13 +323,30 @@ export function InventarioOperador() {
     
     const valNorm = val ? val.toString().substring(0, 10) : null
     
-    // Na nova lógica caixa-por-caixa, procuramos pelo ean_caixa
+    // Na nova lógica caixa-por-caixa, procuramos pelo ean_caixa nos itens pendentes do endereço
     const itemMatch = itensDoEndereco.find(i => i.ean_caixa === itemAtual.codigo)
     
     let item_id
     if (itemMatch) {
       item_id = itemMatch.id
     } else {
+      // Bug fix (2ª Contagem): Antes de criar item surpresa, verificar se essa caixa
+      // já existe neste inventário/endereço com status OK (da 1ª contagem).
+      // Se sim, ela não é surpresa — foi apenas bipada de novo na recontagem. Ignorar.
+      try {
+        const { db } = await import('../lib/db.js')
+        const { rows: jaContada } = await db.execute({
+          sql: `SELECT id FROM inventario_itens WHERE inventario_id = ? AND endereco = ? AND ean_caixa = ? AND status_item = 'OK' LIMIT 1`,
+          args: [inventarioAtivo.id, enderecoAtual, itemAtual.codigo]
+        })
+        if (jaContada.length > 0) {
+          toastSuccess('Confirmado ✓', `Caixa ${itemAtual.codigo} já confirmada (OK na 1ª contagem).`)
+          voltarParaProduto()
+          return
+        }
+      } catch (_) {}
+
+      // Se realmente não existe: é um item surpresa (nova caixa não prevista)
       const res = await inventariosQueries.adicionarItemSurpresa({
         inventario_id: inventarioAtivo.id,
         endereco: enderecoAtual,
@@ -355,6 +372,7 @@ export function InventarioOperador() {
     toastSuccess('Registrado', 'Volume salvo. Finalize o endereço para enviar.')
     voltarParaProduto()
   }
+
 
   const finalizarEndereco = async () => {
     if (inventarioAtivo?.tipo === 'CargaInicial' && contagemLocal.length === 0) {
