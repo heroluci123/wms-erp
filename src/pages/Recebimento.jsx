@@ -175,7 +175,9 @@ function HistoricoPaletes() {
               <span className="text-xs text-muted font-bold uppercase">Caixas do Palete ({caixasDetalhe.length})</span>
             </div>
             <div style={{ overflowY: 'auto', maxHeight: 520 }}>
-              {caixasDetalhe.map((c, i) => (
+              {caixasDetalhe.map((c, i) => {
+                const isDoca = c.status === 'DISPONIVEL' && (c.endereco === 'DOCA' || paleteAberto.endereco_atual === 'DOCA');
+                return (
                 <div key={c.id} style={{
                   padding: '10px 16px',
                   borderBottom: i < caixasDetalhe.length - 1 ? '1px solid var(--border)' : 'none',
@@ -198,14 +200,14 @@ function HistoricoPaletes() {
                     )}
                     <div style={{
                       marginTop: 4, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-                      background: c.status === 'DISPONIVEL' ? 'rgba(16,185,129,0.15)' : 'rgba(251,191,36,0.15)',
-                      color: c.status === 'DISPONIVEL' ? 'var(--success)' : 'var(--warning)'
+                      background: c.status === 'DISPONIVEL' ? (isDoca ? 'var(--info-muted)' : 'rgba(16,185,129,0.15)') : 'rgba(251,191,36,0.15)',
+                      color: c.status === 'DISPONIVEL' ? (isDoca ? 'var(--info)' : 'var(--success)') : 'var(--warning)'
                     }}>
-                      {c.status === 'DISPONIVEL' ? ((c.endereco === 'DOCA' || paleteAberto.endereco_atual === 'DOCA') ? '✅ Doca' : '✅ Estoque') : '📤 Retirada'}
+                      {c.status === 'DISPONIVEL' ? (isDoca ? '⏳ Na Doca' : '✅ Estoque') : '📤 Retirada'}
                     </div>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
         )}
