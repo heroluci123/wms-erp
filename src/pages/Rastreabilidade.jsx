@@ -36,11 +36,11 @@ export function Rastreabilidade() {
           <h3 className="font-bold mb-16 flex items-center gap-8"><Search size={20}/> Consultar Histórico da Caixa</h3>
           <form onSubmit={handleBuscarHistorico} className="flex gap-12 items-end">
             <div className="flex-1">
-              <label className="label">EAN da Caixa</label>
+              <label className="form-label">EAN da Caixa</label>
               <input 
                 autoFocus
                 type="text" 
-                className="input" 
+                className="form-input" 
                 value={eanRastreio} 
                 onChange={e => setEanRastreio(e.target.value)} 
                 placeholder="Bipe ou digite o EAN..." 
