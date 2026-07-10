@@ -101,10 +101,10 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
         args: [c.produto_id, opCodigo, c.validade || null, c.peso_kg]
       })
       
-      // Se estava num palete que estava na doca (FINALIZADO), forçar para ARMAZENADO (pois saiu da doca)
+      // Se estava num palete que estava na doca (FINALIZADO), forçar para FECHADO (pois saiu da doca)
       if (c.palete_id) {
         queries.push({
-          sql: `UPDATE paletes SET status = 'ARMAZENADO' WHERE id = ? AND status = 'FINALIZADO'`,
+          sql: `UPDATE paletes SET status = 'FECHADO' WHERE id = ? AND status = 'FINALIZADO'`,
           args: [c.palete_id]
         })
       }
