@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react'
 import { Package, Plus, Trash2, ArrowRight } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as desmembramentoQueries from '../queries/desmembramento'
+import * as produtosQueries from '../queries/produtos'
 
 export function Desmembramento() {
   const { operador, toastError, toastSuccess } = useAppStore()
@@ -31,7 +32,7 @@ export function Desmembramento() {
     }
   }
 
-  const handleAddNovaCaixa = (e) => {
+  const handleAddNovaCaixa = async (e) => {
     e.preventDefault()
     if (!novoEan.trim() || !novoPeso) return
     const peso = parseFloat(novoPeso)
@@ -45,6 +46,20 @@ export function Desmembramento() {
     }
     if (novasCaixas.some(c => c.ean_caixa === novoEan.trim())) {
       toastError('Erro', 'Esta etiqueta já foi adicionada na lista.')
+      return
+    }
+
+    setLoading(true)
+    const resultado = await produtosQueries.buscarPorCodigoComInfo(novoEan.trim())
+    setLoading(false)
+
+    if (!resultado) {
+      toastError('Erro', 'Etiqueta não reconhecida. Certifique-se de que o padrão deste produto já foi cadastrado.')
+      return
+    }
+
+    if (resultado.produto.id !== caixaOriginal.produto_id) {
+      toastError('Erro de Segurança', `Etiqueta inválida! Você bipou uma etiqueta de ${resultado.produto.descricao}.`)
       return
     }
     
