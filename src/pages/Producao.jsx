@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Layers, Plus, Factory, Check, Info, ArrowRight, Package } from 'lucide-react'
+import { Layers, Plus, Factory, Check, Info, ArrowRight, Package, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as producaoQueries from '../queries/producao.js'
 import * as produtosQueries from '../queries/produtos.js'
