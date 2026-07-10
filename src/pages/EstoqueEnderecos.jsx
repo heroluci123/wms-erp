@@ -29,6 +29,7 @@ export function EstoqueEnderecos() {
   const [filtroPalete,    setFiltroPalete]    = useState('')
   const [filtroArmazenamento, setFiltroArmazenamento] = useState('todos')
   const [filtroVencimento,setFiltroVencimento]= useState('todos') // 'todos', 'vencidos_proximos'
+  const [filtroEstagnado, setFiltroEstagnado] = useState('todos')
 
   const carregarDados = useCallback(async () => {
     setLoading(true)
@@ -72,7 +73,8 @@ export function EstoqueEnderecos() {
           qtd_caixas: 1,
           valor_unitario: cx.valor_unitario,
           produto_id: cx.produto_id,
-          tipo_armazenamento: cx.tipo_armazenamento || posMatch?.tipo_armazenamento || 'SECO'
+          tipo_armazenamento: cx.tipo_armazenamento || posMatch?.tipo_armazenamento || 'SECO',
+          updated_at: cx.updated_at
         })
         // Marcar a COMBINAÇÃO produto+endereço como coberta (não apenas uma linha específica).
         // Isso garante que todas as linhas de estoque_posicao desse produto neste endereço
@@ -91,11 +93,23 @@ export function EstoqueEnderecos() {
             id: `pos_${pos.id}`,
             ean_caixa: null,
             palete_codigo: pos.palete_codigos,
-            peso_kg: pos.qtd_kg
+            peso_kg: pos.qtd_kg,
+            updated_at: pos.updated_at
           })
         }
       }
 
+
+      const agora = new Date()
+      estoqueMesclado.forEach(item => {
+        if (item.updated_at) {
+          const t = item.updated_at.replace(' ', 'T')
+          item.dias_parado = differenceInDays(agora, new Date(t))
+        } else {
+          item.dias_parado = 0
+        }
+        item.is_estagnado = item.dias_parado >= 30
+      })
 
       setEstoque(
         incluirInsumos
@@ -119,6 +133,8 @@ export function EstoqueEnderecos() {
       const dias = differenceInDays(new Date(dataStr), new Date())
       if (dias > 30) return false
     }
+    if (filtroEstagnado === 'estagnados' && !item.is_estagnado) return false
+    if (filtroEstagnado === 'ativos' && item.is_estagnado) return false
     return (
       (filtroArmazenamento === 'todos' || item.tipo_armazenamento === filtroArmazenamento) &&
       (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
@@ -135,9 +151,9 @@ export function EstoqueEnderecos() {
 
   const exportarCSV = () => {
     if (estoqueFiltrado.length === 0) return
-    const header = "ENDERECO;EAN_CAIXA;PRODUTO_ID;CODIGO;DESCRICAO;GRUPO;VALIDADE;KG;PALETE;CURVA;VALOR_UNIT\n"
+    const header = "ENDERECO;EAN_CAIXA;PRODUTO_ID;CODIGO;DESCRICAO;GRUPO;VALIDADE;KG;PALETE;CURVA;VALOR_UNIT;ULT_MOV;STATUS_MOV\n"
     const rows = estoqueFiltrado.map(i =>
-      `${i.endereco};${i.ean_caixa};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.validade || ''};${String(i.peso_kg).replace('.', ',')};${i.palete_codigo || ''};${i.status_curva};${String(i.valor_unitario || 0).replace('.', ',')}`
+      `${i.endereco};${i.ean_caixa};${i.produto_id};${i.codigo};${i.descricao};${i.grupo || ''};${i.validade || ''};${String(i.peso_kg).replace('.', ',')};${i.palete_codigo || ''};${i.status_curva};${String(i.valor_unitario || 0).replace('.', ',')};${i.updated_at || ''};${i.is_estagnado ? 'Estagnado' : 'Ativo'}`
     ).join("\n")
     downloadCSV(header + rows)
   }
@@ -240,6 +256,16 @@ export function EstoqueEnderecos() {
                 <option value="todos">Validade: Todas</option>
                 <option value="vencidos_proximos">⚠️ Vencidos e Próximos (30d)</option>
               </select>
+              <select
+                className="form-input bg-bg-card"
+                style={{ flex: '1 1 150px', fontWeight: 600 }}
+                value={filtroEstagnado}
+                onChange={e => setFiltroEstagnado(e.target.value)}
+              >
+                <option value="todos">Status: Todos</option>
+                <option value="ativos">🔄 Ativos</option>
+                <option value="estagnados">⚠️ Estagnados</option>
+              </select>
               <input type="text" className="form-input" style={{ flex: '1 1 90px' }}
                 placeholder="Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
               <input type="text" className="form-input" style={{ flex: '1 1 90px' }}
@@ -267,6 +293,8 @@ export function EstoqueEnderecos() {
                   <th>Validade</th>
                   <th>Palete/Doca</th>
                   <th>EAN Caixa</th>
+                  <th>Últ. Mov.</th>
+                  <th>Status</th>
                   <th style={{ textAlign: 'right' }}>Caixas</th>
                   <th style={{ textAlign: 'right' }}>KG</th>
                   {isExecutivo && <th style={{ textAlign: 'right' }}>Valor Total</th>}
@@ -274,9 +302,9 @@ export function EstoqueEnderecos() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={isExecutivo ? 12 : 11} className="text-center text-muted py-24">Carregando...</td></tr>
+                  <tr><td colSpan={isExecutivo ? 14 : 13} className="text-center text-muted py-24">Carregando...</td></tr>
                 ) : estoqueFiltrado.length === 0 ? (
-                  <tr><td colSpan={isExecutivo ? 12 : 11} className="text-center text-muted py-24">Nenhuma caixa encontrada.</td></tr>
+                  <tr><td colSpan={isExecutivo ? 14 : 13} className="text-center text-muted py-24">Nenhuma caixa encontrada.</td></tr>
                 ) : (
                   estoqueFiltrado.map((item) => (
                     <tr key={item.id}>
@@ -293,6 +321,14 @@ export function EstoqueEnderecos() {
                       <td className="td-ean" style={{ color: item.ean_caixa?.startsWith('INT-') ? 'var(--warning)' : 'var(--text-muted)' }}
                           title={item.ean_caixa}>
                         {item.ean_caixa?.startsWith('INT-') ? '⚠️ ' : ''}{item.ean_caixa || '—'}
+                      </td>
+                      <td style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        {item.updated_at ? format(new Date(item.updated_at.replace(' ', 'T')), 'dd/MM/yy HH:mm') : '-'}
+                      </td>
+                      <td>
+                        <span className={`badge ${item.is_estagnado ? 'badge--danger' : 'badge--success'}`} style={{ fontSize: 9 }}>
+                          {item.is_estagnado ? `Estagnado (${item.dias_parado}d)` : 'Ativo'}
+                        </span>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{item.qtd_caixas}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-secondary)' }}>{parseFloat(item.peso_kg || 0).toFixed(3)}</td>

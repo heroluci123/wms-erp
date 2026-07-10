@@ -43,7 +43,7 @@ export async function listarGeralCaixas({ incluirRec = false } = {}) {
   const res = await db.execute({
     sql: `
       SELECT
-        c.id, c.ean_caixa, c.endereco, c.validade, c.peso_kg, c.status, c.palete_id,
+        c.id, c.ean_caixa, c.endereco, c.validade, c.peso_kg, c.status, c.palete_id, c.updated_at,
         p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
         p.status_curva, p.valor_unitario, p.unidade, p.grupo,
         pl.codigo as palete_codigo,
