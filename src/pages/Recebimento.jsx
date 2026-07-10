@@ -201,7 +201,7 @@ function HistoricoPaletes() {
                       background: c.status === 'DISPONIVEL' ? 'rgba(16,185,129,0.15)' : 'rgba(251,191,36,0.15)',
                       color: c.status === 'DISPONIVEL' ? 'var(--success)' : 'var(--warning)'
                     }}>
-                      {c.status === 'DISPONIVEL' ? '✅ Estoque' : '📤 Retirada'}
+                      {c.status === 'DISPONIVEL' ? ((c.endereco === 'DOCA' || paleteAberto.endereco_atual === 'DOCA') ? '✅ Doca' : '✅ Estoque') : '📤 Retirada'}
                     </div>
                   </div>
                 </div>
