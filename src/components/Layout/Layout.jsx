@@ -109,7 +109,7 @@ function Sidebar() {
           <CheckSquare size={18} /> Inventário
         </NavLink>
       )}
-      {operador?.permissoes?.produtos && (
+      {operador?.permissoes?.rastreabilidade && (
         <NavLink to="/rastreabilidade" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <Search size={18} /> Rastreabilidade de Caixa
         </NavLink>
