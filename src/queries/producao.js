@@ -109,6 +109,24 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
 
 export async function adicionarRetorno(op_id, { ean_caixa, produto_id, peso_kg, validade }, operador_id, operador_nome) {
   try {
+    const opStats = await db.execute({
+      sql: `
+        SELECT 
+          (SELECT COALESCE(SUM(peso_kg), 0) FROM op_insumos WHERE op_id = ?) as total_insumo,
+          (SELECT COALESCE(SUM(peso_kg), 0) FROM op_retornos WHERE op_id = ?) as total_retorno
+      `,
+      args: [op_id, op_id]
+    })
+    
+    const { total_insumo, total_retorno } = opStats.rows[0]
+    
+    if (total_retorno + peso_kg > total_insumo + 0.2) {
+      return { 
+        success: false, 
+        error: `Fisicamente impossível: O peso total de retornos (${(total_retorno + peso_kg).toFixed(2)}kg) não pode ser maior que o total de insumos alocados na OP (${total_insumo.toFixed(2)}kg). Aloque mais insumos primeiro.` 
+      }
+    }
+
     const queries = [
       {
         sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, peso_kg, validade, status) VALUES (?, ?, 'PRODUCAO', ?, ?, 'DISPONIVEL') RETURNING id`,
@@ -143,6 +161,8 @@ export async function adicionarRetorno(op_id, { ean_caixa, produto_id, peso_kg, 
     return { success: false, error: err.message }
   }
 }
+
+
 
 export async function finalizarOP(op_id) {
   try {
