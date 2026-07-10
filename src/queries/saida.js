@@ -1,4 +1,4 @@
-﻿import { db } from '../lib/db.js';
+import { db } from '../lib/db.js';
 
 export async function listarRomaneios(status = 'TODOS') {
   let query = `
@@ -155,9 +155,9 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
         args: [item.caixa_id]
       })
 
-      // Adiciona no log de movimentaÃ§Ãµes como SAIDA definitiva
+      // Adiciona no log de movimentações como DESPACHO
       queries.push({
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'CLIENTE', 1, ?, ?, ?, 'SAIDA')`,
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, 'CLIENTE', 1, ?, ?, ?, 'DESPACHO')`,
         args: [item.produto_id, item.endereco || 'REC', item.peso_kg, operador_id || null, operador_nome || 'Sistema']
       })
     }
