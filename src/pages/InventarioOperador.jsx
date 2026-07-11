@@ -706,8 +706,18 @@ export function InventarioOperador() {
               <input
                 id="inv-produto"
                 className="form-input form-input--scanner mb-16"
-                placeholder="Bipar código do material ou EAN..."
-                onKeyDown={e => { if(e.key === 'Enter') { scanProduto(e.target.value); e.target.value = '' } }}
+                placeholder="Bipar código do material ou EAN... (Enter vazio = Finalizar)"
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    if (e.target.value.trim()) {
+                      scanProduto(e.target.value)
+                      e.target.value = ''
+                    } else {
+                      // Enter com campo vazio = finalizar endereço
+                      finalizarEndereco()
+                    }
+                  }
+                }}
               />
               
               {contagemLocal.length > 0 && (
