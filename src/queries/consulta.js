@@ -78,7 +78,7 @@ export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
       SELECT *
       FROM movimentacoes_log
       WHERE produto_id = ?
-      ORDER BY created_at DESC
+      ORDER BY data_hora DESC
       LIMIT ?
     `,
     args: [produto_id, limite]
