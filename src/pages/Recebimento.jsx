@@ -157,7 +157,7 @@ function HistoricoPaletes() {
               </div>
             </div>
             <div className="flex gap-8 items-center">
-              {paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && (
+              {paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && operador?.perm_produtos === 1 && (
                 <button className="btn btn--sm" style={{ background: 'var(--warning-muted)', color: 'var(--warning)', borderColor: 'rgba(251,191,36,0.3)', borderWidth: 1, borderStyle: 'solid', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setModalReabrirOpen(true)}>
                   <Unlock size={14} /> Reabrir Palete
                 </button>
@@ -265,11 +265,11 @@ function HistoricoPaletes() {
                 </div>
               </div>
 
-              <div className="flex gap-12">
-                <button className="btn btn--outline flex-1" onClick={() => setModalReabrirOpen(false)} disabled={loadingDetalhe}>
+              <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+                <button className="btn btn--outline" style={{ flex: 1 }} onClick={() => setModalReabrirOpen(false)} disabled={loadingDetalhe}>
                   Cancelar
                 </button>
-                <button className="btn flex-1" style={{ background: 'var(--warning)', color: '#000', fontWeight: 600 }} onClick={handleReabrirPalete} disabled={loadingDetalhe}>
+                <button className="btn" style={{ flex: 1, background: 'var(--warning)', color: '#000', fontWeight: 600 }} onClick={handleReabrirPalete} disabled={loadingDetalhe}>
                   {loadingDetalhe ? 'Reabrindo...' : 'Sim, Reabrir'}
                 </button>
               </div>
@@ -387,10 +387,10 @@ function HistoricoPaletes() {
                     <span style={{ fontWeight: 600, fontSize: 16, color: 'var(--text-primary)' }}>{p.codigo}</span>
                     <span className="badge" style={{ 
                       fontSize: 10, 
-                      background: isAtivo ? 'var(--warning-muted)' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'var(--info-muted)' : 'var(--success-muted)', 
-                      color: isAtivo ? 'var(--warning)' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'var(--info)' : 'var(--success)' 
+                      background: isAtivo ? 'var(--warning-muted)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info-muted)' : 'var(--success-muted)', 
+                      color: isAtivo ? 'var(--warning)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info)' : 'var(--success)' 
                     }}>
-                      {isAtivo ? '🟡 NA DOCA' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? '🏁 NA DOCA (FINALIZADO)' : '✅ ARMAZENADO'}
+                      {isAtivo ? '🟡 NA DOCA' : (isFinalizado && p.endereco_atual === 'DOCA') ? '🏁 NA DOCA (FINALIZADO)' : '✅ ARMAZENADO'}
                     </span>
                   </div>
                   <div className="text-xs text-muted">
@@ -426,6 +426,7 @@ export function Recebimento() {
   const [paletesAbertos, setPaletesAbertos] = useState([])
   const [paleteAtivo, setPaleteAtivo] = useState(null)
   const [caixasDoPalete, setCaixasDoPalete] = useState([])
+  const [modalConcluirOpen, setModalConcluirOpen] = useState(false)
   
   // Formulário de Caixa SSCC
   const [eanBipado, setEanBipado] = useState('')
@@ -495,13 +496,13 @@ export function Recebimento() {
 
   const handleConcluirPalete = async () => {
     if (!paleteAtivo) return;
-    if (!window.confirm(`Tem certeza que deseja fechar o ${paleteAtivo.codigo} na doca?`)) return;
     try {
       const res = await movimentacoesQueries.concluirPalete(paleteAtivo.id);
       if (res.success) {
         toastSuccess('Palete Concluído ✅', `${paleteAtivo.codigo} fechado com sucesso.`);
         setPaleteAtivo(null);
         setCaixasDoPalete([]);
+        setModalConcluirOpen(false);
         carregarPaletesAbertos();
       } else {
         toastError('Erro', res.error);
@@ -670,10 +671,10 @@ export function Recebimento() {
                     <ArrowLeft size={16}/> Voltar
                   </button>
                   <div className="text-sm font-bold text-primary font-mono">{paleteAtivo.codigo}</div>
-                  <button
+                  <button 
                     className="btn btn--sm"
                     style={{ background: 'var(--success)', color: 'white', border: 'none' }}
-                    onClick={handleConcluirPalete}
+                    onClick={() => setModalConcluirOpen(true)}
                     title="Fechar o palete na doca"
                   >
                     <Check size={14}/> Concluir
@@ -790,17 +791,55 @@ export function Recebimento() {
       {/* TAB: Histórico */}
       {activeTab === 'historico' && <HistoricoPaletes />}
 
-      <CadastroEanModal
+      {/* Modal EAN Desconhecido */}
+      <CadastroEanModal 
         isOpen={modalEanOpen}
         onClose={() => { setModalEanOpen(false); setTimeout(() => codigoRef.current?.focus(), 100); }}
         codigoDesconhecido={eanDesconhecido}
         onRegraSalva={(p) => {
           setProdutoDetectado(p)
-          setEanCaixaReal(eanDesconhecido)
           setEanEhUnico(true)
+          setModalEanOpen(false)
           setTimeout(() => document.getElementById('box-peso')?.focus(), 100)
         }}
       />
+
+      {/* Modal Concluir Palete */}
+      {modalConcluirOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
+          <div className="card animate-fade-in" style={{ width: 420, padding: 24, position: 'relative' }}>
+            <button className="btn btn--ghost" style={{ position: 'absolute', top: 12, right: 12, padding: 4 }} onClick={() => setModalConcluirOpen(false)}>
+              <X size={20} />
+            </button>
+            
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--success-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                <CheckCircle2 size={24} style={{ color: 'var(--success)' }} />
+              </div>
+              <h3 className="font-bold text-lg mb-8">Concluir Palete</h3>
+              <p className="text-muted text-sm" style={{ lineHeight: 1.5 }}>
+                Tem certeza que deseja fechar o palete <strong className="text-primary">{paleteAtivo?.codigo}</strong> na Doca?
+              </p>
+            </div>
+
+            <div style={{ background: 'rgba(16,185,129,0.1)', padding: 12, borderRadius: 8, marginBottom: 24, display: 'flex', gap: 12, alignItems: 'flex-start', border: '1px solid rgba(16,185,129,0.2)' }}>
+              <Check size={18} style={{ color: 'var(--success)', flexShrink: 0, marginTop: 2 }} />
+              <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                <strong>Tudo Certo:</strong> As caixas ficarão disponíveis na Doca e poderão ser movimentadas ou transferidas para os porta-paletes.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+              <button className="btn btn--outline" style={{ flex: 1 }} onClick={() => setModalConcluirOpen(false)}>
+                Cancelar
+              </button>
+              <button className="btn" style={{ flex: 1, background: 'var(--success)', color: '#fff', fontWeight: 600 }} onClick={handleConcluirPalete}>
+                Sim, Fechar Palete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
