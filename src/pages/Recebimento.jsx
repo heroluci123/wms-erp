@@ -27,7 +27,7 @@ function downloadCSV(rows, filename) {
 
 // ─── ABA HISTÓRICO ───────────────────────────────────────────────────────────
 function HistoricoPaletes() {
-  const { toastError } = useAppStore();
+  const { toastError, toastSuccess } = useAppStore();
   const [paletes, setPaletes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [paleteAberto, setPaleteAberto] = useState(null); // palete selecionado para ver caixas
@@ -70,6 +70,26 @@ function HistoricoPaletes() {
       setLoadingDetalhe(false);
     }
   };
+
+  const handleReabrirPalete = async () => {
+    if (!window.confirm("Ao reabrir este palete, as caixas que já estão na Doca não poderão ser apagadas do sistema. Deseja continuar?")) return;
+    setLoadingDetalhe(true);
+    try {
+      const res = await movimentacoesQueries.reabrirPalete(paleteAberto.id);
+      if (res.success) {
+        toastSuccess("Sucesso", "Palete reaberto. Adicione mais caixas na aba de Montagem.");
+        setPaleteAberto(null);
+        carregar();
+      } else {
+        toastError("Erro", res.error);
+      }
+    } catch (e) {
+      toastError("Erro", "Falha ao reabrir palete.");
+    } finally {
+      setLoadingDetalhe(false);
+    }
+  };
+
 
   const exportarPaletesCSV = () => {
     const paletesExport = paletesFiltrados.map(p => ({
@@ -134,10 +154,16 @@ function HistoricoPaletes() {
                   </span>
                 </h2>
               </div>
+            <div className="flex gap-8 items-center">
+              {paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && (
+                <button className="btn btn--outline btn--sm" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }} onClick={handleReabrirPalete}>
+                  Reabrir Palete
+                </button>
+              )}
+              <button className="btn btn--ghost btn--sm" onClick={exportarCaixasCSV}>
+                <Download size={14} /> CSV
+              </button>
             </div>
-            <button className="btn btn--ghost btn--sm" onClick={exportarCaixasCSV}>
-              <Download size={14} /> CSV
-            </button>
           </div>
 
           {/* Totalizadores */}
@@ -409,6 +435,10 @@ export function Recebimento() {
   }
 
   const handleRemoverCaixa = async (c) => {
+    if (c.endereco === 'DOCA') {
+      toastWarning('Atenção', 'Esta caixa já foi fechada na Doca anteriormente e não pode ser apagada do sistema.');
+      return;
+    }
     if (!window.confirm(`Tem certeza que deseja apagar a caixa de ${c.peso_kg}kg do palete?`)) return;
     try {
       const res = await movimentacoesQueries.removerCaixaSerializada(c.id, operador.id, operador.nome);

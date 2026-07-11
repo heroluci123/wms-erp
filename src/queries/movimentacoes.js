@@ -112,8 +112,57 @@ export async function concluirPalete(palete_id) {
       return { success: false, error: 'Não é possível finalizar um palete vazio. Por favor, adicione caixas ou feche esta aba.' };
     }
 
+    const { rows: caixas } = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL'`, args: [palete_id] })
+
+    const tx = await db.transaction('write')
+
+    try {
+      await tx.execute({
+        sql: `UPDATE paletes SET status = 'FECHADO', endereco_atual = 'DOCA' WHERE id = ?`,
+        args: [palete_id]
+      })
+
+      await tx.execute({
+        sql: `UPDATE estoque_caixas SET endereco = 'DOCA' WHERE palete_id = ? AND (endereco IS NULL OR endereco = 'REC')`,
+        args: [palete_id]
+      })
+
+      const agrupamento = {}
+      for (const c of caixas) {
+        if (c.endereco === 'DOCA') continue; // Já foi movido antes, em caso de reabertura
+        const key = `${c.produto_id}_${c.validade}`
+        if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, caixas: 0, kg: 0 }
+        agrupamento[key].caixas += 1
+        agrupamento[key].kg += c.peso_kg
+      }
+
+      for (const g of Object.values(agrupamento)) {
+        await tx.execute({
+          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = 'REC' AND validade IS ?`,
+          args: [g.caixas, g.kg, g.produto_id, g.validade || null]
+        })
+        await tx.execute({
+          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'DOCA', '', ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+          args: [g.produto_id, g.validade || null, g.caixas, g.kg]
+        })
+      }
+      
+      await tx.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`)
+      await tx.commit()
+      return { success: true }
+    } catch (e) {
+      await tx.rollback()
+      throw e
+    }
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function reabrirPalete(palete_id) {
+  try {
     await db.execute({
-      sql: `UPDATE paletes SET status = 'FECHADO', endereco_atual = 'DOCA' WHERE id = ?`,
+      sql: `UPDATE paletes SET status = 'EM_MONTAGEM', endereco_atual = 'REC' WHERE id = ?`,
       args: [palete_id]
     });
     return { success: true };
