@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box } from 'lucide-react'
+import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box, Unlock } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
@@ -33,6 +33,7 @@ function HistoricoPaletes() {
   const [paleteAberto, setPaleteAberto] = useState(null); // palete selecionado para ver caixas
   const [caixasDetalhe, setCaixasDetalhe] = useState([]);
   const [loadingDetalhe, setLoadingDetalhe] = useState(false);
+  const [modalReabrirOpen, setModalReabrirOpen] = useState(false);
 
   // Filtros
   const [filtroDataInicio, setFiltroDataInicio] = useState('');
@@ -72,13 +73,13 @@ function HistoricoPaletes() {
   };
 
   const handleReabrirPalete = async () => {
-    if (!window.confirm("Ao reabrir este palete, as caixas que já estão na Doca não poderão ser apagadas do sistema. Deseja continuar?")) return;
     setLoadingDetalhe(true);
     try {
       const res = await movimentacoesQueries.reabrirPalete(paleteAberto.id);
       if (res.success) {
         toastSuccess("Sucesso", "Palete reaberto. Adicione mais caixas na aba de Montagem.");
         setPaleteAberto(null);
+        setModalReabrirOpen(false);
         carregar();
       } else {
         toastError("Erro", res.error);
@@ -157,8 +158,8 @@ function HistoricoPaletes() {
             </div>
             <div className="flex gap-8 items-center">
               {paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && (
-                <button className="btn btn--outline btn--sm" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }} onClick={handleReabrirPalete}>
-                  Reabrir Palete
+                <button className="btn btn--sm" style={{ background: 'var(--warning-muted)', color: 'var(--warning)', borderColor: 'rgba(251,191,36,0.3)', borderWidth: 1, borderStyle: 'solid', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setModalReabrirOpen(true)}>
+                  <Unlock size={14} /> Reabrir Palete
                 </button>
               )}
               <button className="btn btn--ghost btn--sm" onClick={exportarCaixasCSV}>
@@ -235,6 +236,43 @@ function HistoricoPaletes() {
                   </div>
                 </div>
               )})}
+            </div>
+          </div>
+        )}
+
+        {/* Modal Reabrir Palete */}
+        {modalReabrirOpen && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
+            <div className="card animate-fade-in" style={{ width: 420, padding: 24, position: 'relative' }}>
+              <button className="btn btn--ghost" style={{ position: 'absolute', top: 12, right: 12, padding: 4 }} onClick={() => setModalReabrirOpen(false)}>
+                <X size={20} />
+              </button>
+              
+              <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--warning-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                  <Unlock size={24} style={{ color: 'var(--warning)' }} />
+                </div>
+                <h3 className="font-bold text-lg mb-8">Reabrir Palete</h3>
+                <p className="text-muted text-sm" style={{ lineHeight: 1.5 }}>
+                  Ao reabrir este palete, ele retornará para a aba de montagem na Doca para a adição de novas caixas.
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(239,68,68,0.1)', padding: 12, borderRadius: 8, marginBottom: 24, display: 'flex', gap: 12, alignItems: 'flex-start', border: '1px solid rgba(239,68,68,0.2)' }}>
+                <AlertTriangle size={18} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
+                <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                  <strong>Atenção:</strong> As caixas que já foram finalizadas e estão na Doca <strong className="text-danger">não poderão ser apagadas</strong> do sistema após a reabertura.
+                </div>
+              </div>
+
+              <div className="flex gap-12">
+                <button className="btn btn--outline flex-1" onClick={() => setModalReabrirOpen(false)} disabled={loadingDetalhe}>
+                  Cancelar
+                </button>
+                <button className="btn flex-1" style={{ background: 'var(--warning)', color: '#000', fontWeight: 600 }} onClick={handleReabrirPalete} disabled={loadingDetalhe}>
+                  {loadingDetalhe ? 'Reabrindo...' : 'Sim, Reabrir'}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -555,7 +593,11 @@ export function Recebimento() {
         <button
           className={`btn ${activeTab === 'palete' ? 'btn--primary' : 'btn--ghost'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
-          onClick={() => { setActiveTab('palete'); setTimeout(() => codigoRef.current?.focus(), 100) }}
+          onClick={() => { 
+            setActiveTab('palete'); 
+            carregarPaletesAbertos();
+            setTimeout(() => codigoRef.current?.focus(), 100);
+          }}
         >
           <Layers size={16} /> Recebimento c/ Palete
         </button>
