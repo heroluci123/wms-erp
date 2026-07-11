@@ -154,6 +154,7 @@ function HistoricoPaletes() {
                   </span>
                 </h2>
               </div>
+            </div>
             <div className="flex gap-8 items-center">
               {paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && (
                 <button className="btn btn--outline btn--sm" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }} onClick={handleReabrirPalete}>
