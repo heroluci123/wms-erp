@@ -297,12 +297,12 @@ export async function criar({ tipo_filtro, identificador_filtro }) {
     if (tipo_filtro === 'Curva') {
       const { rows } = await tx.execute({
         sql: `
-        SELECT ec.ean_caixa, ec.endereco, ec.produto_id, ec.lote, ec.validade, 1 as qtd_caixas, ec.peso_kg as qtd_kg
-        FROM estoque_caixas ec
-        JOIN produtos p ON p.id = ec.produto_id
-        WHERE p.status_curva = ? AND ec.status = 'DISPONIVEL'
-          AND ec.endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO')
-        ORDER BY ec.endereco, p.descricao
+        SELECT NULL as ean_caixa, ep.endereco, ep.produto_id, ep.lote, ep.validade, ep.qtd_caixas, ep.qtd_kg
+        FROM estoque_posicao ep
+        JOIN produtos p ON p.id = ep.produto_id
+        WHERE p.status_curva = ? AND ep.qtd_caixas > 0
+          AND ep.endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO')
+        ORDER BY ep.endereco, p.descricao
       `, args: [identificador_filtro] })
       saldos = rows
     } else if (tipo_filtro === 'Rua') {
@@ -310,14 +310,14 @@ export async function criar({ tipo_filtro, identificador_filtro }) {
       const { rows } = await tx.execute({
         sql: `
         SELECT l.endereco, 
-               ec.ean_caixa,
-               IFNULL(ec.produto_id, ?) as produto_id, 
-               IFNULL(ec.lote, '') as lote, 
-               ec.validade, 
-               CASE WHEN ec.id IS NOT NULL THEN 1 ELSE 0 END as qtd_caixas, 
-               IFNULL(ec.peso_kg, 0) as qtd_kg
+               NULL as ean_caixa,
+               IFNULL(ep.produto_id, ?) as produto_id, 
+               IFNULL(ep.lote, '') as lote, 
+               ep.validade, 
+               IFNULL(ep.qtd_caixas, 0) as qtd_caixas, 
+               IFNULL(ep.qtd_kg, 0) as qtd_kg
         FROM locais l
-        LEFT JOIN estoque_caixas ec ON ec.endereco = l.endereco AND ec.status = 'DISPONIVEL'
+        LEFT JOIN estoque_posicao ep ON ep.endereco = l.endereco AND ep.qtd_caixas > 0
         WHERE l.endereco LIKE ? AND l.endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO')
         ORDER BY l.endereco
       `, args: [pVazio, identificador_filtro + '%'] })
@@ -362,14 +362,14 @@ export async function criarGeral({ nome, zonas = [] }) {
       const { rows: saldos } = await tx.execute({
         sql: `
         SELECT l.endereco, 
-               ec.ean_caixa,
-               IFNULL(ec.produto_id, ?) as produto_id, 
-               IFNULL(ec.lote, '') as lote, 
-               ec.validade, 
-               CASE WHEN ec.id IS NOT NULL THEN 1 ELSE 0 END as qtd_caixas, 
-               IFNULL(ec.peso_kg, 0) as qtd_kg
+               NULL as ean_caixa,
+               IFNULL(ep.produto_id, ?) as produto_id, 
+               IFNULL(ep.lote, '') as lote, 
+               ep.validade, 
+               IFNULL(ep.qtd_caixas, 0) as qtd_caixas, 
+               IFNULL(ep.qtd_kg, 0) as qtd_kg
         FROM locais l
-        LEFT JOIN estoque_caixas ec ON ec.endereco = l.endereco AND ec.status = 'DISPONIVEL'
+        LEFT JOIN estoque_posicao ep ON ep.endereco = l.endereco AND ep.qtd_caixas > 0
         WHERE l.endereco LIKE ? AND l.endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO')
         ORDER BY l.endereco
       `, args: [pVazio, zona + '%'] })
@@ -557,24 +557,26 @@ export async function registrarContagem({ item_id, qtd_contada_caixas, qtd_conta
     // Na Carga Inicial: sem segunda contagem. Vai direto para Aguardando Ajuste (sempre é uma entrada nova)
     novoStatus = 'Aguardando Ajuste'
   } else if (isOK) {
-    if (item.qtd_sistema_caixas === 0 && qtd_contada_caixas === 0) {
-      // Se era um item surpresa e a contagem final foi corrigida para 0, ele não existe fisicamente. Remove.
+    // Endereço bateu com o sistema → OK
+    // Caso especial: era um item surpresa (ean_caixa existe mas a contagem foi corrigida para 0 pelo operador)
+    // Isso só acontece se o item foi criado com qtd_sistema = 0 E tem ean_caixa (é real surpresa)
+    // Neste caso, removemos o item pois o produto não existia de fato.
+    if (item.ean_caixa && item.qtd_sistema_caixas === 0 && qtd_contada_caixas === 0) {
       await db.execute({ sql: `DELETE FROM inventario_itens WHERE id = ?`, args: [item_id] })
       
-      const { rows: invRows } = await db.execute({ sql: `SELECT inventario_id FROM inventario_itens WHERE id = ?`, args: [item_id] })
-      const inventario = invRows[0] || { inventario_id: item.inventario_id }
-      const { rows: pendentesRows } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item IN ('Pendente','2ª Contagem','3ª Contagem')`, args: [inventario.inventario_id] })
-      const pendentes = pendentesRows[0]
-      const { rows: ajustesRows } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item = 'Aguardando Ajuste'`, args: [inventario.inventario_id] })
-      const ajustes = ajustesRows[0]
-      if (!isCargaInicial && pendentes.v === 0) {
-        const novoStatusInv = ajustes.v > 0 ? 'Aguardando Ajuste' : 'Finalizado OK'
-        await db.execute({ sql: `UPDATE inventarios SET status = ? WHERE id = ?`, args: [novoStatusInv, inventario.inventario_id] })
+      const { rows: pendentesRows2 } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item IN ('Pendente','2ª Contagem','3ª Contagem')`, args: [item.inventario_id] })
+      const pendentes2 = pendentesRows2[0]
+      const { rows: ajustesRows2 } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item = 'Aguardando Ajuste'`, args: [item.inventario_id] })
+      const ajustes2 = ajustesRows2[0]
+      if (pendentes2.v === 0) {
+        const novoStatusInv = ajustes2.v > 0 ? 'Aguardando Ajuste' : 'Finalizado OK'
+        await db.execute({ sql: `UPDATE inventarios SET status = ? WHERE id = ?`, args: [novoStatusInv, item.inventario_id] })
       }
       return { success: true, status_item: 'OK' }
     } else {
       novoStatus = 'OK'
     }
+
   } else {
     if (contagem_atual === 1) {
       novoStatus = '2ª Contagem'; contagem_atual = 2

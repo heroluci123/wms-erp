@@ -362,6 +362,7 @@ export function InventarioOperador() {
     setContagemLocal(prev => [...prev, {
       chave,
       item_id,
+      produto_id: itemAtual.produto_id,
       codigo: itemAtual.codigo,
       descricao: itemAtual.descricao,
       validade: val,
@@ -379,14 +380,23 @@ export function InventarioOperador() {
       return toastWarning('Atenção', 'Nenhum item foi bipado neste endereço.')
     }
     try {
-      const counted = contagemLocal.map(c => ({
-        item_id: c.item_id,
-        caixas: c.caixas,
-        kg: c.kg,
-        validade: c.validade
-      }))
+      const groupedCounted = []
+      contagemLocal.forEach(c => {
+        const existing = groupedCounted.find(g => g.item_id === c.item_id)
+        if (existing) {
+          existing.caixas += c.caixas
+          existing.kg += c.kg
+        } else {
+          groupedCounted.push({
+            item_id: c.item_id,
+            caixas: c.caixas,
+            kg: c.kg,
+            validade: c.validade
+          })
+        }
+      })
 
-      const countedIds = contagemLocal.map(c => c.item_id)
+      const countedIds = groupedCounted.map(c => c.item_id)
       const uncounted = itensDoEndereco
         .filter(i => !countedIds.includes(i.id))
         .map(i => ({
@@ -396,7 +406,7 @@ export function InventarioOperador() {
           validade: i.validade_contada || i.validade
         }))
 
-      const todosParaEnviar = [...counted, ...uncounted]
+      const todosParaEnviar = [...groupedCounted, ...uncounted]
 
       await Promise.all(
         todosParaEnviar.map(c => inventariosQueries.registrarContagem({

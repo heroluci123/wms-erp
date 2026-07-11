@@ -123,6 +123,23 @@ export function Producao() {
     setModalRemoverItem(item)
   }
 
+  const confirmarFefoInsumo = async () => {
+    if (!modalFefo || !opSelecionada) return
+    const caixa = modalFefo.atual
+    setModalFefo(null)
+    try {
+      const resAlo = await producaoQueries.alocarInsumos(opSelecionada.id, [caixa], operador.id, operador.nome)
+      if (resAlo.success) {
+        toastSuccess('Insumo Adicionado', `Caixa de ${caixa.peso_kg}kg alocada com sucesso.`)
+        carregarDetalhes(opSelecionada.id)
+      } else {
+        toastError('Erro ao Alocar', resAlo.error)
+      }
+    } catch (e) {
+      toastError('Erro', e.message)
+    }
+  }
+
   const handleNovaOP = async (nome) => {
     try {
       const res = await producaoQueries.criarOP(nome, operador.id, operador.nome)
@@ -462,10 +479,7 @@ export function Producao() {
             <p className="mb-24 font-bold">Recomendamos fortemente que você utilize a caixa mais antiga para evitar perdas.</p>
             <div className="flex gap-16">
               <button className="btn btn--primary flex-1" onClick={() => setModalFefo(null)}>Cancelar e Pegar Outra</button>
-              <button className="btn btn--ghost" onClick={() => {
-                setModalInsumo(modalFefo.atual)
-                setModalFefo(null)
-              }}>Ignorar e Usar Atual</button>
+              <button className="btn btn--ghost" onClick={confirmarFefoInsumo}>Ignorar e Usar Atual</button>
             </div>
           </div>
         </div>
