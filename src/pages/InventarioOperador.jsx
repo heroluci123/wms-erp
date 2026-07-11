@@ -646,7 +646,7 @@ export function InventarioOperador() {
           <p className="page-header__subtitle">
             {isCargaAtiva
               ? `Inventário #${inventarioAtivo.id} | ${contagemLocal.length > 0 ? `${enderecoAtual} — ${contagemLocal.length} itens bipados` : 'Bipe o endereço para começar'}`
-              : `Inventário #${inventarioAtivo.id} | Falta contar: ${pendentesGlobais.length} itens`}
+              : `Inventário #${inventarioAtivo.id}`}
           </p>
         </div>
         <button className="btn btn--ghost" onClick={() => setInventarioAtivo(null)}>Sair</button>
