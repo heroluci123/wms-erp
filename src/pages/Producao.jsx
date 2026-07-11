@@ -73,7 +73,7 @@ export function Producao() {
           if (caixa.validade) {
             const caixaMaisVelha = await producaoQueries.verificarFEFO(caixa.produto_id, caixa.validade)
             if (caixaMaisVelha && caixaMaisVelha.id !== caixa.id) {
-              setModalFefo({ atual: caixa, velha: caixaMaisVelha })
+              setModalFefo({ atual: caixa, velha: caixaMaisVelha, op_id: opSelecionada.id })
               return
             }
           }
@@ -124,14 +124,20 @@ export function Producao() {
   }
 
   const confirmarFefoInsumo = async () => {
-    if (!modalFefo || !opSelecionada) return
+    if (!modalFefo) return
     const caixa = modalFefo.atual
+    const op_id = modalFefo.op_id || opSelecionada?.id
+    if (!op_id) {
+      toastError('Erro', 'Ordem de Produção não encontrada. Selecione a OP novamente.')
+      setModalFefo(null)
+      return
+    }
     setModalFefo(null)
     try {
-      const resAlo = await producaoQueries.alocarInsumos(opSelecionada.id, [caixa], operador.id, operador.nome)
+      const resAlo = await producaoQueries.alocarInsumos(op_id, [caixa], operador.id, operador.nome)
       if (resAlo.success) {
         toastSuccess('Insumo Adicionado', `Caixa de ${caixa.peso_kg}kg alocada com sucesso.`)
-        carregarDetalhes(opSelecionada.id)
+        carregarDetalhes(op_id)
       } else {
         toastError('Erro ao Alocar', resAlo.error)
       }
