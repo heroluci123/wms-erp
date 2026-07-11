@@ -262,7 +262,7 @@ export function ConsultaEstoque() {
         <div className="animate-fade-in">
           {/* Header Produto */}
           <div className="flex items-center gap-16 mb-24 pb-16 border-b border-border">
-            <div className="p-16 bg-bg-card border border-border rounded-md">
+            <div className="p-16 border border-border rounded-md" style={{ background: 'var(--bg-2)' }}>
               <Box size={32} className="text-primary" />
             </div>
             <div>
@@ -292,7 +292,7 @@ export function ConsultaEstoque() {
 
           {/* Abas */}
           <div className="card p-0 mb-24 overflow-hidden">
-            <div className="flex border-b border-border bg-bg-card">
+            <div className="flex border-b border-border" style={{ background: 'var(--bg-2)' }}>
               <button 
                 className={`p-16 font-bold flex items-center gap-8 ${abaAtiva === 'enderecos' ? 'text-primary border-b-2 border-primary' : 'text-muted'}`}
                 onClick={() => setAbaAtiva('enderecos')}
@@ -321,7 +321,8 @@ export function ConsultaEstoque() {
                       {enderecosProd.map(end => (
                         <div key={end.endereco} className="border border-border rounded-md overflow-hidden">
                           <button 
-                            className="w-full flex items-center justify-between p-16 bg-bg-card hover:bg-bg-hover transition-colors"
+                            className="w-full flex items-center justify-between p-16 transition-colors"
+                            style={{ background: 'var(--bg-2)', border: 'none', color: 'var(--text-primary)' }}
                             onClick={() => toggleEndereco(end.endereco)}
                           >
                             <div className="flex items-center gap-12">
@@ -335,7 +336,7 @@ export function ConsultaEstoque() {
                           </button>
                           
                           {enderecoExpandido === end.endereco && (
-                            <div className="p-16 bg-bg-1 border-t border-border">
+                            <div className="p-16 border-t border-border" style={{ background: 'var(--bg-1)' }}>
                               {!caixasNoEndereco[end.endereco] ? (
                                 <div className="text-center text-muted p-12">Carregando caixas...</div>
                               ) : (
