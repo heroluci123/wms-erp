@@ -143,7 +143,7 @@ function HistoricoPaletes() {
   if (paleteAberto) {
     const pesoTotal = caixasDetalhe.reduce((s, c) => s + c.peso_kg, 0);
     const qtdDisponiveis = caixasDetalhe.filter(c => c.status === 'DISPONIVEL').length;
-    const qtdConsumidas = caixasDetalhe.filter(c => c.status === 'CONSUMIDA').length;
+    const qtdConsumidas = caixasDetalhe.filter(c => c.status !== 'DISPONIVEL').length;
 
     return (
       <div style={{ maxWidth: 900 }}>
@@ -189,7 +189,7 @@ function HistoricoPaletes() {
               <div className="font-bold text-cyan" style={{ fontSize: 20 }}>{pesoTotal.toFixed(2)} kg</div>
             </div>
             <div style={{ background: 'var(--bg-3)', borderRadius: 8, padding: '8px 16px', textAlign: 'center', flex: 1, minWidth: 80 }}>
-              <div className="text-xs text-muted mb-2">Em Estoque</div>
+              <div className="text-xs text-muted mb-2">No Palete</div>
               <div className="font-bold text-success" style={{ fontSize: 20 }}>{qtdDisponiveis}</div>
             </div>
             <div style={{ background: 'var(--bg-3)', borderRadius: 8, padding: '8px 16px', textAlign: 'center', flex: 1, minWidth: 80 }}>
