@@ -248,7 +248,7 @@ function HistoricoPaletes() {
                       background: c.status === 'DISPONIVEL' ? (isDoca ? 'var(--info-muted)' : 'rgba(16,185,129,0.15)') : 'rgba(251,191,36,0.15)',
                       color: c.status === 'DISPONIVEL' ? (isDoca ? 'var(--info)' : 'var(--success)') : 'var(--warning)'
                     }}>
-                      {c.status === 'DISPONIVEL' ? (isDoca ? '⏳ Na Doca' : '✅ Estoque') : '📤 Retirada'}
+                      {c.status === 'DISPONIVEL' ? (isDoca ? '⏳ Na Doca' : '✅ Estoque') : `📤 ${c.status === 'RESERVADA' && c.endereco ? c.endereco : c.status.replace('_', ' ')}`}
                     </div>
                   </div>
                 </div>
