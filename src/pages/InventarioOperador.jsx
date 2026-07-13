@@ -44,6 +44,8 @@ export function InventarioOperador() {
   const [ssccDadosCaixa, setSsccDadosCaixa] = useState(null)       // { peso_kg, validade, ean_caixa }
   const [ssccModoConfirmacao, setSsccModoConfirmacao] = useState(false) // true = mostrar confirm, false = editar
 
+  const [isFinalizando, setIsFinalizando] = useState(false)
+
   // 1. Carregar inventários
   const carregar = async () => {
     try {
@@ -376,9 +378,11 @@ export function InventarioOperador() {
 
 
   const finalizarEndereco = async () => {
+    if (isFinalizando) return
     if (inventarioAtivo?.tipo === 'CargaInicial' && contagemLocal.length === 0) {
       return toastWarning('Atenção', 'Nenhum item foi bipado neste endereço.')
     }
+    setIsFinalizando(true)
     try {
       const groupedCounted = []
       contagemLocal.forEach(c => {
@@ -455,6 +459,8 @@ export function InventarioOperador() {
       }
     } catch(e) {
       toastError('Erro', 'Falha ao finalizar endereço.')
+    } finally {
+      setIsFinalizando(false)
     }
   }
 
@@ -739,9 +745,9 @@ export function InventarioOperador() {
               )}
               
               <button className="btn btn--secondary w-full py-16" onClick={finalizarEndereco}
-                disabled={isCargaAtiva && contagemLocal.length === 0}
-                style={{ opacity: (isCargaAtiva && contagemLocal.length === 0) ? 0.5 : 1 }}>
-                <CheckCircle2 size={18}/> Finalizar Endereço
+                disabled={(isCargaAtiva && contagemLocal.length === 0) || isFinalizando}
+                style={{ opacity: ((isCargaAtiva && contagemLocal.length === 0) || isFinalizando) ? 0.5 : 1 }}>
+                <CheckCircle2 size={18}/> {isFinalizando ? 'Finalizando...' : 'Finalizar Endereço'}
               </button>
             </div>
           ) : step > 2 ? (
