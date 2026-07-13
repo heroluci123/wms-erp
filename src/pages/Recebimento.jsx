@@ -135,6 +135,9 @@ function HistoricoPaletes() {
 
   const totalCaixasFiltradas = paletesFiltrados.reduce((s, p) => s + (p.qtd_caixas || 0), 0);
   const totalPesoFiltrado = paletesFiltrados.reduce((s, p) => s + parseFloat(p.peso_total || 0), 0);
+  const qtdNaDoca = paletesFiltrados.filter(p => p.status === 'EM_MONTAGEM').length;
+  const qtdDocaFinalizado = paletesFiltrados.filter(p => p.status === 'FECHADO' && p.endereco_atual === 'DOCA').length;
+  const qtdArmazenados = paletesFiltrados.filter(p => p.status === 'FECHADO' && p.endereco_atual !== 'DOCA').length;
 
   // ── DETALHE DO PALETE ──
   if (paleteAberto) {
@@ -352,17 +355,29 @@ function HistoricoPaletes() {
       {/* Totalizadores gerais */}
       {paletesFiltrados.length > 0 && (
         <div className="flex gap-10 mb-16" style={{ flexWrap: 'wrap' }}>
-          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 120 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
             <div className="text-xs text-muted">Paletes encontrados</div>
             <div className="font-bold text-primary" style={{ fontSize: 18 }}>{paletesFiltrados.length}</div>
           </div>
-          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 120 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
             <div className="text-xs text-muted">Total Caixas</div>
             <div className="font-bold text-cyan" style={{ fontSize: 18 }}>{totalCaixasFiltradas}</div>
           </div>
-          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 120 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
             <div className="text-xs text-muted">Peso Total</div>
             <div className="font-bold text-success" style={{ fontSize: 18 }}>{totalPesoFiltrado.toFixed(1)} kg</div>
+          </div>
+          <div style={{ background: 'var(--warning-muted)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+            <div className="text-xs" style={{ color: 'var(--warning)', opacity: 0.8 }}>🟡 Na Doca</div>
+            <div className="font-bold" style={{ fontSize: 18, color: 'var(--warning)' }}>{qtdNaDoca}</div>
+          </div>
+          <div style={{ background: 'var(--info-muted)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+            <div className="text-xs" style={{ color: 'var(--info)', opacity: 0.8 }}>🏁 Doca Finalizado</div>
+            <div className="font-bold" style={{ fontSize: 18, color: 'var(--info)' }}>{qtdDocaFinalizado}</div>
+          </div>
+          <div style={{ background: 'var(--success-muted)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+            <div className="text-xs" style={{ color: 'var(--success)', opacity: 0.8 }}>✅ Armazenados</div>
+            <div className="font-bold" style={{ fontSize: 18, color: 'var(--success)' }}>{qtdArmazenados}</div>
           </div>
         </div>
       )}
