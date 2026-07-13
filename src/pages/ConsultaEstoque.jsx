@@ -294,15 +294,15 @@ export function ConsultaEstoque() {
           <div className="card p-0 mb-24 overflow-hidden">
             <div className="flex border-b border-border" style={{ background: 'var(--bg-2)' }}>
               <button 
-                className={`p-16 font-bold flex items-center gap-8 ${abaAtiva === 'enderecos' ? 'text-primary border-b-2 border-primary' : 'text-muted'}`}
-                style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer' }}
+                className={`p-16 font-bold flex items-center gap-8 ${abaAtiva === 'enderecos' ? 'border-b-2 border-primary' : 'text-muted'}`}
+                style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer', color: abaAtiva === 'enderecos' ? '#ffffff' : undefined }}
                 onClick={() => setAbaAtiva('enderecos')}
               >
                 <MapPin size={18} /> Onde está no Estoque?
               </button>
               <button 
-                className={`p-16 font-bold flex items-center gap-8 ${abaAtiva === 'historico' ? 'text-primary border-b-2 border-primary' : 'text-muted'}`}
-                style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer' }}
+                className={`p-16 font-bold flex items-center gap-8 ${abaAtiva === 'historico' ? 'border-b-2 border-primary' : 'text-muted'}`}
+                style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer', color: abaAtiva === 'historico' ? '#ffffff' : undefined }}
                 onClick={() => setAbaAtiva('historico')}
               >
                 <Activity size={18} /> Histórico Geral do Produto
