@@ -136,8 +136,8 @@ function HistoricoPaletes() {
   const totalCaixasFiltradas = paletesFiltrados.reduce((s, p) => s + (p.qtd_caixas || 0), 0);
   const totalPesoFiltrado = paletesFiltrados.reduce((s, p) => s + parseFloat(p.peso_total || 0), 0);
   const qtdNaDoca = paletesFiltrados.filter(p => p.status === 'EM_MONTAGEM').length;
-  const qtdDocaFinalizado = paletesFiltrados.filter(p => p.status === 'FECHADO' && p.endereco_atual === 'DOCA').length;
-  const qtdArmazenados = paletesFiltrados.filter(p => p.status === 'FECHADO' && p.endereco_atual !== 'DOCA').length;
+  const qtdDocaFinalizado = paletesFiltrados.filter(p => p.status === 'FECHADO' && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0).length;
+  const qtdArmazenados = paletesFiltrados.filter(p => p.status === 'FECHADO' && (p.endereco_atual !== 'DOCA' || p.qtd_disponiveis <= 0)).length;
 
   // ── DETALHE DO PALETE ──
   if (paleteAberto) {
