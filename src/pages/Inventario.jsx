@@ -241,14 +241,19 @@ export function Inventario() {
   // Form: Novo Cíclico
   const [tipoFiltro, setTipoFiltro] = useState('Curva')
   const [identificador, setIdentificador] = useState('A')
+  const [isCreatingCiclico, setIsCreatingCiclico] = useState(false)
 
   // Form: Novo Geral
   const [nomeGeral, setNomeGeral] = useState('')
   const [zonasGeral, setZonasGeral] = useState('')
+  const [isCreatingGeral, setIsCreatingGeral] = useState(false)
 
   // Form: Novo Ciclo
   const [nomeCiclo, setNomeCiclo] = useState('')
   const [targetCiclo, setTargetCiclo] = useState('99.9')
+  const [isCreatingCiclo, setIsCreatingCiclo] = useState(false)
+  
+  const [isCreatingCarga, setIsCreatingCarga] = useState(false)
 
   const carregar = useCallback(async () => {
     setLoading(true)
@@ -294,6 +299,7 @@ export function Inventario() {
 
   const handleCriarCiclico = async (e) => {
     e.preventDefault()
+    setIsCreatingCiclico(true)
     try {
       const res = await inventariosQueries.criar({ tipo_filtro: tipoFiltro, identificador_filtro: identificador.toUpperCase() })
       if (res.success) {
@@ -301,12 +307,14 @@ export function Inventario() {
         carregar()
       } else toastError('Erro ao criar', res.error)
     } catch (err) { toastError('Erro', err.message) }
+    finally { setIsCreatingCiclico(false) }
   }
 
   const handleCriarGeral = async (e) => {
     e.preventDefault()
     const zonas = zonasGeral.split(',').map(z => z.trim().toUpperCase()).filter(Boolean)
     if (zonas.length === 0) return toastError('Erro', 'Informe ao menos uma zona/rua.')
+    setIsCreatingGeral(true)
     try {
       const res = await inventariosQueries.criarGeral({ nome: nomeGeral, zonas })
       if (res.success) {
@@ -315,6 +323,7 @@ export function Inventario() {
         carregar()
       } else toastError('Erro', res.error)
     } catch (err) { toastError('Erro', err.message) }
+    finally { setIsCreatingGeral(false) }
   }
 
   const handleCriarCargaInicial = async () => {
@@ -425,7 +434,9 @@ export function Inventario() {
                     <input type="text" className="form-input" placeholder="Ex: R1" value={identificador} onChange={e => setIdentificador(e.target.value)} required />
                   )}
                 </div>
-                <button type="submit" className="btn btn--primary">Criar</button>
+                <button type="submit" className="btn btn--primary" disabled={isCreatingCiclico}>
+                  {isCreatingCiclico ? 'Criando...' : 'Criar'}
+                </button>
               </form>
             </div>
             <div className="card" style={{ background: 'var(--bg-2)', border: '1px dashed var(--border)' }}>
@@ -454,7 +465,9 @@ export function Inventario() {
                   <input type="text" className="form-input" placeholder="Ex: R1, R2, R3, MEZANINO" value={zonasGeral} onChange={e => setZonasGeral(e.target.value)} required />
                   <span className="text-muted text-sm mt-4 inline-block">Cada zona vira uma seção independente com progresso separado.</span>
                 </div>
-                <button type="submit" className="btn btn--primary">Criar Inventário Geral</button>
+                <button type="submit" className="btn btn--primary" disabled={isCreatingGeral}>
+                  {isCreatingGeral ? 'Criando...' : 'Criar Inventário Geral'}
+                </button>
               </form>
             </div>
             <div className="card" style={{ background: 'var(--bg-2)', border: '1px dashed var(--border)' }}>
