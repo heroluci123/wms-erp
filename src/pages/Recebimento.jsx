@@ -158,10 +158,10 @@ function HistoricoPaletes() {
                 <h2 className="text-xl" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 12 }}>
                   {paleteAberto.codigo}
                   <span className="badge text-sm" style={{ 
-                    background: paleteAberto.status === 'EM_MONTAGEM' ? 'var(--warning-muted)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA') ? 'var(--info-muted)' : 'var(--success-muted)', 
-                    color: paleteAberto.status === 'EM_MONTAGEM' ? 'var(--warning)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA') ? 'var(--info)' : 'var(--success)' 
+                    background: paleteAberto.status === 'EM_MONTAGEM' ? 'var(--warning-muted)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && caixasDetalhe.some(c => c.status === 'DISPONIVEL')) ? 'var(--info-muted)' : 'var(--success-muted)', 
+                    color: paleteAberto.status === 'EM_MONTAGEM' ? 'var(--warning)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && caixasDetalhe.some(c => c.status === 'DISPONIVEL')) ? 'var(--info)' : 'var(--success)' 
                   }}>
-                    {paleteAberto.status === 'EM_MONTAGEM' ? '🟡 Na Doca' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA') ? '🏁 Na Doca (Finalizado)' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual !== 'DOCA') ? '✅ Armazenado' : '✅ Finalizado'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
+                    {paleteAberto.status === 'EM_MONTAGEM' ? '🟡 Na Doca' : (paleteAberto.status === 'FECHADO' && paleteAberto.endereco_atual === 'DOCA' && caixasDetalhe.some(c => c.status === 'DISPONIVEL')) ? '🏁 Na Doca (Finalizado)' : '✅ Armazenado'} · Endereço: <strong>{paleteAberto.endereco_atual}</strong>
                   </span>
                 </h2>
               </div>
@@ -416,10 +416,10 @@ function HistoricoPaletes() {
                     <span style={{ fontWeight: 600, fontSize: 16, color: 'var(--text-primary)' }}>{p.codigo}</span>
                     <span className="badge" style={{ 
                       fontSize: 10, 
-                      background: isAtivo ? 'var(--warning-muted)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info-muted)' : 'var(--success-muted)', 
-                      color: isAtivo ? 'var(--warning)' : (isFinalizado && p.endereco_atual === 'DOCA') ? 'var(--info)' : 'var(--success)' 
+                      background: isAtivo ? 'var(--warning-muted)' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'var(--info-muted)' : 'var(--success-muted)', 
+                      color: isAtivo ? 'var(--warning)' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'var(--info)' : 'var(--success)' 
                     }}>
-                      {isAtivo ? '🟡 NA DOCA' : (isFinalizado && p.endereco_atual === 'DOCA') ? '🏁 NA DOCA (FINALIZADO)' : '✅ ARMAZENADO'}
+                      {isAtivo ? '🟡 NA DOCA' : (isFinalizado && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? '🏁 NA DOCA (FINALIZADO)' : '✅ ARMAZENADO'}
                     </span>
                   </div>
                   <div className="text-xs text-muted">
