@@ -93,14 +93,15 @@ function HistoricoPaletes() {
 
 
   const exportarPaletesCSV = () => {
+    const safeFmt = (v, fmt) => { try { if (!v) return '-'; const d = new Date(v.toString().includes('Z') ? v : v + 'Z'); return isNaN(d.getTime()) ? '-' : format(d, fmt, { locale: ptBR }); } catch { return '-'; } };
     const paletesExport = paletesFiltrados.map(p => ({
       Codigo: p.codigo,
       Status: p.status === 'EM_MONTAGEM' ? 'Na Doca' : (p.status === 'FECHADO' && p.endereco_atual === 'DOCA' && p.qtd_disponiveis > 0) ? 'Na Doca (Finalizado)' : 'Armazenado',
       'Endereço': p.endereco_atual,
       'Qtd Caixas': p.qtd_caixas || 0,
       'Peso Total': parseFloat(p.peso_total || 0).toFixed(2),
-      'Aberto Em': p.created_at ? format(new Date(p.created_at + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-',
-      'Última Bipagem': p.ultima_caixa ? format(new Date(p.ultima_caixa + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '-',
+      'Aberto Em': safeFmt(p.created_at, 'dd/MM/yyyy HH:mm'),
+      'Última Bipagem': safeFmt(p.ultima_caixa, 'dd/MM/yyyy HH:mm'),
       'Último Operador': p.ultimo_operador || '-'
     }));
     downloadCSV(paletesExport, `historico_paletes_${format(new Date(), 'yyyy-MM-dd')}.csv`);
@@ -413,8 +414,8 @@ function HistoricoPaletes() {
                   </div>
                   {p.created_at && (
                     <div className="text-xs text-muted mt-2">
-                      🕐 Aberto em {format(new Date(p.created_at + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
-                      {p.ultima_caixa && ` · Última bipagem: ${format(new Date(p.ultima_caixa + 'Z'), 'dd/MM/yyyy HH:mm', { locale: ptBR })}${p.ultimo_operador ? ` por ${p.ultimo_operador}` : ''}`}
+                      🕐 Aberto em {(() => { try { const d = new Date(String(p.created_at).endsWith('Z') ? p.created_at : p.created_at + 'Z'); return isNaN(d.getTime()) ? '-' : format(d, 'dd/MM/yyyy HH:mm', { locale: ptBR }); } catch { return '-'; } })()}
+                      {p.ultima_caixa && ` · Última bipagem: ${(() => { try { const d = new Date(String(p.ultima_caixa).endsWith('Z') ? p.ultima_caixa : p.ultima_caixa + 'Z'); return isNaN(d.getTime()) ? '-' : format(d, 'dd/MM/yyyy HH:mm', { locale: ptBR }); } catch { return '-'; } })()} ${p.ultimo_operador ? `por ${p.ultimo_operador}` : ''}`}
                     </div>
                   )}
                 </div>
