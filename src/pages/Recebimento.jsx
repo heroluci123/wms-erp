@@ -354,30 +354,30 @@ function HistoricoPaletes() {
 
       {/* Totalizadores gerais */}
       {paletesFiltrados.length > 0 && (
-        <div className="flex gap-10 mb-16" style={{ flexWrap: 'wrap' }}>
-          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+        <div className="flex gap-16 mb-16" style={{ flexWrap: 'wrap' }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 16px', flex: 1, minWidth: 100, textAlign: 'center' }}>
             <div className="text-xs text-muted">Paletes encontrados</div>
-            <div className="font-bold text-primary" style={{ fontSize: 18 }}>{paletesFiltrados.length}</div>
+            <div className="font-bold text-primary" style={{ fontSize: 20 }}>{paletesFiltrados.length}</div>
           </div>
-          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 16px', flex: 1, minWidth: 100, textAlign: 'center' }}>
             <div className="text-xs text-muted">Total Caixas</div>
-            <div className="font-bold text-cyan" style={{ fontSize: 18 }}>{totalCaixasFiltradas}</div>
+            <div className="font-bold text-cyan" style={{ fontSize: 20 }}>{totalCaixasFiltradas}</div>
           </div>
-          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 16px', flex: 1, minWidth: 100, textAlign: 'center' }}>
             <div className="text-xs text-muted">Peso Total</div>
-            <div className="font-bold text-success" style={{ fontSize: 18 }}>{totalPesoFiltrado.toFixed(1)} kg</div>
+            <div className="font-bold text-success" style={{ fontSize: 20 }}>{totalPesoFiltrado.toFixed(1)} kg</div>
           </div>
-          <div style={{ background: 'var(--warning-muted)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+          <div style={{ background: 'var(--warning-muted)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: '10px 16px', flex: 1, minWidth: 100, textAlign: 'center' }}>
             <div className="text-xs" style={{ color: 'var(--warning)', opacity: 0.8 }}>🟡 Na Doca</div>
-            <div className="font-bold" style={{ fontSize: 18, color: 'var(--warning)' }}>{qtdNaDoca}</div>
+            <div className="font-bold" style={{ fontSize: 20, color: 'var(--warning)' }}>{qtdNaDoca}</div>
           </div>
-          <div style={{ background: 'var(--info-muted)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+          <div style={{ background: 'var(--info-muted)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 8, padding: '10px 16px', flex: 1, minWidth: 100, textAlign: 'center' }}>
             <div className="text-xs" style={{ color: 'var(--info)', opacity: 0.8 }}>🏁 Doca Finalizado</div>
-            <div className="font-bold" style={{ fontSize: 18, color: 'var(--info)' }}>{qtdDocaFinalizado}</div>
+            <div className="font-bold" style={{ fontSize: 20, color: 'var(--info)' }}>{qtdDocaFinalizado}</div>
           </div>
-          <div style={{ background: 'var(--success-muted)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '8px 16px', flex: 1, minWidth: 100 }}>
+          <div style={{ background: 'var(--success-muted)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '10px 16px', flex: 1, minWidth: 100, textAlign: 'center' }}>
             <div className="text-xs" style={{ color: 'var(--success)', opacity: 0.8 }}>✅ Armazenados</div>
-            <div className="font-bold" style={{ fontSize: 18, color: 'var(--success)' }}>{qtdArmazenados}</div>
+            <div className="font-bold" style={{ fontSize: 20, color: 'var(--success)' }}>{qtdArmazenados}</div>
           </div>
         </div>
       )}
