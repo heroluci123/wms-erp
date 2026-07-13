@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Layers, Plus, Factory, Check, Info, ArrowRight, Package, Trash2 } from 'lucide-react'
+import { Layers, Plus, Factory, Check, Info, ArrowRight, Package, Trash2, Unlock } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as producaoQueries from '../queries/producao.js'
 import * as produtosQueries from '../queries/produtos.js'
@@ -260,6 +260,25 @@ export function Producao() {
                   {detalhes.status !== 'FECHADA' && (
                     <button className="btn btn--primary flex items-center gap-8" onClick={() => setModalFinalizarOP(true)}>
                       Finalizar OP <Check size={18}/>
+                    </button>
+                  )}
+                  {detalhes.status === 'FECHADA' && (
+                    <button className="btn btn--outline flex items-center gap-8" onClick={async () => {
+                      if (!window.confirm("Deseja reabrir esta OP?")) return;
+                      try {
+                        const res = await producaoQueries.reabrirOP(opSelecionada.id);
+                        if (res.success) {
+                          toastSuccess('OP Reaberta', 'A OP foi reaberta e os itens de insumo voltaram ao estoque disponível.');
+                          carregarOPs();
+                          carregarDetalhes(opSelecionada.id);
+                        } else {
+                          toastError('Erro', res.error);
+                        }
+                      } catch (e) {
+                        toastError('Erro', e.message);
+                      }
+                    }}>
+                      <Unlock size={18}/> Reabrir OP
                     </button>
                   )}
                 </div>

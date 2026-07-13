@@ -319,3 +319,48 @@ export async function cancelarOP(op_id) {
     return { success: false, error: err.message }
   }
 }
+
+export async function reabrirOP(op_id) {
+  try {
+    const queries = [
+      {
+        sql: `UPDATE ordens_producao SET status = 'ABERTA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        args: [op_id]
+      },
+      {
+        sql: `UPDATE estoque_caixas SET status = 'DISPONIVEL' WHERE id IN (SELECT caixa_id FROM op_insumos WHERE op_id = ?)`,
+        args: [op_id]
+      }
+    ]
+    
+    // Read the inputs to add them back to the position stock
+    const insumosRes = await db.execute({
+      sql: `SELECT c.produto_id, c.endereco, c.validade, c.lote, c.peso_kg FROM op_insumos oi JOIN estoque_caixas c ON c.id = oi.caixa_id WHERE oi.op_id = ?`,
+      args: [op_id]
+    })
+    
+    for (const c of insumosRes.rows) {
+      // Find position safely
+      const posRes = await db.execute({
+        sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND coalesce(lote, '') = coalesce(?, '') AND coalesce(validade, '') = coalesce(?, '')`,
+        args: [c.produto_id, c.endereco, c.lote, c.validade]
+      });
+      if (posRes.rows.length > 0) {
+        queries.push({
+          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          args: [c.peso_kg, posRes.rows[0].id]
+        })
+      } else {
+        queries.push({
+          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, 1, ?)`,
+          args: [c.produto_id, c.endereco, c.lote, c.validade, c.peso_kg]
+        })
+      }
+    }
+    
+    await db.batch(queries, 'write')
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
