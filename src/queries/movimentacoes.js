@@ -227,7 +227,7 @@ export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {
         min(c.created_at) as primeira_caixa,
         max(c.created_at) as ultima_caixa
       FROM paletes p
-      LEFT JOIN estoque_caixas c ON c.palete_id = p.id
+      LEFT JOIN estoque_caixas c ON c.palete_origem_id = p.id
       WHERE ${where}
       GROUP BY p.id
       ORDER BY p.created_at DESC

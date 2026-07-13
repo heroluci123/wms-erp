@@ -214,7 +214,8 @@ function HistoricoPaletes() {
             </div>
             <div style={{ overflowY: 'auto', maxHeight: 520 }}>
               {caixasDetalhe.map((c, i) => {
-                const isDoca = c.status === 'DISPONIVEL' && (c.endereco === 'DOCA' || paleteAberto.endereco_atual === 'DOCA');
+                const enderecoCaixa = c.endereco || paleteAberto.endereco_atual;
+                const isDoca = c.status === 'DISPONIVEL' && (enderecoCaixa === 'DOCA' || enderecoCaixa === 'REC');
                 return (
                 <div key={c.id} style={{
                   padding: '10px 16px',
