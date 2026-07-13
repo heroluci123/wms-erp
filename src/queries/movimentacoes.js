@@ -241,9 +241,11 @@ export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {
 export async function listarTodasCaixasDoPalete(palete_id) {
   const res = await db.execute({
     sql: `
-      SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo, p.tipo_produto
+      SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo, p.tipo_produto,
+             h.operador_nome as bipado_por
       FROM estoque_caixas c
       JOIN produtos p ON c.produto_id = p.id
+      LEFT JOIN caixas_historico h ON h.ean_caixa = c.ean_caixa AND h.operacao = 'RECEBIMENTO'
       WHERE c.palete_id = ?
       ORDER BY c.created_at ASC
     `,

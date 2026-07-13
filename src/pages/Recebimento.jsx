@@ -234,7 +234,7 @@ function HistoricoPaletes() {
                           } catch (e) {
                             return '-';
                           }
-                        })()}
+                        })()}{c.bipado_por ? ` · por ${c.bipado_por}` : ''}
                       </div>
                     )}
                   </div>
