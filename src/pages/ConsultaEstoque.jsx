@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Package, Box, MapPin, Activity, History, ChevronDown, ChevronRight, Clock, Download } from 'lucide-react'
+import { Search, Package, Box, MapPin, Activity, History, ChevronDown, ChevronRight, Clock, FileDown } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as produtosQueries from '../queries/produtos.js'
 import * as consultaQueries from '../queries/consulta.js'
@@ -178,8 +178,8 @@ export function ConsultaEstoque() {
           </h1>
           <p className="page-header__subtitle">Pesquise por EAN (Caixa) ou por Produto (SKU/Descrição) para ver o inventário completo.</p>
         </div>
-        <button onClick={handleExportarCSVSKU} className="btn btn--outline btn--sm flex items-center gap-8" disabled={loading}>
-          <Download size={16} /> Baixar CSV Consolidado
+        <button onClick={handleExportarCSVSKU} className="btn btn--secondary flex items-center gap-8" disabled={loading}>
+          <FileDown size={16} /> Exportar CSV
         </button>
       </div>
 
