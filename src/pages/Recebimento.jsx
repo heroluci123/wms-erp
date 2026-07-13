@@ -146,7 +146,7 @@ function HistoricoPaletes() {
     const qtdConsumidas = caixasDetalhe.filter(c => c.status !== 'DISPONIVEL').length;
 
     return (
-      <div style={{ maxWidth: 900 }}>
+      <div key="detalhe" style={{ maxWidth: 900 }}>
         {/* Header do detalhe */}
         <div className="card mb-16" style={{ padding: '14px 18px' }}>
           <div className="flex justify-between items-center">
@@ -299,7 +299,7 @@ function HistoricoPaletes() {
 
   // ── LISTA DE PALETES ──
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div key="lista" style={{ maxWidth: 900 }}>
       {/* Filtros */}
       <div className="card mb-16">
         <div className="flex items-center gap-8 mb-14">
