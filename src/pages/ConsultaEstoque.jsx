@@ -295,12 +295,14 @@ export function ConsultaEstoque() {
             <div className="flex border-b border-border" style={{ background: 'var(--bg-2)' }}>
               <button 
                 className={`p-16 font-bold flex items-center gap-8 ${abaAtiva === 'enderecos' ? 'text-primary border-b-2 border-primary' : 'text-muted'}`}
+                style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer' }}
                 onClick={() => setAbaAtiva('enderecos')}
               >
                 <MapPin size={18} /> Onde está no Estoque?
               </button>
               <button 
                 className={`p-16 font-bold flex items-center gap-8 ${abaAtiva === 'historico' ? 'text-primary border-b-2 border-primary' : 'text-muted'}`}
+                style={{ background: 'transparent', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer' }}
                 onClick={() => setAbaAtiva('historico')}
               >
                 <Activity size={18} /> Histórico Geral do Produto
@@ -395,7 +397,7 @@ export function ConsultaEstoque() {
                         <tbody>
                           {historicoProd.map(log => (
                             <tr key={log.id}>
-                              <td className="text-muted whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</td>
+                              <td className="text-muted whitespace-nowrap">{new Date(log.data_hora).toLocaleString()}</td>
                               <td><span className={`badge ${log.tipo === 'RECEBIMENTO' ? 'badge--primary' : log.tipo === 'SAIDA' || log.tipo === 'EXPEDICAO' ? 'badge--info' : 'badge--warning'}`}>{log.tipo}</span></td>
                               <td className="font-bold">{log.qtd_caixas} cx <span className="text-muted font-normal ml-4 text-xs">({log.qtd_kg?.toFixed(2)} kg)</span></td>
                               <td>
