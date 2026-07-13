@@ -324,7 +324,7 @@ export async function reabrirOP(op_id) {
   try {
     const queries = [
       {
-        sql: `UPDATE ordens_producao SET status = 'ABERTA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        sql: `UPDATE ordens_producao SET status = 'ABERTA', reaberta = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
         args: [op_id]
       },
       {
@@ -339,7 +339,17 @@ export async function reabrirOP(op_id) {
       args: [op_id]
     })
     
+    // Agrupar para evitar erro de UNIQUE constraint se houver caixas identicas
+    const agrupado = {};
     for (const c of insumosRes.rows) {
+      const key = `${c.produto_id}|${c.endereco}|${c.lote || ''}|${c.validade || ''}`;
+      if (!agrupado[key]) agrupado[key] = { ...c, caixas: 0, peso_total: 0 };
+      agrupado[key].caixas += 1;
+      agrupado[key].peso_total += c.peso_kg;
+    }
+
+    for (const key in agrupado) {
+      const c = agrupado[key];
       // Find position safely
       const posRes = await db.execute({
         sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND coalesce(lote, '') = coalesce(?, '') AND coalesce(validade, '') = coalesce(?, '')`,
@@ -347,13 +357,13 @@ export async function reabrirOP(op_id) {
       });
       if (posRes.rows.length > 0) {
         queries.push({
-          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          args: [c.peso_kg, posRes.rows[0].id]
+          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas + ?, qtd_kg = qtd_kg + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          args: [c.caixas, c.peso_total, posRes.rows[0].id]
         })
       } else {
         queries.push({
-          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, 1, ?)`,
-          args: [c.produto_id, c.endereco, c.lote, c.validade, c.peso_kg]
+          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [c.produto_id, c.endereco, c.lote, c.validade, c.caixas, c.peso_total]
         })
       }
     }

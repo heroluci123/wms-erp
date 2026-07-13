@@ -20,6 +20,7 @@ export function Producao() {
   const [modalFinalizarOP, setModalFinalizarOP] = useState(false)
   const [modalNovaOP, setModalNovaOP] = useState(false)
   const [modalCancelarOP, setModalCancelarOP] = useState(false)
+  const [modalReabrirOP, setModalReabrirOP] = useState(false)
 
   const historico = detalhes ? [
     ...detalhes.insumos.map(i => ({ ...i, tipoMov: 'INSUMO' })),
@@ -263,21 +264,7 @@ export function Producao() {
                     </button>
                   )}
                   {detalhes.status === 'FECHADA' && (
-                    <button className="btn btn--outline flex items-center gap-8" onClick={async () => {
-                      if (!window.confirm("Deseja reabrir esta OP?")) return;
-                      try {
-                        const res = await producaoQueries.reabrirOP(opSelecionada.id);
-                        if (res.success) {
-                          toastSuccess('OP Reaberta', 'A OP foi reaberta e os itens de insumo voltaram ao estoque disponível.');
-                          carregarOPs();
-                          carregarDetalhes(opSelecionada.id);
-                        } else {
-                          toastError('Erro', res.error);
-                        }
-                      } catch (e) {
-                        toastError('Erro', e.message);
-                      }
-                    }}>
+                    <button className="btn btn--outline flex items-center gap-8" onClick={() => setModalReabrirOP(true)}>
                       <Unlock size={18}/> Reabrir OP
                     </button>
                   )}
@@ -381,7 +368,7 @@ export function Producao() {
                           <td className="text-muted text-sm" style={{ textAlign: 'right' }}>
                             {new Date(h.created_at).toLocaleDateString()} {new Date(h.created_at).toLocaleTimeString()}
                           </td>
-                          {detalhes.status !== 'FECHADA' && (operador?.is_adm === 1 || operador?.permissoes?.produtos) && (
+                          {detalhes.status !== 'FECHADA' && !detalhes.reaberta && (operador?.is_adm === 1 || operador?.permissoes?.produtos) && (
                             <td style={{ textAlign: 'center' }}>
                               <button className="text-danger p-4 hover:bg-danger hover:text-white rounded" onClick={() => handleRemoverItem(h)}>
                                 <Trash2 size={16} />
@@ -557,6 +544,34 @@ export function Producao() {
                 }
                 setModalCancelarOP(false)
               }}>Sim, Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REABRIR OP */}
+      {modalReabrirOP && opSelecionada && (
+        <div className="modal-overlay animate-fade-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-warning">Reabrir Ordem de Produção</h3>
+            <p className="mb-24">Deseja realmente reabrir esta OP? O status voltará para ABERTA e os insumos consumidos retornarão ao estoque disponível.</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => setModalReabrirOP(false)}>Cancelar</button>
+              <button className="btn btn--warning flex-1" onClick={async () => {
+                try {
+                  const res = await producaoQueries.reabrirOP(opSelecionada.id);
+                  if (res.success) {
+                    toastSuccess('OP Reaberta', 'A OP foi reaberta com sucesso.');
+                    setModalReabrirOP(false);
+                    carregarOPs();
+                    carregarDetalhes(opSelecionada.id);
+                  } else {
+                    toastError('Erro', res.error);
+                  }
+                } catch (e) {
+                  toastError('Erro', e.message);
+                }
+              }}>Sim, Reabrir</button>
             </div>
           </div>
         </div>
