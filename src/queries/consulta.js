@@ -85,3 +85,27 @@ export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
   });
   return res.rows;
 }
+
+export async function buscarEstoqueConsolidado(produto_id = null) {
+  let where = "c.status = 'DISPONIVEL'";
+  const args = [];
+  
+  if (produto_id) {
+    where += " AND c.produto_id = ?";
+    args.push(produto_id);
+  }
+
+  const res = await db.execute({
+    sql: `
+      SELECT p.codigo, p.descricao, SUM(c.peso_kg) as total_kg
+      FROM estoque_caixas c
+      JOIN produtos p ON c.produto_id = p.id
+      WHERE ${where}
+      GROUP BY p.id
+      ORDER BY p.descricao ASC
+    `,
+    args
+  });
+  return res.rows;
+}
+

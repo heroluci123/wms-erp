@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Package, Box, MapPin, Activity, History, ChevronDown, ChevronRight, Clock } from 'lucide-react'
+import { Search, Package, Box, MapPin, Activity, History, ChevronDown, ChevronRight, Clock, Download } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as produtosQueries from '../queries/produtos.js'
 import * as consultaQueries from '../queries/consulta.js'
@@ -137,15 +137,50 @@ export function ConsultaEstoque() {
     }
   }
 
+  const handleExportarCSVSKU = async () => {
+    try {
+      setLoading(true)
+      const isProdutoFiltrado = viewMode === 'produto' && produtoSel;
+      const dados = await consultaQueries.buscarEstoqueConsolidado(isProdutoFiltrado ? produtoSel.id : null);
+      
+      if (!dados || dados.length === 0) {
+        toastError('Estoque Vazio', 'Não há estoque disponível para exportar.')
+        return
+      }
+
+      let csvContent = 'CODIGO;DESCRICAO;QUANTIDADE_KG\n'
+      dados.forEach(row => {
+        csvContent += `${row.codigo};"${row.descricao}";${row.total_kg.toFixed(2).replace('.', ',')}\n`
+      })
+
+      const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `Estoque_Consolidado_${isProdutoFiltrado ? produtoSel.codigo : 'Geral'}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+    } catch (e) {
+      toastError('Erro', 'Falha ao gerar CSV.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', paddingBottom: 40 }}>
-      <div className="page-header mb-24">
+      <div className="page-header mb-24 flex justify-between items-start flex-wrap gap-12">
         <div>
           <h1 className="page-header__title flex items-center gap-12">
             <Search size={28} /> Consulta de Estoque
           </h1>
           <p className="page-header__subtitle">Pesquise por EAN (Caixa) ou por Produto (SKU/Descrição) para ver o inventário completo.</p>
         </div>
+        <button onClick={handleExportarCSVSKU} className="btn btn--outline btn--sm flex items-center gap-8" disabled={loading}>
+          <Download size={16} /> Baixar CSV Consolidado
+        </button>
       </div>
 
       {/* --- BARRA DE BUSCA HÍBRIDA --- */}
