@@ -8,10 +8,10 @@ import * as inventariosQueries from './inventarios.js';
 
 export async function criarPalete() {
   // Gera um código único estilo PLT-XXXX
-  const resCount = await db.execute("SELECT count(*) as total FROM paletes");
-  const num = (resCount.rows[0].total + 1).toString().padStart(4, '0');
+  const resMax = await db.execute("SELECT MAX(id) as max_id FROM paletes");
+  const num = ((resMax.rows[0].max_id || 0) + 1).toString().padStart(4, '0');
   const codigo = `PLT-${num}`;
-  
+
   await db.execute({
     sql: `INSERT INTO paletes (codigo, endereco_atual, status) VALUES (?, 'REC', 'EM_MONTAGEM')`,
     args: [codigo]
