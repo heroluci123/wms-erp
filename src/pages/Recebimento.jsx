@@ -117,7 +117,13 @@ function HistoricoPaletes() {
       Validade: c.validade || '',
       Status: c.status,
       Endereco: c.endereco || '',
-      BipadoEm: c.created_at ? format(new Date(c.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+      BipadoEm: (() => {
+        if (!c.created_at) return '';
+        try {
+          const p = new Date(c.created_at.replace(' ', 'T') + (c.created_at.includes('Z') ? '' : 'Z'));
+          return isNaN(p.getTime()) ? '' : format(p, 'dd/MM/yyyy HH:mm', { locale: ptBR });
+        } catch(e) { return ''; }
+      })(),
     }));
     downloadCSV(rows, `${paleteAberto.codigo}_caixas_${format(new Date(), 'yyyy-MM-dd')}.csv`);
   };
@@ -217,7 +223,14 @@ function HistoricoPaletes() {
                     <div className="text-xs font-mono text-muted mt-2" style={{ wordBreak: 'break-all' }}>{c.ean_caixa}</div>
                     {c.created_at && (
                       <div className="text-xs text-muted mt-2">
-                        🕐 {format(new Date(c.created_at + 'Z'), 'dd/MM/yy HH:mm', { locale: ptBR })}
+                        🕐 {(() => {
+                          try {
+                            const parsed = new Date(c.created_at.replace(' ', 'T') + (c.created_at.includes('Z') ? '' : 'Z'));
+                            return isNaN(parsed.getTime()) ? '-' : format(parsed, 'dd/MM/yy HH:mm', { locale: ptBR });
+                          } catch (e) {
+                            return '-';
+                          }
+                        })()}
                       </div>
                     )}
                   </div>
