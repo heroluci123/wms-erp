@@ -510,6 +510,11 @@ export function Recebimento() {
 
   const handleConcluirPalete = async () => {
     if (!paleteAtivo) return;
+    if (caixasDoPalete.length === 0) {
+      toastWarning('Palete Vazio', 'Não é possível finalizar um palete sem caixas. Adicione pelo menos uma caixa ou exclua este palete.');
+      setModalConcluirOpen(false);
+      return;
+    }
     try {
       const res = await movimentacoesQueries.concluirPalete(paleteAtivo.id);
       if (res.success) {
