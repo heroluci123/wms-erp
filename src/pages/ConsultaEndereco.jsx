@@ -1,7 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { MapPin, RefreshCw, Package } from 'lucide-react'
+import { MapPin, RefreshCw, Package, FileDown } from 'lucide-react'
 import { db } from '../lib/db.js'
 import { format, differenceInDays } from 'date-fns'
+
+function downloadCSV(content) {
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = Object.assign(document.createElement('a'), { href: url, download: `consulta_endereco_${Date.now()}.csv` })
+  document.body.appendChild(a); a.click(); document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 async function consultarEndereco(endereco) {
   const { rows } = await db.execute({
@@ -66,6 +74,15 @@ export function ConsultaEndereco() {
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
+  const exportarCSV = () => {
+    if (caixas.length === 0) return
+    const header = "ENDERECO;EAN_CAIXA;CODIGO;DESCRICAO;GRUPO;VALIDADE;KG;PALETE;CURVA\n"
+    const rows = caixas.map(i =>
+      `${enderecoConsultado};${i.ean_caixa || ''};${i.codigo};${i.descricao};${i.grupo || ''};${i.validade || ''};${String(i.peso_kg || 0).replace('.', ',')};${i.palete_codigo || ''};${i.status_curva || ''}`
+    ).join("\n")
+    downloadCSV(header + rows)
+  }
+
   // Agrupamento por produto
   const porProduto = caixas.reduce((acc, cx) => {
     const key = cx.codigo
@@ -112,9 +129,16 @@ export function ConsultaEndereco() {
             {loading ? <RefreshCw size={16} className="spin" /> : <MapPin size={16} />} Consultar
           </button>
           {enderecoConsultado && (
-            <button type="button" className="btn btn--ghost" onClick={handleReset}>
-              Limpar
-            </button>
+            <>
+              <button type="button" className="btn btn--ghost" onClick={handleReset}>
+                Limpar
+              </button>
+              {caixas.length > 0 && (
+                <button type="button" className="btn btn--secondary" onClick={exportarCSV}>
+                  <FileDown size={16} /> Exportar CSV
+                </button>
+              )}
+            </>
           )}
         </form>
       </div>
