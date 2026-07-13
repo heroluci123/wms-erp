@@ -584,7 +584,7 @@ export function Recebimento() {
     if (!paleteAtivo) return toastError('Atenção', 'Selecione um palete.')
     if (!produtoDetectado) return toastError('Atenção', 'Produto não detectado.')
     if (!boxData.peso_kg || !boxData.validade) return toastWarning('Atenção', 'Informe peso e validade.')
-
+    if (!eanCaixaReal || eanCaixaReal.trim() === '') return toastError('Atenção', 'EAN inválido ou vazio. Bipe novamente.')
     try {
       const res = await movimentacoesQueries.receberCaixaSerializada({
         ean_caixa: eanCaixaReal,
