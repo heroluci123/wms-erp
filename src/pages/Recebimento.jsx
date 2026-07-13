@@ -27,7 +27,7 @@ function downloadCSV(rows, filename) {
 
 // ─── ABA HISTÓRICO ───────────────────────────────────────────────────────────
 function HistoricoPaletes() {
-  const { toastError, toastSuccess } = useAppStore();
+  const { toastError, toastSuccess, operador } = useAppStore();
   const [paletes, setPaletes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [paleteAberto, setPaleteAberto] = useState(null); // palete selecionado para ver caixas
