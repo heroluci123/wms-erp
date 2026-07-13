@@ -16,7 +16,7 @@ async function consultarEndereco(endereco) {
     sql: `
       SELECT
         ec.id, ec.ean_caixa, ec.peso_kg, ec.validade, ec.lote,
-        p.codigo, p.descricao, p.status_curva, p.grupo,
+        p.codigo, p.descricao, p.status_curva, p.grupo, p.valor_unitario,
         pl.codigo as palete_codigo
       FROM estoque_caixas ec
       JOIN produtos p ON p.id = ec.produto_id
@@ -93,6 +93,7 @@ export function ConsultaEndereco() {
 
   const totalCx = caixas.length
   const totalKg = caixas.reduce((s, c) => s + (parseFloat(c.peso_kg) || 0), 0)
+  const totalValor = caixas.reduce((s, c) => s + ((parseFloat(c.peso_kg) || 0) * (parseFloat(c.valor_unitario) || 0)), 0)
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto', paddingBottom: 48 }}>
@@ -185,6 +186,11 @@ export function ConsultaEndereco() {
                 <div style={{ textAlign: 'center', padding: '0 40px' }}>
                   <div style={{ fontSize: 36, fontWeight: 900, color: 'var(--warning)', lineHeight: 1 }}>{Object.keys(porProduto).length}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>Produtos</div>
+                </div>
+                <div style={{ width: 1, height: 48, background: 'var(--border)', opacity: 0.6 }} />
+                <div style={{ textAlign: 'center', padding: '0 40px' }}>
+                  <div style={{ fontSize: 36, fontWeight: 900, color: 'var(--cyan)', lineHeight: 1 }}>R$ {totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>Valor Agregado</div>
                 </div>
               </div>
 
