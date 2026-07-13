@@ -84,6 +84,11 @@ export function Rastreabilidade() {
                     {caixaInfo.status === 'CONSUMIDA' ? 'DESMEMBRADA' : caixaInfo.status === 'EXPEDIDA' ? 'EXPEDIDA' : caixaInfo.endereco}
                   </div>
                   {caixaInfo.status === 'DISPONIVEL' && <div className="text-sm text-muted">Em Estoque</div>}
+                  {caixaInfo.palete_codigo && (
+                    <div className="text-sm font-bold mt-4" style={{ color: 'var(--primary)' }}>
+                      Palete: {caixaInfo.palete_codigo}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

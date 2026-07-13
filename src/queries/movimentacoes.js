@@ -227,7 +227,7 @@ export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {
         min(c.created_at) as primeira_caixa,
         max(c.created_at) as ultima_caixa
       FROM paletes p
-      LEFT JOIN estoque_caixas c ON c.palete_origem_id = p.id
+      LEFT JOIN estoque_caixas c ON c.palete_id = p.id
       WHERE ${where}
       GROUP BY p.id
       ORDER BY p.created_at DESC
@@ -246,7 +246,7 @@ export async function listarTodasCaixasDoPalete(palete_id) {
       FROM estoque_caixas c
       JOIN produtos p ON c.produto_id = p.id
       LEFT JOIN caixas_historico h ON h.ean_caixa = c.ean_caixa AND h.operacao = 'RECEBIMENTO'
-      WHERE c.palete_origem_id = ?
+      WHERE c.palete_id = ?
       ORDER BY c.created_at ASC
     `,
     args: [palete_id]
