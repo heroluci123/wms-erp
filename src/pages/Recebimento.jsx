@@ -142,8 +142,8 @@ function HistoricoPaletes() {
   // ── DETALHE DO PALETE ──
   if (paleteAberto) {
     const pesoTotal = caixasDetalhe.reduce((s, c) => s + c.peso_kg, 0);
-    const qtdDisponiveis = caixasDetalhe.filter(c => c.status === 'DISPONIVEL').length;
-    const qtdConsumidas = caixasDetalhe.filter(c => c.status !== 'DISPONIVEL').length;
+    const qtdDisponiveis = caixasDetalhe.filter(c => c.palete_id === paleteAberto.id && c.status === 'DISPONIVEL').length;
+    const qtdConsumidas = caixasDetalhe.length - qtdDisponiveis;
 
     return (
       <div key="detalhe" style={{ maxWidth: 900 }}>
@@ -225,6 +225,9 @@ function HistoricoPaletes() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="font-bold text-sm" style={{ lineHeight: 1.3 }}>{c.produto_descricao}</div>
                     <div className="text-xs font-mono text-muted mt-2" style={{ wordBreak: 'break-all' }}>{c.ean_caixa}</div>
+                    <div className="text-muted text-xs">
+                      {c.palete_id === paleteAberto.id && c.status === 'DISPONIVEL' ? '-' : `Endereço: ${c.endereco || 'Desconhecido'}`}
+                    </div>
                     {c.created_at && (
                       <div className="text-xs text-muted mt-2">
                         🕐 {(() => {

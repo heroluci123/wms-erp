@@ -29,8 +29,8 @@ export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id
     // 1. Inserir a caixa serializada
     const queries = [
       {
-        sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, palete_id, peso_kg, validade, status) VALUES (?, ?, ?, ?, ?, 'DISPONIVEL')`,
-        args: [ean_caixa, produto_id, palete_id || null, peso_kg, validade || null]
+        sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, palete_id, palete_origem_id, peso_kg, validade, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
+        args: [ean_caixa, produto_id, palete_id || null, palete_id || null, peso_kg, validade || null]
       },
       // 2. Aumentar o saldo agregado em REC (mantém compatibilidade com o WMS atual)
       {
@@ -246,7 +246,7 @@ export async function listarTodasCaixasDoPalete(palete_id) {
       FROM estoque_caixas c
       JOIN produtos p ON c.produto_id = p.id
       LEFT JOIN caixas_historico h ON h.ean_caixa = c.ean_caixa AND h.operacao = 'RECEBIMENTO'
-      WHERE c.palete_id = ?
+      WHERE c.palete_origem_id = ?
       ORDER BY c.created_at ASC
     `,
     args: [palete_id]
