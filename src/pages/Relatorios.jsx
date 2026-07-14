@@ -4,6 +4,8 @@ import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts'
 import * as relatoriosQueries from '../queries/relatorios'
 
+const fmtKg = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg'
+
 const PRESETS = [
   { label: 'Hoje',    getRange: () => { const d = new Date().toISOString().slice(0,10); return [d, d] } },
   { label: '7 dias',  getRange: () => [subDays(new Date(), 6).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
@@ -334,8 +336,8 @@ export function Relatorios() {
                           <BarChart data={totalGeral} margin={{ top: 20, right: 20, left: 10, bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" vertical={false} />
                             <XAxis dataKey="name" tick={{ fontSize: 13, fontWeight: 'bold', fill: '#e2e2eb' }} axisLine={false} tickLine={false} />
-                            <YAxis tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={false} tickLine={false} />
-                            <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#fff' }} />
+                            <YAxis tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={false} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
+                            <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#fff' }} formatter={fmtKg} />
                             <Bar dataKey="valor" radius={[6, 6, 0, 0]} barSize={70}>
                               {totalGeral.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.fill} />
@@ -350,28 +352,12 @@ export function Relatorios() {
                       <h3 className="text-sm font-bold mb-12 text-center uppercase" style={{ color: 'var(--text-muted)' }}>Top 10 Entradas</h3>
                       <div style={{ width: '100%', height: 320 }}>
                         <ResponsiveContainer width="100%" height={320}>
-                          <BarChart
-                            data={top10Entradas}
-                            layout="vertical"
-                            margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
-                          >
+                          <BarChart data={top10Entradas} layout="vertical" margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={false} vertical={true} />
-                            <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} />
-                            <YAxis
-                              dataKey="descricao"
-                              type="category"
-                              width={130}
-                              tick={{ fontSize: 9, fill: '#e2e2eb' }}
-                              axisLine={false}
-                              tickLine={false}
-                              tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v}
-                            />
-                            <Tooltip
-                              cursor={{ fill: 'rgba(42,42,60,0.6)' }}
-                              contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }}
-                              itemStyle={{ color: '#10b981' }}
-                            />
-                            <Bar dataKey="total_entrada" name="Entradas (kg)" fill="#10b981" radius={[0, 4, 4, 0]} barSize={18} />
+                            <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
+                            <YAxis dataKey="descricao" type="category" width={130} tick={{ fontSize: 9, fill: '#e2e2eb' }} axisLine={false} tickLine={false} tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v} />
+                            <Tooltip cursor={{ fill: 'rgba(42,42,60,0.6)' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#10b981' }} formatter={fmtKg} />
+                            <Bar dataKey="total_entrada" name="Entradas" fill="#10b981" radius={[0, 4, 4, 0]} barSize={18} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -381,28 +367,12 @@ export function Relatorios() {
                       <h3 className="text-sm font-bold mb-12 text-center uppercase" style={{ color: 'var(--text-muted)' }}>Top 10 Saídas</h3>
                       <div style={{ width: '100%', height: 320 }}>
                         <ResponsiveContainer width="100%" height={320}>
-                          <BarChart
-                            data={top10Saidas}
-                            layout="vertical"
-                            margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
-                          >
+                          <BarChart data={top10Saidas} layout="vertical" margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={false} vertical={true} />
-                            <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} />
-                            <YAxis
-                              dataKey="descricao"
-                              type="category"
-                              width={130}
-                              tick={{ fontSize: 9, fill: '#e2e2eb' }}
-                              axisLine={false}
-                              tickLine={false}
-                              tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v}
-                            />
-                            <Tooltip
-                              cursor={{ fill: 'rgba(42,42,60,0.6)' }}
-                              contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }}
-                              itemStyle={{ color: '#ef4444' }}
-                            />
-                            <Bar dataKey="total_saida" name="Saídas (kg)" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={18} />
+                            <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
+                            <YAxis dataKey="descricao" type="category" width={130} tick={{ fontSize: 9, fill: '#e2e2eb' }} axisLine={false} tickLine={false} tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v} />
+                            <Tooltip cursor={{ fill: 'rgba(42,42,60,0.6)' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#ef4444' }} formatter={fmtKg} />
+                            <Bar dataKey="total_saida" name="Saídas" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={18} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
