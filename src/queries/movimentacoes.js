@@ -1165,11 +1165,11 @@ export async function listarHistoricoTransferencias({ filtroEndereco = '', filtr
     args.push(`%${filtroProduto.trim()}%`)
   }
   if (dataInicio) {
-    where += ` AND DATE(ml.created_at) >= ?`
+    where += ` AND DATE(ml.data_hora) >= ?`
     args.push(dataInicio)
   }
   if (dataFim) {
-    where += ` AND DATE(ml.created_at) <= ?`
+    where += ` AND DATE(ml.data_hora) <= ?`
     args.push(dataFim)
   }
 
@@ -1180,7 +1180,7 @@ export async function listarHistoricoTransferencias({ filtroEndereco = '', filtr
           FROM movimentacoes_log ml
           LEFT JOIN produtos p ON p.id = ml.produto_id
           ${where}
-          ORDER BY ml.created_at DESC
+          ORDER BY ml.data_hora DESC
           LIMIT ?`,
     args
   })

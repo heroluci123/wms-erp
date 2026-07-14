@@ -188,7 +188,7 @@ export function Movimentacao() {
     if (historico.length === 0) return
     const header = ['Data/Hora','Produto','Codigo','Origem','Destino','Caixas','Kg','Operador']
     const rows = historico.map(h => [
-      new Date(h.created_at).toLocaleString('pt-BR'),
+      new Date(h.data_hora).toLocaleString('pt-BR'),
       h.produto_descricao || '-',
       h.produto_codigo || '-',
       h.endereco_origem,
@@ -415,7 +415,7 @@ export function Movimentacao() {
                       <span>📦 <strong>{h.qtd_caixas}</strong> cx</span>
                       <span>⚖️ <strong>{parseFloat(h.qtd_kg||0).toFixed(3)}</strong> kg</span>
                       <span>👤 {h.operador_nome || 'Sistema'}</span>
-                      <span>🕐 {new Date(h.created_at).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
+                      <span>📅 {new Date(h.data_hora).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
                     </div>
                   </div>
                 </div>
