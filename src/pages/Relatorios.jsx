@@ -180,7 +180,12 @@ export function Relatorios() {
       entry.total_saida += (b.total_saida || 0)
     })
     
-    return Array.from(map.values()).sort((a, b) => a.descricao.localeCompare(b.descricao))
+    // Sort by Total Volume (Entradas + Saídas) Descending instead of alphabetical
+    return Array.from(map.values()).sort((a, b) => {
+      const volA = a.total_entrada + Math.abs(a.total_saida)
+      const volB = b.total_entrada + Math.abs(b.total_saida)
+      return volB - volA
+    })
   }, [balanco, agruparMateriaPrima, filtroProduto, arvoreData])
 
   const exportarCSV = () => {
@@ -314,11 +319,11 @@ export function Relatorios() {
 
                 {/* Gráficos */}
                 {balancoView.length > 0 && (
-                  <div className="flex gap-24 mb-24 flex-wrap">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-24 mb-24">
                     
-                    <div className="w-full lg:w-[280px] shrink-0 card border border-border p-16">
+                    <div className="card border border-border p-16 flex flex-col">
                       <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Resumo Total (Kg)</h3>
-                      <div style={{ height: 350 }}>
+                      <div className="flex-1 min-h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={totalGeral} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" vertical={false} />
@@ -335,14 +340,14 @@ export function Relatorios() {
                       </div>
                     </div>
 
-                    <div className="flex-1 min-w-[350px] card border border-border p-16">
+                    <div className="card border border-border p-16 flex flex-col">
                       <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Top 10 Entradas (Kg)</h3>
-                      <div style={{ height: 350 }}>
+                      <div className="flex-1 min-h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={top10Entradas} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
+                          <BarChart data={top10Entradas} layout="vertical" margin={{ top: 10, right: 20, left: -20, bottom: 10 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={true} vertical={false} />
                             <XAxis type="number" tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
-                            <YAxis dataKey="descricao" type="category" width={220} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <YAxis dataKey="descricao" type="category" width={160} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
                             <Tooltip cursor={{fill: '#2a2a3c', opacity: 0.4}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff'}} itemStyle={{color: '#fff'}} />
                             <Bar dataKey="total_entrada" name="Entradas (+)" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
                           </BarChart>
@@ -350,14 +355,14 @@ export function Relatorios() {
                       </div>
                     </div>
 
-                    <div className="flex-1 min-w-[350px] card border border-border p-16">
+                    <div className="card border border-border p-16 flex flex-col">
                       <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Top 10 Saídas (Kg)</h3>
-                      <div style={{ height: 350 }}>
+                      <div className="flex-1 min-h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={top10Saidas} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
+                          <BarChart data={top10Saidas} layout="vertical" margin={{ top: 10, right: 20, left: -20, bottom: 10 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={true} vertical={false} />
                             <XAxis type="number" tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
-                            <YAxis dataKey="descricao" type="category" width={220} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <YAxis dataKey="descricao" type="category" width={160} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
                             <Tooltip cursor={{fill: '#2a2a3c', opacity: 0.4}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff'}} itemStyle={{color: '#fff'}} />
                             <Bar dataKey="total_saida" name="Saídas (-)" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={14} />
                           </BarChart>
