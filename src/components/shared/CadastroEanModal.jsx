@@ -146,17 +146,17 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
 
   return (
     <div className="modal-overlay">
-      <div className="modal-content" style={{ maxWidth: 600 }}>
+      <div className="modal-content" style={{ maxWidth: 600, width: '95%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-lg)' }}>
 
         {/* HEADER */}
-        <div className="modal-header">
-          <h2 className="flex items-center gap-8" style={{ color: 'var(--warning)' }}>
+        <div className="modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 className="flex items-center gap-8" style={{ color: 'var(--warning)', margin: 0, fontSize: 18 }}>
             <Tag size={20} /> Produto não encontrado
           </h2>
-          <button className="btn btn--ghost" onClick={onClose}><X size={20} /></button>
+          <button className="btn btn--ghost" onClick={onClose} style={{ padding: 4 }}><X size={20} /></button>
         </div>
 
-        <div className="modal-body">
+        <div className="modal-body" style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
 
           {/* Visualização do EAN com sufixo destacado */}
           <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', marginBottom: 20, textAlign: 'center' }}>
@@ -242,7 +242,7 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
               </div>
 
               {/* Lista de produtos */}
-              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 16 }}>
+              <div style={{ flex: 1, minHeight: 120, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 16 }}>
                 {produtosList.filter(p =>
                   p.descricao.toLowerCase().includes(busca.toLowerCase()) ||
                   (p.codigo && p.codigo.toLowerCase().includes(busca.toLowerCase()))
@@ -283,12 +283,14 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
                 </div>
               )}
 
-              <button
-                className="btn btn--primary btn--lg w-full"
-                onClick={handleSalvarManual}
-                disabled={!produtoSelecionado}>
-                <Check size={16} /> Vincular e Salvar
-              </button>
+              <div style={{ flexShrink: 0 }}>
+                <button
+                  className="btn btn--primary btn--lg w-full"
+                  onClick={handleSalvarManual}
+                  disabled={!produtoSelecionado}>
+                  <Check size={16} /> Vincular e Salvar
+                </button>
+              </div>
 
               {podeCadastrar && (
                 <div style={{ marginTop: 16, textAlign: 'center' }}>
