@@ -6,6 +6,16 @@ import * as produtosQueries from '../queries/produtos.js'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 
+const fmtDataHora = (str) => {
+  if (!str) return '-'
+  const s = str.trim()
+  const iso = /[Zz+\-]\d*$/.test(s) ? s : s.replace(' ', 'T') + 'Z'
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  })
+}
+
 export function Producao() {
   const { toastSuccess, toastError, toastWarning, operador } = useAppStore()
   const [ops, setOps] = useState([])
@@ -253,7 +263,9 @@ export function Producao() {
               <div className="flex items-center justify-between mb-16">
                 <div>
                   <h2 className="font-bold text-xl text-primary">{detalhes.codigo} - {detalhes.nome}</h2>
-                  <div className="text-muted text-sm mt-4">Criado em: {new Date(detalhes.created_at).toLocaleString()}</div>
+                  <div className="text-muted text-sm mt-4">
+                    Criado em: {fmtDataHora(detalhes.created_at)} por <span className="font-semibold text-text-primary">{detalhes.operador_nome || 'Sistema'}</span>
+                  </div>
                 </div>
                 <div className="flex gap-12">
                   {detalhes.status !== 'FECHADA' && detalhes.insumos.length === 0 && detalhes.retornos.length === 0 && (

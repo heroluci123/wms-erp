@@ -333,7 +333,14 @@ export function Produtos() {
 
       {/* MODAL DE EDIÇÃO */}
       {isEditing && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-24 fade-in">
+        <div 
+          className="flex items-center justify-center p-24 fade-in"
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            zIndex: 50,
+            backgroundColor: 'rgba(0,0,0,0.6)'
+          }}
+        >
           <div className="bg-bg border border-border rounded-lg w-full max-w-4xl max-h-full flex flex-col shadow-2xl">
             <div className="flex items-center justify-between p-16 border-b border-border bg-bg-1 rounded-t-lg">
               <h2 className="text-lg font-bold flex items-center gap-8">

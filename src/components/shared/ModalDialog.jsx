@@ -33,8 +33,12 @@ export function ModalDialog({ isOpen, type = 'alert', title, message, onConfirm,
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-24 fade-in"
-      style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+      className="flex items-center justify-center p-24 fade-in"
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 9999,
+        backgroundColor: 'rgba(0,0,0,0.7)'
+      }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
