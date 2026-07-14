@@ -143,10 +143,19 @@ export function Produtos() {
     document.body.removeChild(link)
   }
 
-  const filtrados = produtos.filter(p => 
-    p.descricao.toLowerCase().includes(busca.toLowerCase()) || 
-    (p.codigo && String(p.codigo).toLowerCase().includes(busca.toLowerCase()))
-  )
+  const [filtroClassificacao, setFiltroClassificacao] = useState('TODOS')
+
+  const filtrados = produtos.filter(p => {
+    const buscaOk = p.descricao.toLowerCase().includes(busca.toLowerCase()) ||
+      (p.codigo && String(p.codigo).toLowerCase().includes(busca.toLowerCase()))
+    
+    const classOk =
+      filtroClassificacao === 'TODOS' ? true :
+      filtroClassificacao === 'SEM_CLASSIFICACAO' ? !p.classificacao :
+      p.classificacao === filtroClassificacao
+    
+    return buscaOk && classOk
+  })
 
   const materiasPrimas = produtos.filter(p => p.classificacao === 'MATERIA_PRIMA' && p.id !== formData.id)
 
@@ -171,19 +180,65 @@ export function Produtos() {
 
       <div className="flex-1 min-h-0 flex flex-col">
         <div className="card h-full flex flex-col">
-          <div className="p-16 border-b border-border flex gap-16">
-            <div className="relative flex-1 max-w-[400px]">
-              <Search className="absolute left-12 top-10 text-muted" size={18} />
-              <input
-                type="text"
-                placeholder="Buscar por código ou descrição..."
-                className="form-input pl-40 w-full"
-                value={busca}
-                onChange={e => setBusca(e.target.value)}
-              />
+          <div className="p-16 border-b border-border">
+            <div className="flex gap-16 flex-wrap items-center">
+              <div className="relative flex-1 max-w-[360px]">
+                <Search className="absolute left-12 top-10 text-muted" size={18} />
+                <input
+                  type="text"
+                  placeholder="Buscar por código ou descrição..."
+                  className="form-input pl-40 w-full"
+                  value={busca}
+                  onChange={e => setBusca(e.target.value)}
+                />
+              </div>
+
+              {/* Filtros de Classificação */}
+              <div className="flex gap-8 flex-wrap">
+                {[
+                  { label: 'Todos', value: 'TODOS' },
+                  { label: 'Matéria Prima', value: 'MATERIA_PRIMA' },
+                  { label: 'Subproduto', value: 'SUBPRODUTO' },
+                  { label: 'Não Classificados', value: 'SEM_CLASSIFICACAO' },
+                ].map(f => (
+                  <button
+                    key={f.value}
+                    onClick={() => setFiltroClassificacao(f.value)}
+                    style={{
+                      padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                      border: '1.5px solid',
+                      borderColor: filtroClassificacao === f.value
+                        ? f.value === 'SEM_CLASSIFICACAO' ? 'var(--warning)'
+                          : f.value === 'MATERIA_PRIMA' ? 'var(--success)'
+                          : f.value === 'SUBPRODUTO' ? '#f59e0b'
+                          : 'var(--primary)'
+                        : 'transparent',
+                      backgroundColor: filtroClassificacao === f.value
+                        ? f.value === 'SEM_CLASSIFICACAO' ? 'rgba(245,158,11,0.15)'
+                          : f.value === 'MATERIA_PRIMA' ? 'rgba(16,185,129,0.15)'
+                          : f.value === 'SUBPRODUTO' ? 'rgba(245,158,11,0.15)'
+                          : 'rgba(99,102,241,0.15)'
+                        : 'var(--bg-2)',
+                      color: filtroClassificacao === f.value
+                        ? f.value === 'SEM_CLASSIFICACAO' ? 'var(--warning)'
+                          : f.value === 'MATERIA_PRIMA' ? 'var(--success)'
+                          : f.value === 'SUBPRODUTO' ? '#f59e0b'
+                          : 'var(--primary)'
+                        : 'var(--text-muted)',
+                      cursor: 'pointer', transition: 'all 0.15s'
+                    }}
+                  >
+                    {f.value === 'SEM_CLASSIFICACAO' && filtroClassificacao !== 'SEM_CLASSIFICACAO'
+                      ? `⚠️ ${f.label}` : f.label}
+                    {' '}({f.value === 'TODOS' ? produtos.length
+                      : f.value === 'SEM_CLASSIFICACAO' ? produtos.filter(p => !p.classificacao).length
+                      : produtos.filter(p => p.classificacao === f.value).length})
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-          
+
           <div className="flex-1 overflow-auto table-container">
             {loading ? (
               <div className="p-32 text-center text-muted">Carregando produtos...</div>
