@@ -650,7 +650,7 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
         if (tipoAjuste === 'Perda') {
           // Move para o endereço PERDIDO e marca como BLOQUEADO
           await tx.execute({
-            sql: `UPDATE estoque_caixas SET endereco = 'PERDIDO', status = 'BLOQUEADO', updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
+            sql: `UPDATE estoque_caixas SET endereco = 'PERDIDO', status = 'BLOQUEADO', updated_at = CURRENT_TIMESTAMP WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
             args: [item.ean_caixa]
           })
           await tx.execute({
@@ -664,11 +664,11 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
           })
         } else if (tipoAjuste === 'Sobra') {
           // Verifica se já existia na estoque_caixas em outro lugar
-          const { rows: caixas } = await tx.execute({ sql: `SELECT id, endereco, peso_kg FROM estoque_caixas WHERE ean_caixa = ?`, args: [item.ean_caixa] })
+          const { rows: caixas } = await tx.execute({ sql: `SELECT id, endereco, peso_kg FROM estoque_caixas WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`, args: [item.ean_caixa] })
           if (caixas.length > 0) {
             // Estava perdida, move pra cá
             await tx.execute({
-              sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
+              sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
               args: [item.endereco, kgContado, validadeReal, item.ean_caixa]
             })
             await tx.execute({
@@ -696,7 +696,7 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
         } else {
           // Divergência de Peso/Validade (SSCC)
           await tx.execute({
-            sql: `UPDATE estoque_caixas SET peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
+            sql: `UPDATE estoque_caixas SET peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
             args: [kgContado, validadeReal, item.ean_caixa]
           })
           await tx.execute({
@@ -843,7 +843,7 @@ export async function adicionarItemSurpresa({ inventario_id, endereco, produto_i
   const { rows: existenteRows } = await db.execute({
     sql: `
     SELECT * FROM inventario_itens 
-    WHERE inventario_id = ? AND endereco = ? AND ean_caixa = ?
+    WHERE inventario_id = ? AND endereco = ? AND LTRIM(ean_caixa, '0') = LTRIM(?, '0')
   `, args: [inventario_id, endereco, ean_caixa] })
   const existente = existenteRows[0]
   

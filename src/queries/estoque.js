@@ -98,7 +98,7 @@ export async function inserirCaixasCargaInicial(caixas) {
   try {
     for (const c of caixas) {
       const { rows } = await tx.execute({
-        sql: `SELECT id FROM estoque_caixas WHERE ean_caixa = ?`,
+        sql: `SELECT id FROM estoque_caixas WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
         args: [c.ean_caixa]
       });
       if (rows.length === 0) {
@@ -108,7 +108,7 @@ export async function inserirCaixasCargaInicial(caixas) {
         });
       } else {
         await tx.execute({
-          sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL' WHERE ean_caixa = ?`,
+          sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL' WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
           args: [c.endereco, c.peso_kg, c.validade || null, c.ean_caixa]
         });
       }

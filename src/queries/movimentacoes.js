@@ -281,15 +281,14 @@ export async function identificarCodigoMovimentacao(codigo) {
   }
 
   // 2. Tentar como Caixa SSCC Específica
-  // Tenta EAN exato E sem zeros à esquerda (coletor pode emitir 0000072245006840 em vez de 72245006840)
-  const codigoSemZeros = codigo.replace(/^0+/, '') || codigo;
+  // Tenta EAN ignorando os zeros à esquerda (coletor pode emitir 0000072245006840 em vez de 72245006840)
   const resCaixa = await db.execute({ 
     sql: `SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo, pal.codigo as palete_codigo 
           FROM estoque_caixas c 
           JOIN produtos p ON c.produto_id = p.id
           LEFT JOIN paletes pal ON c.palete_id = pal.id
-          WHERE (c.ean_caixa = ? OR c.ean_caixa = ?) AND c.status = 'DISPONIVEL'`, 
-    args: [codigo, codigoSemZeros] 
+          WHERE LTRIM(c.ean_caixa, '0') = LTRIM(?, '0') AND c.status = 'DISPONIVEL'`, 
+    args: [codigo] 
   });
   
   if (resCaixa.rows.length > 0) {

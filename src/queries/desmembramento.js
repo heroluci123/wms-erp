@@ -5,7 +5,7 @@ export async function validarCaixa(ean) {
     sql: `SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo 
           FROM estoque_caixas c 
           JOIN produtos p ON c.produto_id = p.id 
-          WHERE c.ean_caixa = ?`,
+          WHERE LTRIM(c.ean_caixa, '0') = LTRIM(?, '0')`,
     args: [ean]
   });
   
