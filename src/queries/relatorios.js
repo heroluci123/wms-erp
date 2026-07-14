@@ -9,7 +9,7 @@ export async function getBalancoMensal(mesAno) {
       FROM caixas_historico ch
       JOIN estoque_caixas c ON c.id = ch.caixa_id
       JOIN produtos p ON p.id = c.produto_id
-      WHERE strftime('%Y-%m', ch.created_at) = ?
+      WHERE strftime('%Y-%m', ch.data_hora) = ?
       GROUP BY p.id, p.descricao, p.classificacao, p.produto_pai_id
       ORDER BY p.descricao ASC
     `,
