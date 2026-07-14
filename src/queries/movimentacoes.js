@@ -388,6 +388,70 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
   }
 }
 
+export async function transferirEnderecoInteiro({ origem, destino, operador_id, operador_nome }) {
+  if (destino === 'REC' || destino === 'EXPEDICAO') {
+    return { success: false, error: 'Proibido transferir diretamente para REC ou EXPEDICAO.' };
+  }
+
+  try {
+    const paletes = (await db.execute({ sql: `SELECT * FROM paletes WHERE endereco_atual = ?`, args: [origem] })).rows;
+    const caixas = (await db.execute({ 
+      sql: `SELECT * FROM estoque_caixas WHERE (endereco = ? OR palete_id IN (SELECT id FROM paletes WHERE endereco_atual = ?)) AND status = 'DISPONIVEL'`, 
+      args: [origem, origem] 
+    })).rows;
+
+    if (paletes.length === 0 && caixas.length === 0) {
+       return { success: false, error: `Nenhum saldo encontrado no endereço ${origem}.` };
+    }
+
+    const blocos = [];
+
+    if (paletes.length > 0) {
+      const paleteIds = paletes.map(p => p.id).join(',');
+      blocos.push({ sql: `UPDATE paletes SET endereco_atual = ? WHERE id IN (${paleteIds})`, args: [destino] });
+    }
+    
+    if (caixas.length > 0) {
+      const caixaIds = caixas.map(c => c.id).join(',');
+      blocos.push({ sql: `UPDATE estoque_caixas SET endereco = ? WHERE id IN (${caixaIds})`, args: [destino] });
+      
+      for (const c of caixas) {
+        blocos.push({
+          sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'TRANSFERENCIA', 'Transferência de Endereço Completo (' || ? || ') para ' || ?, ?)`,
+          args: [c.id, c.ean_caixa, origem, destino, operador_nome || 'Sistema']
+        });
+      }
+      
+      const agrupamento = {};
+      for (const c of caixas) {
+        const key = `${c.produto_id}_${c.validade}`;
+        if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, caixas: 0, kg: 0 };
+        agrupamento[key].caixas += 1;
+        agrupamento[key].kg += c.peso_kg;
+      }
+
+      for (const g of Object.values(agrupamento)) {
+        blocos.push({
+          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+          args: [g.produto_id, destino, g.validade || null, g.caixas, g.kg]
+        });
+
+        blocos.push({
+          sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, ?, '', ?, ?, ?, ?, 'TRANSFERENCIA')`,
+          args: [g.produto_id, origem, destino, g.caixas, g.kg, operador_id || null, operador_nome || 'Sistema']
+        });
+      }
+    }
+    
+    await db.batch(blocos, 'write');
+    await db.execute({ sql: `DELETE FROM estoque_posicao WHERE endereco = ?`, args: [origem] });
+
+    return { success: true, totalPaletes: paletes.length, totalCaixas: caixas.length };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, operador_nome }) {
   if (destino === 'REC' || destino === 'EXPEDICAO') {
     return { success: false, error: 'Proibido transferir para REC/EXPEDICAO via Movimentação.' }

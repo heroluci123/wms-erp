@@ -12,27 +12,17 @@ import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
 export function Movimentacao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   
-  // Modos: 'SCANNER_ORIGEM' | 'DESTINO' | 'ANTIGO_PRODUTO' | 'ANTIGO_QTD'
   const [step, setStep] = useState('SCANNER_ORIGEM')
   
   // Estado Universal
-  const [entidadeTipo, setEntidadeTipo] = useState(null) // 'PALETE' | 'CAIXAS' | 'ANTIGO'
+  const [entidadeTipo, setEntidadeTipo] = useState(null) // 'PALETE' | 'CAIXAS' | 'ENDERECO_TODO'
   const [paleteSelecionado, setPaleteSelecionado] = useState(null)
   const [caixasSelecionadas, setCaixasSelecionadas] = useState([])
-  const [enderecoOrigem, setEnderecoOrigem] = useState(null) // Para o modo antigo
+  const [enderecoOrigem, setEnderecoOrigem] = useState(null)
   
-  // Estado Modo Antigo
-  const [produtoAntigo, setProdutoAntigo] = useState(null)
-  const [saldoAtual, setSaldoAtual] = useState(null)
-  const [saldoOpcoes, setSaldoOpcoes] = useState([])
-  const [qtdCaixas, setQtdCaixas] = useState('')
-  const [qtdKg, setQtdKg] = useState('')
-  const [sugestoes, setSugestoes] = useState([])
-
-  // Modal Cadastro EAN
-  const [modalEanOpen, setModalEanOpen] = useState(false)
-  const [eanDesconhecido, setEanDesconhecido] = useState('')
-
+  const [modalConfirmarOrigem, setModalConfirmarOrigem] = useState(false)
+  const [modalConfirmarDestino, setModalConfirmarDestino] = useState(false)
+  
   const [destino, setDestino] = useState('')
 
   // Abas
@@ -52,13 +42,9 @@ export function Movimentacao() {
     setPaleteSelecionado(null)
     setCaixasSelecionadas([])
     setEnderecoOrigem(null)
-    setProdutoAntigo(null)
-    setSaldoAtual(null)
-    setSaldoOpcoes([])
-    setQtdCaixas('')
-    setQtdKg('')
     setDestino('')
-    setSugestoes([])
+    setModalConfirmarOrigem(false)
+    setModalConfirmarDestino(false)
     setTimeout(() => document.getElementById('input-universal')?.focus(), 100)
   }
 
@@ -70,11 +56,6 @@ export function Movimentacao() {
       // Se já estiver na etapa de destino e bipar algo
       if (step === 'DESTINO') {
         return processarScanDestino(codigo)
-      }
-
-      // Se for modo ANTIGO aguardando produto
-      if (step === 'ANTIGO_PRODUTO') {
-        return processarScanProdutoAntigo(codigo)
       }
 
       // ESTAMOS NO PASSO INICIAL (Origem)
@@ -91,7 +72,6 @@ export function Movimentacao() {
         else if (iden.tipo === 'CAIXA') {
           if (entidadeTipo === 'PALETE') return toastWarning('Atenção', 'Você já selecionou um palete inteiro.')
           
-          // Verifica se já bipou essa caixa
           if (caixasSelecionadas.find(c => c.id === iden.dados.id)) {
             return toastWarning('Aviso', 'Esta caixa já foi bipada.')
           }
@@ -101,22 +81,18 @@ export function Movimentacao() {
           toastSuccess('Caixa SSCC Adicionada', iden.dados.produto_descricao)
         }
         else if (iden.tipo === 'ENDERECO') {
-          // Se for REC ou EXPEDICAO não pode origem antiga genérica
           if (iden.dados.endereco === 'REC' || iden.dados.endereco === 'EXPEDICAO') {
             return toastWarning('Não permitido', `Para ${iden.dados.endereco}, bipe os paletes ou caixas individualmente.`)
           }
           
           if (entidadeTipo === 'CAIXAS') {
-            // Se ele estava bipando caixas e de repente bipou um endereço, ele quer que seja o DESTINO!
             return processarScanDestino(codigo)
           }
 
           if (entidadeTipo === 'PALETE') return toastWarning('Atenção', 'Você já selecionou um palete.')
 
-          setEntidadeTipo('ANTIGO')
           setEnderecoOrigem(iden.dados.endereco)
-          setStep('ANTIGO_PRODUTO')
-          toastSuccess('Endereço Confirmado', 'Fluxo antigo ativado.')
+          setModalConfirmarOrigem(true)
         }
         else {
           toastError('Código não reconhecido', 'Não é um Palete, Caixa ou Endereço válido.')
@@ -138,51 +114,15 @@ export function Movimentacao() {
       return toastError('Endereço Inválido', `O endereço "${dst}" não está cadastrado.`)
     }
     setDestino(dst)
-  }
 
-  const processarScanProdutoAntigo = async (val) => {
-    try {
-      const resultado = await produtosQueries.buscarPorCodigoComInfo(val)
-      if (!resultado) {
-        // EAN completamente desconhecido: abre modal para vincular
-        setEanDesconhecido(val)
-        setModalEanOpen(true)
-        return
-      }
-
-      const { produto } = resultado
-
-      // EAN unico: continua fluxo normal
-      const saldos = await estoqueQueries.buscarPorEnderecoProduto(enderecoOrigem, produto.id)
-      if (saldos.length === 0) {
-        return toastError('Sem Saldo', `O produto não possui saldo em ${enderecoOrigem}`)
-      }
-      setProdutoAntigo(produto)
-      if (saldos.length === 1) {
-        setSaldoAtual(saldos[0])
-        setStep('ANTIGO_QTD')
-      } else {
-        setSaldoOpcoes(saldos)
-        setStep('ANTIGO_SELECIONAR_LOTE')
-      }
-    } catch (err) {
-      toastError('Erro', err.message)
+    if (entidadeTipo === 'ENDERECO_TODO') {
+      try {
+        const stockNoDestino = await estoqueQueries.buscarPorEndereco(dst)
+        if (stockNoDestino && stockNoDestino.length > 0) {
+          setModalConfirmarDestino(true)
+        }
+      } catch (e) {}
     }
-  }
-
-  const selecionarLoteAntigo = async (saldo) => {
-    setSaldoAtual(saldo)
-    setSaldoOpcoes([])
-    setStep('ANTIGO_QTD')
-  }
-
-  const handleQtdSubmitAntigo = (e) => {
-    e.preventDefault()
-    if (!qtdCaixas || !qtdKg) return toastWarning('Aviso', 'Preencha caixas e kg.')
-    if (parseFloat(qtdCaixas) > saldoAtual.qtd_caixas || parseFloat(qtdKg) > saldoAtual.qtd_kg) {
-      return toastError('Aviso', 'Quantidade excede o saldo disponível na origem.')
-    }
-    setStep('DESTINO')
   }
 
   const confirmarMovimentacao = async () => {
@@ -206,18 +146,14 @@ export function Movimentacao() {
           operador_nome: operador.nome
         });
       }
-      else if (entidadeTipo === 'ANTIGO') {
-        res = await movimentacoesQueries.transferir({
-          produto_id: produtoAntigo.id,
-          lote: saldoAtual.lote,
-          validade: saldoAtual.validade,
-          qtd_caixas: parseFloat(qtdCaixas),
-          qtd_kg: parseFloat(qtdKg),
+      else if (entidadeTipo === 'ENDERECO_TODO') {
+        res = await movimentacoesQueries.transferirEnderecoInteiro({
           origem: enderecoOrigem,
           destino: destino,
           operador_id: operador.id,
           operador_nome: operador.nome
         });
+        setModalConfirmarDestino(false);
       }
 
       if (res && res.success) {
@@ -362,64 +298,23 @@ export function Movimentacao() {
               </div>
             )}
 
-            {entidadeTipo === 'ANTIGO' && (
+            {entidadeTipo === 'ENDERECO_TODO' && (
               <div className="mt-16 p-16" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8 }}>
                 <div className="flex items-center gap-12 font-bold text-cyan" style={{ fontSize: 18 }}>
-                  <MapPin size={24} /> Origem Genérica: {enderecoOrigem}
+                  <MapPin size={24} /> Origem: Endereço {enderecoOrigem}
+                </div>
+                <div className="text-sm text-muted mt-8">
+                  Todas as caixas e paletes do endereço acima serão movidos simultaneamente.
                 </div>
               </div>
             )}
           </div>
 
-          {/* --- FLUXO ANTIGO ESCONDIDO DENTRO SE NECESSÁRIO --- */}
-          {entidadeTipo === 'ANTIGO' && (
-            <>
-              <div className={`mov-step ${step === 'ANTIGO_PRODUTO' || step === 'ANTIGO_SELECIONAR_LOTE' ? 'active' : step === 'ANTIGO_QTD' || destino ? 'completed' : ''}`}>
-                <div className="mov-step__header"><div className="mov-step__number">2</div><div className="mov-step__label">Material (Fluxo Antigo)</div></div>
-                {step === 'ANTIGO_PRODUTO' && (
-                  <input className="form-input form-input--scanner" placeholder="Bipar material..." onKeyDown={(e) => e.key === 'Enter' && processarScanProdutoAntigo(e.target.value)} autoFocus />
-                )}
-                {step === 'ANTIGO_SELECIONAR_LOTE' && (
-                  <div className="flex-col gap-8">
-                    {saldoOpcoes.map((s, i) => (
-                      <div key={i} onClick={() => selecionarLoteAntigo(s)} style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px', cursor: 'pointer' }}>
-                        <div className="font-bold">Lote: {s.lote || 'N/A'} - {s.qtd_caixas} CX / {s.qtd_kg} KG</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {produtoAntigo && saldoAtual && (
-                  <div className="mt-8 text-cyan font-bold">{produtoAntigo.descricao} (Lote: {saldoAtual.lote})</div>
-                )}
-              </div>
-
-              <div className={`mov-step ${step === 'ANTIGO_QTD' ? 'active' : destino ? 'completed' : ''}`}>
-                <div className="mov-step__header"><div className="mov-step__number">3</div><div className="mov-step__label">Quantidade (Fluxo Antigo)</div></div>
-                {step === 'ANTIGO_QTD' && (
-                  <form onSubmit={handleQtdSubmitAntigo} className="flex gap-16 items-end">
-                    <div className="form-group" style={{ flex: 1 }}>
-                      <label className="form-label">Caixas (Máx: {saldoAtual.qtd_caixas})</label>
-                      <input type="number" step="0.01" className="form-input" value={qtdCaixas} onChange={e => setQtdCaixas(e.target.value)} />
-                    </div>
-                    <div className="form-group" style={{ flex: 1 }}>
-                      <label className="form-label">KG (Máx: {saldoAtual.qtd_kg})</label>
-                      <input type="number" step="0.01" className="form-input" value={qtdKg} onChange={e => setQtdKg(e.target.value)} />
-                    </div>
-                    <button type="submit" className="btn btn--primary btn--lg">OK</button>
-                  </form>
-                )}
-                {destino && (
-                  <div className="mt-8 font-bold text-cyan">{qtdCaixas} cx / {qtdKg} kg</div>
-                )}
-              </div>
-            </>
-          )}
-
           {/* STEP DESTINO E CONFIRMAÇÃO */}
           {entidadeTipo && (step === 'DESTINO' || destino) && (
             <div className={`mov-step active`}>
               <div className="mov-step__header">
-                <div className="mov-step__number">{entidadeTipo === 'ANTIGO' ? 4 : 2}</div>
+                <div className="mov-step__number">2</div>
                 <div className="mov-step__label">Endereço Destino</div>
               </div>
               
@@ -527,6 +422,43 @@ export function Movimentacao() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {modalConfirmarOrigem && (
+        <div className="modal-overlay animate-fade-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100 }}>
+          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-warning flex items-center gap-8">
+              <AlertTriangle size={24} /> Mover Endereço Completo
+            </h3>
+            <p className="mb-24">Você realmente deseja movimentar <strong>todas</strong> as caixas e paletes do endereço <strong>{enderecoOrigem}</strong> simultaneamente para outro lugar?</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => { setModalConfirmarOrigem(false); resetAll(); }}>Cancelar</button>
+              <button className="btn btn--warning flex-1" onClick={() => {
+                setModalConfirmarOrigem(false);
+                setEntidadeTipo('ENDERECO_TODO');
+                setStep('DESTINO');
+              }}>Sim, Mover Tudo</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalConfirmarDestino && (
+        <div className="modal-overlay animate-fade-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100 }}>
+          <div className="card p-24" style={{ width: 450, maxWidth: '90%' }}>
+            <h3 className="font-bold text-xl mb-16 text-warning flex items-center gap-8">
+              <AlertTriangle size={24} /> Destino Ocupado
+            </h3>
+            <p className="mb-24">O endereço de destino <strong>{destino}</strong> não está vazio e já contém outras cargas armazenadas.</p>
+            <p className="mb-24">Tem certeza que deseja misturar as caixas do endereço <strong>{enderecoOrigem}</strong> com as do <strong>{destino}</strong>?</p>
+            <div className="flex gap-16">
+              <button className="btn btn--ghost" onClick={() => { setModalConfirmarDestino(false); setDestino(''); }}>Cancelar / Trocar Destino</button>
+              <button className="btn btn--warning flex-1" onClick={() => {
+                confirmarMovimentacao();
+              }}>Sim, Confirmar e Misturar</button>
+            </div>
+          </div>
         </div>
       )}
 
