@@ -4,10 +4,13 @@ import { db } from '../lib/db.js';
 export async function listar() {
   const res = await db.execute(`
     SELECT p.id, p.codigo, p.ean, p.descricao, p.valor_unitario, p.tipo_produto, p.status_curva, p.unidade, p.grupo, p.created_at, p.classificacao,
-           GROUP_CONCAT(pai.id) as pais_ids, GROUP_CONCAT(pai.descricao, ', ') as pai_descricao
+           GROUP_CONCAT(pai.id) as pais_ids, GROUP_CONCAT(pai.descricao, ', ') as pai_descricao,
+           COALESCE(SUM(ep.saldo_kg), 0) as saldo_kg,
+           COALESCE(SUM(ep.qtd_caixas), 0) as qtd_caixas
     FROM produtos p
     LEFT JOIN produto_arvore pa ON pa.filho_id = p.id
     LEFT JOIN produtos pai ON pai.id = pa.pai_id
+    LEFT JOIN estoque_posicao ep ON ep.produto_id = p.id
     GROUP BY p.id
     ORDER BY p.descricao ASC
   `)

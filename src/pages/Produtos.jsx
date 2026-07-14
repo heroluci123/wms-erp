@@ -162,6 +162,7 @@ export function Produtos() {
                     <th>Grupo</th>
                     <th>Classificação</th>
                     <th style={{ width: 120 }}>Curva</th>
+                    <th style={{ textAlign: 'right' }}>Saldo Estoque</th>
                     <th style={{ textAlign: 'right' }}>Valor Unit.</th>
                     <th style={{ textAlign: 'right' }}>Ações</th>
                   </tr>
@@ -181,6 +182,14 @@ export function Produtos() {
                         {!p.classificacao && <span className="badge badge--ghost text-xs">Não Def.</span>}
                       </td>
                       <td><CurvaBadge curva={p.status_curva} /></td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div className={`inline-flex flex-col items-end px-10 py-4 rounded text-xs font-bold ${
+                          parseFloat(p.saldo_kg) > 0 ? 'bg-success/10 text-success' : 'bg-bg-2 text-muted'
+                        }`}>
+                          <span>{parseFloat(p.saldo_kg || 0).toFixed(1)} kg</span>
+                          <span style={{ fontSize: 10, opacity: 0.8 }}>{parseFloat(p.qtd_caixas || 0)} cx</span>
+                        </div>
+                      </td>
                       <td style={{ textAlign: 'right' }} className="text-success font-bold text-sm">R$ {parseFloat(p.valor_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                       <td style={{ textAlign: 'right' }}>
                         <button className="btn-icon" onClick={() => handleEdit(p)}><Edit2 size={16} /></button>
