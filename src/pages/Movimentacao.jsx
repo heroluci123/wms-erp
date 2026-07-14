@@ -462,27 +462,7 @@ export function Movimentacao() {
         </div>
       )}
 
-      <CadastroEanModal
-        isOpen={modalEanOpen}
-        onClose={() => { setModalEanOpen(false); setTimeout(() => document.getElementById('input-universal')?.focus(), 100) }}
-        codigoDesconhecido={eanDesconhecido}
-        onRegraSalva={async (p) => {
-          // Depois de vincular o EAN, busca o saldo e continua o fluxo automaticamente
-          const saldos = await estoqueQueries.buscarPorEnderecoProduto(enderecoOrigem, p.id)
-          if (saldos.length === 0) {
-            toastError('Sem Saldo', `EAN vinculado! Mas o produto não possui saldo em ${enderecoOrigem}`)
-            return
-          }
-          setProdutoAntigo(p)
-          if (saldos.length === 1) {
-            setSaldoAtual(saldos[0])
-            setStep('ANTIGO_QTD')
-          } else {
-            setSaldoOpcoes(saldos)
-            setStep('ANTIGO_SELECIONAR_LOTE')
-          }
-        }}
-      />
+
     </div>
   )
 }
