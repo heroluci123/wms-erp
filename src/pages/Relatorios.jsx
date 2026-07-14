@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { PieChart, TrendingUp, ChevronRight, ChevronDown, PackageOpen, Layers, Calendar, Search, Download } from 'lucide-react'
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts'
 import * as relatoriosQueries from '../queries/relatorios'
 
 const PRESETS = [
@@ -27,32 +27,36 @@ const ArvoreNode = ({ node, level = 0, searchTerm = '' }) => {
   return (
     <div className="relative">
       <div 
-        className={`flex items-center gap-12 py-8 px-12 rounded cursor-pointer hover:bg-bg-2 transition-colors ${matchesSearch ? 'bg-bg-3' : ''} ${level === 0 ? 'bg-bg-1 border-b border-border font-bold mt-4' : ''}`}
+        className={`flex items-center gap-12 py-10 px-16 cursor-pointer hover:bg-bg-2 transition-colors ${matchesSearch ? 'bg-primary/10' : ''} ${level === 0 ? 'bg-bg-1 font-bold rounded mt-4 border border-border/50' : 'border-b border-border/30'}`}
         onClick={() => setExpanded(!expanded)}
-        style={{ paddingLeft: level === 0 ? 12 : 24 }}
       >
+        {/* Espaçamento para Níveis */}
+        {Array.from({ length: level }).map((_, i) => (
+          <div key={i} className="w-16 h-full border-l-2 border-border/30 ml-8"></div>
+        ))}
+
         <div className="w-16 flex justify-center">
           {hasChildren ? (
-            expanded ? <ChevronDown size={14} className="text-muted" /> : <ChevronRight size={14} className="text-muted" />
+            expanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />
           ) : (
-            <div className="w-4 h-4 rounded-full bg-border"></div>
+            <div className="w-4 h-4 rounded-full bg-border/50"></div>
           )}
         </div>
         
-        {level === 0 ? <PackageOpen size={16} className="text-primary" /> : <Layers size={14} className="text-muted" />}
+        {level === 0 ? <PackageOpen size={18} className="text-primary" /> : <Layers size={16} className="text-muted" />}
         
-        <div className="flex-1 text-sm">
+        <div className="flex-1 text-sm font-medium">
           <span>{node.descricao}</span>
         </div>
         
         <div className="text-xs">
-          {node.classificacao === 'MATERIA_PRIMA' && <span className="text-success text-xs border border-success/30 px-6 py-2 rounded-full">Matéria Prima</span>}
-          {node.classificacao === 'SUBPRODUTO' && <span className="text-warning text-xs border border-warning/30 px-6 py-2 rounded-full">Subproduto</span>}
+          {node.classificacao === 'MATERIA_PRIMA' && <span className="text-success text-xs px-8 py-2 rounded bg-success/10 font-bold">Matéria Prima</span>}
+          {node.classificacao === 'SUBPRODUTO' && <span className="text-warning text-xs px-8 py-2 rounded bg-warning/10 font-bold">Subproduto</span>}
         </div>
       </div>
       
       {expanded && hasChildren && (
-        <div className="border-l border-border ml-16 pl-8">
+        <div className="ml-16">
           {node.children.map((child, i) => (
             <ArvoreNode key={`${child.id}-${i}`} node={child} level={level + 1} searchTerm={searchTerm} />
           ))}
@@ -302,33 +306,37 @@ export function Relatorios() {
 
                 {/* Gráficos */}
                 {balancoView.length > 0 && (
-                  <div className="flex gap-24 mb-24">
-                    <div className="flex-1 card border border-border p-16">
-                      <h3 className="text-sm font-bold mb-16 text-center">Top 10 Movimentações (Kg)</h3>
-                      <div style={{ height: 250 }}>
+                  <div className="flex gap-24 mb-24 flex-wrap">
+                    <div className="flex-1 min-w-[500px] card border border-border p-16">
+                      <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Top 10 Movimentações (Kg)</h3>
+                      <div style={{ height: 350 }}>
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={top10} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" />
-                            <XAxis dataKey="descricao" tick={{fontSize: 10}} interval={0} angle={-25} textAnchor="end" />
-                            <YAxis tick={{fontSize: 12}} />
-                            <Tooltip contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c'}} />
-                            <Legend wrapperStyle={{fontSize: 12}} />
-                            <Bar dataKey="total_entrada" name="Entradas" fill="#10b981" radius={[2, 2, 0, 0]} />
-                            <Bar dataKey="total_saida" name="Saídas" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                          <BarChart data={top10} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={true} vertical={false} />
+                            <XAxis type="number" tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <YAxis dataKey="descricao" type="category" width={180} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <Tooltip cursor={{fill: '#2a2a3c', opacity: 0.4}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12}} />
+                            <Legend wrapperStyle={{fontSize: 12, paddingTop: 10}} />
+                            <Bar dataKey="total_entrada" name="Entradas (+)" fill="#10b981" radius={[0, 4, 4, 0]} barSize={12} />
+                            <Bar dataKey="total_saida" name="Saídas (-)" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={12} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
-                    <div className="w-[300px] card border border-border p-16">
-                      <h3 className="text-sm font-bold mb-16 text-center">Resumo Total</h3>
-                      <div style={{ height: 250 }}>
+                    <div className="w-full lg:w-[350px] card border border-border p-16">
+                      <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Resumo Total (Kg)</h3>
+                      <div style={{ height: 350 }}>
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={totalGeral} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" />
-                            <XAxis dataKey="name" tick={{fontSize: 12}} />
-                            <YAxis tick={{fontSize: 12}} />
-                            <Tooltip contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c'}} cursor={{fill: 'transparent'}} />
-                            <Bar dataKey="valor" radius={[4, 4, 0, 0]} />
+                          <BarChart data={totalGeral} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" vertical={false} />
+                            <XAxis dataKey="name" tick={{fontSize: 13, fontWeight: 'bold', fill: '#e2e2eb'}} axisLine={false} tickLine={false} />
+                            <YAxis tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={false} tickLine={false} />
+                            <Tooltip cursor={{fill: 'transparent'}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12}} />
+                            <Bar dataKey="valor" radius={[6, 6, 0, 0]} barSize={60}>
+                              {totalGeral.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.fill} />
+                              ))}
+                            </Bar>
                           </BarChart>
                         </ResponsiveContainer>
                       </div>

@@ -3,9 +3,12 @@ import { db } from '../lib/db.js';
 /** Queries de Produtos */
 export async function listar() {
   const res = await db.execute(`
-    SELECT p.id, p.codigo, p.ean, p.descricao, p.valor_unitario, p.tipo_produto, p.status_curva, p.unidade, p.grupo, p.created_at, p.classificacao, p.produto_pai_id, pai.descricao as pai_descricao
+    SELECT p.id, p.codigo, p.ean, p.descricao, p.valor_unitario, p.tipo_produto, p.status_curva, p.unidade, p.grupo, p.created_at, p.classificacao,
+           GROUP_CONCAT(pai.id) as pais_ids, GROUP_CONCAT(pai.descricao, ', ') as pai_descricao
     FROM produtos p
-    LEFT JOIN produtos pai ON pai.id = p.produto_pai_id
+    LEFT JOIN produto_arvore pa ON pa.filho_id = p.id
+    LEFT JOIN produtos pai ON pai.id = pa.pai_id
+    GROUP BY p.id
     ORDER BY p.descricao ASC
   `)
   return res.rows
@@ -172,7 +175,7 @@ export async function removerRegraEan(id) {
   }
 }
 
-export async function criar({ codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, produto_pai_id }) {
+export async function criar({ codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
@@ -182,12 +185,24 @@ export async function criar({ codigo, descricao, valor_unitario, tipo_produto, s
   try {
     const result = await db.execute({
       sql: `
-        INSERT INTO produtos (codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, produto_pai_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO produtos (codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null, produto_pai_id || null]
+      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null]
     })
-    return { id: result.lastInsertRowid.toString(), success: true }
+    
+    const newId = result.lastInsertRowid.toString()
+    
+    if (classificacao === 'SUBPRODUTO' && Array.isArray(pais_ids) && pais_ids.length > 0) {
+      for (const paiId of pais_ids) {
+        await db.execute({
+          sql: `INSERT OR IGNORE INTO produto_arvore (pai_id, filho_id) VALUES (?, ?)`,
+          args: [paiId, newId]
+        })
+      }
+    }
+    
+    return { id: newId, success: true }
   } catch (err) {
     if (err.message.includes('UNIQUE constraint')) {
       return { success: false, error: 'Já existe um produto com este Código ou EAN.' }
@@ -196,7 +211,7 @@ export async function criar({ codigo, descricao, valor_unitario, tipo_produto, s
   }
 }
 
-export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, produto_pai_id }) {
+export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
@@ -206,11 +221,23 @@ export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_pr
   try {
     await db.execute({
       sql: `
-        UPDATE produtos SET codigo=?, descricao=?, valor_unitario=?, tipo_produto=?, status_curva=?, unidade=?, grupo=?, classificacao=?, produto_pai_id=?
+        UPDATE produtos SET codigo=?, descricao=?, valor_unitario=?, tipo_produto=?, status_curva=?, unidade=?, grupo=?, classificacao=?
         WHERE id=?
       `,
-      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null, produto_pai_id || null, id]
+      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null, id]
     })
+
+    // Atualizar Paternidade se for SUBPRODUTO
+    await db.execute({ sql: `DELETE FROM produto_arvore WHERE filho_id = ?`, args: [id] })
+    if (classificacao === 'SUBPRODUTO' && Array.isArray(pais_ids) && pais_ids.length > 0) {
+      for (const paiId of pais_ids) {
+        await db.execute({
+          sql: `INSERT OR IGNORE INTO produto_arvore (pai_id, filho_id) VALUES (?, ?)`,
+          args: [paiId, id]
+        })
+      }
+    }
+
     return { success: true }
   } catch (err) {
     if (err.message.includes('UNIQUE constraint')) {
