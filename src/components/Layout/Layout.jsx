@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -102,6 +102,11 @@ function Sidebar() {
 
       { (operador?.permissoes?.inventario_coletor || operador?.permissoes?.inventario_gestao || operador?.permissoes?.produtos) && (
         <div className="sidebar__section-label">Controle</div>
+      )}
+      {operador?.permissoes?.produtos && (
+        <NavLink to="/relatorios" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <PieChart size={18} /> Relatórios
+        </NavLink>
       )}
       
       { (operador?.permissoes?.inventario_coletor || operador?.permissoes?.inventario_gestao) && (

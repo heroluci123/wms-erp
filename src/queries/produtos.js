@@ -3,8 +3,10 @@ import { db } from '../lib/db.js';
 /** Queries de Produtos */
 export async function listar() {
   const res = await db.execute(`
-    SELECT id, codigo, ean, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, created_at
-    FROM produtos ORDER BY descricao ASC
+    SELECT p.id, p.codigo, p.ean, p.descricao, p.valor_unitario, p.tipo_produto, p.status_curva, p.unidade, p.grupo, p.created_at, p.classificacao, p.produto_pai_id, pai.descricao as pai_descricao
+    FROM produtos p
+    LEFT JOIN produtos pai ON pai.id = p.produto_pai_id
+    ORDER BY p.descricao ASC
   `)
   return res.rows
 }
@@ -170,7 +172,7 @@ export async function removerRegraEan(id) {
   }
 }
 
-export async function criar({ codigo, descricao, valor_unitario = 0, tipo_produto = 'Materia Prima', status_curva = 'C', unidade = 'CX', grupo = '' }) {
+export async function criar({ codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, produto_pai_id }) {
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
@@ -180,10 +182,10 @@ export async function criar({ codigo, descricao, valor_unitario = 0, tipo_produt
   try {
     const result = await db.execute({
       sql: `
-        INSERT INTO produtos (codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO produtos (codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, produto_pai_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo]
+      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null, produto_pai_id || null]
     })
     return { id: result.lastInsertRowid.toString(), success: true }
   } catch (err) {
@@ -194,7 +196,7 @@ export async function criar({ codigo, descricao, valor_unitario = 0, tipo_produt
   }
 }
 
-export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo }) {
+export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, produto_pai_id }) {
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
@@ -204,10 +206,10 @@ export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_pr
   try {
     await db.execute({
       sql: `
-        UPDATE produtos SET codigo=?, descricao=?, valor_unitario=?, tipo_produto=?, status_curva=?, unidade=?, grupo=?
+        UPDATE produtos SET codigo=?, descricao=?, valor_unitario=?, tipo_produto=?, status_curva=?, unidade=?, grupo=?, classificacao=?, produto_pai_id=?
         WHERE id=?
       `,
-      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, id]
+      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null, produto_pai_id || null, id]
     })
     return { success: true }
   } catch (err) {

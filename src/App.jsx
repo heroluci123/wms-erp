@@ -5,6 +5,7 @@ import { Layout } from './components/Layout/Layout'
 // Pages
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
+import { Relatorios } from './pages/Relatorios'
 import { EstoqueEnderecos } from './pages/EstoqueEnderecos'
 import { Recebimento } from './pages/Recebimento'
 import { Movimentacao } from './pages/Movimentacao'
@@ -58,6 +59,7 @@ function App() {
           <Route path="/estoque-enderecos" element={<EstoqueEnderecos />} />
           <Route path="/consulta-estoque" element={<ConsultaEstoque />} />
           <Route path="/consulta-endereco" element={<ConsultaEndereco />} />
+          <Route path="/relatorios" element={<Relatorios />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -233,6 +233,9 @@ export function Producao() {
                         Insumos: <strong>{(op.peso_insumos || 0).toFixed(2)} kg</strong> |{' '} 
                         Retorno: <strong>{(op.peso_retornos || 0).toFixed(2)} kg</strong> |{' '} 
                         Subproduto: <strong className="text-warning">{Math.max(0, (op.peso_insumos || 0) - (op.peso_retornos || 0)).toFixed(2)} kg</strong>
+                        {op.rendimento_pct != null && (
+                          <span className="ml-8 text-success font-bold">| Rendimento: {op.rendimento_pct}%</span>
+                        )}
                       </div>
                     </div>
                     <ArrowRight className="text-muted"/>
@@ -305,7 +308,17 @@ export function Producao() {
                   <div className="text-2xl font-bold font-mono text-warning mb-8">
                     {Math.max(0, (detalhes.peso_insumos || 0) - (detalhes.peso_retornos || 0)).toFixed(2)} kg
                   </div>
-                  <div className="text-xs text-muted">
+                  <div className="flex gap-16 mt-16 pt-16 border-t border-border">
+                    <div>
+                      <div className="text-xs text-muted uppercase">Rendimento</div>
+                      <div className="font-bold text-success">{detalhes.rendimento_pct != null ? detalhes.rendimento_pct : (detalhes.peso_insumos > 0 ? ((detalhes.peso_retornos / detalhes.peso_insumos) * 100).toFixed(2) : 0)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted uppercase">Perda (Quebra)</div>
+                      <div className="font-bold text-danger">{detalhes.perda_pct != null ? detalhes.perda_pct : (detalhes.peso_insumos > 0 ? (100 - ((detalhes.peso_retornos / detalhes.peso_insumos) * 100)).toFixed(2) : 0)}%</div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted mt-16">
                     Calculado em tempo real com base na diferença de peso.
                   </div>
                 </div>
@@ -465,6 +478,14 @@ export function Producao() {
               <div className="flex justify-between text-warning font-bold border-t border-border pt-4 mt-4">
                 <span>Subproduto (Líquido/Osso):</span> 
                 <span>{Math.max(0, (detalhes?.peso_insumos || 0) - (detalhes?.peso_retornos || 0)).toFixed(2)} kg</span>
+              </div>
+              <div className="flex justify-between text-success font-bold pt-4 mt-4">
+                <span>Rendimento Previsto:</span> 
+                <span>{detalhes?.peso_insumos > 0 ? ((detalhes?.peso_retornos / detalhes?.peso_insumos) * 100).toFixed(2) : 0}%</span>
+              </div>
+              <div className="flex justify-between text-danger font-bold pt-4 mt-4">
+                <span>Quebra/Perda Prevista:</span> 
+                <span>{detalhes?.peso_insumos > 0 ? (100 - ((detalhes?.peso_retornos / detalhes?.peso_insumos) * 100)).toFixed(2) : 0}%</span>
               </div>
             </div>
             <p className="mb-24">Tem certeza que deseja confirmar a finalização? Esta ação baixará os insumos permanentemente e o saldo de subproduto será contabilizado como quebra.</p>

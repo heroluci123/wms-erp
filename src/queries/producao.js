@@ -263,31 +263,122 @@ export async function verificarFEFO(produto_id, validadeAtual) {
 
 export async function finalizarOP(op_id) {
   try {
-    const queries = [
-      {
-        sql: `UPDATE ordens_producao SET status = 'FECHADA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        args: [op_id]
-      },
-      {
-        sql: `UPDATE estoque_caixas SET status = 'CONSUMIDA' WHERE id IN (SELECT caixa_id FROM op_insumos WHERE op_id = ?)`,
-        args: [op_id]
-      }
-    ]
+    const queries = []
     
-    // Precisamos decrementar as caixas de insumo de estoque_posicao já que agora elas ficavam no endereço da OP
+    // 1. Fetch Insumos
     const insumosRes = await db.execute({
-      sql: `SELECT c.produto_id, c.endereco, c.validade, c.peso_kg FROM op_insumos oi JOIN estoque_caixas c ON c.id = oi.caixa_id WHERE oi.op_id = ?`,
+      sql: `SELECT c.produto_id, c.endereco, c.validade, c.peso_kg, p.classificacao 
+            FROM op_insumos oi 
+            JOIN estoque_caixas c ON c.id = oi.caixa_id 
+            JOIN produtos p ON p.id = c.produto_id
+            WHERE oi.op_id = ?`,
       args: [op_id]
     })
     
+    // 2. Fetch Retornos
+    const retornosRes = await db.execute({
+      sql: `SELECT c.produto_id, c.peso_kg, p.classificacao, p.produto_pai_id 
+            FROM op_retornos or_ret 
+            JOIN estoque_caixas c ON c.id = or_ret.caixa_id 
+            JOIN produtos p ON p.id = c.produto_id
+            WHERE or_ret.op_id = ?`,
+      args: [op_id]
+    })
+
+    // 3. Calculos de Peso
+    const totalInsumos = insumosRes.rows.reduce((sum, i) => sum + (i.peso_kg || 0), 0)
+    const totalRetornos = retornosRes.rows.reduce((sum, r) => sum + (r.peso_kg || 0), 0)
+    
+    let rendimento_pct = null
+    let perda_pct = null
+    if (totalInsumos > 0) {
+      rendimento_pct = parseFloat(((totalRetornos / totalInsumos) * 100).toFixed(2))
+      perda_pct = parseFloat((100 - rendimento_pct).toFixed(2))
+    }
+
+    // UPDATE ordens_producao com os rendimentos
+    queries.push({
+      sql: `UPDATE ordens_producao SET status = 'FECHADA', rendimento_pct = ?, perda_pct = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      args: [rendimento_pct, perda_pct, op_id]
+    })
+
+    // UPDATE caixas insumo para CONSUMIDA
+    queries.push({
+      sql: `UPDATE estoque_caixas SET status = 'CONSUMIDA' WHERE id IN (SELECT caixa_id FROM op_insumos WHERE op_id = ?)`,
+      args: [op_id]
+    })
+    
+    // Decrementar posicoes
     for (const c of insumosRes.rows) {
       queries.push({
         sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ?`,
         args: [c.peso_kg, c.produto_id, c.endereco]
       })
     }
-    
     queries.push(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`)
+    
+    // --- LÓGICA DE INTELIGÊNCIA ARTIFICIAL BOM ---
+    // Regra 1: Insumos sem classificação viram MATERIA_PRIMA
+    const insumosMap = new Map()
+    for (const i of insumosRes.rows) {
+      insumosMap.set(i.produto_id, (insumosMap.get(i.produto_id) || 0) + i.peso_kg)
+      if (!i.classificacao) {
+        queries.push({
+          sql: `UPDATE produtos SET classificacao = 'MATERIA_PRIMA' WHERE id = ?`,
+          args: [i.produto_id]
+        })
+        i.classificacao = 'MATERIA_PRIMA'
+      }
+    }
+    
+    // Regra 4: Determinar Produto Pai (Maior Matéria Prima)
+    let maiorMateriaPrimaId = null
+    let maiorMateriaPrimaPeso = 0
+    let maiorQualquerInsumoId = null
+    let maiorQualquerInsumoPeso = 0
+    
+    for (const [prodId, peso] of insumosMap.entries()) {
+      const prodData = insumosRes.rows.find(r => r.produto_id === prodId)
+      if (prodData.classificacao === 'MATERIA_PRIMA') {
+        if (peso > maiorMateriaPrimaPeso) {
+          maiorMateriaPrimaPeso = peso
+          maiorMateriaPrimaId = prodId
+        }
+      }
+      if (peso > maiorQualquerInsumoPeso) {
+        maiorQualquerInsumoPeso = peso
+        maiorQualquerInsumoId = prodId
+      }
+    }
+    
+    const produtoPaiId = maiorMateriaPrimaId || maiorQualquerInsumoId
+    
+    // Regra 2, 3 e Paternidade: Retornos viram SUBPRODUTO e herdam o Pai
+    const retornosIds = new Set()
+    for (const r of retornosRes.rows) {
+      if (!retornosIds.has(r.produto_id)) {
+        retornosIds.add(r.produto_id)
+        
+        let updateFields = []
+        let updateArgs = []
+        
+        if (!r.classificacao) {
+          updateFields.push(`classificacao = 'SUBPRODUTO'`)
+        }
+        if (!r.produto_pai_id && produtoPaiId) {
+          updateFields.push(`produto_pai_id = ?`)
+          updateArgs.push(produtoPaiId)
+        }
+        
+        if (updateFields.length > 0) {
+          updateArgs.push(r.produto_id)
+          queries.push({
+            sql: `UPDATE produtos SET ${updateFields.join(', ')} WHERE id = ?`,
+            args: updateArgs
+          })
+        }
+      }
+    }
 
     await db.batch(queries, 'write')
     return { success: true }

@@ -11,7 +11,7 @@ export function Produtos() {
   
   // Form State
   const [isEditing, setIsEditing] = useState(false)
-  const [formData, setFormData] = useState({ id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '' })
+  const [formData, setFormData] = useState({ id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '', classificacao: '', produto_pai_id: '' })
 
   const carregar = async () => {
     try {
@@ -76,7 +76,7 @@ export function Produtos() {
 
   const resetForm = () => {
     setIsEditing(false)
-    setFormData({ id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '' })
+    setFormData({ id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '', classificacao: '', produto_pai_id: '' })
   }
 
   const filtrados = produtos.filter(p => 
@@ -90,9 +90,9 @@ export function Produtos() {
 
   const exportarCSV = async () => {
     if (produtos.length === 0) return
-    const header = "ID;CODIGO;DESCRICAO;GRUPO;TIPO;CURVA;UNIDADE;VALOR_UNIT\n"
+    const header = "ID;CODIGO;DESCRICAO;GRUPO;TIPO;CURVA;UNIDADE;VALOR_UNIT;CLASSIFICACAO;PAI_NOME\n"
     const rows = produtos.map(p =>
-      `${p.id};${p.codigo || ''};${p.descricao};${p.grupo || ''};${p.tipo_produto};${p.status_curva};${p.unidade};${p.valor_unitario || 0}`
+      `${p.id};${p.codigo || ''};${p.descricao};${p.grupo || ''};${p.tipo_produto};${p.status_curva};${p.unidade};${p.valor_unitario || 0};${p.classificacao || ''};${p.pai_descricao || ''}`
     ).join("\n")
     
     const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' })
@@ -157,6 +157,23 @@ export function Produtos() {
                   <option value="Insumos">Insumos</option>
                 </select>
               </div>
+              <div className="form-group" style={{ flex: 1.5 }}>
+                <label className="form-label">Classificação (BOM)</label>
+                <select className="form-input" value={formData.classificacao || ''} onChange={e => setFormData({...formData, classificacao: e.target.value})}>
+                  <option value="">Não Definido</option>
+                  <option value="MATERIA_PRIMA">Matéria Prima Raiz</option>
+                  <option value="SUBPRODUTO">Subproduto (Derivado)</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ flex: 2 }}>
+                <label className="form-label">Produto Pai</label>
+                <select className="form-input" value={formData.produto_pai_id || ''} onChange={e => setFormData({...formData, produto_pai_id: e.target.value ? parseInt(e.target.value) : ''})}>
+                  <option value="">Nenhum (Raiz)</option>
+                  {produtos.filter(p => p.id !== formData.id).map(p => (
+                    <option key={p.id} value={p.id}>{p.descricao}</option>
+                  ))}
+                </select>
+              </div>
               <div className="form-group" style={{ flex: 1 }}>
                 <label className="form-label">Curva ABC</label>
                 <select className="form-input" value={formData.status_curva} onChange={e => setFormData({...formData, status_curva: e.target.value})}>
@@ -197,6 +214,7 @@ export function Produtos() {
                   <th>Código</th>
                   <th>Descrição</th>
                   <th>Grupo</th>
+                  <th>Classificação</th>
                   <th style={{ width: 120 }}>Curva</th>
                   <th style={{ textAlign: 'right' }}>Valor Unit.</th>
                   <th style={{ textAlign: 'right' }}>Ações</th>
@@ -206,8 +224,16 @@ export function Produtos() {
                 {filtrados.map(p => (
                   <tr key={p.id}>
                     <td className="td-mono">{p.codigo || '-'}</td>
-                    <td className="truncate" style={{ maxWidth: 150 }} title={p.descricao}>{p.descricao}</td>
+                    <td className="truncate" style={{ maxWidth: 150 }} title={p.descricao}>
+                      {p.descricao}
+                      {p.pai_descricao && <div className="text-xs text-muted">↳ Pai: {p.pai_descricao}</div>}
+                    </td>
                     <td>{p.grupo || '-'}</td>
+                    <td>
+                      {p.classificacao === 'MATERIA_PRIMA' && <span className="badge badge--success text-xs">M. Prima</span>}
+                      {p.classificacao === 'SUBPRODUTO' && <span className="badge badge--warning text-xs">Subproduto</span>}
+                      {!p.classificacao && <span className="badge badge--ghost text-xs">Não Def.</span>}
+                    </td>
                     <td><CurvaBadge curva={p.status_curva} /></td>
                     <td style={{ textAlign: 'right' }} className="text-success font-bold">R$ {parseFloat(p.valor_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                     <td style={{ textAlign: 'right' }}>
