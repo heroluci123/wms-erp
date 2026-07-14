@@ -3,6 +3,20 @@ import { ArrowRight, MapPin, Box, Hash, AlertTriangle, Lightbulb, Check, Layers,
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
+
+// O banco salva horários em UTC. O Brasil é UTC-3.
+// Adicionamos 'Z' para que o JS interprete como UTC e o toLocaleString
+// converta automaticamente para o fuso do navegador.
+const fmtDataHora = (str) => {
+  if (!str) return '-'
+  const s = str.trim()
+  // Se já tem offset ou 'Z', usa direto. Se não, assume UTC adicionando 'Z'.
+  const iso = /[Zz+\-]\d*$/.test(s) ? s : s.replace(' ', 'T') + 'Z'
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  })
+}
 import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
 import * as estoqueQueries from '../queries/estoque.js';
@@ -188,7 +202,7 @@ export function Movimentacao() {
     if (historico.length === 0) return
     const header = ['Data/Hora','Produto','Codigo','Origem','Destino','Caixas','Kg','Operador']
     const rows = historico.map(h => [
-      new Date(h.data_hora).toLocaleString('pt-BR'),
+      new Date(h.data_hora + 'Z').toLocaleString('pt-BR'),
       h.produto_descricao || '-',
       h.produto_codigo || '-',
       h.endereco_origem,
@@ -415,7 +429,7 @@ export function Movimentacao() {
                       <span>📦 <strong>{h.qtd_caixas}</strong> cx</span>
                       <span>⚖️ <strong>{parseFloat(h.qtd_kg||0).toFixed(3)}</strong> kg</span>
                       <span>👤 {h.operador_nome || 'Sistema'}</span>
-                      <span>📅 {new Date(h.data_hora).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
+                      <span>📅 {fmtDataHora(h.data_hora)}</span>
                     </div>
                   </div>
                 </div>

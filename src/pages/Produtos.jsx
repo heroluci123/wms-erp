@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Search, Edit2, Trash2, X, Download, Save, Box, AlertCircle, Layers } from 'lucide-react'
 import * as produtosQueries from '../queries/produtos'
+import { ModalDialog } from '../components/shared/ModalDialog'
 
 const CurvaBadge = ({ curva }) => {
   const cores = {
@@ -16,6 +17,19 @@ export function Produtos() {
   const [busca, setBusca] = useState('')
   const [loading, setLoading] = useState(true)
   
+  // Modal State
+  const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', message: '', onConfirm: null })
+
+  const showAlert = (title, message, type = 'error') => {
+    setModal({ isOpen: true, type, title, message, onConfirm: null })
+  }
+
+  const showConfirm = (title, message, onConfirm) => {
+    setModal({ isOpen: true, type: 'confirm', title, message, onConfirm })
+  }
+
+  const closeModal = () => setModal(m => ({ ...m, isOpen: false }))
+  
   // Form State
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({ 
@@ -30,7 +44,7 @@ export function Produtos() {
       setProdutos(p)
     } catch (err) {
       console.error(err)
-      alert('Erro ao carregar produtos')
+      showAlert('Erro', 'Erro ao carregar produtos. Tente novamente.')
     } finally {
       setLoading(false)
     }
@@ -53,7 +67,7 @@ export function Produtos() {
       resetForm()
       carregar()
     } catch (err) {
-      alert(err.message || 'Erro ao salvar produto')
+      showAlert('Erro ao Salvar', err.message || 'Não foi possível salvar o produto.')
     }
   }
 
@@ -73,15 +87,20 @@ export function Produtos() {
     setIsEditing(true)
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Deseja realmente excluir este produto?')) return
-    try {
-      const result = await produtosQueries.deletar(id)
-      if (!result.success) throw new Error(result.error)
-      carregar()
-    } catch (err) {
-      alert(err.message || 'Erro ao excluir produto')
-    }
+  const handleDelete = async (id, nome) => {
+    showConfirm(
+      'Excluir Produto',
+      `Deseja realmente excluir "${nome}"? Esta ação não pode ser desfeita.`,
+      async () => {
+        try {
+          const result = await produtosQueries.deletar(id)
+          if (!result.success) throw new Error(result.error)
+          carregar()
+        } catch (err) {
+          showAlert('Erro ao Excluir', err.message || 'Não foi possível excluir este produto.')
+        }
+      }
+    )
   }
 
   const resetForm = () => {
@@ -193,7 +212,7 @@ export function Produtos() {
                       <td style={{ textAlign: 'right' }} className="text-success font-bold text-sm">R$ {parseFloat(p.valor_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                       <td style={{ textAlign: 'right' }}>
                         <button className="btn-icon" onClick={() => handleEdit(p)}><Edit2 size={16} /></button>
-                        <button className="btn-icon text-danger ml-8" onClick={() => handleDelete(p.id)}><Trash2 size={16} /></button>
+                        <button className="btn-icon text-danger ml-8" onClick={() => handleDelete(p.id, p.descricao)}><Trash2 size={16} /></button>
                       </td>
                     </tr>
                   ))}
@@ -359,6 +378,17 @@ export function Produtos() {
           </div>
         </div>
       )}
+      {/* MODAL DE CONFIRMAÇÃO / ALERTA */}
+      <ModalDialog
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onConfirm={modal.onConfirm}
+        onClose={closeModal}
+        confirmLabel="Sim, excluir"
+        cancelLabel="Cancelar"
+      />
     </div>
   )
 }
