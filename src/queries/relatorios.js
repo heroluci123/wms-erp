@@ -1,6 +1,6 @@
 import { db } from '../lib/db.js';
 
-export async function getBalancoMensal(mesAno) {
+export async function getBalanco(dataInicio, dataFim) {
   const res = await db.execute({
     sql: `
       SELECT p.id as produto_id, p.descricao, p.classificacao, p.produto_pai_id,
@@ -9,20 +9,25 @@ export async function getBalancoMensal(mesAno) {
       FROM caixas_historico ch
       JOIN estoque_caixas c ON c.id = ch.caixa_id
       JOIN produtos p ON p.id = c.produto_id
-      WHERE strftime('%Y-%m', ch.data_hora) = ?
-      GROUP BY p.id, p.descricao, p.classificacao, p.produto_pai_id
+      WHERE date(ch.data_hora) BETWEEN ? AND ?
+      GROUP BY p.id, p.descricao, p.classificacao
       ORDER BY p.descricao ASC
     `,
-    args: [mesAno]
+    args: [dataInicio, dataFim]
   })
   return res.rows
 }
 
 export async function getArvoreProducao() {
-  const res = await db.execute(`
-    SELECT id, descricao, classificacao, produto_pai_id 
+  const produtosRes = await db.execute(`
+    SELECT id, descricao, classificacao
     FROM produtos 
     ORDER BY descricao ASC
   `)
-  return res.rows
+  const arvoreRes = await db.execute(`SELECT pai_id, filho_id FROM produto_arvore`)
+  
+  return {
+    produtos: produtosRes.rows,
+    arvore: arvoreRes.rows
+  }
 }

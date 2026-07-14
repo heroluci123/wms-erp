@@ -354,27 +354,18 @@ export async function finalizarOP(op_id) {
     const produtoPaiId = maiorMateriaPrimaId || maiorQualquerInsumoId
     
     // Regra 2, 3 e Paternidade: Retornos viram SUBPRODUTO e herdam o Pai
-    const retornosIds = new Set()
-    for (const r of retornosRes.rows) {
-      if (!retornosIds.has(r.produto_id)) {
-        retornosIds.add(r.produto_id)
-        
-        let updateFields = []
-        let updateArgs = []
-        
-        if (!r.classificacao) {
-          updateFields.push(`classificacao = 'SUBPRODUTO'`)
-        }
-        if (!r.produto_pai_id && produtoPaiId) {
-          updateFields.push(`produto_pai_id = ?`)
-          updateArgs.push(produtoPaiId)
-        }
-        
-        if (updateFields.length > 0) {
-          updateArgs.push(r.produto_id)
+    if (produtoPaiId) {
+      for (const r of retornosRes.rows) {
+        if (r.produto_id !== produtoPaiId) {
           queries.push({
-            sql: `UPDATE produtos SET ${updateFields.join(', ')} WHERE id = ?`,
-            args: updateArgs
+            sql: `INSERT OR IGNORE INTO produto_arvore (pai_id, filho_id) VALUES (?, ?)`,
+            args: [produtoPaiId, r.produto_id]
+          })
+        }
+        if (!r.classificacao) {
+          queries.push({
+            sql: `UPDATE produtos SET classificacao = 'SUBPRODUTO' WHERE id = ?`,
+            args: [r.produto_id]
           })
         }
       }
