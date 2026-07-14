@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Plus, Search, Edit2, Trash2, X, Download, Save, Box, AlertCircle, Layers } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { Plus, Search, Edit2, Trash2, X, Download, Save, Box, Layers } from 'lucide-react'
 import * as produtosQueries from '../queries/produtos'
 import { ModalDialog } from '../components/shared/ModalDialog'
 
@@ -32,6 +32,9 @@ export function Produtos() {
   
   // Form State
   const [isEditing, setIsEditing] = useState(false)
+  const [savedRowId, setSavedRowId] = useState(null)
+  const tableRef = useRef(null)
+  const scrollYRef = useRef(0)
   const [formData, setFormData] = useState({ 
     id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', 
     valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '', 
@@ -56,6 +59,7 @@ export function Produtos() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    const editedId = formData.id
     try {
       if (formData.id) {
         const result = await produtosQueries.atualizar(formData)
@@ -65,13 +69,24 @@ export function Produtos() {
         if (!result.success) throw new Error(result.error)
       }
       resetForm()
-      carregar()
+      await carregar()
+      // Restaurar scroll e destacar a linha editada
+      if (editedId) {
+        setSavedRowId(editedId)
+        window.scrollTo({ top: scrollYRef.current, behavior: 'smooth' })
+        setTimeout(() => {
+          const row = document.getElementById(`row-produto-${editedId}`)
+          if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 100)
+        setTimeout(() => setSavedRowId(null), 2500)
+      }
     } catch (err) {
       showAlert('Erro ao Salvar', err.message || 'Não foi possível salvar o produto.')
     }
   }
 
   const handleEdit = (p) => {
+    scrollYRef.current = window.scrollY
     setFormData({
       id: p.id,
       codigo: p.codigo || '',
@@ -188,7 +203,14 @@ export function Produtos() {
                 </thead>
                 <tbody>
                   {filtrados.map(p => (
-                    <tr key={p.id}>
+                    <tr
+                      key={p.id}
+                      id={`row-produto-${p.id}`}
+                      style={{
+                        transition: 'background 0.5s',
+                        background: savedRowId === p.id ? 'rgba(99,102,241,0.18)' : ''
+                      }}
+                    >
                       <td className="td-mono">{p.codigo || '-'}</td>
                       <td className="truncate" style={{ maxWidth: 200 }} title={p.descricao}>
                         {p.descricao}
@@ -211,8 +233,34 @@ export function Produtos() {
                       </td>
                       <td style={{ textAlign: 'right' }} className="text-success font-bold text-sm">R$ {parseFloat(p.valor_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <button className="btn-icon" onClick={() => handleEdit(p)}><Edit2 size={16} /></button>
-                        <button className="btn-icon text-danger ml-8" onClick={() => handleDelete(p.id, p.descricao)}><Trash2 size={16} /></button>
+                        <div className="flex items-center justify-end gap-6">
+                          <button
+                            title="Editar"
+                            onClick={() => handleEdit(p)}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              width: 32, height: 32, borderRadius: 8, border: '1px solid transparent',
+                              backgroundColor: 'transparent', cursor: 'pointer', transition: 'all 0.15s', color: 'var(--primary)'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.15)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.4)' }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            title="Excluir"
+                            onClick={() => handleDelete(p.id, p.descricao)}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              width: 32, height: 32, borderRadius: 8, border: '1px solid transparent',
+                              backgroundColor: 'transparent', cursor: 'pointer', transition: 'all 0.15s', color: 'var(--danger)'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.15)'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.4)' }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
