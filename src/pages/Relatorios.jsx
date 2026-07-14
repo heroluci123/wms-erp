@@ -200,9 +200,17 @@ export function Relatorios() {
   }
 
   // Gráficos Data
-  const top10 = useMemo(() => {
+  const top10Entradas = useMemo(() => {
     return [...balancoView]
-      .sort((a,b) => (b.total_entrada + b.total_saida) - (a.total_entrada + a.total_saida))
+      .filter(b => b.total_entrada > 0)
+      .sort((a, b) => b.total_entrada - a.total_entrada)
+      .slice(0, 10)
+  }, [balancoView])
+
+  const top10Saidas = useMemo(() => {
+    return [...balancoView]
+      .filter(b => b.total_saida > 0)
+      .sort((a, b) => b.total_saida - a.total_saida)
       .slice(0, 10)
   }, [balancoView])
 
@@ -307,23 +315,8 @@ export function Relatorios() {
                 {/* Gráficos */}
                 {balancoView.length > 0 && (
                   <div className="flex gap-24 mb-24 flex-wrap">
-                    <div className="flex-1 min-w-[500px] card border border-border p-16">
-                      <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Top 10 Movimentações (Kg)</h3>
-                      <div style={{ height: 350 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={top10} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={true} vertical={false} />
-                            <XAxis type="number" tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
-                            <YAxis dataKey="descricao" type="category" width={180} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
-                            <Tooltip cursor={{fill: '#2a2a3c', opacity: 0.4}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12}} />
-                            <Legend wrapperStyle={{fontSize: 12, paddingTop: 10}} />
-                            <Bar dataKey="total_entrada" name="Entradas (+)" fill="#10b981" radius={[0, 4, 4, 0]} barSize={12} />
-                            <Bar dataKey="total_saida" name="Saídas (-)" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={12} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                    <div className="w-full lg:w-[350px] card border border-border p-16">
+                    
+                    <div className="w-full lg:w-[280px] shrink-0 card border border-border p-16">
                       <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Resumo Total (Kg)</h3>
                       <div style={{ height: 350 }}>
                         <ResponsiveContainer width="100%" height="100%">
@@ -331,7 +324,7 @@ export function Relatorios() {
                             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" vertical={false} />
                             <XAxis dataKey="name" tick={{fontSize: 13, fontWeight: 'bold', fill: '#e2e2eb'}} axisLine={false} tickLine={false} />
                             <YAxis tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={false} tickLine={false} />
-                            <Tooltip cursor={{fill: 'transparent'}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12}} />
+                            <Tooltip cursor={{fill: 'transparent'}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff'}} itemStyle={{color: '#fff'}} />
                             <Bar dataKey="valor" radius={[6, 6, 0, 0]} barSize={60}>
                               {totalGeral.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.fill} />
@@ -341,6 +334,37 @@ export function Relatorios() {
                         </ResponsiveContainer>
                       </div>
                     </div>
+
+                    <div className="flex-1 min-w-[350px] card border border-border p-16">
+                      <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Top 10 Entradas (Kg)</h3>
+                      <div style={{ height: 350 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={top10Entradas} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={true} vertical={false} />
+                            <XAxis type="number" tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <YAxis dataKey="descricao" type="category" width={220} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <Tooltip cursor={{fill: '#2a2a3c', opacity: 0.4}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff'}} itemStyle={{color: '#fff'}} />
+                            <Bar dataKey="total_entrada" name="Entradas (+)" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 min-w-[350px] card border border-border p-16">
+                      <h3 className="text-sm font-bold mb-16 text-center text-muted uppercase">Top 10 Saídas (Kg)</h3>
+                      <div style={{ height: 350 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={top10Saidas} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={true} vertical={false} />
+                            <XAxis type="number" tick={{fontSize: 12, fill: '#8b8b9e'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <YAxis dataKey="descricao" type="category" width={220} tick={{fontSize: 10, fill: '#e2e2eb'}} axisLine={{stroke: '#2a2a3c'}} tickLine={false} />
+                            <Tooltip cursor={{fill: '#2a2a3c', opacity: 0.4}} contentStyle={{backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff'}} itemStyle={{color: '#fff'}} />
+                            <Bar dataKey="total_saida" name="Saídas (-)" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={14} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
                   </div>
                 )}
 
