@@ -7,6 +7,16 @@ import * as saidaQueries from '../queries/saida.js'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
 import * as producaoQueries from '../queries/producao.js'
 
+const fmtDataHora = (str) => {
+  if (!str) return '-'
+  const s = str.trim()
+  const iso = /[Zz+\-]\d*$/.test(s) ? s : s.replace(' ', 'T') + 'Z'
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  })
+}
+
 export function Saida() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   
@@ -474,9 +484,9 @@ const PRESETS = [
                   </div>
                   <div className="text-sm">Cliente: <strong className="text-white">{rom.cliente}</strong></div>
                   <div className="text-xs text-muted flex items-center gap-12 mt-4 flex-wrap">
-                    <span><Clock size={12} className="inline mr-4"/> Montado em: {new Date(rom.created_at).toLocaleString()} por {rom.operador_nome || 'Sistema'}</span>
+                    <span><Clock size={12} className="inline mr-4"/> Montado em: {fmtDataHora(rom.created_at)} por {rom.operador_nome || 'Sistema'}</span>
                     {rom.expedido_at && (
-                      <span><Check size={12} className="inline mr-4"/> Finalizado em: {new Date(rom.expedido_at).toLocaleString()} por {rom.operador_expedicao_nome || 'Sistema'}</span>
+                      <span><Check size={12} className="inline mr-4"/> Finalizado em: {fmtDataHora(rom.expedido_at)} por {rom.operador_expedicao_nome || 'Sistema'}</span>
                     )}
                     <span><Package size={12} className="inline mr-4"/> {rom.qtd_caixas} cx ({(rom.peso_total || 0).toFixed(2)} kg)</span>
                   </div>
