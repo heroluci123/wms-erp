@@ -396,7 +396,7 @@ export function Producao() {
                           </td>
                           <td className="text-muted text-sm">{h.operador_nome || 'Sistema'}</td>
                           <td className="text-muted text-sm" style={{ textAlign: 'right' }}>
-                            {new Date(h.created_at).toLocaleDateString()} {new Date(h.created_at).toLocaleTimeString()}
+                            {fmtDataHora(h.created_at)}
                           </td>
                           {detalhes.status !== 'FECHADA' && !detalhes.reaberta && (operador?.is_adm === 1 || operador?.permissoes?.produtos) && (
                             <td style={{ textAlign: 'center' }}>
