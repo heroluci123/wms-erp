@@ -34,8 +34,9 @@ export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataF
 }
 
 export async function criarRomaneio({ cliente, previsao_entrega, operador_id, operador_nome }) {
-  const resCount = await db.execute("SELECT count(*) as total FROM romaneios");
-  const num = (resCount.rows[0].total + 1).toString().padStart(4, '0');
+  const resMax = await db.execute("SELECT MAX(CAST(SUBSTR(codigo, 5) AS INTEGER)) as max_num FROM romaneios WHERE codigo LIKE 'ROM-%'");
+  const maxNum = resMax.rows[0].max_num || 0;
+  const num = (maxNum + 1).toString().padStart(4, '0');
   const codigo = `ROM-${num}`;
   
   const res = await db.execute({
