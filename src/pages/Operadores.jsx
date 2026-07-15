@@ -8,6 +8,7 @@ export function Operadores() {
   const [operadores, setOperadores] = useState([])
   
   const [isEditing, setIsEditing] = useState(false)
+  const [alterandoSenha, setAlterandoSenha] = useState(false)
   const [formData, setFormData] = useState({ 
     id: null, 
     nome: '', 
@@ -97,7 +98,7 @@ export function Operadores() {
     const permissoesObj = typeof op.permissoes === 'object' ? op.permissoes : {}
     setFormData({ 
       ...op, 
-      pin: '',
+      pin: op.pin || '',
       permissoes: {
         recebimento: !!permissoesObj.recebimento,
         movimentacao: !!permissoesObj.movimentacao,
@@ -151,6 +152,7 @@ export function Operadores() {
         consulta_estoque: false
       }
     })
+    setAlterandoSenha(false)
   }
 
   const togglePermissao = (key) => {
@@ -193,15 +195,31 @@ export function Operadores() {
             </div>
               <div className="form-group" style={{ flex: 1 }}>
                 <label className="form-label">PIN (4 Dígitos) *</label>
-                <input 
-                  type="password" 
-                  className="form-input" 
-                  maxLength={4}
-                  placeholder="Ex: 1234"
-                  value={formData.pin} 
-                  onChange={e => setFormData({...formData, pin: e.target.value})} 
-                  required 
-                />
+                {isEditing && !alterandoSenha ? (
+                  <div className="flex items-center gap-12" style={{ height: 42 }}>
+                    <span className="font-mono text-lg tracking-widest bg-bg-2 px-12 py-4 rounded border border-border">{formData.pin || '****'}</span>
+                    <button 
+                      type="button" 
+                      className="btn btn--outline btn--sm" 
+                      onClick={() => {
+                        setAlterandoSenha(true)
+                        setFormData({...formData, pin: ''})
+                      }}
+                    >
+                      Alterar Senha
+                    </button>
+                  </div>
+                ) : (
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    maxLength={4}
+                    placeholder="Ex: 1234"
+                    value={formData.pin} 
+                    onChange={e => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} 
+                    required 
+                  />
+                )}
               </div>
             
             <div className="form-group mt-8 flex items-center gap-8">

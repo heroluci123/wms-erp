@@ -22,7 +22,7 @@ export async function autenticar(pin) {
 }
 
 export async function listar() {
-  const res = await db.execute('SELECT id, nome, perfil, is_adm, permissoes, ativo, created_at FROM operadores ORDER BY nome')
+  const res = await db.execute('SELECT id, nome, pin, perfil, is_adm, permissoes, ativo, created_at FROM operadores ORDER BY nome')
   
   return res.rows.map(op => {
     try {
