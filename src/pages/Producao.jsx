@@ -77,6 +77,11 @@ export function Producao() {
         const resCod = await movimentacoesQueries.identificarCodigoMovimentacao(codigo)
         if (resCod && resCod.tipo === 'CAIXA') {
           const caixa = resCod.dados
+          
+          if (detalhes?.retornos?.some(r => r.caixa_id === caixa.id)) {
+            return toastError('Aviso', 'Esta caixa acabou de ser gerada como retorno nesta OP e não pode ser bipada novamente como insumo aqui.')
+          }
+
           if (caixa.status !== 'DISPONIVEL') {
             return toastError('Inválido', `Esta caixa não está disponível (Status: ${caixa.status}).`)
           }
