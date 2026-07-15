@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Map, RefreshCw, BarChart2, CheckCircle2, AlertCircle, Database } from 'lucide-react'
+import { Map, RefreshCw, BarChart2, CheckCircle2, AlertCircle, Database, Download } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as locaisQueries from '../queries/locais.js';
 import * as estoqueQueries from '../queries/estoque.js';
@@ -67,6 +67,25 @@ export function MapaCapacidade() {
   const posicoesVazias = locaisFiltrados.filter(loc => (estoquePorEndereco[loc.endereco] || 0) === 0).length
   const posicoesOcupadas = locaisFiltrados.filter(loc => (estoquePorEndereco[loc.endereco] || 0) > 0).length
 
+  const handleExportarCSV = () => {
+    let csvContent = "RUA;STATUS\n";
+    
+    locaisFiltrados.forEach(loc => {
+      const totalCx = estoquePorEndereco[loc.endereco] || 0;
+      const status = totalCx === 0 ? "VAZIO" : `${totalCx} cx`;
+      csvContent += `${loc.endereco};${status}\n`;
+    });
+
+    const blob = new Blob(["\ufeff", csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `mapa_capacidade_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   return (
     <div>
       <div className="page-header mb-24">
@@ -97,6 +116,9 @@ export function MapaCapacidade() {
             <option value="FRIO">❄️ Frio</option>
             <option value="CONGELADO">🧊 Congelado</option>
           </select>
+          <button className="btn btn--outline" onClick={handleExportarCSV} title="Exportar para Excel/CSV">
+            <Download size={16} /> Exportar
+          </button>
           <button className="btn btn--secondary" onClick={carregar}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} /> Atualizar
           </button>
