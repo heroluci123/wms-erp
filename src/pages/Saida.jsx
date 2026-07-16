@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
-import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock, Trash2, Calendar, Scale, DollarSign } from 'lucide-react'
+import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock, Trash2, Calendar, Scale, DollarSign, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import * as saidaQueries from '../queries/saida.js'
@@ -200,9 +200,9 @@ const PRESETS = [
     setDataFim(fim)
   }
 
-// ─── COMPONENTE: Desktop Split View para Itens do Romaneio ───────────────────
-function RomaneioItensSplitView({ itens, onRemoveCaixa }) {
-  const [skuSelecionado, setSkuSelecionado] = useState(null)
+// ─── COMPONENTE: Desktop Accordion para Itens do Romaneio ───────────────────
+function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
+  const [skuExpandido, setSkuExpandido] = useState(null)
 
   // Agrupar itens por SKU
   const agrupados = React.useMemo(() => {
@@ -220,70 +220,63 @@ function RomaneioItensSplitView({ itens, onRemoveCaixa }) {
     return Object.values(mapa).sort((a, b) => a.produto_descricao.localeCompare(b.produto_descricao))
   }, [itens])
 
-  // Seleciona o primeiro SKU por padrão quando os itens carregam
-  useEffect(() => {
-    if (agrupados.length > 0 && !skuSelecionado) {
-      setSkuSelecionado(agrupados[0].chave)
-    } else if (agrupados.length === 0) {
-      setSkuSelecionado(null)
-    }
-  }, [agrupados, skuSelecionado])
-
   if (!itens || itens.length === 0) return null;
 
-  const skuAtivo = agrupados.find(g => g.chave === skuSelecionado) || agrupados[0]
-
   return (
-    <div className="flex" style={{ gap: 16, height: 280 }}>
-      {/* Coluna Esquerda: SKUs Consolidados */}
-      <div style={{ flex: '1 1 50%', border: '1px solid var(--border)', borderRadius: 8, overflowY: 'auto', background: 'var(--bg-2)' }}>
-        {agrupados.map(g => (
-          <div 
-            key={g.chave}
-            onClick={() => setSkuSelecionado(g.chave)}
-            style={{ 
-              padding: '12px 16px', 
-              borderBottom: '1px solid var(--border)', 
-              cursor: 'pointer',
-              background: skuSelecionado === g.chave ? 'rgba(34,211,238,0.1)' : 'transparent',
-              borderLeft: skuSelecionado === g.chave ? '3px solid var(--primary)' : '3px solid transparent'
-            }}
-            className="flex justify-between items-center hover:bg-bg-3 transition-colors"
-          >
-            <div>
-              <div className="font-bold text-sm" style={{ color: skuSelecionado === g.chave ? 'var(--primary)' : 'inherit' }}>
-                {g.chave}
+    <div className="flex-col" style={{ gap: 8, maxHeight: 350, overflowY: 'auto', paddingRight: 4 }}>
+      {agrupados.map(g => {
+        const isExpanded = skuExpandido === g.chave;
+        return (
+          <div key={g.chave} style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-2)', overflow: 'hidden' }}>
+            {/* Header / Resumo */}
+            <div 
+              onClick={() => setSkuExpandido(isExpanded ? null : g.chave)}
+              style={{ 
+                padding: '12px 16px', 
+                cursor: 'pointer', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                background: isExpanded ? 'rgba(34,211,238,0.1)' : 'transparent',
+                borderLeft: isExpanded ? '3px solid var(--primary)' : '3px solid transparent'
+              }}
+              className="hover:bg-bg-3 transition-colors"
+            >
+              <div>
+                <div className="font-bold text-sm" style={{ color: isExpanded ? 'var(--primary)' : 'var(--text-primary)' }}>
+                  {g.chave}
+                </div>
+                <div className="text-xs text-muted mt-4">
+                  <Package size={12} className="inline mr-4"/> {g.qtd} {g.qtd === 1 ? 'caixa' : 'caixas'}
+                </div>
               </div>
-              <div className="text-xs text-muted mt-4">
-                <Package size={12} className="inline mr-4"/> {g.qtd} {g.qtd === 1 ? 'caixa' : 'caixas'}
+              <div className="flex items-center gap-16">
+                <div className="font-bold text-cyan">{g.pesoTotal.toFixed(2)} kg</div>
+                <ChevronRight size={18} style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', color: 'var(--text-muted)' }} />
               </div>
             </div>
-            <div className="font-bold text-cyan text-right">
-              {g.pesoTotal.toFixed(2)} kg
-            </div>
+            
+            {/* Detalhes (Lista de EANs) */}
+            {isExpanded && (
+              <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-1)' }}>
+                {g.caixas.map((c, i) => (
+                  <div key={c.id} className="flex justify-between items-center" style={{ padding: '8px 16px', borderBottom: i < g.caixas.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <div className="font-mono text-sm text-muted">{c.ean_caixa}</div>
+                    <div className="flex items-center gap-16">
+                      <div className="font-bold text-sm">{c.peso_kg.toFixed(2)} kg</div>
+                      {onRemoveCaixa && (
+                        <button className="btn btn--ghost btn--icon text-danger p-4" onClick={(e) => { e.stopPropagation(); onRemoveCaixa(c) }} title="Remover caixa">
+                          <X size={16}/>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        ))}
-      </div>
-
-      {/* Coluna Direita: Caixas do SKU Selecionado */}
-      <div style={{ flex: '1 1 50%', border: '1px solid var(--border)', borderRadius: 8, overflowY: 'auto', background: 'var(--bg-2)' }}>
-        <div style={{ position: 'sticky', top: 0, background: 'var(--bg-1)', padding: '8px 16px', borderBottom: '1px solid var(--border)', zIndex: 10 }}>
-          <h5 className="font-bold text-xs uppercase text-muted">EANs: {skuAtivo?.chave}</h5>
-        </div>
-        {skuAtivo?.caixas.map(c => (
-          <div key={c.id} className="flex justify-between items-center" style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
-            <div className="font-mono text-sm text-muted">{c.ean_caixa}</div>
-            <div className="flex items-center gap-16">
-              <div className="font-bold text-sm">{c.peso_kg.toFixed(2)} kg</div>
-              {onRemoveCaixa && (
-                <button className="btn btn--ghost btn--icon text-danger p-4" onClick={(e) => { e.stopPropagation(); onRemoveCaixa(c) }} title="Remover caixa">
-                  <X size={16}/>
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+        )
+      })}
     </div>
   )
 }
@@ -474,7 +467,7 @@ function RomaneioItensSplitView({ itens, onRemoveCaixa }) {
               {romaneioAtual.itens && romaneioAtual.itens.length > 0 && (
                 <>
                   <div className="desktop-only mb-24">
-                    <RomaneioItensSplitView itens={romaneioAtual.itens} onRemoveCaixa={handleRemoverCaixa} />
+                    <RomaneioItensAccordion itens={romaneioAtual.itens} onRemoveCaixa={handleRemoverCaixa} />
                   </div>
                   <div className="mobile-only table-container mb-24" style={{ maxHeight: 300, overflowY: 'auto' }}>
                     <table>
@@ -608,7 +601,7 @@ function RomaneioItensSplitView({ itens, onRemoveCaixa }) {
                     <>
                       {/* Desktop View */}
                       <div className="desktop-only">
-                        <RomaneioItensSplitView itens={romaneioExpandido.itens} />
+                        <RomaneioItensAccordion itens={romaneioExpandido.itens} />
                       </div>
                       
                       {/* Mobile View */}
