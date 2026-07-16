@@ -66,6 +66,7 @@ export function Movimentacao() {
   const { inputRef: universalRef, handleKeyDown: handleUniversalKeyDown } = useBarcodeScanner({
     onScan: async (val) => {
       const codigo = val.toUpperCase().trim()
+      if (universalRef.current) universalRef.current.value = ''
       
       // Se já estiver na etapa de destino e bipar algo
       if (step === 'DESTINO') {
