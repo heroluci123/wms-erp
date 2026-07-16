@@ -1358,3 +1358,12 @@ tbody td {
 }
 ::selection { background: var(--primary); color: #ffffff; }
 .text-primary { color: var(--text-primary); }
+
+/* Utilitarios de Viewport */
+.desktop-only { display: none; }
+.mobile-only { display: block; }
+@media (min-width: 768px) {
+  .desktop-only { display: block; }
+  .desktop-only.flex { display: flex; }
+  .mobile-only { display: none; }
+}

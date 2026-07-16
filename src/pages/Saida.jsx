@@ -200,6 +200,94 @@ const PRESETS = [
     setDataFim(fim)
   }
 
+// ─── COMPONENTE: Desktop Split View para Itens do Romaneio ───────────────────
+function RomaneioItensSplitView({ itens, onRemoveCaixa }) {
+  const [skuSelecionado, setSkuSelecionado] = useState(null)
+
+  // Agrupar itens por SKU
+  const agrupados = React.useMemo(() => {
+    if (!itens) return []
+    const mapa = itens.reduce((acc, it) => {
+      const chave = it.produto_codigo + ' - ' + it.produto_descricao
+      if (!acc[chave]) {
+        acc[chave] = { chave, produto_codigo: it.produto_codigo, produto_descricao: it.produto_descricao, caixas: [], pesoTotal: 0, qtd: 0 }
+      }
+      acc[chave].caixas.push(it)
+      acc[chave].pesoTotal += it.peso_kg
+      acc[chave].qtd += 1
+      return acc
+    }, {})
+    return Object.values(mapa).sort((a, b) => a.produto_descricao.localeCompare(b.produto_descricao))
+  }, [itens])
+
+  // Seleciona o primeiro SKU por padrão quando os itens carregam
+  useEffect(() => {
+    if (agrupados.length > 0 && !skuSelecionado) {
+      setSkuSelecionado(agrupados[0].chave)
+    } else if (agrupados.length === 0) {
+      setSkuSelecionado(null)
+    }
+  }, [agrupados, skuSelecionado])
+
+  if (!itens || itens.length === 0) return null;
+
+  const skuAtivo = agrupados.find(g => g.chave === skuSelecionado) || agrupados[0]
+
+  return (
+    <div className="flex" style={{ gap: 16, height: 280 }}>
+      {/* Coluna Esquerda: SKUs Consolidados */}
+      <div style={{ flex: '1 1 50%', border: '1px solid var(--border)', borderRadius: 8, overflowY: 'auto', background: 'var(--bg-2)' }}>
+        {agrupados.map(g => (
+          <div 
+            key={g.chave}
+            onClick={() => setSkuSelecionado(g.chave)}
+            style={{ 
+              padding: '12px 16px', 
+              borderBottom: '1px solid var(--border)', 
+              cursor: 'pointer',
+              background: skuSelecionado === g.chave ? 'rgba(34,211,238,0.1)' : 'transparent',
+              borderLeft: skuSelecionado === g.chave ? '3px solid var(--primary)' : '3px solid transparent'
+            }}
+            className="flex justify-between items-center hover:bg-bg-3 transition-colors"
+          >
+            <div>
+              <div className="font-bold text-sm" style={{ color: skuSelecionado === g.chave ? 'var(--primary)' : 'inherit' }}>
+                {g.chave}
+              </div>
+              <div className="text-xs text-muted mt-4">
+                <Package size={12} className="inline mr-4"/> {g.qtd} {g.qtd === 1 ? 'caixa' : 'caixas'}
+              </div>
+            </div>
+            <div className="font-bold text-cyan text-right">
+              {g.pesoTotal.toFixed(2)} kg
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Coluna Direita: Caixas do SKU Selecionado */}
+      <div style={{ flex: '1 1 50%', border: '1px solid var(--border)', borderRadius: 8, overflowY: 'auto', background: 'var(--bg-2)' }}>
+        <div style={{ position: 'sticky', top: 0, background: 'var(--bg-1)', padding: '8px 16px', borderBottom: '1px solid var(--border)', zIndex: 10 }}>
+          <h5 className="font-bold text-xs uppercase text-muted">EANs: {skuAtivo?.chave}</h5>
+        </div>
+        {skuAtivo?.caixas.map(c => (
+          <div key={c.id} className="flex justify-between items-center" style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+            <div className="font-mono text-sm text-muted">{c.ean_caixa}</div>
+            <div className="flex items-center gap-16">
+              <div className="font-bold text-sm">{c.peso_kg.toFixed(2)} kg</div>
+              {onRemoveCaixa && (
+                <button className="btn btn--ghost btn--icon text-danger p-4" onClick={(e) => { e.stopPropagation(); onRemoveCaixa(c) }} title="Remover caixa">
+                  <X size={16}/>
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
   const carregarRomaneiosList = async (statusBusca, inicio = null, fim = null, previsao = null) => {
     try {
       const lista = await saidaQueries.listarRomaneios(statusBusca, inicio, fim, previsao)
@@ -384,30 +472,35 @@ const PRESETS = [
               </div>
 
               {romaneioAtual.itens && romaneioAtual.itens.length > 0 && (
-                <div className="table-container mb-24" style={{ maxHeight: 300, overflowY: 'auto' }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Produto</th>
-                        <th>EAN Caixa</th>
-                        <th style={{ textAlign: 'right' }}>Peso (kg)</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {romaneioAtual.itens.map(it => (
-                        <tr key={it.id}>
-                          <td>{it.produto_codigo} - {it.produto_descricao}</td>
-                          <td className="td-mono text-muted">{it.ean_caixa}</td>
-                          <td className="font-bold text-success" style={{ textAlign: 'right' }}>{it.peso_kg.toFixed(2)}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button className="btn btn--ghost btn--icon text-danger" onClick={() => handleRemoverCaixa(it)}><X size={16}/></button>
-                          </td>
+                <>
+                  <div className="desktop-only mb-24">
+                    <RomaneioItensSplitView itens={romaneioAtual.itens} onRemoveCaixa={handleRemoverCaixa} />
+                  </div>
+                  <div className="mobile-only table-container mb-24" style={{ maxHeight: 300, overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Produto</th>
+                          <th>EAN Caixa</th>
+                          <th style={{ textAlign: 'right' }}>Peso (kg)</th>
+                          <th></th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {romaneioAtual.itens.map(it => (
+                          <tr key={it.id}>
+                            <td>{it.produto_codigo} - {it.produto_descricao}</td>
+                            <td className="td-mono text-muted">{it.ean_caixa}</td>
+                            <td className="font-bold text-success" style={{ textAlign: 'right' }}>{it.peso_kg.toFixed(2)}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button className="btn btn--ghost btn--icon text-danger" onClick={() => handleRemoverCaixa(it)}><X size={16}/></button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
 
               <button className="btn btn--primary btn--lg w-full" onClick={handleFinalizarMontagem}>
@@ -512,26 +605,34 @@ const PRESETS = [
                 <div className="p-16 border-t border-border bg-bg-1">
                   <h4 className="font-bold mb-12 text-sm text-muted uppercase">Itens do Romaneio</h4>
                   {romaneioExpandido.itens && romaneioExpandido.itens.length > 0 ? (
-                    <div className="table-container" style={{ maxHeight: 250, overflowY: 'auto' }}>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Produto</th>
-                            <th>EAN</th>
-                            <th style={{ textAlign: 'right' }}>Peso</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {romaneioExpandido.itens.map(it => (
-                            <tr key={it.id}>
-                              <td>{it.produto_codigo} - {it.produto_descricao}</td>
-                              <td className="td-mono text-muted">{it.ean_caixa}</td>
-                              <td className="font-bold text-cyan" style={{ textAlign: 'right' }}>{it.peso_kg.toFixed(2)} kg</td>
+                    <>
+                      {/* Desktop View */}
+                      <div className="desktop-only">
+                        <RomaneioItensSplitView itens={romaneioExpandido.itens} />
+                      </div>
+                      
+                      {/* Mobile View */}
+                      <div className="mobile-only table-container" style={{ maxHeight: 250, overflowY: 'auto' }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Produto</th>
+                              <th>EAN</th>
+                              <th style={{ textAlign: 'right' }}>Peso</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {romaneioExpandido.itens.map(it => (
+                              <tr key={it.id}>
+                                <td>{it.produto_codigo} - {it.produto_descricao}</td>
+                                <td className="td-mono text-muted">{it.ean_caixa}</td>
+                                <td className="font-bold text-cyan" style={{ textAlign: 'right' }}>{it.peso_kg.toFixed(2)} kg</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
                   ) : (
                     <div className="text-center p-24 text-muted"><Clock className="animate-spin inline mr-8" size={16}/> Carregando itens...</div>
                   )}
