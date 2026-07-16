@@ -598,6 +598,7 @@ export function Recebimento() {
     if (!produtoDetectado) return toastError('Atenção', 'Produto não detectado.')
     if (!boxData.peso_kg || !boxData.validade) return toastWarning('Atenção', 'Informe peso e validade.')
     if (!eanCaixaReal || eanCaixaReal.trim() === '') return toastError('Atenção', 'EAN inválido ou vazio. Bipe novamente.')
+    if (parseFloat(boxData.peso_kg) > 1000) return toastError('Peso Inválido', 'O peso da caixa está muito alto. Verifique se você bipou o código de barras no campo de peso acidentalmente!')
     try {
       const res = await movimentacoesQueries.receberCaixaSerializada({
         ean_caixa: eanCaixaReal,

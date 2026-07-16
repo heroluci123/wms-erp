@@ -1,0 +1,1 @@
+const Database = require('better-sqlite3'); const db = new Database(require('os').homedir() + '/AppData/Roaming/wms-erp/wms-local.db'); db.exec('DELETE FROM estoque_posicao WHERE qtd_kg ; DELETE FROM estoque_caixas WHERE peso_kg ; DELETE FROM movimentacoes_log WHERE qtd_kg ;'); console.log('Cleaned up giant values'); process.exit(0);  
