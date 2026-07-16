@@ -99,8 +99,20 @@ export function Movimentacao() {
             return toastWarning('Não permitido', `Para ${iden.dados.endereco}, bipe os paletes ou caixas individualmente.`)
           }
           
+          
           if (entidadeTipo === 'CAIXAS') {
-            return processarScanDestino(codigo)
+            if (iden.tipo === 'CAIXA') {
+              if (caixasSelecionadas.find(c => c.id === iden.dados.id)) {
+                return toastWarning('Aviso', 'Esta caixa já foi bipada.')
+              }
+              setCaixasSelecionadas(prev => [iden.dados, ...prev])
+              return toastSuccess('Caixa SSCC Adicionada', iden.dados.produto_descricao)
+            } else if (iden.tipo === 'ENDERECO' || iden.tipo === 'PALETE') {
+              setStep('DESTINO')
+              return processarScanDestino(codigo)
+            } else {
+              return toastWarning('Atenção', 'Bipe outra caixa para a fila ou um endereço/palete de destino.')
+            }
           }
 
           if (entidadeTipo === 'PALETE') return toastWarning('Atenção', 'Você já selecionou um palete.')
@@ -123,10 +135,18 @@ export function Movimentacao() {
     if (dst === 'REC' || dst === 'EXPEDICAO') {
       return toastError('Destino Proibido', `Não é permitido transferir para "${dst}" pela Movimentação. Use a tela de Recebimento ou Saída.`)
     }
-    const localDst = await locaisQueries.buscarPorEndereco(dst)
-    if (!localDst) {
-      return toastError('Endereço Inválido', `O endereço "${dst}" não está cadastrado.`)
+    
+    // O destino pode ser um palete? Vamos verificar se parece com código de palete
+    const isPalletCode = dst.startsWith('PLT-') || dst.length > 5;
+    
+    let localDst = null;
+    if (!isPalletCode) {
+      localDst = await locaisQueries.buscarPorEndereco(dst)
+      if (!localDst) {
+        return toastError('Endereço Inválido', `O destino "${dst}" não é um endereço válido cadastrado.`)
+      }
     }
+    
     setDestino(dst)
 
     if (entidadeTipo === 'ENDERECO_TODO') {

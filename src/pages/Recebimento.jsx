@@ -6,6 +6,7 @@ import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import * as movimentacoesQueries from '../queries/movimentacoes.js';
 import * as produtosQueries from '../queries/produtos.js';
+import * as estoqueQueries from '../queries/estoque.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx';
 
 // ─── Helper: exportar CSV ────────────────────────────────────────────────────
@@ -558,6 +559,14 @@ export function Recebimento() {
       setProdutoDetectado(null)
       
       try {
+        const caixaExistente = await estoqueQueries.buscarCaixaPorEan(val)
+        if (caixaExistente) {
+          toastError('Caixa Duplicada', 'Esta caixa já foi recebida e consta no estoque.')
+          setEanBipado('')
+          setTimeout(() => codigoRef.current?.focus(), 100)
+          return
+        }
+
         const resultado = await produtosQueries.buscarPorCodigoComInfo(val)
         if (resultado) {
           const { produto, eanUnico } = resultado
@@ -748,19 +757,19 @@ export function Recebimento() {
                   </div>
 
                   {produtoDetectado && (
-                    <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
+                    <div style={{ background: 'var(--bg-2)', padding: '12px 16px', borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
                       <div className="text-xs font-bold mb-4 uppercase" style={{ color: eanEhUnico ? 'var(--primary)' : 'var(--warning)' }}>
-                        {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico — Produto identificado por sufixo do EAN'}
+                        {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico (Sufixo)'}
                       </div>
-                      <div className="font-bold" style={{ fontSize: 16 }}>{produtoDetectado.descricao}</div>
-                      <div className="text-sm text-muted mb-4">Código: {produtoDetectado.codigo || '-'}</div>
+                      <div className="font-bold text-sm" style={{ lineHeight: 1.2 }}>{produtoDetectado.descricao}</div>
+                      <div className="text-xs text-muted mb-4">Código: {produtoDetectado.codigo || '-'}</div>
                       {!eanEhUnico && (
-                        <div style={{ fontSize: 11, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '6px 10px', color: 'var(--warning)', marginBottom: 8 }}>
-                          🏷️ EAN bipado identificado por sufixo — caixa salva com EAN original: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
+                        <div style={{ fontSize: 10, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '4px 8px', color: 'var(--warning)', marginBottom: 8 }}>
+                          🏷️ Salva com EAN original: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
                         </div>
                       )}
 
-                      <div className="form-grid form-grid--2">
+                      <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12 }}>
                         <div className="form-group">
                           <label className="form-label">Peso Real (KG) *</label>
                           <input
@@ -798,7 +807,7 @@ export function Recebimento() {
                 {/* Lista de caixas do palete ativo */}
                 <div className="mt-16">
                   <h4 className="text-xs text-muted font-bold mb-8 uppercase tracking-wider">Caixas no Palete ({caixasDoPalete.length})</h4>
-                  <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 8 }}>
                     {caixasDoPalete.length === 0 ? (
                       <div className="text-center text-muted p-24 text-sm">Nenhuma caixa bipada ainda.</div>
                     ) : (

@@ -64,6 +64,15 @@ export async function listarGeralCaixas({ incluirRec = false } = {}) {
   return res.rows
 }
 
+// Verifica se uma caixa já existe no estoque pelo EAN
+export async function buscarCaixaPorEan(ean_caixa) {
+  const res = await db.execute({
+    sql: `SELECT id, ean_caixa, status, endereco, palete_id FROM estoque_caixas WHERE ean_caixa = ?`,
+    args: [ean_caixa]
+  })
+  return res.rows.length > 0 ? res.rows[0] : null
+}
+
 // Busca saldo de um produto em um endereço específico (apenas lotes com saldo > 0)
 export async function buscarPorEnderecoProduto(endereco, produto_id) {
   const res = await db.execute({

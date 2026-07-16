@@ -467,12 +467,22 @@ export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, o
     // Agrupamento para atualizar estoque genérico e logs
     const agrupamento = {};
 
+    // Check if the destino is a pallet in the DB
+    const isDestinoPalete = await db.execute({ sql: `SELECT id FROM paletes WHERE codigo = ?`, args: [destino] });
+    const palete_id_destino = isDestinoPalete.rows.length > 0 ? isDestinoPalete.rows[0].id : null;
+    // se for um palete, o endereço da caixa fica nulo e ela é atrelada ao palete. O local_real vira o palete.
+    // se for endereço físico, palete é nulo e endereço = destino.
+
     for (const c of caixas) {
       // Origem real da caixa é o endereço dela, ou se estiver num palete, o endereço do palete
       const origem_real = c.endereco || c.palete_endereco || 'REC';
 
-      // Remove a caixa do palete (desmembramento) e atualiza o endereço
-      blocos.push({ sql: `UPDATE estoque_caixas SET palete_id = NULL, endereco = ? WHERE id = ?`, args: [destino, c.id] });
+      // Atualiza a caixa
+      if (palete_id_destino) {
+        blocos.push({ sql: `UPDATE estoque_caixas SET palete_id = ?, endereco = NULL WHERE id = ?`, args: [palete_id_destino, c.id] });
+      } else {
+        blocos.push({ sql: `UPDATE estoque_caixas SET palete_id = NULL, endereco = ? WHERE id = ?`, args: [destino, c.id] });
+      }
       
       // Se a caixa estava num palete, verifica se ele esvaziou para finalizar
       if (c.palete_id) {
