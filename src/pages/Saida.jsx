@@ -191,7 +191,12 @@ const PRESETS = [
   const [dataInicio, setDataInicio] = useState(() => new Date().toISOString().slice(0,10))
   const [dataFim,    setDataFim]    = useState(() => new Date().toISOString().slice(0,10))
   const [previsaoBusca, setPrevisaoBusca] = useState('')
+  const [clienteBusca, setClienteBusca] = useState('')
   const [presetAtivo, setPresetAtivo] = useState(0) // "Hoje" por padrão
+
+  const romaneiosFiltrados = romaneiosLista.filter(r => 
+    !clienteBusca || (r.cliente && r.cliente.toLowerCase().includes(clienteBusca.toLowerCase()))
+  )
 
   const aplicarPreset = (idx) => {
     setPresetAtivo(idx)
@@ -535,6 +540,11 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
                     <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>Previsão:</span>
                     <input type="date" value={previsaoBusca} onChange={e => setPrevisaoBusca(e.target.value)}
                       style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }} />
+                      
+                    <div style={{ height: 24, width: 1, background: 'var(--border)', marginLeft: 8 }}></div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}><Search size={12} className="inline"/> Cliente:</span>
+                    <input type="text" value={clienteBusca} onChange={e => setClienteBusca(e.target.value)} placeholder="Buscar cliente..."
+                      style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none', width: 120 }} />
                   </div>
                 </div>
               </div>
@@ -542,23 +552,23 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
               <div className="kpi-grid">
                 <div className="kpi-card" style={{ borderColor: 'var(--primary)' }}>
                   <span className="kpi-card__label flex items-center gap-8" style={{ color: 'var(--primary)' }}><Package size={14} /> Caixas Expedidas</span>
-                  <span className="kpi-card__value">{romaneiosLista.reduce((sum, r) => sum + (r.qtd_caixas || 0), 0)}</span>
+                  <span className="kpi-card__value">{romaneiosFiltrados.reduce((sum, r) => sum + (r.qtd_caixas || 0), 0)}</span>
                 </div>
                 <div className="kpi-card" style={{ borderColor: 'var(--info)' }}>
                   <span className="kpi-card__label flex items-center gap-8" style={{ color: 'var(--info)' }}><Scale size={14} /> KG Expedido</span>
-                  <span className="kpi-card__value">{romaneiosLista.reduce((sum, r) => sum + parseFloat(r.peso_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="kpi-card__value">{romaneiosFiltrados.reduce((sum, r) => sum + parseFloat(r.peso_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="kpi-card" style={{ borderColor: 'var(--success)' }}>
                   <span className="kpi-card__label flex items-center gap-8" style={{ color: 'var(--success)' }}><DollarSign size={14} /> Valor Expedido</span>
-                  <span className="kpi-card__value">R$ {romaneiosLista.reduce((sum, r) => sum + parseFloat(r.valor_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="kpi-card__value">R$ {romaneiosFiltrados.reduce((sum, r) => sum + parseFloat(r.valor_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
           )}
-          {romaneiosLista.length === 0 && (
+          {romaneiosFiltrados.length === 0 && (
             <div className="text-muted text-center p-24">Nenhum romaneio nesta etapa.</div>
           )}
-          {romaneiosLista.map(rom => (
+          {romaneiosFiltrados.map(rom => (
             <div key={rom.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div 
                 className="p-16 flex justify-between items-center cursor-pointer hover:bg-bg-2 transition-colors"
