@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
-import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock, Trash2, Calendar, Scale, DollarSign, ChevronRight } from 'lucide-react'
+import { Truck, Check, X, Plus, Package, ScanBarcode, MapPin, Hash, ClipboardList, Clock, Trash2, Calendar, Scale, DollarSign, ChevronRight, Search } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import * as saidaQueries from '../queries/saida.js'
@@ -195,7 +195,7 @@ const PRESETS = [
   const [presetAtivo, setPresetAtivo] = useState(0) // "Hoje" por padrão
 
   const romaneiosFiltrados = romaneiosLista.filter(r => 
-    !clienteBusca || (r.cliente && r.cliente.toLowerCase().includes(clienteBusca.toLowerCase()))
+    abaAtiva !== 'HISTORICO' || !clienteBusca || (r.cliente && r.cliente.toLowerCase().includes(clienteBusca.toLowerCase()))
   )
 
   const aplicarPreset = (idx) => {
