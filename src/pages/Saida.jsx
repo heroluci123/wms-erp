@@ -515,7 +515,7 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
             <div className="flex-col gap-16 mb-8">
               <div className="card card--elevated">
                 <div className="flex items-center gap-16 flex-wrap">
-                  <div className="flex items-center gap-8" style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 600 }}>
+                  <div className="flex items-center gap-8 flex-shrink-0" style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
                     <Calendar size={16} /> Período de análise:
                   </div>
                   <div className="flex gap-8 flex-wrap">
@@ -525,26 +525,32 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
                         borderColor: presetAtivo === i ? 'var(--accent)' : 'var(--border)',
                         background: presetAtivo === i ? 'var(--accent-muted)' : 'transparent',
                         color: presetAtivo === i ? 'var(--accent)' : 'var(--text-muted)',
-                        cursor: 'pointer', transition: 'all 0.15s'
+                        cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap'
                       }}>{p.label}</button>
                     ))}
                   </div>
-                  <div className="flex items-center gap-8 ml-auto">
-                    <input type="date" value={dataInicio} onChange={e => { setDataInicio(e.target.value); setPresetAtivo(null) }}
-                      style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13 }} />
-                    <span style={{ color: 'var(--text-muted)' }}>até</span>
-                    <input type="date" value={dataFim} onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }}
-                      style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13, marginRight: 8 }} />
+                  <div className="flex items-center gap-12 ml-auto flex-wrap">
+                    <div className="flex items-center gap-8">
+                      <input type="date" value={dataInicio} onChange={e => { setDataInicio(e.target.value); setPresetAtivo(null) }}
+                        style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13 }} />
+                      <span style={{ color: 'var(--text-muted)' }}>até</span>
+                      <input type="date" value={dataFim} onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }}
+                        style={{ background: 'var(--bg-3)', border: '1.5px solid var(--border)', borderRadius: 8, padding: '5px 10px', color: 'var(--text-primary)', fontSize: 13 }} />
+                    </div>
                     
-                    <div style={{ height: 24, width: 1, background: 'var(--border)' }}></div>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>Previsão:</span>
-                    <input type="date" value={previsaoBusca} onChange={e => setPrevisaoBusca(e.target.value)}
-                      style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }} />
+                    <div className="flex items-center gap-8">
+                      <div style={{ height: 24, width: 1, background: 'var(--border)' }}></div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>Previsão:</span>
+                      <input type="date" value={previsaoBusca} onChange={e => setPrevisaoBusca(e.target.value)}
+                        style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }} />
+                    </div>
                       
-                    <div style={{ height: 24, width: 1, background: 'var(--border)', marginLeft: 8 }}></div>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}><Search size={12} className="inline"/> Cliente:</span>
-                    <input type="text" value={clienteBusca} onChange={e => setClienteBusca(e.target.value)} placeholder="Buscar cliente..."
-                      style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none', width: 120 }} />
+                    <div className="flex items-center gap-8">
+                      <div style={{ height: 24, width: 1, background: 'var(--border)' }}></div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}><Search size={12} className="inline"/> Cliente:</span>
+                      <input type="text" value={clienteBusca} onChange={e => setClienteBusca(e.target.value)} placeholder="Buscar cliente..."
+                        style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', padding: '2px 4px', color: 'var(--text-primary)', fontSize: 12, outline: 'none', width: 120 }} />
+                    </div>
                   </div>
                 </div>
               </div>
