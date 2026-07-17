@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ToastContainer } from '../components/shared/ToastContainer'
 import { useAppStore } from '../store/appStore'
 import { Delete } from 'lucide-react'
 import * as operadoresQueries from '../queries/operadores.js';
@@ -31,6 +32,7 @@ export function Login() {
         setPin('')
       }
     } catch (err) {
+      console.error("Login error:", err)
       toastError('Erro', 'Falha ao conectar com banco de dados')
       setPin('')
     } finally {
@@ -77,6 +79,7 @@ export function Login() {
       <div style={{ position: 'absolute', bottom: 10, opacity: 0.1, fontSize: 10 }}>
         PIN padrão de gestor: 0000
       </div>
+      <ToastContainer />
     </div>
   )
 }
