@@ -821,7 +821,7 @@ export function Recebimento() {
                           <div className="text-right flex items-center gap-12">
                             <div>
                               <div className="font-bold text-cyan text-sm">{c.peso_kg} kg</div>
-                              <div className="text-xs text-muted">Venc: {c.validade ? format(new Date(c.validade + 'T00:00:00'), 'dd/MM/yy') : '-'}</div>
+                              <div className="text-xs text-muted">Venc: {(() => { try { if (!c.validade) return '-'; const d = new Date(c.validade + 'T00:00:00'); return isNaN(d.getTime()) ? c.validade : format(d, 'dd/MM/yy'); } catch { return c.validade; } })()}</div>
                             </div>
                             <button className="btn btn--ghost text-danger p-4" onClick={() => handleRemoverCaixa(c)} title="Excluir caixa do palete"><Trash2 size={16}/></button>
                           </div>
