@@ -15,13 +15,13 @@ async function consultarEndereco(endereco) {
   const { rows } = await db.execute({
     sql: `
       SELECT
-        ec.id, ec.ean_caixa, ec.peso_kg, ec.validade, ec.lote,
+        ec.id, ec.ean_caixa, ec.peso_kg, ec.validade, ec.lote, ec.status,
         p.codigo, p.descricao, p.status_curva, p.grupo, p.valor_unitario,
         pl.codigo as palete_codigo
       FROM estoque_caixas ec
       JOIN produtos p ON p.id = ec.produto_id
       LEFT JOIN paletes pl ON pl.id = ec.palete_id
-      WHERE ec.endereco = ? AND ec.status = 'DISPONIVEL'
+      WHERE ec.endereco = ? AND ec.status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')
       ORDER BY p.descricao, ec.validade
     `,
     args: [endereco.toUpperCase().trim()]
@@ -245,6 +245,8 @@ export function ConsultaEndereco() {
                         <tr key={cx.id} style={{ borderBottom: '1px solid var(--border)' }}>
                           <td style={{ padding: '7px 8px', fontFamily: 'monospace', fontSize: 11, color: 'var(--primary)' }}>
                             {cx.ean_caixa || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>s/EAN</span>}
+                            {cx.status === 'RESERVADA' && <span style={{ marginLeft: 6, fontSize: 9, padding: '2px 4px', background: 'var(--warning-muted)', color: 'var(--warning)', borderRadius: 4, fontWeight: 700 }} title="Caixa em Romaneio/Expedição">RESERVADA</span>}
+                            {cx.status === 'BLOQUEADO' && <span style={{ marginLeft: 6, fontSize: 9, padding: '2px 4px', background: 'var(--danger-muted)', color: 'var(--danger)', borderRadius: 4, fontWeight: 700 }}>BLOQUEADA</span>}
                           </td>
                           <td style={{ padding: '7px 8px', color: 'var(--text-muted)' }}>{cx.lote || '—'}</td>
                           <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 700 }}>{parseFloat(cx.peso_kg || 0).toFixed(2)} kg</td>
