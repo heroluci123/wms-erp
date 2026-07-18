@@ -4,6 +4,39 @@ import { db } from '../lib/db.js';
 
 import * as inventariosQueries from './inventarios.js';
 
+/**
+ * Recalcula estoque_posicao para um ou mais endereços a partir do estoque_caixas (fonte de verdade).
+ * Previne dessincronização acumulada por somas/subtrações erradas.
+ */
+export async function recalcularPosicaoEnderecos(enderecos) {
+  if (!enderecos || enderecos.length === 0) return;
+  const placeholders = enderecos.map(() => '?').join(',');
+  
+  // 1. Calcular saldos reais
+  const { rows: saldos } = await db.execute({
+    sql: `SELECT produto_id, endereco, COALESCE(validade,'') as validade,
+                 COUNT(*) as qtd_caixas, SUM(peso_kg) as qtd_kg
+          FROM estoque_caixas
+          WHERE status = 'DISPONIVEL' AND endereco IN (${placeholders})
+          GROUP BY produto_id, endereco, COALESCE(validade,'')`,
+    args: enderecos
+  });
+
+  // 2. Deletar posições antigas desses endereços
+  await db.execute({ sql: `DELETE FROM estoque_posicao WHERE endereco IN (${placeholders})`, args: enderecos });
+
+  // 3. Reinserir com valores corretos
+  for (const s of saldos) {
+    if ((s.qtd_caixas || 0) <= 0) continue;
+    await db.execute({
+      sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg, updated_at)
+            VALUES (?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP)`,
+      args: [s.produto_id, s.endereco, s.validade || null, s.qtd_caixas, s.qtd_kg]
+    });
+  }
+}
+
+
 // ── LPN (Paletes) e SSCC (Caixas Serializadas) ──
 
 export async function criarPalete() {
@@ -356,30 +389,8 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
 
     await db.batch(blocos, 'write');
 
-    // Remove TODOS os registros da origem para os produtos movimentados (evita duplicatas por mismatch de validade/lote)
-    // Somente remove se o estoque_caixas confirma que nenhuma caixa real permanece na origem
-    for (const g of Object.values(agrupamento)) {
-      const restantes = await db.execute({
-        sql: `SELECT COUNT(*) as total FROM estoque_caixas WHERE produto_id = ? AND endereco = ? AND status = 'DISPONIVEL'`,
-        args: [g.produto_id, origem]
-      });
-      if (restantes.rows[0].total === 0) {
-        // Sem caixas físicas na origem → pode limpar toda a posição
-        await db.execute({
-          sql: `DELETE FROM estoque_posicao WHERE produto_id = ? AND endereco = ?`,
-          args: [g.produto_id, origem]
-        });
-      } else {
-        // Ainda tem caixas — subtrai só a quantidade correta
-        await db.execute({
-          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ?`,
-          args: [g.caixas, g.kg, g.produto_id, origem]
-        });
-      }
-    }
-
-    // Limpar posições zeradas ou negativas
-    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`);
+    // Recalcular posições a partir da fonte de verdade (evita saldos fantasma)
+    await recalcularPosicaoEnderecos([origem, destino]);
 
     return { success: true };
   } catch (err) {
@@ -443,7 +454,8 @@ export async function transferirEnderecoInteiro({ origem, destino, operador_id, 
     }
     
     await db.batch(blocos, 'write');
-    await db.execute({ sql: `DELETE FROM estoque_posicao WHERE endereco = ?`, args: [origem] });
+    // Recalcular ambos os endereços para garantir consistência
+    await recalcularPosicaoEnderecos([origem, destino]);
 
     return { success: true, totalPaletes: paletes.length, totalCaixas: caixas.length };
   } catch (err) {
@@ -525,7 +537,10 @@ export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, o
     }
 
     await db.batch(blocos, 'write');
-    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`);
+    
+    // Recalcular posições a partir da fonte de verdade (evita saldo fantasma)
+    const enderecosAfetados = [...new Set(Object.values(agrupamento).map(g => g.origem).concat([destino]).filter(Boolean))];
+    await recalcularPosicaoEnderecos(enderecosAfetados);
 
     return { success: true };
   } catch (err) {
