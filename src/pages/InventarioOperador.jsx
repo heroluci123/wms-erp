@@ -151,60 +151,109 @@ export function InventarioOperador() {
 
   const scanProduto = async (val) => {
     if (!val || val.trim() === '') return
+    const eanBipado = val.trim()
 
     try {
-      const resultado = await produtosQueries.buscarPorCodigoComInfo(val)
+      const resultado = await produtosQueries.buscarPorCodigoComInfo(eanBipado)
       if (!resultado) {
+        // EAN completamente desconhecido no sistema
         const isCarga = inventarioAtivo?.tipo === 'CargaInicial'
         if (isCarga) {
           const prods = await produtosQueries.listar()
           setProdutosSemEan(prods.filter(p => !p.ean))
-          setModalCadastro({ ean: val.trim() })
+          setModalCadastro({ ean: eanBipado })
           setFormCadastro({ descricao: '', tipo_produto: 'Materia Prima', status_curva: 'C', valor_unitario: '', grupo: '', produtoVinculado: null })
         } else {
-          setEanDesconhecido(val.trim())
+          setEanDesconhecido(eanBipado)
           setModalEanOpen(true)
         }
         return
       }
       
-      const { produto, eanUnico } = resultado
+      const { produto } = resultado
 
-      if (val.trim() === produto.codigo) {
+      if (eanBipado === produto.codigo) {
         return toastError('Código Inválido', 'Não é permitido usar o código interno do produto no inventário. Bipe a etiqueta da caixa!')
       }
 
-      let caixaSSCC = null
-      if (val.trim().length >= 8) {
-        try {
-          const { db } = await import('../lib/db.js')
-          const res = await db.execute({
-            sql: `SELECT peso_kg, validade, ean_caixa FROM estoque_caixas WHERE ean_caixa = ? AND status = 'DISPONIVEL' LIMIT 1`,
-            args: [val.trim()]
+      // Busca a caixa no estoque pelo EAN (qualquer status)
+      const { db } = await import('../lib/db.js')
+      const resEstoque = await db.execute({
+        sql: `SELECT peso_kg, validade, ean_caixa, endereco, status FROM estoque_caixas WHERE ean_caixa = ? LIMIT 1`,
+        args: [eanBipado]
+      })
+      const caixaNoEstoque = resEstoque.rows.length > 0 ? resEstoque.rows[0] : null
+
+      if (caixaNoEstoque) {
+        // Caixa já existe no sistema — conta automaticamente sem pedir peso/validade
+        const chave = `${eanBipado}__${caixaNoEstoque.validade || ''}`
+        const jaExisteNaContagem = contagemLocal.find(c => c.chave === chave)
+        if (jaExisteNaContagem) {
+          toastWarning('Atenção', 'Esta caixa já foi bipada nesta contagem!')
+          return
+        }
+
+        // Verifica se já foi OK na 1ª contagem deste inventário
+        const { rows: jaOk } = await db.execute({
+          sql: `SELECT id FROM inventario_itens WHERE inventario_id = ? AND ean_caixa = ? AND status_item = 'OK' LIMIT 1`,
+          args: [inventarioAtivo.id, eanBipado]
+        })
+        if (jaOk.length > 0) {
+          toastSuccess('Confirmado ✓', `Caixa já contada e confirmada (OK).`)
+          return
+        }
+
+        // Registrar na contagem local automaticamente
+        // Encontra ou cria o item no inventario
+        const itemMatch = itensDoEndereco.find(i => i.ean_caixa === eanBipado)
+        let item_id
+        if (itemMatch) {
+          item_id = itemMatch.id
+        } else {
+          const res = await inventariosQueries.adicionarItemSurpresa({
+            inventario_id: inventarioAtivo.id,
+            endereco: enderecoAtual,
+            produto_id: produto.id,
+            validade: caixaNoEstoque.validade,
+            ean_caixa: eanBipado
           })
-          if (res.rows.length > 0) caixaSSCC = res.rows[0]
-        } catch (_) {}
+          if (!res.success) return toastError('Erro', res.error)
+          item_id = res.item_id
+          setItensDoEndereco(prev => [...prev, { 
+            ...produto, id: item_id, ean_caixa: eanBipado, 
+            validade: caixaNoEstoque.validade, endereco: enderecoAtual 
+          }])
+        }
+
+        setContagemLocal(prev => [...prev, {
+          chave,
+          item_id,
+          produto_id: produto.id,
+          codigo: eanBipado,
+          descricao: produto.descricao,
+          validade: caixaNoEstoque.validade || '',
+          caixas: 1,
+          kg: caixaNoEstoque.peso_kg || 0
+        }])
+        toastSuccess('Caixa Contada ✓', `${produto.descricao} — ${(caixaNoEstoque.peso_kg || 0).toFixed(2)} kg`)
+        // Foca de volta no campo de produto para bipe rápido
+        setTimeout(() => document.getElementById('inv-produto')?.focus(), 100)
+        return
       }
 
-      setSsccDadosCaixa(caixaSSCC)
-
-      if (caixaSSCC) {
-        setQtdCaixas('1')
-        setQtdKg(String(caixaSSCC.peso_kg))
-        setQtdValidade(caixaSSCC.validade || '')
-        setSsccModoConfirmacao(true)
-      } else {
-        setQtdCaixas('1')
-        setQtdKg('')
-        setQtdValidade('')
-        setSsccModoConfirmacao(false)
-      }
+      // Caixa não existe no estoque, mas o produto está cadastrado
+      // Precisa de peso e validade manualmente
+      setSsccDadosCaixa(null)
+      setSsccModoConfirmacao(false)
+      setQtdCaixas('1')
+      setQtdKg('')
+      setQtdValidade('')
 
       setItemAtual({
         id: null,
         produto_id: produto.id,
         endereco: enderecoAtual,
-        codigo: val.trim(),
+        codigo: eanBipado,
         descricao: produto.descricao,
         status_curva: produto.status_curva,
         tipo_produto: produto.tipo_produto,
@@ -212,7 +261,7 @@ export function InventarioOperador() {
         status_item: 'Pendente'
       })
       setStep(3)
-      if (!caixaSSCC) setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
+      setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
     } catch (err) {
       return toastError('Erro', err.message)
     }
