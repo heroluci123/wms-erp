@@ -456,3 +456,63 @@ export async function reabrirOP(op_id) {
     return { success: false, error: err.message }
   }
 }
+
+// ─── RELATÓRIOS ───────────────────────────────────────────────────────────────
+
+/**
+ * Retorna todas as OPs fechadas (com insumos e retornos totalizados) dentro de um período.
+ * Usado pelo Relatório Geral.
+ */
+export async function relatorioOPsPeriodo(dataInicio, dataFim) {
+  const res = await db.execute({
+    sql: `
+      SELECT
+        op.id,
+        op.codigo,
+        op.nome,
+        op.operador_nome,
+        op.created_at,
+        op.updated_at as fechada_em,
+        COALESCE((SELECT SUM(peso_kg) FROM op_insumos WHERE op_id = op.id), 0) as kg_insumo,
+        COALESCE((SELECT SUM(peso_kg) FROM op_retornos WHERE op_id = op.id), 0) as kg_retorno,
+        COALESCE((SELECT COUNT(*) FROM op_insumos WHERE op_id = op.id), 0) as caixas_insumo,
+        COALESCE((SELECT COUNT(*) FROM op_retornos WHERE op_id = op.id), 0) as caixas_retorno
+      FROM ordens_producao op
+      WHERE op.status = 'FECHADA'
+        AND DATE(op.created_at) >= ?
+        AND DATE(op.created_at) <= ?
+      ORDER BY op.created_at DESC
+    `,
+    args: [dataInicio, dataFim]
+  })
+  return res.rows
+}
+
+/**
+ * Retorna o consolidado de produto acabado (op_retornos) agrupado por produto no período.
+ * Usado pelo Relatório de Produto Acabado.
+ */
+export async function relatorioProdutoAcabadoPeriodo(dataInicio, dataFim) {
+  const res = await db.execute({
+    sql: `
+      SELECT
+        p.id as produto_id,
+        p.codigo as produto_codigo,
+        p.descricao as produto_descricao,
+        p.grupo,
+        COUNT(DISTINCT r.op_id) as num_ops,
+        COUNT(r.id) as num_caixas,
+        COALESCE(SUM(r.peso_kg), 0) as kg_total
+      FROM op_retornos r
+      JOIN ordens_producao op ON op.id = r.op_id
+      JOIN produtos p ON p.id = r.produto_id
+      WHERE op.status = 'FECHADA'
+        AND DATE(op.created_at) >= ?
+        AND DATE(op.created_at) <= ?
+      GROUP BY p.id, p.codigo, p.descricao, p.grupo
+      ORDER BY kg_total DESC
+    `,
+    args: [dataInicio, dataFim]
+  })
+  return res.rows
+}

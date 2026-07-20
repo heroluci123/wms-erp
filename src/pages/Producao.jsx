@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Layers, Plus, Factory, Check, Info, ArrowRight, Package, Trash2, Unlock } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Layers, Plus, Factory, Check, Info, ArrowRight, Package, Trash2, Unlock, BarChart2, Download, Calendar, ChevronRight, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as producaoQueries from '../queries/producao.js'
 import * as produtosQueries from '../queries/produtos.js'
@@ -14,6 +14,394 @@ const fmtDataHora = (str) => {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   })
+}
+
+// ─── HELPER CSV ───────────────────────────────────────────────────────────────
+function downloadCSV(content, filename) {
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename })
+  document.body.appendChild(a); a.click(); document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ─── DATA HELPERS ─────────────────────────────────────────────────────────────
+function toDateStr(d) { return d.toISOString().slice(0, 10) }
+function hoje() { return toDateStr(new Date()) }
+function ontem() { const d = new Date(); d.setDate(d.getDate() - 1); return toDateStr(d) }
+function inicioSemana() { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return toDateStr(d) }
+function inicioMes() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01` }
+
+// ─── COMPONENTE DE RELATÓRIOS ─────────────────────────────────────────────────
+function HistoricoRelatorios() {
+  const [di, setDi] = useState(inicioMes())
+  const [df, setDf] = useState(hoje())
+  const [subTab, setSubTab] = useState('produto') // 'produto' | 'geral'
+  const [loading, setLoading] = useState(false)
+  const [dadosProduto, setDadosProduto] = useState(null)
+  const [dadosGeral, setDadosGeral] = useState(null)
+
+  const aplicarAtalho = (tipo) => {
+    if (tipo === 'hoje') { setDi(hoje()); setDf(hoje()) }
+    else if (tipo === 'ontem') { setDi(ontem()); setDf(ontem()) }
+    else if (tipo === 'semana') { setDi(inicioSemana()); setDf(hoje()) }
+    else if (tipo === 'mes') { setDi(inicioMes()); setDf(hoje()) }
+  }
+
+  const carregar = async () => {
+    if (!di || !df) return
+    setLoading(true)
+    try {
+      const [prod, geral] = await Promise.all([
+        producaoQueries.relatorioProdutoAcabadoPeriodo(di, df),
+        producaoQueries.relatorioOPsPeriodo(di, df)
+      ])
+      setDadosProduto(prod)
+      setDadosGeral(geral)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { carregar() }, [])
+
+  const fmtDt = (s) => {
+    if (!s) return '-'
+    const iso = s.includes('T') ? s : s.replace(' ', 'T') + 'Z'
+    return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  }
+
+  // KPIs produto acabado
+  const kpiProduto = useMemo(() => {
+    if (!dadosProduto) return null
+    const totalKg = dadosProduto.reduce((s, r) => s + Number(r.kg_total || 0), 0)
+    const totalCx = dadosProduto.reduce((s, r) => s + Number(r.num_caixas || 0), 0)
+    const totalOps = new Set(dadosProduto.map(r => r.num_ops)).size
+    return { totalKg, totalCx, totalProdutos: dadosProduto.length }
+  }, [dadosProduto])
+
+  // KPIs geral
+  const kpiGeral = useMemo(() => {
+    if (!dadosGeral) return null
+    const totalKgInsumo = dadosGeral.reduce((s, r) => s + Number(r.kg_insumo || 0), 0)
+    const totalKgRetorno = dadosGeral.reduce((s, r) => s + Number(r.kg_retorno || 0), 0)
+    const rendMedio = totalKgInsumo > 0 ? (totalKgRetorno / totalKgInsumo * 100) : 0
+    return { totalOps: dadosGeral.length, totalKgInsumo, totalKgRetorno, rendMedio }
+  }, [dadosGeral])
+
+  // Máximo kg para o gráfico
+  const maxKgChart = useMemo(() => {
+    if (!dadosProduto || dadosProduto.length === 0) return 1
+    return Math.max(...dadosProduto.map(r => Number(r.kg_total || 0)))
+  }, [dadosProduto])
+
+  const exportarProdutoCSV = () => {
+    if (!dadosProduto || dadosProduto.length === 0) return
+    const header = 'PRODUTO_CODIGO;PRODUTO;GRUPO;NUM_OPS;NUM_CAIXAS;KG_TOTAL\n'
+    const rows = dadosProduto.map(r =>
+      `${r.produto_codigo};${r.produto_descricao};${r.grupo || ''};${r.num_ops};${r.num_caixas};${String(Number(r.kg_total || 0).toFixed(2)).replace('.', ',')}`
+    ).join('\n')
+    downloadCSV(header + rows, `relatorio_produto_acabado_${di}_${df}.csv`)
+  }
+
+  const exportarGeralCSV = () => {
+    if (!dadosGeral || dadosGeral.length === 0) return
+    const header = 'OP;NOME;OPERADOR;DATA_ABERTURA;KG_INSUMO;KG_RETORNO;KG_SUBPRODUTO;RENDIMENTO_%\n'
+    const rows = dadosGeral.map(r => {
+      const kgInsumo = Number(r.kg_insumo || 0)
+      const kgRetorno = Number(r.kg_retorno || 0)
+      const subproduto = Math.max(0, kgInsumo - kgRetorno)
+      const rend = kgInsumo > 0 ? (kgRetorno / kgInsumo * 100).toFixed(2) : '0'
+      return `${r.codigo};${r.nome};${r.operador_nome || ''};${fmtDt(r.created_at)};${kgInsumo.toFixed(2).replace('.', ',')};${kgRetorno.toFixed(2).replace('.', ',')};${subproduto.toFixed(2).replace('.', ',')};${rend.replace('.', ',')}`
+    }).join('\n')
+    downloadCSV(header + rows, `relatorio_geral_producao_${di}_${df}.csv`)
+  }
+
+  const periodoLabel = di === df
+    ? `${fmtDt(di + 'T12:00:00')}`
+    : `${fmtDt(di + 'T12:00:00')} → ${fmtDt(df + 'T12:00:00')}`
+
+  return (
+    <div>
+      {/* ── FILTRO DE DATA ── */}
+      <div className="card mb-16" style={{ background: 'var(--bg-2)' }}>
+        <div className="flex items-center gap-8 mb-12">
+          <Calendar size={16} style={{ color: 'var(--primary)' }} />
+          <span className="font-bold text-sm" style={{ color: 'var(--primary)' }}>Período</span>
+          <span className="text-xs text-muted ml-8">{periodoLabel}</span>
+        </div>
+        <div className="flex flex-wrap gap-8 mb-12">
+          {[
+            { label: 'Hoje', key: 'hoje' },
+            { label: 'Ontem', key: 'ontem' },
+            { label: 'Esta Semana', key: 'semana' },
+            { label: 'Este Mês', key: 'mes' },
+          ].map(a => (
+            <button
+              key={a.key}
+              className="btn btn--ghost btn--sm"
+              style={{ fontSize: 12 }}
+              onClick={() => aplicarAtalho(a.key)}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-12 items-end">
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Data Início</label>
+            <input type="date" className="form-input" value={di} onChange={e => setDi(e.target.value)} style={{ width: 160 }} />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Data Fim</label>
+            <input type="date" className="form-input" value={df} onChange={e => setDf(e.target.value)} style={{ width: 160 }} />
+          </div>
+          <button className="btn btn--primary" onClick={carregar} disabled={loading}>
+            {loading ? 'Carregando...' : 'Aplicar Filtro'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── SUB-ABAS ── */}
+      <div className="flex gap-12 mb-16">
+        <button
+          className={`btn ${subTab === 'produto' ? 'btn--primary' : 'btn--ghost'}`}
+          style={{ flex: 1 }}
+          onClick={() => setSubTab('produto')}
+        >
+          <Package size={16} /> Produto Acabado
+        </button>
+        <button
+          className={`btn ${subTab === 'geral' ? 'btn--primary' : 'btn--ghost'}`}
+          style={{ flex: 1 }}
+          onClick={() => setSubTab('geral')}
+        >
+          <BarChart2 size={16} /> Relatório Geral
+        </button>
+      </div>
+
+      {/* ═══════════════ ABA PRODUTO ACABADO ═══════════════ */}
+      {subTab === 'produto' && (
+        <div>
+          {dadosProduto === null ? (
+            <div className="text-center text-muted py-32">Aplique o filtro para ver os relatórios.</div>
+          ) : (
+            <>
+              {/* KPI Cards */}
+              {kpiProduto && (
+                <div className="grid grid-cols-3 gap-16 mb-16">
+                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
+                    <div style={{ fontSize: 30, fontWeight: 900, color: 'var(--success)' }}>{Number(kpiProduto.totalKg).toFixed(0)} kg</div>
+                    <div className="text-xs text-muted uppercase font-bold mt-4">Total Produzido</div>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
+                    <div style={{ fontSize: 30, fontWeight: 900, color: 'var(--primary)' }}>{kpiProduto.totalCx}</div>
+                    <div className="text-xs text-muted uppercase font-bold mt-4">Caixas Geradas</div>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
+                    <div style={{ fontSize: 30, fontWeight: 900, color: 'var(--warning)' }}>{kpiProduto.totalProdutos}</div>
+                    <div className="text-xs text-muted uppercase font-bold mt-4">Produtos Distintos</div>
+                  </div>
+                </div>
+              )}
+
+              {dadosProduto.length === 0 ? (
+                <div className="card text-center text-muted py-32">Nenhuma produção no período selecionado.</div>
+              ) : (
+                <div className="card p-0">
+                  {/* Header da tabela + CSV */}
+                  <div className="flex items-center justify-between p-16" style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div>
+                      <div className="font-bold text-primary">Consolidado por Produto</div>
+                      <div className="text-xs text-muted">{dadosProduto.length} produto(s) · {periodoLabel}</div>
+                    </div>
+                    <button className="btn btn--ghost btn--sm flex items-center gap-8" onClick={exportarProdutoCSV}>
+                      <Download size={14} /> CSV
+                    </button>
+                  </div>
+
+                  {/* Gráfico de barras */}
+                  <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+                    <div className="text-xs text-muted font-bold uppercase mb-12">Kg Produzido por Produto</div>
+                    <div className="flex flex-col gap-10">
+                      {dadosProduto.map(r => {
+                        const pct = maxKgChart > 0 ? (Number(r.kg_total) / maxKgChart * 100) : 0
+                        const totalKgGeral = kpiProduto?.totalKg || 1
+                        const share = (Number(r.kg_total) / totalKgGeral * 100).toFixed(1)
+                        return (
+                          <div key={r.produto_id}>
+                            <div className="flex justify-between items-center mb-4">
+                              <span className="text-sm font-bold" style={{ maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.produto_descricao}</span>
+                              <span className="text-sm font-mono" style={{ color: 'var(--success)' }}>{Number(r.kg_total).toFixed(2)} kg <span className="text-muted text-xs">({share}%)</span></span>
+                            </div>
+                            <div style={{ height: 8, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, var(--success), var(--primary))', borderRadius: 99, transition: 'width 0.6s ease' }} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Tabela detalhada */}
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+                          <th style={{ textAlign: 'left', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Produto</th>
+                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Código</th>
+                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Grupo</th>
+                          <th style={{ textAlign: 'center', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Nº OPs</th>
+                          <th style={{ textAlign: 'center', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Caixas</th>
+                          <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Kg Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dadosProduto.map((r, i) => (
+                          <tr key={r.produto_id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                            <td style={{ padding: '10px 16px', fontWeight: 600 }}>{r.produto_descricao}</td>
+                            <td style={{ padding: '10px 8px', fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>{r.produto_codigo}</td>
+                            <td style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: 12 }}>{r.grupo || '—'}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--primary)' }}>{r.num_ops}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'center', color: 'var(--text-muted)' }}>{r.num_caixas}</td>
+                            <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--success)', fontFamily: 'monospace' }}>{Number(r.kg_total).toFixed(2)} kg</td>
+                          </tr>
+                        ))}
+                        {/* Linha total */}
+                        <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-2)' }}>
+                          <td colSpan={5} style={{ padding: '10px 16px', fontWeight: 700, fontSize: 13 }}>TOTAL</td>
+                          <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 900, color: 'var(--success)', fontFamily: 'monospace', fontSize: 15 }}>
+                            {kpiProduto ? Number(kpiProduto.totalKg).toFixed(2) : '—'} kg
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ ABA GERAL ═══════════════ */}
+      {subTab === 'geral' && (
+        <div>
+          {dadosGeral === null ? (
+            <div className="text-center text-muted py-32">Aplique o filtro para ver os relatórios.</div>
+          ) : (
+            <>
+              {/* KPI Cards */}
+              {kpiGeral && (
+                <div className="grid grid-cols-4 gap-12 mb-16">
+                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{kpiGeral.totalOps}</div>
+                    <div className="text-xs text-muted uppercase font-bold mt-4">OPs Finalizadas</div>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--cyan)' }}>{kpiGeral.totalKgInsumo.toFixed(0)} kg</div>
+                    <div className="text-xs text-muted uppercase font-bold mt-4">Total Insumo</div>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--success)' }}>{kpiGeral.totalKgRetorno.toFixed(0)} kg</div>
+                    <div className="text-xs text-muted uppercase font-bold mt-4">Total Produzido</div>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center', background: kpiGeral.rendMedio < 85 ? 'rgba(239,68,68,0.1)' : 'var(--bg-2)', border: kpiGeral.rendMedio < 85 ? '1px solid var(--danger)' : undefined }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: kpiGeral.rendMedio < 85 ? 'var(--danger)' : kpiGeral.rendMedio < 92 ? 'var(--warning)' : 'var(--success)' }}>
+                      {kpiGeral.rendMedio.toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-muted uppercase font-bold mt-4">Rendimento Médio</div>
+                  </div>
+                </div>
+              )}
+
+              {dadosGeral.length === 0 ? (
+                <div className="card text-center text-muted py-32">Nenhuma OP finalizada no período selecionado.</div>
+              ) : (
+                <div className="card p-0">
+                  <div className="flex items-center justify-between p-16" style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div>
+                      <div className="font-bold text-primary">Relatório Geral de Produção</div>
+                      <div className="text-xs text-muted">{dadosGeral.length} OP(s) · {periodoLabel}</div>
+                    </div>
+                    <button className="btn btn--ghost btn--sm flex items-center gap-8" onClick={exportarGeralCSV}>
+                      <Download size={14} /> CSV
+                    </button>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+                          <th style={{ textAlign: 'left', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>OP</th>
+                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Produto/Nome</th>
+                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Data</th>
+                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Operador</th>
+                          <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Kg Insumo</th>
+                          <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Kg Produzido</th>
+                          <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Subproduto</th>
+                          <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Rendimento</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dadosGeral.map((r, i) => {
+                          const kgInsumo = Number(r.kg_insumo || 0)
+                          const kgRetorno = Number(r.kg_retorno || 0)
+                          const subprod = Math.max(0, kgInsumo - kgRetorno)
+                          const rend = kgInsumo > 0 ? (kgRetorno / kgInsumo * 100) : 0
+                          const rendBaixo = rend < 85 && kgInsumo > 0
+                          const rendMedio = rend >= 85 && rend < 92
+                          const rendColor = rendBaixo ? 'var(--danger)' : rendMedio ? 'var(--warning)' : 'var(--success)'
+                          return (
+                            <tr key={r.id} style={{
+                              borderBottom: '1px solid var(--border)',
+                              background: rendBaixo ? 'rgba(239,68,68,0.05)' : i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'
+                            }}>
+                              <td style={{ padding: '10px 16px' }}>
+                                <div className="font-bold font-mono text-primary" style={{ fontSize: 13 }}>{r.codigo}</div>
+                              </td>
+                              <td style={{ padding: '10px 8px', maxWidth: 160 }}>
+                                <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nome}</div>
+                              </td>
+                              <td style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: 12 }}>{fmtDataHora(r.created_at)}</td>
+                              <td style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: 12 }}>{r.operador_nome || '—'}</td>
+                              <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--cyan)' }}>{kgInsumo.toFixed(2)}</td>
+                              <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--success)' }}>{kgRetorno.toFixed(2)}</td>
+                              <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--warning)' }}>{subprod.toFixed(2)}</td>
+                              <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                                <span style={{ fontWeight: 700, color: rendColor, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  {rendBaixo && <AlertTriangle size={12} />}
+                                  {rend.toFixed(2)}%
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        {/* Linha de totais */}
+                        {kpiGeral && (
+                          <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-2)' }}>
+                            <td colSpan={4} style={{ padding: '10px 16px', fontWeight: 700 }}>TOTAL ({kpiGeral.totalOps} OPs)</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--cyan)' }}>{kpiGeral.totalKgInsumo.toFixed(2)}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--success)' }}>{kpiGeral.totalKgRetorno.toFixed(2)}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--warning)' }}>{Math.max(0, kpiGeral.totalKgInsumo - kpiGeral.totalKgRetorno).toFixed(2)}</td>
+                            <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 900, color: kpiGeral.rendMedio < 85 ? 'var(--danger)' : kpiGeral.rendMedio < 92 ? 'var(--warning)' : 'var(--success)' }}>
+                              {kpiGeral.rendMedio.toFixed(2)}%
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function Producao() {
@@ -234,31 +622,7 @@ export function Producao() {
           )}
 
           {activeTab === 'historico' && (
-            <div className="card">
-              <h2 className="font-bold text-lg mb-16 text-muted">Histórico de Produções (Finalizadas)</h2>
-              <div className="flex flex-col gap-12">
-                {opsFechadas.map(op => (
-                  <div key={op.id} className="card bg-bg-0 cursor-pointer flex justify-between items-center hover:border-primary transition-colors" onClick={() => setOpSelecionada(op)}>
-                    <div>
-                      <h3 className="font-bold text-primary">{op.codigo} - {op.nome}</h3>
-                      <div className="text-sm text-muted">
-                        Abertura: {new Date(op.created_at).toLocaleDateString()}
-                      </div>
-                      <div className="text-sm text-muted mt-4">
-                        Insumos: <strong>{(op.peso_insumos || 0).toFixed(2)} kg</strong> |{' '} 
-                        Retorno: <strong>{(op.peso_retornos || 0).toFixed(2)} kg</strong> |{' '} 
-                        Subproduto: <strong className="text-warning">{Math.max(0, (op.peso_insumos || 0) - (op.peso_retornos || 0)).toFixed(2)} kg</strong>
-                        {op.rendimento_pct != null && (
-                          <span className="ml-8 text-success font-bold">| Rendimento: {op.rendimento_pct}%</span>
-                        )}
-                      </div>
-                    </div>
-                    <ArrowRight className="text-muted"/>
-                  </div>
-                ))}
-                {opsFechadas.length === 0 && <p className="text-muted text-sm py-16 text-center">Nenhuma OP finalizada.</p>}
-              </div>
-            </div>
+            <HistoricoRelatorios />
           )}
         </div>
       ) : (
