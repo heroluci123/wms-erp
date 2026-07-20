@@ -276,7 +276,20 @@ export async function deletar(id) {
 
 export async function buscarHistoricoCaixa(ean) {
   const res = await db.execute({
-    sql: `SELECT * FROM caixas_historico WHERE ean_caixa = ? ORDER BY data_hora ASC`,
+    sql: `
+      SELECT
+        ch.*,
+        r.codigo  AS romaneio_codigo,
+        r.cliente AS romaneio_cliente
+      FROM caixas_historico ch
+      LEFT JOIN romaneios_itens ri
+        ON ch.operacao = 'ROMANEIO'
+        AND ri.caixa_id = ch.caixa_id
+      LEFT JOIN romaneios r
+        ON r.id = ri.romaneio_id
+      WHERE ch.ean_caixa = ?
+      ORDER BY ch.data_hora ASC
+    `,
     args: [ean]
   })
   return res.rows

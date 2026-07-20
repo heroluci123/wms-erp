@@ -109,7 +109,27 @@ export function Rastreabilidade() {
                     border: '3px solid var(--surface)' 
                   }}></div>
                   <div style={{ fontWeight: 'bold', color: 'var(--accent)' }}>{ev.operacao}</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 4 }}>{ev.detalhes}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 4 }}>
+                    {ev.detalhes}
+                    {ev.operacao === 'ROMANEIO' && ev.romaneio_codigo && (
+                      <span style={{
+                        marginLeft: 8,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        background: 'rgba(99,102,241,0.15)',
+                        border: '1px solid rgba(99,102,241,0.4)',
+                        borderRadius: 6,
+                        padding: '2px 8px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        fontFamily: 'monospace',
+                        color: 'var(--primary)'
+                      }}>
+                        📋 {ev.romaneio_codigo}{ev.romaneio_cliente ? ` · ${ev.romaneio_cliente}` : ''}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                     <span><Clock size={12} style={{ display: 'inline', marginRight: 4 }}/> {new Date(ev.data_hora).toLocaleString()}</span>
                     <span>• Operador: {ev.operador_nome || 'Sistema'}</span>
