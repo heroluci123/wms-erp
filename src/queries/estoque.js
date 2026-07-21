@@ -39,7 +39,10 @@ export async function listarGeral() {
 }
 
 // Listagem caixa a caixa (serializada) com EAN individual — usa estoque_caixas direto
-export async function listarGeralCaixas({ incluirRec = false } = {}) {
+// Inclui TODAS as caixas que ainda estão fisicamente no armazém:
+// DISPONIVEL (livre), RESERVADA (em romaneio/OP), BLOQUEADO
+// Exclui apenas EXPEDIDA (saiu do galpão) e CONSUMIDA (desmembrada/produção)
+export async function listarGeralCaixas() {
   const res = await db.execute({
     sql: `
       SELECT
@@ -47,19 +50,18 @@ export async function listarGeralCaixas({ incluirRec = false } = {}) {
         p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
         p.status_curva, p.valor_unitario, p.unidade, p.grupo,
         pl.codigo as palete_codigo,
-        l.tipo_armazenamento as tipo_armazenamento
+        COALESCE(l.tipo_armazenamento, 'SECO') as tipo_armazenamento
       FROM estoque_caixas c
       JOIN produtos p ON p.id = c.produto_id
       LEFT JOIN paletes pl ON pl.id = c.palete_id
       LEFT JOIN locais l ON l.endereco = c.endereco
-      WHERE c.status = 'DISPONIVEL'
-        AND c.endereco IS NOT NULL
-        AND c.endereco != ''
-        AND c.endereco NOT IN ('EXPEDICAO', 'PERDIDO')
-        AND (? = 1 OR c.endereco != 'REC')
+      WHERE c.status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')
+        AND c.ean_caixa IS NOT NULL
+        AND c.ean_caixa != ''
+        AND (c.endereco IS NOT NULL OR c.palete_id IS NOT NULL)
       ORDER BY c.endereco, p.descricao, c.validade
     `,
-    args: [incluirRec ? 1 : 0]
+    args: []
   })
   return res.rows
 }

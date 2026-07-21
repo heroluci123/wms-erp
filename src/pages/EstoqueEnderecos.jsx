@@ -28,8 +28,10 @@ export function EstoqueEnderecos() {
   const [filtroEan,       setFiltroEan]       = useState('')
   const [filtroPalete,    setFiltroPalete]    = useState('')
   const [filtroArmazenamento, setFiltroArmazenamento] = useState('todos')
-  const [filtroVencimento,setFiltroVencimento]= useState('todos') // 'todos', 'vencidos_proximos'
+  const [filtroVencimento,setFiltroVencimento]= useState('todos')
   const [filtroEstagnado, setFiltroEstagnado] = useState('todos')
+  const [filtroTipoProduto, setFiltroTipoProduto] = useState('todos') // todos | MP | PA | Insumos
+  const [filtroStatus, setFiltroStatus] = useState('todos')           // todos | DISPONIVEL | RESERVADA | BLOQUEADO
 
   const carregarDados = useCallback(async () => {
     setLoading(true)
@@ -74,7 +76,8 @@ export function EstoqueEnderecos() {
           valor_unitario: cx.valor_unitario,
           produto_id: cx.produto_id,
           tipo_armazenamento: cx.tipo_armazenamento || posMatch?.tipo_armazenamento || 'SECO',
-          updated_at: cx.updated_at
+          updated_at: cx.updated_at,
+          status_caixa: cx.status  // DISPONIVEL | RESERVADA | BLOQUEADO
         })
         // Marcar a COMBINAÇÃO produto+endereço como coberta (não apenas uma linha específica).
         // Isso garante que todas as linhas de estoque_posicao desse produto neste endereço
@@ -111,11 +114,7 @@ export function EstoqueEnderecos() {
         item.is_estagnado = item.dias_parado >= 30
       })
 
-      setEstoque(
-        incluirInsumos
-          ? estoqueMesclado.filter(i => i.tipo_produto === 'Insumos')
-          : estoqueMesclado.filter(i => i.tipo_produto !== 'Insumos')
-      )
+      setEstoque(estoqueMesclado)
     } catch (err) {
       console.error(err)
     } finally {
@@ -135,6 +134,12 @@ export function EstoqueEnderecos() {
     }
     if (filtroEstagnado === 'estagnados' && !item.is_estagnado) return false
     if (filtroEstagnado === 'ativos' && item.is_estagnado) return false
+    if (filtroStatus !== 'todos' && item.status_caixa !== filtroStatus) return false
+    if (filtroTipoProduto !== 'todos') {
+      if (filtroTipoProduto === 'MP' && item.tipo_produto !== 'Materia Prima') return false
+      if (filtroTipoProduto === 'PA' && item.tipo_produto !== 'Produto Acabado') return false
+      if (filtroTipoProduto === 'Insumos' && item.tipo_produto !== 'Insumos') return false
+    }
     return (
       (filtroArmazenamento === 'todos' || item.tipo_armazenamento === filtroArmazenamento) &&
       (item.descricao || '').toLowerCase().includes(filtroDescricao.toLowerCase()) &&
@@ -230,11 +235,13 @@ export function EstoqueEnderecos() {
               <select
                 className="form-input bg-bg-card"
                 style={{ flex: '1 1 150px', fontWeight: 600 }}
-                value={incluirInsumos ? 'insumos' : 'operacao'}
-                onChange={e => setIncluirInsumos(e.target.value === 'insumos')}
+                value={filtroTipoProduto}
+                onChange={e => setFiltroTipoProduto(e.target.value)}
               >
-                <option value="operacao">Visão: Operação (MP/PA)</option>
-                <option value="insumos">Visão: Insumos</option>
+                <option value="todos">Tipo: Todos</option>
+                <option value="MP">Matéria Prima</option>
+                <option value="PA">Produto Acabado</option>
+                <option value="Insumos">Insumos</option>
               </select>
               <select
                 className="form-input bg-bg-card"
@@ -259,12 +266,13 @@ export function EstoqueEnderecos() {
               <select
                 className="form-input bg-bg-card"
                 style={{ flex: '1 1 150px', fontWeight: 600 }}
-                value={filtroEstagnado}
-                onChange={e => setFiltroEstagnado(e.target.value)}
+                value={filtroStatus}
+                onChange={e => setFiltroStatus(e.target.value)}
               >
                 <option value="todos">Status: Todos</option>
-                <option value="ativos">🔄 Ativos</option>
-                <option value="estagnados">⚠️ Estagnados</option>
+                <option value="DISPONIVEL">✅ Disponível</option>
+                <option value="RESERVADA">📋 Reservada</option>
+                <option value="BLOQUEADO">🔒 Bloqueada</option>
               </select>
               <input type="text" className="form-input" style={{ flex: '1 1 90px' }}
                 placeholder="Endereço..." value={filtroEndereco} onChange={e => setFiltroEndereco(e.target.value)} />
@@ -326,9 +334,19 @@ export function EstoqueEnderecos() {
                         {item.updated_at ? format(new Date(item.updated_at.replace(' ', 'T')), 'dd/MM/yy HH:mm') : '-'}
                       </td>
                       <td>
-                        <span className={`badge ${item.is_estagnado ? 'badge--danger' : 'badge--success'}`} style={{ fontSize: 9 }}>
-                          {item.is_estagnado ? `Estagnado (${item.dias_parado}d)` : 'Ativo'}
-                        </span>
+                        {(() => {
+                          const s = item.status_caixa
+                          const cfg = {
+                            DISPONIVEL: { label: 'Disponível', color: 'var(--success)', bg: 'rgba(16,185,129,0.12)' },
+                            RESERVADA:  { label: 'Reservada',  color: 'var(--primary)', bg: 'rgba(99,102,241,0.15)' },
+                            BLOQUEADO:  { label: 'Bloqueada',  color: 'var(--danger)',  bg: 'rgba(239,68,68,0.12)' },
+                          }[s] || { label: s || '—', color: 'var(--text-muted)', bg: 'transparent' }
+                          return (
+                            <span style={{ fontSize: 9, fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 6px', borderRadius: 5 }}>
+                              {cfg.label}
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{item.qtd_caixas}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-secondary)' }}>{parseFloat(item.peso_kg || 0).toFixed(3)}</td>
