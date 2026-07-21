@@ -3,6 +3,17 @@ import { Search, Package, Clock } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as produtosQueries from '../queries/produtos.js'
 
+// Força interpretação UTC e formata no fuso de Brasília
+const fmtDataHora = (s) => {
+  if (!s) return '-'
+  const iso = /[Zz+\-]\d*$/.test(s.trim()) ? s.trim() : s.trim().replace(' ', 'T') + 'Z'
+  return new Date(iso).toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  })
+}
+
 export function Rastreabilidade() {
   const { toastError } = useAppStore()
   const [eanRastreio, setEanRastreio] = useState('')
@@ -131,7 +142,7 @@ export function Rastreabilidade() {
                     )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                    <span><Clock size={12} style={{ display: 'inline', marginRight: 4 }}/> {new Date(ev.data_hora).toLocaleString()}</span>
+                    <span><Clock size={12} style={{ display: 'inline', marginRight: 4 }}/> {fmtDataHora(ev.data_hora)}</span>
                     <span>• Operador: {ev.operador_nome || 'Sistema'}</span>
                   </div>
                 </div>
