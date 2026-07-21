@@ -136,18 +136,24 @@ export function Movimentacao() {
     if (dst === 'REC' || dst === 'EXPEDICAO') {
       return toastError('Destino Proibido', `Não é permitido transferir para "${dst}" pela Movimentação. Use a tela de Recebimento ou Saída.`)
     }
-    
-    // O destino pode ser um palete? Vamos verificar se parece com código de palete
-    const isPalletCode = dst.startsWith('PLT-') || dst.length > 5;
-    
-    let localDst = null;
-    if (!isPalletCode) {
-      localDst = await locaisQueries.buscarPorEndereco(dst)
-      if (!localDst) {
-        return toastError('Endereço Inválido', `O destino "${dst}" não é um endereço válido cadastrado.`)
-      }
+
+    // SEGURANÇA: rejeitar EANs e qualquer string puramente numérica como destino
+    if (/^\d+$/.test(dst)) {
+      return toastError('Destino Inválido', 'Este código parece ser um EAN de produto, não um endereço. Bipe um endereço de galpão (ex: 1R-01-1) ou um palete (PLT-XXXX).')
     }
-    
+
+    // Destino é um palete LPN
+    if (dst.startsWith('PLT-')) {
+      setDestino(dst)
+      return
+    }
+
+    // Para qualquer outro código: validar se existe como endereço cadastrado
+    const localDst = await locaisQueries.buscarPorEndereco(dst)
+    if (!localDst) {
+      return toastError('Endereço Inválido', `O destino "${dst}" não é um endereço válido cadastrado no sistema.`)
+    }
+
     setDestino(dst)
 
     if (entidadeTipo === 'ENDERECO_TODO') {
