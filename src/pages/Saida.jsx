@@ -321,13 +321,33 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
 
   const confirmarExpedir = async (id) => {
     try {
-      const res = await saidaQueries.expedirRomaneio(id, operador.id, operador.nome)
-      if (res.success) {
-        toastSuccess('Expedido com sucesso!', 'Romaneio finalizado e estoque baixado.')
+      if (id === 'TODOS') {
+        let successCount = 0;
+        let errorCount = 0;
+        for (const rom of romaneiosFiltrados) {
+          const res = await saidaQueries.expedirRomaneio(rom.id, operador.id, operador.nome);
+          if (res.success) {
+            successCount++;
+          } else {
+            errorCount++;
+          }
+        }
+        if (errorCount > 0) {
+          toastWarning('Concluído com avisos', `${successCount} romaneios expedidos, ${errorCount} falharam.`);
+        } else {
+          toastSuccess('Expedidos com sucesso!', `Todos os ${successCount} romaneios foram finalizados e baixados do estoque.`);
+        }
         setRomaneioExpandido(null)
         carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
       } else {
-        toastError('Erro', res.error)
+        const res = await saidaQueries.expedirRomaneio(id, operador.id, operador.nome)
+        if (res.success) {
+          toastSuccess('Expedido com sucesso!', 'Romaneio finalizado e estoque baixado.')
+          setRomaneioExpandido(null)
+          carregarRomaneiosList('AGUARDANDO_EXPEDICAO')
+        } else {
+          toastError('Erro', res.error)
+        }
       }
     } catch (e) {
       toastError('Erro', e.message)
@@ -574,6 +594,15 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
           {romaneiosFiltrados.length === 0 && (
             <div className="text-muted text-center p-24">Nenhum romaneio nesta etapa.</div>
           )}
+          
+          {abaAtiva === 'EXPEDICAO' && romaneiosFiltrados.length > 0 && (
+            <div className="flex justify-end mb-16">
+              <button className="btn btn--primary" onClick={() => setModalExpedir('TODOS')}>
+                <Truck size={16} /> Expedir Todos os {romaneiosFiltrados.length} Romaneios
+              </button>
+            </div>
+          )}
+
           {romaneiosFiltrados.map(rom => (
             <div key={rom.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div 
@@ -720,10 +749,16 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div className="card p-24" style={{ width: 450, maxWidth: '90%' }}>
             <h3 className="font-bold text-xl mb-16 text-primary">Confirmar Expedição</h3>
-            <p className="mb-24">Atenção: Ao confirmar, todas as caixas serão baixadas do estoque definitivamente. Deseja realizar a expedição?</p>
+            {modalExpedir === 'TODOS' ? (
+              <p className="mb-24">Atenção: Ao confirmar, <strong>TODOS OS {romaneiosFiltrados.length} ROMANEIOS</strong> exibidos serão expedidos e suas caixas serão baixadas do estoque definitivamente. Deseja realizar a expedição em lote?</p>
+            ) : (
+              <p className="mb-24">Atenção: Ao confirmar, todas as caixas deste romaneio serão baixadas do estoque definitivamente. Deseja realizar a expedição?</p>
+            )}
             <div className="flex gap-16">
               <button className="btn btn--ghost" onClick={() => setModalExpedir(null)}>Cancelar</button>
-              <button className="btn btn--primary flex-1" onClick={() => confirmarExpedir(modalExpedir)}>Expedir Romaneio</button>
+              <button className="btn btn--primary flex-1" onClick={() => confirmarExpedir(modalExpedir)}>
+                {modalExpedir === 'TODOS' ? 'Expedir Todos' : 'Expedir Romaneio'}
+              </button>
             </div>
           </div>
         </div>
