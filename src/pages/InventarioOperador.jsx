@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore'
 import * as inventariosQueries from '../queries/inventarios.js';
 import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
+import * as estoqueQueries from '../queries/estoque.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
 
 export function InventarioOperador() {
@@ -489,7 +490,6 @@ export function InventarioOperador() {
         }))
 
       if (caixasSSCC.length > 0) {
-        const { estoqueQueries } = await import('../queries/estoque.js')
         await estoqueQueries.inserirCaixasCargaInicial(caixasSSCC)
       }
 
@@ -507,7 +507,7 @@ export function InventarioOperador() {
         atualizarFila(pendentes)
       }
     } catch(e) {
-      toastError('Erro', 'Falha ao finalizar endereço.')
+      toastError('Erro ao Finalizar', e.message || 'Falha ao finalizar endereço.')
     } finally {
       setIsFinalizando(false)
     }

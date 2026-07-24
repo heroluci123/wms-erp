@@ -438,328 +438,161 @@ export async function criarCargaInicial() {
   }
 }
 
-export async function conciliarCargaInicial({ inventario_id, operador_id, operador_nome }) {
-  const tx = await db.transaction('write')
-  try {
-    const { rows: itens } = await tx.execute({
-      sql: `
-      SELECT ii.*, p.valor_unitario
-      FROM inventario_itens ii
-      JOIN produtos p ON p.id = ii.produto_id
-      WHERE ii.inventario_id = ? AND ii.qtd_contada_caixas IS NOT NULL
-    `, args: [inventario_id] })
-
-    let inseridos = 0
-    for (const item of itens) {
-      const validadeReal = item.validade_contada || item.validade
-      let existe
-      if (validadeReal) {
-        const { rows } = await tx.execute({ sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND validade = ?`, args: [item.produto_id, item.endereco, item.lote || '', validadeReal] })
-        existe = rows[0]
-      } else {
-        const { rows } = await tx.execute({ sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND validade IS NULL`, args: [item.produto_id, item.endereco, item.lote || ''] })
-        existe = rows[0]
-      }
-      if (existe) {
-        await tx.execute({ sql: `UPDATE estoque_posicao SET qtd_caixas = ?, qtd_kg = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, args: [item.qtd_contada_caixas, item.qtd_contada_kg, existe.id] })
-      } else {
-        await tx.execute({ sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, ?, ?)`, args: [item.produto_id, item.endereco, item.lote || '', validadeReal, item.qtd_contada_caixas, item.qtd_contada_kg] })
-      }
-      inseridos++
-    }
-    await tx.execute({ sql: `UPDATE inventarios SET status = 'Finalizado OK', data_finalizacao = CURRENT_TIMESTAMP WHERE id = ?`, args: [inventario_id] })
-    await tx.commit()
-    return { success: true, inseridos }
-  } catch (e) {
-    await tx.rollback()
-    return { success: false, error: e.message }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LISTAGEM GERAL
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function listar() {
-  const { rows } = await db.execute({
-    sql: `
-    SELECT i.*,
-      ic.nome as ciclo_nome,
-      COUNT(ii.id) as total_itens,
-      SUM(CASE WHEN ii.status_item IN ('Pendente','2ª Contagem','3ª Contagem') THEN 1 ELSE 0 END) as pendentes,
-      SUM(CASE WHEN ii.status_item = 'OK' THEN 1 ELSE 0 END) as ok,
-      SUM(CASE WHEN ii.status_item = 'Aguardando Ajuste' THEN 1 ELSE 0 END) as divergentes
-    FROM inventarios i
-    LEFT JOIN inventario_ciclos ic ON ic.id = i.ciclo_id
-    LEFT JOIN inventario_itens ii ON ii.inventario_id = i.id
-    GROUP BY i.id
-    ORDER BY i.data_criacao DESC
-  `, args: [] })
-  return rows
-}
-
-export async function buscar(id) {
-  const { rows } = await db.execute({
-    sql: `
-    SELECT i.*, ic.nome as ciclo_nome
-    FROM inventarios i
-    LEFT JOIN inventario_ciclos ic ON ic.id = i.ciclo_id
-    WHERE i.id = ?
-  `, args: [id] })
-  return rows[0]
-}
-
-export async function listarItens(inventario_id) {
-  const { rows } = await db.execute({
-    sql: `
-    SELECT
-      ii.id, ii.ean_caixa, ii.endereco, ii.lote, ii.validade, ii.validade_contada,
-      ii.qtd_sistema_caixas, ii.qtd_sistema_kg,
-      ii.qtd_contada_caixas, ii.qtd_contada_kg,
-      ii.contagem_atual, ii.qtd_1_caixas, ii.qtd_1_kg, ii.qtd_2_caixas, ii.qtd_2_kg, ii.qtd_3_caixas, ii.qtd_3_kg,
-      ii.status_item, ii.data_contagem,
-      p.id as produto_id, p.codigo, p.descricao, p.status_curva, p.valor_unitario
-    FROM inventario_itens ii
-    JOIN produtos p ON p.id = ii.produto_id
-    WHERE ii.inventario_id = ?
-    ORDER BY ii.endereco, p.descricao, ii.ean_caixa
-  `, args: [inventario_id] })
-  return rows
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONTAGEM (Coletor)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function registrarContagem({ item_id, qtd_contada_caixas, qtd_contada_kg, validade_informada }) {
-  const { rows: itemRows } = await db.execute({ sql: `SELECT ii.*, i.tipo as tipo_inventario FROM inventario_itens ii JOIN inventarios i ON i.id = ii.inventario_id WHERE ii.id = ?`, args: [item_id] })
-  const item = itemRows[0]
-  if (!item) return { success: false, error: 'Item não encontrado' }
-
-  // Normaliza datas para comparar apenas a parte da data (YYYY-MM-DD)
-  const validadeSistema = item.validade ? item.validade.toString().substring(0, 10) : null
-  const validadeInformada = validade_informada ? validade_informada.toString().substring(0, 10) : null
-
-  const isCargaInicial = item.tipo_inventario === 'CargaInicial'
-
-  const caixasOK = Math.abs((item.qtd_sistema_caixas || 0) - qtd_contada_caixas) < 0.001
-  const kgOK = Math.abs((item.qtd_sistema_kg || 0) - qtd_contada_kg) < 0.001
-  // Validade: se o sistema não tem validade definida (surpresa/VAZIO), considera OK para validade
-  const validadeOK = !validadeSistema || (validadeInformada === validadeSistema)
-  const isOK = caixasOK && kgOK && validadeOK
-
-  let novoStatus = item.status_item
-  let contagem_atual = item.contagem_atual || 1
-  const col_caixas = 'qtd_' + contagem_atual + '_caixas'
-  const col_kg = 'qtd_' + contagem_atual + '_kg'
-
-  if (isCargaInicial) {
-    // Na Carga Inicial: sem segunda contagem. Vai direto para Aguardando Ajuste (sempre é uma entrada nova)
-    novoStatus = 'Aguardando Ajuste'
-  } else if (isOK) {
-    // Endereço bateu com o sistema → OK
-    // Caso especial: era um item surpresa (ean_caixa existe mas a contagem foi corrigida para 0 pelo operador)
-    // Isso só acontece se o item foi criado com qtd_sistema = 0 E tem ean_caixa (é real surpresa)
-    // Neste caso, removemos o item pois o produto não existia de fato.
-    if (item.ean_caixa && item.qtd_sistema_caixas === 0 && qtd_contada_caixas === 0) {
-      await db.execute({ sql: `DELETE FROM inventario_itens WHERE id = ?`, args: [item_id] })
-      
-      const { rows: pendentesRows2 } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item IN ('Pendente','2ª Contagem','3ª Contagem')`, args: [item.inventario_id] })
-      const pendentes2 = pendentesRows2[0]
-      const { rows: ajustesRows2 } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item = 'Aguardando Ajuste'`, args: [item.inventario_id] })
-      const ajustes2 = ajustesRows2[0]
-      if (pendentes2.v === 0) {
-        const novoStatusInv = ajustes2.v > 0 ? 'Aguardando Ajuste' : 'Finalizado OK'
-        await db.execute({ sql: `UPDATE inventarios SET status = ? WHERE id = ?`, args: [novoStatusInv, item.inventario_id] })
-      }
-      return { success: true, status_item: 'OK' }
-    } else {
-      novoStatus = 'OK'
-    }
-
-  } else {
-    if (contagem_atual === 1) {
-      novoStatus = '2ª Contagem'; contagem_atual = 2
-    } else if (contagem_atual === 2) {
-      const igual1 = Math.abs((item.qtd_1_caixas || 0) - qtd_contada_caixas) < 0.001 && Math.abs((item.qtd_1_kg || 0) - qtd_contada_kg) < 0.001
-      if (igual1) { novoStatus = 'Aguardando Ajuste' }
-      else { novoStatus = '3ª Contagem'; contagem_atual = 3 }
-    } else {
-      // Terceira contagem (ou mais) é sempre final, enviando para ajuste
-      novoStatus = 'Aguardando Ajuste'
-    }
-  }
-
-  const updateSql = 'UPDATE inventario_itens SET qtd_contada_caixas = ?, qtd_contada_kg = ?, validade_contada = ?, status_item = ?, data_contagem = CURRENT_TIMESTAMP, contagem_atual = ?, ' + col_caixas + ' = ?, ' + col_kg + ' = ? WHERE id = ?'
-  await db.execute({ sql: updateSql, args: [qtd_contada_caixas, qtd_contada_kg, validadeInformada, novoStatus, contagem_atual, qtd_contada_caixas, qtd_contada_kg, item_id] })
-  
-  const { rows: invRows } = await db.execute({ sql: `SELECT inventario_id FROM inventario_itens WHERE id = ?`, args: [item_id] })
-  const inventario = invRows[0]
-  if (inventario) {
-    const { rows: pendentesRows } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item IN ('Pendente','2ª Contagem','3ª Contagem')`, args: [inventario.inventario_id] })
-    const pendentes = pendentesRows[0]
-    const { rows: ajustesRows } = await db.execute({ sql: `SELECT COUNT(*) as v FROM inventario_itens WHERE inventario_id = ? AND status_item = 'Aguardando Ajuste'`, args: [inventario.inventario_id] })
-    const ajustes = ajustesRows[0]
-
-    if (!isCargaInicial && pendentes.v === 0) {
-      const novoStatusInv = ajustes.v > 0 ? 'Aguardando Ajuste' : 'Finalizado OK'
-      await db.execute({ sql: `UPDATE inventarios SET status = ? WHERE id = ?`, args: [novoStatusInv, inventario.inventario_id] })
-    }
-  }
-
-  return { success: true, status_item: novoStatus }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONCILIAÇÃO COM LOG DE AUDITORIA
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function conciliar({ inventario_id, operador_id, operador_nome }) {
   const tx = await db.transaction('write')
   try {
     const { rows: invRows } = await tx.execute({ sql: `SELECT * FROM inventarios WHERE id = ?`, args: [inventario_id] })
     const inv = invRows[0]
-    const { rows: itensParaAjuste } = await tx.execute({
-      sql: `
-      SELECT ii.*, p.valor_unitario
-      FROM inventario_itens ii
-      JOIN produtos p ON p.id = ii.produto_id
-      WHERE ii.inventario_id = ? AND ii.status_item = 'Aguardando Ajuste'
-    `, args: [inventario_id] })
+    if (!inv) throw new Error('Inventário não encontrado.')
+
+    // Obter todos os endereços distintos que foram parte deste inventário
+    const { rows: endRows } = await tx.execute({
+      sql: `SELECT DISTINCT endereco FROM inventario_itens WHERE inventario_id = ?`,
+      args: [inventario_id]
+    })
+    const enderecos = endRows.map(r => r.endereco).filter(Boolean)
 
     let atualizados = 0
 
-    for (const item of itensParaAjuste) {
-      const diffCx = (item.qtd_contada_caixas || 0) - (item.qtd_sistema_caixas || 0)
-      const diffKg = (item.qtd_contada_kg || 0) - (item.qtd_sistema_kg || 0)
-      
-      // tipoAjuste corrigido para qualquer quantidade (nao apenas 1 caixa)
-      let tipoAjuste = 'Divergência de Peso/Validade'
-      if ((item.qtd_contada_caixas || 0) < (item.qtd_sistema_caixas || 0)) {
-        tipoAjuste = 'Perda' // Falta: sistema tinha mais do que foi contado
-      } else if ((item.qtd_contada_caixas || 0) > (item.qtd_sistema_caixas || 0)) {
-        tipoAjuste = 'Sobra' // Sobra: foi contado mais do que o sistema esperava
-      }
+    for (const endereco of enderecos) {
+      // Itens contados / registrados neste endereço
+      const { rows: itensEnd } = await tx.execute({
+        sql: `SELECT ii.*, p.valor_unitario
+              FROM inventario_itens ii
+              JOIN produtos p ON p.id = ii.produto_id
+              WHERE ii.inventario_id = ? AND ii.endereco = ?`,
+        args: [inventario_id, endereco]
+      })
 
-      const validadeReal = item.validade_contada || item.validade
-      const qtdContada = item.qtd_contada_caixas || 0
-      const kgContado = item.qtd_contada_kg || 0
+      // 1. Mapear EANs SSCC que foram efetivamente contados (com qtd_contada_caixas > 0)
+      const eansContados = new Set()
+      const caixasContadas = []
 
-      // Se for SSCC (possui ean_caixa)
-      if (item.ean_caixa) {
-        if (tipoAjuste === 'Perda') {
-          // Move para o endereço PERDIDO e marca como BLOQUEADO
-          await tx.execute({
-            sql: `UPDATE estoque_caixas SET endereco = 'PERDIDO', status = 'BLOQUEADO', updated_at = CURRENT_TIMESTAMP WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
-            args: [item.ean_caixa]
+      for (const item of itensEnd) {
+        const qtd = item.qtd_contada_caixas || 0
+        const kg = item.qtd_contada_kg || 0
+        const val = item.validade_contada || item.validade
+
+        if (item.ean_caixa && qtd > 0) {
+          eansContados.add(item.ean_caixa.trim())
+          caixasContadas.push({
+            ean_caixa: item.ean_caixa.trim(),
+            produto_id: item.produto_id,
+            lote: item.lote || '',
+            validade: val,
+            peso_kg: kg
           })
-          await tx.execute({
-            sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_PERDA', 'Caixa declarada perdida no inventário ' || ?, ?)`,
-            args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
-          })
-          // Deduz da posicao atual (que é o item.endereco)
-          await tx.execute({
-            sql: `UPDATE estoque_posicao SET qtd_caixas = MAX(0, qtd_caixas - 1), qtd_kg = MAX(0, qtd_kg - ?), updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND validade IS ?`,
-            args: [item.qtd_sistema_kg, item.produto_id, item.endereco, item.validade]
-          })
-        } else if (tipoAjuste === 'Sobra') {
-          // Verifica se já existia na estoque_caixas em outro lugar
-          const { rows: caixas } = await tx.execute({ sql: `SELECT id, endereco, peso_kg FROM estoque_caixas WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`, args: [item.ean_caixa] })
-          if (caixas.length > 0) {
-            // Estava perdida, move pra cá
-            await tx.execute({
-              sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
-              args: [item.endereco, kgContado, validadeReal, item.ean_caixa]
-            })
-            await tx.execute({
-              sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_SOBRA', 'Caixa reencontrada no inventário ' || ?, ?)`,
-              args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
-            })
-          } else {
-            // Cria a caixa
-            await tx.execute({
-              sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
-              args: [item.ean_caixa, item.produto_id, item.endereco, item.lote || '', validadeReal, kgContado]
-            })
-            await tx.execute({
-              sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_SOBRA', 'Caixa criada como sobra no inventário ' || ?, ?)`,
-              args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
-            })
-          }
-          // Adiciona na posição atual
-          const { rows: pos } = await tx.execute({ sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND validade IS ?`, args: [item.produto_id, item.endereco, validadeReal] })
-          if (pos[0]) {
-            await tx.execute({ sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, args: [kgContado, pos[0].id] })
-          } else {
-            await tx.execute({ sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, 1, ?)`, args: [item.produto_id, item.endereco, item.lote || '', validadeReal, kgContado] })
-          }
-        } else {
-          // Divergência de Peso/Validade (SSCC)
-          await tx.execute({
-            sql: `UPDATE estoque_caixas SET peso_kg = ?, validade = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
-            args: [kgContado, validadeReal, item.ean_caixa]
-          })
-          await tx.execute({
-            sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_AJUSTE', 'Peso/Validade ajustados no inventário ' || ?, ?)`,
-            args: [item.ean_caixa, inventario_id, operador_nome || 'Sistema']
-          })
-          // Atualiza posição subtraindo a diferença de peso
-          await tx.execute({
-            sql: `UPDATE estoque_posicao SET qtd_kg = MAX(0, qtd_kg + ?), updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND validade IS ?`,
-            args: [diffKg, item.produto_id, item.endereco, item.validade]
-          })
-        }
-      } else {
-        // ─── SEM SSCC: ajuste direto em estoque_posicao ──────────────────────
-        // Estes itens vieram de estoque_posicao (sem serialização individual)
-        // Precisamos ajustar a quantidade diretamente na tabela.
-        if (qtdContada === 0) {
-          // Zerar a posição (falta total ou endereço vazio)
-          await tx.execute({
-            sql: `UPDATE estoque_posicao SET qtd_caixas = 0, qtd_kg = 0, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND validade IS ?`,
-            args: [item.produto_id, item.endereco, item.validade || null]
-          })
-          // Remover linhas zeradas
-          await tx.execute({
-            sql: `DELETE FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND qtd_caixas <= 0`,
-            args: [item.produto_id, item.endereco]
-          })
-        } else {
-          // Ajustar para a quantidade contada
-          const { rows: posRows } = await tx.execute({
-            sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND validade IS ?`,
-            args: [item.produto_id, item.endereco, item.validade || null]
-          })
-          if (posRows[0]) {
-            await tx.execute({
-              sql: `UPDATE estoque_posicao SET qtd_caixas = ?, qtd_kg = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-              args: [qtdContada, kgContado, posRows[0].id]
-            })
-          } else {
-            await tx.execute({
-              sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, ?, ?)`,
-              args: [item.produto_id, item.endereco, item.lote || '', item.validade, qtdContada, kgContado]
-            })
-          }
         }
       }
 
+      // 2. Caixas que o sistema dizia estarem em `endereco` com status DISPONIVEL
+      const { rows: caixasSistema } = await tx.execute({
+        sql: `SELECT id, ean_caixa FROM estoque_caixas WHERE endereco = ? AND status = 'DISPONIVEL'`,
+        args: [endereco]
+      })
 
-      await tx.execute({ sql: `UPDATE inventario_itens SET status_item = 'OK' WHERE id = ?`, args: [item.id] })
+      // Qualquer caixa do sistema neste endereço que NÃO foi contada -> Marca como PERDIDO
+      for (const cx of caixasSistema) {
+        if (!eansContados.has(cx.ean_caixa.trim())) {
+          await tx.execute({
+            sql: `UPDATE estoque_caixas SET endereco = 'PERDIDO', status = 'BLOQUEADO', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            args: [cx.id]
+          })
+          await tx.execute({
+            sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'INVENTARIO_PERDA', 'Caixa não encontrada no inventário #' || ?, ?)`,
+            args: [cx.ean_caixa, inventario_id, operador_nome || 'Sistema']
+          })
+        }
+      }
 
+      // Caixas que foram contadas -> Garantir que estão em estoque_caixas com endereco = endereco e status = DISPONIVEL
+      for (const cx of caixasContadas) {
+        const { rows: existe } = await tx.execute({
+          sql: `SELECT id FROM estoque_caixas WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
+          args: [cx.ean_caixa]
+        })
+        if (existe.length > 0) {
+          await tx.execute({
+            sql: `UPDATE estoque_caixas SET endereco = ?, validade = ?, peso_kg = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            args: [endereco, cx.validade, cx.peso_kg, existe[0].id]
+          })
+        } else {
+          await tx.execute({
+            sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
+            args: [cx.ean_caixa, cx.produto_id, endereco, cx.lote, cx.validade, cx.peso_kg]
+          })
+        }
+      }
+
+      // 3. Posição Agregada (estoque_posicao):
+      // Limpar totalmente o saldo antigo deste endereço
       await tx.execute({
-        sql: `
-        INSERT INTO inventario_ajustes_log
-          (inventario_id, ciclo_id, item_id, produto_id, endereco, lote, custo_unitario_data,
-           qtd_ajustada_caixas, qtd_ajustada_kg, tipo_ajuste, usuario_aprovou_id, usuario_aprovou_nome)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, args: [
-        inventario_id, inv.ciclo_id, item.id, item.produto_id,
-        item.endereco, item.lote, item.valor_unitario || 0,
-        diffCx, diffKg, tipoAjuste,
-        operador_id || null, operador_nome || ''
-      ] })
-      atualizados++
+        sql: `DELETE FROM estoque_posicao WHERE endereco = ?`,
+        args: [endereco]
+      })
+
+      // Reconstruir estoque_posicao para este endereço baseado nos itens contados
+      const mapaPosicao = new Map()
+      const { rows: dummyRows } = await tx.execute({ sql: `SELECT id FROM produtos WHERE codigo = 'VAZIO'`, args: [] })
+      const dummyId = dummyRows[0]?.id
+
+      for (const item of itensEnd) {
+        if (dummyId && item.produto_id === dummyId) continue
+
+        const qtd = item.qtd_contada_caixas || 0
+        const kg = item.qtd_contada_kg || 0
+        if (qtd <= 0 && kg <= 0) continue
+
+        const val = item.validade_contada || item.validade || ''
+        const key = `${item.produto_id}__${item.lote || ''}__${val}`
+
+        if (mapaPosicao.has(key)) {
+          const prev = mapaPosicao.get(key)
+          prev.qtd_caixas += qtd
+          prev.qtd_kg += kg
+        } else {
+          mapaPosicao.set(key, {
+            produto_id: item.produto_id,
+            lote: item.lote || '',
+            validade: val || null,
+            qtd_caixas: qtd,
+            qtd_kg: kg
+          })
+        }
+      }
+
+      for (const pos of mapaPosicao.values()) {
+        await tx.execute({
+          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [pos.produto_id, endereco, pos.lote, pos.validade, pos.qtd_caixas, pos.qtd_kg]
+        })
+      }
+
+      // Log de auditoria e atualização de status dos itens
+      for (const item of itensEnd) {
+        if (item.status_item === 'Aguardando Ajuste') {
+          const diffCx = (item.qtd_contada_caixas || 0) - (item.qtd_sistema_caixas || 0)
+          const diffKg = (item.qtd_contada_kg || 0) - (item.qtd_sistema_kg || 0)
+          let tipoAjuste = 'Divergência'
+          if (diffCx < 0) tipoAjuste = 'Perda'
+          else if (diffCx > 0) tipoAjuste = 'Sobra'
+
+          await tx.execute({
+            sql: `
+            INSERT INTO inventario_ajustes_log
+              (inventario_id, ciclo_id, item_id, produto_id, endereco, lote, custo_unitario_data,
+               qtd_ajustada_caixas, qtd_ajustada_kg, tipo_ajuste, usuario_aprovou_id, usuario_aprovou_nome)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, args: [
+            inventario_id, inv.ciclo_id, item.id, item.produto_id,
+            endereco, item.lote, item.valor_unitario || 0,
+            diffCx, diffKg, tipoAjuste,
+            operador_id || null, operador_nome || ''
+          ] })
+          atualizados++
+        }
+        await tx.execute({ sql: `UPDATE inventario_itens SET status_item = 'OK' WHERE id = ?`, args: [item.id] })
+      }
     }
 
     await tx.execute({ sql: `UPDATE inventarios SET status = 'Finalizado OK', data_finalizacao = CURRENT_TIMESTAMP WHERE id = ?`, args: [inventario_id] })
@@ -770,10 +603,6 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
     return { success: false, error: err.message }
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CANCELAMENTOS E RESETS
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function cancelar(id) {
   await db.execute({ sql: `UPDATE inventarios SET status = 'Cancelado', data_finalizacao = CURRENT_TIMESTAMP WHERE id = ?`, args: [id] })
