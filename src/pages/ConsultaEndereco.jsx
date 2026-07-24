@@ -12,7 +12,8 @@ function downloadCSV(content) {
 }
 
 async function consultarEndereco(endereco) {
-  const { rows } = await db.execute({
+  const addr = endereco.toUpperCase().trim()
+  const { rows: caixas } = await db.execute({
     sql: `
       SELECT
         ec.id, ec.ean_caixa, ec.peso_kg, ec.validade, ec.lote, ec.status,
@@ -24,9 +25,24 @@ async function consultarEndereco(endereco) {
       WHERE ec.endereco = ? AND ec.status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')
       ORDER BY p.descricao, ec.validade
     `,
-    args: [endereco.toUpperCase().trim()]
+    args: [addr]
   })
-  return rows
+  if (caixas.length > 0) return caixas
+
+  const { rows: pos } = await db.execute({
+    sql: `
+      SELECT
+        ep.id, NULL as ean_caixa, ep.qtd_kg as peso_kg, ep.validade, ep.lote, 'DISPONIVEL' as status,
+        p.codigo, p.descricao, p.status_curva, p.grupo, p.valor_unitario,
+        NULL as palete_codigo, ep.qtd_caixas
+      FROM estoque_posicao ep
+      JOIN produtos p ON p.id = ep.produto_id
+      WHERE ep.endereco = ? AND (ep.qtd_caixas > 0 OR ep.qtd_kg > 0)
+      ORDER BY p.descricao, ep.validade
+    `,
+    args: [addr]
+  })
+  return pos
 }
 
 function BadgeValidade({ validade }) {
