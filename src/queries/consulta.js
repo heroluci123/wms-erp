@@ -6,13 +6,21 @@ import { db } from '../lib/db.js';
  * @returns { saldoCaixas, saldoKg, entradasCaixas, saidasCaixas }
  */
 export async function buscarResumoProduto(produto_id) {
-  // Saldo Atual
-  const saldoRes = await db.execute({
-    sql: `SELECT SUM(qtd_caixas) as saldoCaixas, SUM(qtd_kg) as saldoKg FROM estoque_posicao WHERE produto_id = ? AND endereco != 'EXPEDICAO' AND endereco != 'PERDIDO'`,
+  const cxsRes = await db.execute({
+    sql: `SELECT COUNT(*) as saldoCaixas, SUM(peso_kg) as saldoKg FROM estoque_caixas WHERE produto_id = ? AND status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO') AND (endereco IS NULL OR (endereco != 'EXPEDICAO' AND endereco != 'PERDIDO'))`,
     args: [produto_id]
   });
-  const saldoCaixas = saldoRes.rows[0]?.saldoCaixas || 0;
-  const saldoKg = saldoRes.rows[0]?.saldoKg || 0;
+  let saldoCaixas = cxsRes.rows[0]?.saldoCaixas || 0;
+  let saldoKg = cxsRes.rows[0]?.saldoKg || 0;
+
+  if (saldoCaixas === 0 && saldoKg === 0) {
+    const saldoRes = await db.execute({
+      sql: `SELECT SUM(qtd_caixas) as saldoCaixas, SUM(qtd_kg) as saldoKg FROM estoque_posicao WHERE produto_id = ? AND endereco != 'EXPEDICAO' AND endereco != 'PERDIDO'`,
+      args: [produto_id]
+    });
+    saldoCaixas = saldoRes.rows[0]?.saldoCaixas || 0;
+    saldoKg = saldoRes.rows[0]?.saldoKg || 0;
+  }
 
   // Entradas (RECEBIMENTO)
   const entradasRes = await db.execute({
@@ -36,6 +44,18 @@ export async function buscarResumoProduto(produto_id) {
  * @param {string} produto_id 
  */
 export async function buscarEnderecosPorProduto(produto_id) {
+  const cxsRes = await db.execute({
+    sql: `
+      SELECT endereco, COUNT(*) as qtd_caixas, SUM(peso_kg) as qtd_kg
+      FROM estoque_caixas
+      WHERE produto_id = ? AND status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO') AND endereco IS NOT NULL AND endereco != ''
+      GROUP BY endereco
+      ORDER BY endereco ASC
+    `,
+    args: [produto_id]
+  });
+  if (cxsRes.rows.length > 0) return cxsRes.rows;
+
   const res = await db.execute({
     sql: `
       SELECT endereco, SUM(qtd_caixas) as qtd_caixas, SUM(qtd_kg) as qtd_kg
@@ -59,7 +79,7 @@ export async function buscarCaixasPorEnderecoEProduto(produto_id, endereco) {
     sql: `
       SELECT *
       FROM estoque_caixas
-      WHERE produto_id = ? AND endereco = ? AND status = 'DISPONIVEL'
+      WHERE produto_id = ? AND endereco = ? AND status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')
       ORDER BY validade ASC
     `,
     args: [produto_id, endereco]
@@ -87,7 +107,7 @@ export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
 }
 
 export async function buscarEstoqueConsolidado(produto_id = null) {
-  let where = "c.status = 'DISPONIVEL'";
+  let where = "c.status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')";
   const args = [];
   
   if (produto_id) {
