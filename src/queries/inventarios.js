@@ -278,6 +278,73 @@ export async function listar() {
   return rows
 }
 
+// Busca um inventário pelo ID
+export async function buscar(inventario_id) {
+  const { rows } = await db.execute({
+    sql: `SELECT * FROM inventarios WHERE id = ?`,
+    args: [inventario_id]
+  })
+  return rows[0] || null
+}
+
+// Lista todos os itens de um inventário com dados do produto
+export async function listarItens(inventario_id) {
+  const { rows } = await db.execute({
+    sql: `
+    SELECT
+      ii.*,
+      p.codigo, p.descricao, p.tipo_produto, p.status_curva, p.valor_unitario, p.grupo
+    FROM inventario_itens ii
+    JOIN produtos p ON p.id = ii.produto_id
+    WHERE ii.inventario_id = ?
+    ORDER BY ii.endereco, p.descricao, ii.validade
+    `,
+    args: [inventario_id]
+  })
+  return rows
+}
+
+// Conciliação para Carga Inicial
+export async function conciliarCargaInicial({ inventario_id, operador_id, operador_nome }) {
+  const tx = await db.transaction('write')
+  try {
+    const { rows: invRows } = await tx.execute({ sql: `SELECT * FROM inventarios WHERE id = ?`, args: [inventario_id] })
+    const inv = invRows[0]
+    if (!inv) throw new Error('Inventário não encontrado.')
+    const { rows: itens } = await tx.execute({
+      sql: `SELECT ii.*, p.valor_unitario FROM inventario_itens ii JOIN produtos p ON p.id = ii.produto_id WHERE ii.inventario_id = ? AND ii.qtd_contada_caixas > 0`,
+      args: [inventario_id]
+    })
+    let inseridos = 0
+    for (const item of itens) {
+      if (!item.ean_caixa) continue
+      const { rows: existe } = await tx.execute({
+        sql: `SELECT id FROM estoque_caixas WHERE LTRIM(ean_caixa,'0') = LTRIM(?,'0')`,
+        args: [item.ean_caixa]
+      })
+      if (existe.length === 0) {
+        await tx.execute({
+          sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
+          args: [item.ean_caixa, item.produto_id, item.endereco, item.lote || '', item.validade_contada || item.validade, item.qtd_contada_kg || 0]
+        })
+        inseridos++
+      } else {
+        await tx.execute({
+          sql: `UPDATE estoque_caixas SET endereco = ?, status = 'DISPONIVEL', peso_kg = ?, validade = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          args: [item.endereco, item.qtd_contada_kg || 0, item.validade_contada || item.validade, existe[0].id]
+        })
+      }
+      await tx.execute({ sql: `UPDATE inventario_itens SET status_item = 'OK' WHERE id = ?`, args: [item.id] })
+    }
+    await tx.execute({ sql: `UPDATE inventarios SET status = 'Finalizado OK', data_finalizacao = CURRENT_TIMESTAMP WHERE id = ?`, args: [inventario_id] })
+    await tx.commit()
+    return { success: true, inseridos }
+  } catch (err) {
+    await tx.rollback()
+    return { success: false, error: err.message }
+  }
+}
+
 // Retorna ou cria o produto dummy para endereços vazios
 export async function getProdutoVazio() {
   let { rows: pRows } = await db.execute({ sql: `SELECT id FROM produtos WHERE codigo = 'VAZIO'`, args: [] })
