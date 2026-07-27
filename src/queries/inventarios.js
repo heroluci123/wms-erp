@@ -255,6 +255,29 @@ export async function ciclos_dashboard(ciclo_id) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LISTAR INVENTÁRIOS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function listar() {
+  const { rows } = await db.execute({
+    sql: `
+    SELECT
+      i.*,
+      COUNT(ii.id) as total_itens,
+      SUM(CASE WHEN ii.status_item = 'OK' THEN 1 ELSE 0 END) as itens_ok,
+      SUM(CASE WHEN ii.status_item = 'Aguardando Ajuste' THEN 1 ELSE 0 END) as itens_divergentes,
+      SUM(CASE WHEN ii.status_item IN ('Pendente','2ª Contagem','3ª Contagem') THEN 1 ELSE 0 END) as itens_pendentes
+    FROM inventarios i
+    LEFT JOIN inventario_itens ii ON ii.inventario_id = i.id
+    GROUP BY i.id
+    ORDER BY i.id DESC
+    LIMIT 200
+  `, args: []
+  })
+  return rows
+}
+
 // Retorna ou cria o produto dummy para endereços vazios
 export async function getProdutoVazio() {
   let { rows: pRows } = await db.execute({ sql: `SELECT id FROM produtos WHERE codigo = 'VAZIO'`, args: [] })
