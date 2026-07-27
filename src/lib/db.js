@@ -38,9 +38,11 @@ function makeElectronClient() {
 
 async function makeWebClient() {
   const { createClient } = await import('@libsql/client/web')
-  const rawUrl = import.meta.env.VITE_TURSO_DATABASE_URL || 'libsql://wms-erp-heroluci123.aws-us-east-1.turso.io'
+  const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TURSO_DATABASE_URL) || (typeof process !== 'undefined' && process.env?.VITE_TURSO_DATABASE_URL)
+  const envToken = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TURSO_AUTH_TOKEN) || (typeof process !== 'undefined' && process.env?.VITE_TURSO_AUTH_TOKEN)
+  const rawUrl = envUrl || 'libsql://wms-erp-heroluci123.aws-us-east-1.turso.io'
   const url = rawUrl.replace(/^libsql:\/\//i, 'https://')
-  const authToken = import.meta.env.VITE_TURSO_AUTH_TOKEN || ''
+  const authToken = envToken || ''
   return createClient({ url, authToken })
 }
 

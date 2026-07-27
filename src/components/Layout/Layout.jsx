@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -65,6 +65,9 @@ function Sidebar() {
           <Layers size={18} /> Estoque por Endereço
         </NavLink>
       )}
+      <NavLink to="/estoque-minimo" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+        <TrendingDown size={18} /> Estoque Mínimo Dinâmico
+      </NavLink>
       <NavLink to="/mapa" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
         <Map size={18} /> Mapa de Capacidade
       </NavLink>

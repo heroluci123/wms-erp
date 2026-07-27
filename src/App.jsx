@@ -25,6 +25,7 @@ import { Operadores } from './pages/Operadores'
 import { MapaCapacidade } from './pages/MapaCapacidade'
 import { ColetorHome } from './pages/ColetorHome'
 import { EanEditor } from './pages/EanEditor'
+import { EstoqueMinimo } from './pages/EstoqueMinimo'
 
 function HomeWrapper() {
   const isMobile = window.innerWidth <= 768
@@ -60,6 +61,7 @@ function App() {
           <Route path="/consulta-estoque" element={<ConsultaEstoque />} />
           <Route path="/consulta-endereco" element={<ConsultaEndereco />} />
           <Route path="/relatorios" element={<Relatorios />} />
+          <Route path="estoque-minimo" element={<EstoqueMinimo />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
