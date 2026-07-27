@@ -869,7 +869,7 @@ export function InventarioOperador() {
                   </div>
                   <div>
                     <div className="font-mono font-bold" style={{ fontSize: 20 }}>{grupo.endereco}</div>
-                    <div className="text-muted text-xs mt-2">{grupo.itens.length} item{grupo.itens.length !== 1 ? 's' : ''} a contar</div>
+                    <div className="text-muted text-xs mt-2">{grupo.itens.length} {grupo.itens.length !== 1 ? 'itens' : 'item'} a contar</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-10">
