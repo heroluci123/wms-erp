@@ -103,6 +103,50 @@ export async function ciclos_encerrar({ ciclo_id, forcar = false }) {
   }
 }
 
+export async function registrarContagem({ item_id, qtd_contada_caixas, qtd_contada_kg, validade_informada }) {
+  try {
+    const { rows } = await db.execute({
+      sql: `SELECT * FROM inventario_itens WHERE id = ?`,
+      args: [item_id]
+    })
+    const item = rows[0]
+    if (!item) return { success: false, error: 'Item não encontrado' }
+
+    const isOk = Math.abs((qtd_contada_caixas || 0) - (item.qtd_sistema_caixas || 0)) < 0.001
+    const status_item = isOk ? 'OK' : 'Aguardando Ajuste'
+
+    const valNorm = validade_informada ? validade_informada.toString().substring(0, 10) : (item.validade_contada || item.validade || null)
+
+    await db.execute({
+      sql: `UPDATE inventario_itens 
+            SET qtd_contada_caixas = ?, qtd_contada_kg = ?, validade_contada = ?, status_item = ?
+            WHERE id = ?`,
+      args: [qtd_contada_caixas, qtd_contada_kg, valNorm, status_item, item_id]
+    })
+
+    // Atualizar status do inventario se não houver pendentes
+    const { rows: pendentesRows } = await db.execute({
+      sql: `SELECT COUNT(*) as cnt FROM inventario_itens WHERE inventario_id = ? AND status_item IN ('Pendente','2ª Contagem','3ª Contagem')`,
+      args: [item.inventario_id]
+    })
+    if (pendentesRows[0]?.cnt === 0) {
+      const { rows: divRows } = await db.execute({
+        sql: `SELECT COUNT(*) as cnt FROM inventario_itens WHERE inventario_id = ? AND status_item = 'Aguardando Ajuste'`,
+        args: [item.inventario_id]
+      })
+      const novoStatusInv = divRows[0]?.cnt > 0 ? 'Aguardando Ajuste' : 'Finalizado OK'
+      await db.execute({
+        sql: `UPDATE inventarios SET status = ?, data_finalizacao = CASE WHEN ? = 'Finalizado OK' THEN CURRENT_TIMESTAMP ELSE data_finalizacao END WHERE id = ?`,
+        args: [novoStatusInv, novoStatusInv, item.inventario_id]
+      })
+    }
+
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function recontarItem(item_id) {
   try {
     await db.execute({ sql: `UPDATE inventario_itens SET qtd_contada_caixas = NULL, qtd_contada_kg = NULL, status_item = 'Pendente', contagem_atual = contagem_atual + 1 WHERE id = ?`, args: [item_id] })
