@@ -309,8 +309,11 @@ export async function listar() {
     SELECT
       i.*,
       COUNT(ii.id) as total_itens,
+      SUM(CASE WHEN ii.status_item = 'OK' THEN 1 ELSE 0 END) as ok,
       SUM(CASE WHEN ii.status_item = 'OK' THEN 1 ELSE 0 END) as itens_ok,
+      SUM(CASE WHEN ii.status_item = 'Aguardando Ajuste' THEN 1 ELSE 0 END) as divergentes,
       SUM(CASE WHEN ii.status_item = 'Aguardando Ajuste' THEN 1 ELSE 0 END) as itens_divergentes,
+      SUM(CASE WHEN ii.status_item IN ('Pendente','2ª Contagem','3ª Contagem') THEN 1 ELSE 0 END) as pendentes,
       SUM(CASE WHEN ii.status_item IN ('Pendente','2ª Contagem','3ª Contagem') THEN 1 ELSE 0 END) as itens_pendentes
     FROM inventarios i
     LEFT JOIN inventario_itens ii ON ii.inventario_id = i.id
