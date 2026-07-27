@@ -77,40 +77,42 @@ export async function buscarEstoqueMinimoDinamico({
     return atual
   }
 
-  // 2. Buscar Estoque Atual em estoque_caixas por produto
+  // 2. Buscar Estoque Atual FÍSICO DISPONÍVEL NAS RUAS por produto
+  // (Desconsidera caixas em OP, Produção, REC, EXPEDICAO, SAIDA, PERDIDO ou já consumidas)
   const { rows: caixasEstoque } = await db.execute({
     sql: `
     SELECT produto_id, COUNT(*) as cxs, SUM(peso_kg) as kg
     FROM estoque_caixas
-    WHERE status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')
+    WHERE status = 'DISPONIVEL'
+      AND endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO', 'PRODUCAO')
+      AND endereco NOT LIKE 'OP-%'
     GROUP BY produto_id
   `, args: []
   })
 
-  // Somar estoque no Pai correspondente
+  // Somar estoque físico disponível nas ruas exclusivamente da própria matéria-prima (pai)
   caixasEstoque.forEach(c => {
-    const paiId = encontrarPaiId(c.produto_id)
-    if (paisMap[paiId]) {
-      paisMap[paiId].estoque_caixas += (c.cxs || 0)
-      paisMap[paiId].estoque_kg += (c.kg || 0)
+    if (paisMap[c.produto_id]) {
+      paisMap[c.produto_id].estoque_caixas += (c.cxs || 0)
+      paisMap[c.produto_id].estoque_kg += (c.kg || 0)
     }
   })
 
-  // Se não houver caixas serializadas para algum pai, verificar estoque_posicao como fallback
+  // Se não houver caixas serializadas para a matéria-prima, verificar estoque_posicao como fallback
   const { rows: posicaoEstoque } = await db.execute({
     sql: `
     SELECT produto_id, SUM(qtd_caixas) as cxs, SUM(qtd_kg) as kg
     FROM estoque_posicao
-    WHERE endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO')
+    WHERE endereco NOT IN ('REC', 'EXPEDICAO', 'SAIDA', 'PERDIDO', 'PRODUCAO')
+      AND endereco NOT LIKE 'OP-%'
     GROUP BY produto_id
   `, args: []
   })
 
   posicaoEstoque.forEach(p => {
-    const paiId = encontrarPaiId(p.produto_id)
-    if (paisMap[paiId] && paisMap[paiId].estoque_kg === 0 && p.kg > 0) {
-      paisMap[paiId].estoque_caixas = p.cxs || 0
-      paisMap[paiId].estoque_kg = p.kg || 0
+    if (paisMap[p.produto_id] && paisMap[p.produto_id].estoque_kg === 0 && p.kg > 0) {
+      paisMap[p.produto_id].estoque_caixas = p.cxs || 0
+      paisMap[p.produto_id].estoque_kg = p.kg || 0
     }
   })
 
