@@ -902,7 +902,7 @@ export function InventarioOperador() {
                   <div className="text-center py-20 mb-16" style={{ background: 'var(--bg-1)', borderRadius: 8, border: '1px solid var(--warning)' }}>
                     <div className="text-sm text-muted mb-4 uppercase tracking-widest">Vá para o endereço</div>
                     <div className="text-warning font-mono" style={{ fontSize: 48, fontWeight: 900 }}>{enderecoAtual}</div>
-                    <div className="text-muted text-sm mt-4">{itensDoEndereco.length} item{itensDoEndereco.length !== 1 ? 'ns' : ''} esperados nesta posição</div>
+
                   </div>
                 )}
                 <input
