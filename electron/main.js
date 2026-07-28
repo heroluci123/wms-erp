@@ -37,10 +37,16 @@ async function initDatabase() {
   }
 
   // 3. Sincronização inicial: baixar dados da nuvem para o local
-  await syncFromRemote()
+  try {
+    await syncFromRemote()
+  } catch (err) {
+    console.warn('[DB] Sync inicial falhou (utilizando banco local):', err.message)
+  }
 
   // 4. Sync periódico a cada 60 segundos
-  setInterval(syncFromRemote, 60000)
+  setInterval(() => {
+    syncFromRemote().catch(e => console.warn('[DB] Sync periódico falhou:', e.message))
+  }, 60000)
 }
 
 // ─── Sync: baixa tudo da nuvem para o SQLite local ────────────────────────────

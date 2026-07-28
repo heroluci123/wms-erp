@@ -36,13 +36,23 @@ function makeElectronClient() {
   }
 }
 
+const DEFAULT_TURSO_URL = 'libsql://wms-erp-heroluci123.aws-us-east-1.turso.io'
+const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODIzMDMwMjUsImlkIjoiMDE5ZWY5ODktOTEwMS03N2IwLTlkYzUtNWIzMjZkYmQwNTk0IiwicmlkIjoiZjg0ZmM3ZTEtZGE4ZC00MWY0LTliODUtYTQ2ZTdhMTk3ODU2In0.jwPV7pJtq6P7s-ApY4hXEMG7TGerCpi1FEEVY2ND8642kawySSLH2udkUgXx4XoaYzNa3y2xgudPeY7Rj-4pBg'
+
 async function makeWebClient() {
   const { createClient } = await import('@libsql/client/web')
-  const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TURSO_DATABASE_URL) || (typeof process !== 'undefined' && process.env?.VITE_TURSO_DATABASE_URL)
-  const envToken = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TURSO_AUTH_TOKEN) || (typeof process !== 'undefined' && process.env?.VITE_TURSO_AUTH_TOKEN)
-  const rawUrl = envUrl || 'libsql://wms-erp-heroluci123.aws-us-east-1.turso.io'
+  let rawUrl = ''
+  let authToken = ''
+
+  try {
+    rawUrl = import.meta.env.VITE_TURSO_DATABASE_URL
+    authToken = import.meta.env.VITE_TURSO_AUTH_TOKEN
+  } catch (_) {}
+
+  if (!rawUrl) rawUrl = DEFAULT_TURSO_URL
+  if (!authToken) authToken = DEFAULT_TURSO_TOKEN
+
   const url = rawUrl.replace(/^libsql:\/\//i, 'https://')
-  const authToken = envToken || ''
   return createClient({ url, authToken })
 }
 
