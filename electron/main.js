@@ -5,8 +5,8 @@ const fs = require('fs')
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 // ─── Configurações do banco ───────────────────────────────────────────────────
-const REMOTE_URL = 'https://wms-erp-heroluci123.aws-us-east-1.turso.io'
-const AUTH_TOKEN  = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODIzMDMwMjUsImlkIjoiMDE5ZWY5ODktOTEwMS03N2IwLTlkYzUtNWIzMjZkYmQwNTk0IiwicmlkIjoiZjg0ZmM3ZTEtZGE4ZC00MWY0LTliODUtYTQ2ZTdhMTk3ODU2In0.jwPV7pJtq6P7s-ApY4hXEMG7TGerCpi1FEEVY2ND8642kawySSLH2udkUgXx4XoaYzNa3y2xgudPeY7Rj-4pBg'
+const REMOTE_URL = 'https://wms-erp-2-heroleon123.aws-us-east-1.turso.io'
+const AUTH_TOKEN  = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODUyNTExMzIsImlkIjoiMDE5ZmE5NDEtNGIwMS03MjZkLWEyOTEtODA1Y2Y3YmE4NDRiIiwia2lkIjoiYU1USWxCVUgzMkZ6VGpMV29CNzM2MzF6ZWt0OGdwZUpyaUFPT2tXdmdFRSIsInJpZCI6IjRhNjVlOGZmLTJiNTctNGU5MS1hODYyLTc0ZWViNzY2MTdiNiJ9.6LC2AUlOhxt7t-zAPCgoHSXAWvf5nLFZzZPAWVdmorcu3v5SCR0tO6_LABDeixQQOka1x4PtNU4Wd-0zDt0nCg'
 
 let localDb   = null  // better-sqlite3 (leitura local instantânea)
 let remoteDb  = null  // @libsql/client HTTP (escrita na nuvem)
