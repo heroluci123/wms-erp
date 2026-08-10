@@ -138,6 +138,8 @@ export function Relatorios() {
   const [presetAtivo, setPresetAtivo] = useState(2)
   const [dataInicio, setDataInicio] = useState(() => subDays(new Date(), 29).toISOString().slice(0,10))
   const [dataFim, setDataFim] = useState(() => new Date().toISOString().slice(0,10))
+  // Controla QUANDO buscar — incrementado por preset e pelo botão Buscar
+  const [triggerBusca, setTriggerBusca] = useState(0)
 
   const [balanco, setBalanco] = useState([])
   const [arvoreData, setArvoreData] = useState({ produtos: [], arvore: [] })
@@ -150,12 +152,17 @@ export function Relatorios() {
   const [agruparMateriaPrima, setAgruparMateriaPrima] = useState(false)
   const [loading, setLoading] = useState(false)
 
+  // Presets definem datas E disparam busca automaticamente
   const aplicarPreset = (index) => {
     setPresetAtivo(index)
     const [ini, fim] = PRESETS[index].getRange()
     setDataInicio(ini)
     setDataFim(fim)
+    setTriggerBusca(t => t + 1)
   }
+
+  // Botão manual de busca
+  const buscar = () => setTriggerBusca(t => t + 1)
 
   const carregarRelatorios = async () => {
     setLoading(true)
@@ -175,7 +182,8 @@ export function Relatorios() {
     }
   }
 
-  useEffect(() => { carregarRelatorios() }, [dataInicio, dataFim])
+  // Só busca quando triggerBusca muda (mount inicial + presets + botão Buscar)
+  useEffect(() => { carregarRelatorios() }, [triggerBusca])
 
   // ─── Árvore ───────────────────────────────────────────────────────────────
   const arvorePronta = useMemo(() => {
@@ -282,7 +290,7 @@ export function Relatorios() {
     <div className="card card--elevated mb-24 p-16">
       <div className="flex items-center gap-16 flex-wrap">
         <div className="flex items-center gap-8 text-sm font-bold text-muted"><Calendar size={16} /> Período:</div>
-        <div className="flex gap-8 flex-wrap">
+        <div className="flex gap-8 flex-wrap items-center">
           {PRESETS.map((p, i) => (
             <button key={i} onClick={() => aplicarPreset(i)} style={{
               padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1.5px solid',
@@ -291,9 +299,33 @@ export function Relatorios() {
               color: presetAtivo === i ? 'var(--primary)' : 'var(--text-muted)'
             }}>{p.label}</button>
           ))}
-          <input type="date" className="form-input text-xs" value={dataInicio} onChange={e => { setDataInicio(e.target.value); setPresetAtivo(null) }} />
+          {/* Separador visual */}
+          <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
+          <input
+            type="date"
+            className="form-input text-xs"
+            value={dataInicio}
+            onChange={e => { setDataInicio(e.target.value); setPresetAtivo(null) }}
+            onKeyDown={e => e.key === 'Enter' && buscar()}
+          />
           <span className="text-muted">até</span>
-          <input type="date" className="form-input text-xs" value={dataFim} onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }} />
+          <input
+            type="date"
+            className="form-input text-xs"
+            value={dataFim}
+            onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }}
+            onKeyDown={e => e.key === 'Enter' && buscar()}
+          />
+          <button
+            onClick={buscar}
+            style={{
+              padding: '6px 18px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+              background: 'var(--primary)', color: '#fff', border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6
+            }}
+          >
+            <Search size={13} /> Buscar
+          </button>
         </div>
       </div>
     </div>
