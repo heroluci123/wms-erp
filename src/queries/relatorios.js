@@ -31,3 +31,61 @@ export async function getArvoreProducao() {
     arvore: arvoreRes.rows
   }
 }
+
+export async function getOrdensProducao(dataInicio, dataFim) {
+  const res = await db.execute({
+    sql: `
+      SELECT 
+        op.id,
+        op.status,
+        op.lote,
+        op.peso_enviado,
+        op.peso_retornado,
+        op.perda,
+        op.data_inicio,
+        op.data_fim,
+        op.operador_id,
+        p.descricao  AS materia_prima,
+        p.codigo     AS mp_codigo,
+        o.nome       AS operador_nome,
+        -- Subprodutos gerados nesta OP (estoque_caixas com endereco = 'OP-'||op.id ou lote = op.lote)
+        (SELECT COUNT(*) FROM estoque_caixas ec 
+          WHERE ec.lote = op.lote 
+            AND ec.produto_id != op.materia_prima_id
+        ) AS qtd_caixas_geradas,
+        (SELECT COALESCE(SUM(ec2.peso_kg),0) FROM estoque_caixas ec2 
+          WHERE ec2.lote = op.lote 
+            AND ec2.produto_id != op.materia_prima_id
+        ) AS kg_gerados
+      FROM ordens_producao op
+      JOIN produtos p ON p.id = op.materia_prima_id
+      LEFT JOIN operadores o ON o.id = op.operador_id
+      WHERE date(op.data_inicio) BETWEEN ? AND ?
+      ORDER BY op.data_inicio DESC
+    `,
+    args: [dataInicio, dataFim]
+  })
+  return res.rows
+}
+
+export async function getOPSubprodutos(lote) {
+  const res = await db.execute({
+    sql: `
+      SELECT 
+        ec.ean_caixa,
+        ec.lote,
+        ec.validade,
+        ec.peso_kg,
+        ec.status,
+        ec.endereco,
+        p.descricao,
+        p.codigo
+      FROM estoque_caixas ec
+      JOIN produtos p ON p.id = ec.produto_id
+      WHERE ec.lote = ?
+      ORDER BY p.descricao, ec.validade
+    `,
+    args: [lote]
+  })
+  return res.rows
+}

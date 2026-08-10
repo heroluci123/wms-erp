@@ -1,84 +1,152 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { PieChart, TrendingUp, ChevronRight, ChevronDown, PackageOpen, Layers, Calendar, Search, Download } from 'lucide-react'
+import { PieChart, TrendingUp, ChevronRight, ChevronDown, PackageOpen, Layers, Calendar, Search, Download, Factory, CheckCircle2, Clock, XCircle, Box } from 'lucide-react'
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import * as relatoriosQueries from '../queries/relatorios'
 
 const fmtKg = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg'
+const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtDate = (d) => d ? d.toString().slice(0, 16).replace('T', ' ') : '-'
 
 const PRESETS = [
-  { label: 'Hoje',    getRange: () => { const d = new Date().toISOString().slice(0,10); return [d, d] } },
-  { label: '7 dias',  getRange: () => [subDays(new Date(), 6).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
-  { label: '30 dias', getRange: () => [subDays(new Date(), 29).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
+  { label: 'Hoje',     getRange: () => { const d = new Date().toISOString().slice(0,10); return [d, d] } },
+  { label: '7 dias',   getRange: () => [subDays(new Date(), 6).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
+  { label: '30 dias',  getRange: () => [subDays(new Date(), 29).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
   { label: 'Este mês', getRange: () => [startOfMonth(new Date()).toISOString().slice(0,10), endOfMonth(new Date()).toISOString().slice(0,10)] },
   { label: 'Este ano', getRange: () => [startOfYear(new Date()).toISOString().slice(0,10), new Date().toISOString().slice(0,10)] },
 ]
 
-// Componente Recursivo para Árvore
+// ─── Status Badge OP ─────────────────────────────────────────────────────────
+const StatusBadgeOP = ({ status }) => {
+  const cfg = {
+    CONCLUIDA: { bg: 'rgba(16,185,129,0.15)',  color: '#10b981', icon: <CheckCircle2 size={12} />, label: 'Concluída' },
+    ABERTA:    { bg: 'rgba(251,191,36,0.15)',   color: '#fbbf24', icon: <Clock size={12} />,        label: 'Aberta' },
+    CANCELADA: { bg: 'rgba(239,68,68,0.15)',    color: '#ef4444', icon: <XCircle size={12} />,      label: 'Cancelada' },
+  }[status] || { bg: 'var(--bg-2)', color: 'var(--text-muted)', icon: null, label: status }
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      background: cfg.bg, color: cfg.color,
+      border: `1px solid ${cfg.color}40`,
+      borderRadius: 99, padding: '2px 10px', fontSize: 11, fontWeight: 700
+    }}>
+      {cfg.icon} {cfg.label}
+    </span>
+  )
+}
+
+// ─── Árvore Node ─────────────────────────────────────────────────────────────
 const ArvoreNode = ({ node, level = 0, searchTerm = '' }) => {
-  // Expand automatically if it contains a search term, else start collapsed
   const matchesSearch = searchTerm && node.descricao.toLowerCase().includes(searchTerm.toLowerCase())
   const [expanded, setExpanded] = useState(false)
-  
-  useEffect(() => {
-    if (searchTerm) setExpanded(true)
-  }, [searchTerm])
-
+  useEffect(() => { if (searchTerm) setExpanded(true) }, [searchTerm])
   const hasChildren = node.children && node.children.length > 0
-  
+
   return (
     <div className="relative">
-      <div 
+      <div
         className={`flex items-center gap-12 py-10 px-16 cursor-pointer hover:bg-bg-2 transition-colors ${matchesSearch ? 'bg-primary/10' : ''} ${level === 0 ? 'bg-bg-1 font-bold rounded mt-4 border border-border/50' : 'border-b border-border/30'}`}
         onClick={() => setExpanded(!expanded)}
       >
-        {/* Espaçamento para Níveis */}
-        {Array.from({ length: level }).map((_, i) => (
-          <div key={i} className="w-16 h-full border-l-2 border-border/30 ml-8"></div>
-        ))}
-
+        {Array.from({ length: level }).map((_, i) => <div key={i} className="w-16 h-full border-l-2 border-border/30 ml-8" />)}
         <div className="w-16 flex justify-center">
-          {hasChildren ? (
-            expanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />
-          ) : (
-            <div className="w-4 h-4 rounded-full bg-border/50"></div>
-          )}
+          {hasChildren
+            ? (expanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />)
+            : <div className="w-4 h-4 rounded-full bg-border/50" />}
         </div>
-        
         {level === 0 ? <PackageOpen size={18} className="text-primary" /> : <Layers size={16} className="text-muted" />}
-        
-        <div className="flex-1 text-sm font-medium">
-          <span>{node.descricao}</span>
-        </div>
-        
+        <div className="flex-1 text-sm font-medium">{node.descricao}</div>
         <div className="text-xs">
           {node.classificacao === 'MATERIA_PRIMA' && <span className="text-success text-xs px-8 py-2 rounded bg-success/10 font-bold">Matéria Prima</span>}
           {node.classificacao === 'SUBPRODUTO' && <span className="text-warning text-xs px-8 py-2 rounded bg-warning/10 font-bold">Subproduto</span>}
         </div>
       </div>
-      
       {expanded && hasChildren && (
         <div className="ml-16">
-          {node.children.map((child, i) => (
-            <ArvoreNode key={`${child.id}-${i}`} node={child} level={level + 1} searchTerm={searchTerm} />
-          ))}
+          {node.children.map((child, i) => <ArvoreNode key={`${child.id}-${i}`} node={child} level={level + 1} searchTerm={searchTerm} />)}
         </div>
       )}
     </div>
   )
 }
 
+// ─── Linha expandível da OP ──────────────────────────────────────────────────
+const OPRow = ({ op }) => {
+  const [expanded, setExpanded] = useState(false)
+  const rendimento = op.peso_enviado > 0 ? ((op.peso_retornado / op.peso_enviado) * 100).toFixed(1) : '0.0'
+  const rendColor = Number(rendimento) >= 80 ? '#10b981' : Number(rendimento) >= 60 ? '#fbbf24' : '#ef4444'
+
+  return (
+    <>
+      <tr className="cursor-pointer hover:bg-bg-2 transition-colors" onClick={() => setExpanded(!expanded)}>
+        <td className="td-mono text-muted">
+          {expanded ? <ChevronDown size={14} style={{ display: 'inline', marginRight: 4 }} /> : <ChevronRight size={14} style={{ display: 'inline', marginRight: 4 }} />}
+          #{op.id}
+        </td>
+        <td className="font-bold text-sm">{op.materia_prima}</td>
+        <td><span className="text-xs text-muted font-mono">{op.lote || '-'}</span></td>
+        <td><StatusBadgeOP status={op.status} /></td>
+        <td style={{ textAlign: 'right' }} className="font-mono text-sm">{fmtNum(op.peso_enviado)}</td>
+        <td style={{ textAlign: 'right' }} className="font-mono text-sm text-success">{fmtNum(op.peso_retornado)}</td>
+        <td style={{ textAlign: 'right' }} className="font-mono text-sm text-danger">{fmtNum(op.perda)}</td>
+        <td style={{ textAlign: 'right' }}><span style={{ color: rendColor, fontWeight: 700, fontSize: 13 }}>{rendimento}%</span></td>
+        <td style={{ textAlign: 'right' }} className="font-mono text-sm">
+          {op.qtd_caixas_geradas > 0
+            ? <span className="text-primary font-bold">{op.qtd_caixas_geradas} cx</span>
+            : <span className="text-muted">0 cx</span>}
+        </td>
+        <td style={{ textAlign: 'right' }} className="font-mono text-sm text-primary">{fmtNum(op.kg_gerados)}</td>
+        <td className="text-muted text-xs">{fmtDate(op.data_inicio)}</td>
+        <td className="text-muted text-xs">{fmtDate(op.data_fim)}</td>
+        <td className="text-muted text-xs">{op.operador_nome || '-'}</td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={13} style={{ padding: 0, background: 'var(--bg-1)' }}>
+            <div style={{ padding: '12px 24px 16px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <Box size={14} style={{ color: 'var(--primary)' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Detalhe OP #{op.id} — Lote: {op.lote || 'N/A'}
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                {[
+                  { label: 'Peso Enviado',   val: fmtNum(op.peso_enviado) + ' kg',   color: 'var(--text)',    bg: 'var(--bg-2)',                    border: 'var(--border)' },
+                  { label: 'Retornado',       val: fmtNum(op.peso_retornado) + ' kg', color: '#10b981',        bg: 'rgba(16,185,129,0.08)',           border: 'rgba(16,185,129,0.2)' },
+                  { label: 'Perda',           val: fmtNum(op.perda) + ' kg',          color: '#ef4444',        bg: 'rgba(239,68,68,0.08)',            border: 'rgba(239,68,68,0.2)' },
+                  { label: 'Rendimento',      val: rendimento + '%',                   color: rendColor,        bg: 'rgba(99,102,241,0.08)',           border: 'rgba(99,102,241,0.2)' },
+                ].map((k, i) => (
+                  <div key={i} style={{ background: k.bg, borderRadius: 8, padding: '10px 14px', border: `1px solid ${k.border}` }}>
+                    <div style={{ fontSize: 10, color: k.color, fontWeight: 700, textTransform: 'uppercase', opacity: 0.7 }}>{k.label}</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: k.color, marginTop: 2 }}>{k.val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+// ─── Componente Principal ────────────────────────────────────────────────────
 export function Relatorios() {
   const [activeTab, setActiveTab] = useState('balanco')
-  const [presetAtivo, setPresetAtivo] = useState(2) // 30 dias
+  const [presetAtivo, setPresetAtivo] = useState(2)
   const [dataInicio, setDataInicio] = useState(() => subDays(new Date(), 29).toISOString().slice(0,10))
   const [dataFim, setDataFim] = useState(() => new Date().toISOString().slice(0,10))
-  
+
   const [balanco, setBalanco] = useState([])
   const [arvoreData, setArvoreData] = useState({ produtos: [], arvore: [] })
-  
+  const [ordensProducao, setOrdensProducao] = useState([])
+
   const [filtroProduto, setFiltroProduto] = useState('')
   const [filtroArvore, setFiltroArvore] = useState('')
+  const [filtroOP, setFiltroOP] = useState('')
+  const [filtroStatusOP, setFiltroStatusOP] = useState('TODOS')
   const [agruparMateriaPrima, setAgruparMateriaPrima] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -92,10 +160,14 @@ export function Relatorios() {
   const carregarRelatorios = async () => {
     setLoading(true)
     try {
-      const bal = await relatoriosQueries.getBalanco(dataInicio, dataFim)
-      const arv = await relatoriosQueries.getArvoreProducao()
+      const [bal, arv, ops] = await Promise.all([
+        relatoriosQueries.getBalanco(dataInicio, dataFim),
+        relatoriosQueries.getArvoreProducao(),
+        relatoriosQueries.getOrdensProducao(dataInicio, dataFim),
+      ])
       setBalanco(bal)
       setArvoreData(arv)
+      setOrdensProducao(ops)
     } catch (err) {
       console.error(err)
     } finally {
@@ -103,141 +175,132 @@ export function Relatorios() {
     }
   }
 
-  useEffect(() => {
-    carregarRelatorios()
-  }, [dataInicio, dataFim])
+  useEffect(() => { carregarRelatorios() }, [dataInicio, dataFim])
 
-  // Construir Árvore Hierárquica a partir do Grafo
+  // ─── Árvore ───────────────────────────────────────────────────────────────
   const arvorePronta = useMemo(() => {
     const { produtos, arvore } = arvoreData
     const map = new Map()
     produtos.forEach(p => map.set(p.id, { ...p, children: [] }))
-    
-    // Associar filhos
     arvore.forEach(link => {
       const pai = map.get(link.pai_id)
       const filho = map.get(link.filho_id)
-      if (pai && filho) {
-        // Clonamos o filho para que uma mesma referência não crie loops ao ter múltiplos pais
-        pai.children.push({ ...filho, children: [] })
-      }
+      if (pai && filho) pai.children.push({ ...filho, children: [] })
     })
-
-    // No Grafo, uma Materia Prima pode ter filhos que tb tem filhos. 
-    // Para renderizar, pegamos todas as raízes (Matéria Prima)
     let roots = produtos.filter(p => p.classificacao === 'MATERIA_PRIMA').map(p => map.get(p.id))
-    
-    // Filtrar pela barra de pesquisa
     if (filtroArvore) {
       const termo = filtroArvore.toLowerCase()
-      // Filtra raízes que combinam ou que têm algum filho/neto que combina
-      const hasTerm = (node) => {
-        if (node.descricao.toLowerCase().includes(termo)) return true
-        if (node.children && node.children.some(c => hasTerm(c))) return true
-        return false
-      }
+      const hasTerm = (node) => node.descricao.toLowerCase().includes(termo) || (node.children && node.children.some(c => hasTerm(c)))
       roots = roots.filter(r => hasTerm(r))
     }
-
     return roots.sort((a,b) => a.descricao.localeCompare(b.descricao))
   }, [arvoreData, filtroArvore])
 
-  // Calcular Balanço (Agrupado ou Não)
+  // ─── Balanço ──────────────────────────────────────────────────────────────
   const balancoView = useMemo(() => {
     let base = balanco
-    
     if (filtroProduto) {
       const term = filtroProduto.toLowerCase()
       base = base.filter(b => b.descricao.toLowerCase().includes(term))
     }
-
     if (!agruparMateriaPrima) {
-      return base.sort((a, b) => {
-        const volA = (a.total_entrada || 0) + Math.abs(a.total_saida || 0)
-        const volB = (b.total_entrada || 0) + Math.abs(b.total_saida || 0)
-        return volB - volA
-      })
+      return base.sort((a, b) => ((b.total_entrada||0) + Math.abs(b.total_saida||0)) - ((a.total_entrada||0) + Math.abs(a.total_saida||0)))
     }
-    
     const map = new Map()
     const { arvore } = arvoreData
-    
-    // Busca recursiva pra achar as Raizes de um ID (Pode ter mais de 1, pegaremos a primeira encontrada por simplicidade no balanço)
     const findRootId = (prodId) => {
       const parents = arvore.filter(a => a.filho_id === prodId)
-      if (parents.length === 0) return prodId
-      return findRootId(parents[0].pai_id)
+      return parents.length === 0 ? prodId : findRootId(parents[0].pai_id)
     }
-
     base.forEach(b => {
       const rootId = findRootId(b.produto_id)
       const rootProd = arvoreData.produtos.find(p => p.id === rootId) || b
-      
-      if (!map.has(rootId)) {
-        map.set(rootId, {
-          produto_id: rootId,
-          descricao: rootProd.descricao,
-          classificacao: rootProd.classificacao,
-          total_entrada: 0,
-          total_saida: 0
-        })
-      }
-      
-      const entry = map.get(rootId)
-      entry.total_entrada += (b.total_entrada || 0)
-      entry.total_saida += (b.total_saida || 0)
+      if (!map.has(rootId)) map.set(rootId, { produto_id: rootId, descricao: rootProd.descricao, classificacao: rootProd.classificacao, total_entrada: 0, total_saida: 0 })
+      const e = map.get(rootId)
+      e.total_entrada += (b.total_entrada || 0)
+      e.total_saida += (b.total_saida || 0)
     })
-    
-    // Sort by Total Volume (Entradas + Saídas) Descending instead of alphabetical
-    return Array.from(map.values()).sort((a, b) => {
-      const volA = a.total_entrada + Math.abs(a.total_saida)
-      const volB = b.total_entrada + Math.abs(b.total_saida)
-      return volB - volA
-    })
+    return Array.from(map.values()).sort((a, b) => (b.total_entrada + Math.abs(b.total_saida)) - (a.total_entrada + Math.abs(a.total_saida)))
   }, [balanco, agruparMateriaPrima, filtroProduto, arvoreData])
 
-  const exportarCSV = () => {
-    if (balancoView.length === 0) return
+  // ─── OPs filtradas ────────────────────────────────────────────────────────
+  const opsView = useMemo(() => {
+    let base = ordensProducao
+    if (filtroStatusOP !== 'TODOS') base = base.filter(op => op.status === filtroStatusOP)
+    if (filtroOP) {
+      const t = filtroOP.toLowerCase()
+      base = base.filter(op => (op.materia_prima || '').toLowerCase().includes(t) || (op.lote || '').toLowerCase().includes(t) || String(op.id).includes(t))
+    }
+    return base
+  }, [ordensProducao, filtroOP, filtroStatusOP])
+
+  // ─── KPIs OPs ─────────────────────────────────────────────────────────────
+  const opKpis = useMemo(() => {
+    const totalEnviado = ordensProducao.reduce((s, o) => s + Number(o.peso_enviado||0), 0)
+    const totalRetornado = ordensProducao.reduce((s, o) => s + Number(o.peso_retornado||0), 0)
+    return {
+      total: ordensProducao.length,
+      concluidas: ordensProducao.filter(o => o.status === 'CONCLUIDA').length,
+      abertas: ordensProducao.filter(o => o.status === 'ABERTA').length,
+      totalEnviado, totalRetornado,
+      totalPerda: ordensProducao.reduce((s, o) => s + Number(o.perda||0), 0),
+      rendimento: totalEnviado > 0 ? ((totalRetornado / totalEnviado) * 100).toFixed(1) : '0.0'
+    }
+  }, [ordensProducao])
+
+  // ─── CSV Balanço ──────────────────────────────────────────────────────────
+  const exportarCSVBalanco = () => {
+    if (!balancoView.length) return
     const header = "CODIGO;PRODUTO;CLASSIFICACAO;ENTRADAS_KG;SAIDAS_KG;BALANCO_KG\n"
-    const rows = balancoView.map(b => 
-      `${b.produto_id};${b.descricao};${b.classificacao};${(b.total_entrada||0).toFixed(2)};${(b.total_saida||0).toFixed(2)};${((b.total_entrada||0) - (b.total_saida||0)).toFixed(2)}`
-    ).join("\n")
-    
+    const rows = balancoView.map(b => `${b.produto_id};${b.descricao};${b.classificacao};${(b.total_entrada||0).toFixed(2)};${(b.total_saida||0).toFixed(2)};${((b.total_entrada||0)-(b.total_saida||0)).toFixed(2)}`).join("\n")
     const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `Relatorio_Balanco_${dataInicio}_${dataFim}.csv`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `Balanco_${dataInicio}_${dataFim}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
-  // Gráficos Data
-  const top10Entradas = useMemo(() => {
-    return [...balancoView]
-      .filter(b => b.total_entrada > 0)
-      .sort((a, b) => b.total_entrada - a.total_entrada)
-      .slice(0, 10)
+  // ─── CSV OPs ──────────────────────────────────────────────────────────────
+  const exportarCSVOPs = () => {
+    if (!opsView.length) return
+    const header = "ID;MATERIA_PRIMA;LOTE;STATUS;PESO_ENVIADO_KG;PESO_RETORNADO_KG;PERDA_KG;RENDIMENTO_PCT;CX_GERADAS;KG_GERADOS;DATA_INICIO;DATA_FIM;OPERADOR\n"
+    const rows = opsView.map(op => {
+      const rend = op.peso_enviado > 0 ? ((op.peso_retornado / op.peso_enviado) * 100).toFixed(1) : '0.0'
+      return `${op.id};${op.materia_prima};${op.lote||''};${op.status};${fmtNum(op.peso_enviado)};${fmtNum(op.peso_retornado)};${fmtNum(op.perda)};${rend}%;${op.qtd_caixas_geradas};${fmtNum(op.kg_gerados)};${fmtDate(op.data_inicio)};${fmtDate(op.data_fim)};${op.operador_nome||''}`
+    }).join("\n")
+    const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `OPs_${dataInicio}_${dataFim}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a)
+  }
+
+  // ─── Charts Balanço ───────────────────────────────────────────────────────
+  const top10Entradas = useMemo(() => [...balancoView].filter(b => b.total_entrada > 0).sort((a,b) => b.total_entrada - a.total_entrada).slice(0,10), [balancoView])
+  const top10Saidas   = useMemo(() => [...balancoView].filter(b => b.total_saida > 0).sort((a,b) => b.total_saida - a.total_saida).slice(0,10), [balancoView])
+  const totalGeral    = useMemo(() => {
+    let i = 0, s = 0; balancoView.forEach(b => { i += b.total_entrada; s += b.total_saida })
+    return [{ name: 'Entradas', valor: i, fill: '#10b981' }, { name: 'Saídas', valor: s, fill: '#ef4444' }]
   }, [balancoView])
 
-  const top10Saidas = useMemo(() => {
-    return [...balancoView]
-      .filter(b => b.total_saida > 0)
-      .sort((a, b) => b.total_saida - a.total_saida)
-      .slice(0, 10)
-  }, [balancoView])
-
-  const totalGeral = useMemo(() => {
-    let inTotal = 0, outTotal = 0
-    balancoView.forEach(b => { inTotal += b.total_entrada; outTotal += b.total_saida })
-    return [
-      { name: 'Entradas', valor: inTotal, fill: '#10b981' },
-      { name: 'Saídas', valor: outTotal, fill: '#ef4444' }
-    ]
-  }, [balancoView])
+  // ─── Filtro de Período compartilhado ─────────────────────────────────────
+  const FiltroPeriodo = () => (
+    <div className="card card--elevated mb-24 p-16">
+      <div className="flex items-center gap-16 flex-wrap">
+        <div className="flex items-center gap-8 text-sm font-bold text-muted"><Calendar size={16} /> Período:</div>
+        <div className="flex gap-8 flex-wrap">
+          {PRESETS.map((p, i) => (
+            <button key={i} onClick={() => aplicarPreset(i)} style={{
+              padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1.5px solid',
+              borderColor: presetAtivo === i ? 'var(--primary)' : 'transparent',
+              backgroundColor: presetAtivo === i ? 'var(--primary-light)' : 'var(--bg-2)',
+              color: presetAtivo === i ? 'var(--primary)' : 'var(--text-muted)'
+            }}>{p.label}</button>
+          ))}
+          <input type="date" className="form-input text-xs" value={dataInicio} onChange={e => { setDataInicio(e.target.value); setPresetAtivo(null) }} />
+          <span className="text-muted">até</span>
+          <input type="date" className="form-input text-xs" value={dataFim} onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }} />
+        </div>
+      </div>
+    </div>
+  )
 
   return (
-    <div className="p-24 max-w-[1200px] mx-auto fade-in">
+    <div className="p-24 max-w-[1400px] mx-auto fade-in">
       <div className="flex items-center justify-between mb-24">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-12">
@@ -247,17 +310,15 @@ export function Relatorios() {
         </div>
       </div>
 
-      <div className="flex gap-16 mb-24">
-        <button 
-          className={`btn ${activeTab === 'balanco' ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => setActiveTab('balanco')}
-        >
+      {/* ─── Tabs ────────────────────────────────────────────────────────────── */}
+      <div className="flex gap-8 mb-24 flex-wrap">
+        <button className={`btn ${activeTab === 'balanco' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('balanco')}>
           <TrendingUp size={18} /> Balanço de Entradas e Saídas
         </button>
-        <button 
-          className={`btn ${activeTab === 'arvore' ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => setActiveTab('arvore')}
-        >
+        <button className={`btn ${activeTab === 'ops' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('ops')}>
+          <Factory size={18} /> Ordens de Produção
+        </button>
+        <button className={`btn ${activeTab === 'arvore' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('arvore')}>
           <Layers size={18} /> Árvore de Produção (BOM)
         </button>
       </div>
@@ -267,117 +328,66 @@ export function Relatorios() {
           <div className="text-center p-32 text-muted">Carregando...</div>
         ) : (
           <>
+            {/* ── ABA BALANÇO ──────────────────────────────────────────────── */}
             {activeTab === 'balanco' && (
               <div>
-                {/* Filtros */}
-                <div className="card card--elevated mb-24 p-16">
-                  <div className="flex items-center gap-16 flex-wrap">
-                    <div className="flex items-center gap-8 text-sm font-bold text-muted">
-                      <Calendar size={16} /> Período:
-                    </div>
-                    <div className="flex gap-8 flex-wrap">
-                      {PRESETS.map((p, i) => (
-                        <button key={i} onClick={() => aplicarPreset(i)} style={{
-                          padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1.5px solid',
-                          borderColor: presetAtivo === i ? 'var(--primary)' : 'transparent',
-                          backgroundColor: presetAtivo === i ? 'var(--primary-light)' : 'var(--bg-2)',
-                          color: presetAtivo === i ? 'var(--primary)' : 'var(--text-muted)'
-                        }}>
-                          {p.label}
-                        </button>
-                      ))}
-                      <input type="date" className="form-input text-xs" value={dataInicio} onChange={e => { setDataInicio(e.target.value); setPresetAtivo(null) }} />
-                      <span className="text-muted">até</span>
-                      <input type="date" className="form-input text-xs" value={dataFim} onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }} />
-                    </div>
-                  </div>
-                </div>
-
+                <FiltroPeriodo />
                 <div className="flex justify-between items-center mb-24 flex-wrap gap-16">
                   <div className="flex gap-16 items-center flex-1">
                     <div className="relative flex-1 max-w-[400px]">
                       <Search size={16} className="absolute left-12 top-12 text-muted" />
-                      <input 
-                        type="text" 
-                        placeholder="Buscar produto..." 
-                        className="form-input pl-36"
-                        value={filtroProduto}
-                        onChange={e => setFiltroProduto(e.target.value)}
-                      />
+                      <input type="text" placeholder="Buscar produto..." className="form-input pl-36" value={filtroProduto} onChange={e => setFiltroProduto(e.target.value)} />
                     </div>
-                    
                     <div className="flex items-center gap-8 bg-bg-2 p-8 rounded px-12 border border-border">
-                      <input 
-                        type="checkbox" 
-                        id="chk-agrupar"
-                        className="w-16 h-16"
-                        checked={agruparMateriaPrima}
-                        onChange={e => setAgruparMateriaPrima(e.target.checked)}
-                      />
-                      <label htmlFor="chk-agrupar" className="cursor-pointer text-sm font-bold select-none text-warning">
-                        Ocultar Subprodutos
-                      </label>
+                      <input type="checkbox" id="chk-agrupar" className="w-16 h-16" checked={agruparMateriaPrima} onChange={e => setAgruparMateriaPrima(e.target.checked)} />
+                      <label htmlFor="chk-agrupar" className="cursor-pointer text-sm font-bold select-none text-warning">Ocultar Subprodutos</label>
                     </div>
                   </div>
-                  
-                  <button className="btn btn--secondary" onClick={exportarCSV}>
+                  <button className="btn btn--secondary" onClick={exportarCSVBalanco}>
                     <Download size={18} /> Exportar CSV
                   </button>
                 </div>
 
-                {/* Gráficos */}
                 {balancoView.length > 0 && (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24, marginBottom: 24 }}>
-
                     <div className="card border border-border p-16">
                       <h3 className="text-sm font-bold mb-12 text-center uppercase" style={{ color: 'var(--text-muted)' }}>Resumo Total (Kg)</h3>
-                      <div style={{ width: '100%', height: 320 }}>
-                        <ResponsiveContainer width="100%" height={320}>
-                          <BarChart data={totalGeral} margin={{ top: 20, right: 20, left: 10, bottom: 20 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" vertical={false} />
-                            <XAxis dataKey="name" tick={{ fontSize: 13, fontWeight: 'bold', fill: '#e2e2eb' }} axisLine={false} tickLine={false} />
-                            <YAxis tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={false} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
-                            <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#fff' }} formatter={fmtKg} />
-                            <Bar dataKey="valor" radius={[6, 6, 0, 0]} barSize={70}>
-                              {totalGeral.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.fill} />
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
+                      <ResponsiveContainer width="100%" height={320}>
+                        <BarChart data={totalGeral} margin={{ top: 20, right: 20, left: 10, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" vertical={false} />
+                          <XAxis dataKey="name" tick={{ fontSize: 13, fontWeight: 'bold', fill: '#e2e2eb' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={false} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
+                          <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} formatter={fmtKg} />
+                          <Bar dataKey="valor" radius={[6,6,0,0]} barSize={70}>
+                            {totalGeral.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
-
                     <div className="card border border-border p-16">
                       <h3 className="text-sm font-bold mb-12 text-center uppercase" style={{ color: 'var(--text-muted)' }}>Top 10 Entradas</h3>
-                      <div style={{ width: '100%', height: 320 }}>
-                        <ResponsiveContainer width="100%" height={320}>
-                          <BarChart data={top10Entradas} layout="vertical" margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={false} vertical={true} />
-                            <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
-                            <YAxis dataKey="descricao" type="category" width={130} tick={{ fontSize: 9, fill: '#e2e2eb' }} axisLine={false} tickLine={false} tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v} />
-                            <Tooltip cursor={{ fill: 'rgba(42,42,60,0.6)' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#10b981' }} formatter={fmtKg} />
-                            <Bar dataKey="total_entrada" name="Entradas" fill="#10b981" radius={[0, 4, 4, 0]} barSize={18} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
+                      <ResponsiveContainer width="100%" height={320}>
+                        <BarChart data={top10Entradas} layout="vertical" margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={false} />
+                          <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
+                          <YAxis dataKey="descricao" type="category" width={130} tick={{ fontSize: 9, fill: '#e2e2eb' }} axisLine={false} tickLine={false} tickFormatter={v => v.length > 18 ? v.slice(0,18)+'…' : v} />
+                          <Tooltip cursor={{ fill: 'rgba(42,42,60,0.6)' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#10b981' }} formatter={fmtKg} />
+                          <Bar dataKey="total_entrada" name="Entradas" fill="#10b981" radius={[0,4,4,0]} barSize={18} />
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
-
                     <div className="card border border-border p-16">
                       <h3 className="text-sm font-bold mb-12 text-center uppercase" style={{ color: 'var(--text-muted)' }}>Top 10 Saídas</h3>
-                      <div style={{ width: '100%', height: 320 }}>
-                        <ResponsiveContainer width="100%" height={320}>
-                          <BarChart data={top10Saidas} layout="vertical" margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={false} vertical={true} />
-                            <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
-                            <YAxis dataKey="descricao" type="category" width={130} tick={{ fontSize: 9, fill: '#e2e2eb' }} axisLine={false} tickLine={false} tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v} />
-                            <Tooltip cursor={{ fill: 'rgba(42,42,60,0.6)' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#ef4444' }} formatter={fmtKg} />
-                            <Bar dataKey="total_saida" name="Saídas" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={18} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
+                      <ResponsiveContainer width="100%" height={320}>
+                        <BarChart data={top10Saidas} layout="vertical" margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3c" horizontal={false} />
+                          <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8b9e' }} axisLine={{ stroke: '#2a2a3c' }} tickLine={false} tickFormatter={v => Number(v).toLocaleString('pt-BR')} />
+                          <YAxis dataKey="descricao" type="category" width={130} tick={{ fontSize: 9, fill: '#e2e2eb' }} axisLine={false} tickLine={false} tickFormatter={v => v.length > 18 ? v.slice(0,18)+'…' : v} />
+                          <Tooltip cursor={{ fill: 'rgba(42,42,60,0.6)' }} contentStyle={{ backgroundColor: '#1e1e2f', borderColor: '#2a2a3c', borderRadius: 8, fontSize: 12, color: '#fff' }} itemStyle={{ color: '#ef4444' }} formatter={fmtKg} />
+                          <Bar dataKey="total_saida" name="Saídas" fill="#ef4444" radius={[0,4,4,0]} barSize={18} />
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
-
                   </div>
                 )}
 
@@ -386,18 +396,15 @@ export function Relatorios() {
                 ) : (
                   <div className="table-container">
                     <table>
-                      <thead>
-                        <tr>
-                          <th>Produto</th>
-                          <th>Classificação</th>
-                          <th style={{ textAlign: 'right' }}>Entradas (kg)</th>
-                          <th style={{ textAlign: 'right' }}>Saídas (kg)</th>
-                          <th style={{ textAlign: 'right' }}>Balanço (kg)</th>
-                        </tr>
-                      </thead>
+                      <thead><tr>
+                        <th>Produto</th><th>Classificação</th>
+                        <th style={{ textAlign: 'right' }}>Entradas (kg)</th>
+                        <th style={{ textAlign: 'right' }}>Saídas (kg)</th>
+                        <th style={{ textAlign: 'right' }}>Balanço (kg)</th>
+                      </tr></thead>
                       <tbody>
                         {balancoView.map(b => {
-                          const balancoCalc = b.total_entrada - b.total_saida
+                          const bc = b.total_entrada - b.total_saida
                           return (
                             <tr key={b.produto_id}>
                               <td className="font-bold text-sm">{b.descricao}</td>
@@ -405,15 +412,9 @@ export function Relatorios() {
                                 {b.classificacao === 'MATERIA_PRIMA' && <span className="text-success text-xs border border-success/30 px-6 py-2 rounded-full">M. Prima</span>}
                                 {b.classificacao === 'SUBPRODUTO' && <span className="text-warning text-xs border border-warning/30 px-6 py-2 rounded-full">Subproduto</span>}
                               </td>
-                              <td style={{ textAlign: 'right' }} className="text-success text-sm">
-                                {b.total_entrada > 0 ? `+${b.total_entrada.toFixed(2)}` : '0.00'}
-                              </td>
-                              <td style={{ textAlign: 'right' }} className="text-danger text-sm">
-                                {b.total_saida > 0 ? `-${b.total_saida.toFixed(2)}` : '0.00'}
-                              </td>
-                              <td style={{ textAlign: 'right' }} className="font-mono font-bold text-sm">
-                                {balancoCalc.toFixed(2)}
-                              </td>
+                              <td style={{ textAlign: 'right' }} className="text-success text-sm">{b.total_entrada > 0 ? `+${b.total_entrada.toFixed(2)}` : '0.00'}</td>
+                              <td style={{ textAlign: 'right' }} className="text-danger text-sm">{b.total_saida > 0 ? `-${b.total_saida.toFixed(2)}` : '0.00'}</td>
+                              <td style={{ textAlign: 'right' }} className="font-mono font-bold text-sm">{bc.toFixed(2)}</td>
                             </tr>
                           )
                         })}
@@ -424,6 +425,100 @@ export function Relatorios() {
               </div>
             )}
 
+            {/* ── ABA ORDENS DE PRODUÇÃO ───────────────────────────────────── */}
+            {activeTab === 'ops' && (
+              <div>
+                <FiltroPeriodo />
+
+                {/* KPIs */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 12, marginBottom: 24 }}>
+                  {[
+                    { label: 'Total de OPs',   value: opKpis.total,                             color: 'var(--primary)' },
+                    { label: 'Concluídas',     value: opKpis.concluidas,                        color: '#10b981' },
+                    { label: 'Abertas',        value: opKpis.abertas,                           color: '#fbbf24' },
+                    { label: 'Peso Enviado',   value: fmtNum(opKpis.totalEnviado) + ' kg',      color: 'var(--text)' },
+                    { label: 'Retornado',      value: fmtNum(opKpis.totalRetornado) + ' kg',    color: '#10b981' },
+                    { label: 'Perda Total',    value: fmtNum(opKpis.totalPerda) + ' kg',        color: '#ef4444' },
+                    { label: 'Rendimento',     value: opKpis.rendimento + '%',                  color: Number(opKpis.rendimento) >= 80 ? '#10b981' : Number(opKpis.rendimento) >= 60 ? '#fbbf24' : '#ef4444' },
+                  ].map((k, i) => (
+                    <div key={i} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>{k.label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: k.color }}>{k.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Filtros e CSV */}
+                <div className="flex items-center gap-16 mb-16 flex-wrap">
+                  <div className="relative flex-1 max-w-[360px]">
+                    <Search size={16} className="absolute left-12 top-12 text-muted" />
+                    <input type="text" placeholder="Buscar por matéria-prima, lote ou OP#..." className="form-input pl-36" value={filtroOP} onChange={e => setFiltroOP(e.target.value)} />
+                  </div>
+                  <div className="flex gap-8">
+                    {['TODOS','CONCLUIDA','ABERTA','CANCELADA'].map(s => (
+                      <button key={s} onClick={() => setFiltroStatusOP(s)} style={{
+                        padding: '6px 16px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1.5px solid',
+                        borderColor: filtroStatusOP === s ? 'var(--primary)' : 'transparent',
+                        background: filtroStatusOP === s ? 'var(--primary-light)' : 'var(--bg-2)',
+                        color: filtroStatusOP === s ? 'var(--primary)' : 'var(--text-muted)'
+                      }}>
+                        {s === 'TODOS' ? 'Todos' : s.charAt(0) + s.slice(1).toLowerCase()}
+                      </button>
+                    ))}
+                  </div>
+                  <button className="btn btn--secondary" style={{ marginLeft: 'auto' }} onClick={exportarCSVOPs}>
+                    <Download size={18} /> Exportar CSV ({opsView.length} OPs)
+                  </button>
+                </div>
+
+                {/* Tabela */}
+                {opsView.length === 0 ? (
+                  <div className="text-center p-32 text-muted bg-bg-1 rounded">
+                    <Factory size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                    <p>Nenhuma ordem de produção encontrada no período selecionado.</p>
+                  </div>
+                ) : (
+                  <div className="table-container" style={{ overflowX: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>OP #</th>
+                          <th>Matéria-Prima</th>
+                          <th>Lote</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: 'right' }}>Enviado (kg)</th>
+                          <th style={{ textAlign: 'right' }}>Retornado (kg)</th>
+                          <th style={{ textAlign: 'right' }}>Perda (kg)</th>
+                          <th style={{ textAlign: 'right' }}>Rendimento</th>
+                          <th style={{ textAlign: 'right' }}>Cx Geradas</th>
+                          <th style={{ textAlign: 'right' }}>Kg Gerados</th>
+                          <th>Início</th>
+                          <th>Fim</th>
+                          <th>Operador</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {opsView.map(op => <OPRow key={op.id} op={op} />)}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ background: 'var(--bg-1)', fontWeight: 700 }}>
+                          <td colSpan={4} className="text-muted text-sm">Total ({opsView.length} OPs)</td>
+                          <td style={{ textAlign: 'right' }} className="font-mono">{fmtNum(opsView.reduce((s,o) => s+Number(o.peso_enviado||0),0))}</td>
+                          <td style={{ textAlign: 'right' }} className="font-mono text-success">{fmtNum(opsView.reduce((s,o) => s+Number(o.peso_retornado||0),0))}</td>
+                          <td style={{ textAlign: 'right' }} className="font-mono text-danger">{fmtNum(opsView.reduce((s,o) => s+Number(o.perda||0),0))}</td>
+                          <td></td>
+                          <td style={{ textAlign: 'right' }} className="font-mono text-primary">{opsView.reduce((s,o) => s+Number(o.qtd_caixas_geradas||0),0)} cx</td>
+                          <td style={{ textAlign: 'right' }} className="font-mono text-primary">{fmtNum(opsView.reduce((s,o) => s+Number(o.kg_gerados||0),0))}</td>
+                          <td colSpan={3}></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── ABA ÁRVORE ───────────────────────────────────────────────── */}
             {activeTab === 'arvore' && (
               <div>
                 <div className="flex justify-between items-center mb-24">
@@ -433,24 +528,14 @@ export function Relatorios() {
                   </div>
                   <div className="relative w-[300px]">
                     <Search size={16} className="absolute left-12 top-10 text-muted" />
-                    <input 
-                      type="text" 
-                      placeholder="Buscar Origem ou Subproduto..." 
-                      className="form-input pl-36"
-                      value={filtroArvore}
-                      onChange={e => setFiltroArvore(e.target.value)}
-                    />
+                    <input type="text" placeholder="Buscar Origem ou Subproduto..." className="form-input pl-36" value={filtroArvore} onChange={e => setFiltroArvore(e.target.value)} />
                   </div>
                 </div>
-                
                 <div className="bg-bg-1 border border-border p-16 rounded overflow-auto" style={{ maxHeight: 600 }}>
-                  {arvorePronta.length === 0 ? (
-                    <div className="text-muted p-16 text-center">Nenhum mapeamento encontrado para esta busca.</div>
-                  ) : (
-                    arvorePronta.map(root => (
-                      <ArvoreNode key={root.id} node={root} searchTerm={filtroArvore} />
-                    ))
-                  )}
+                  {arvorePronta.length === 0
+                    ? <div className="text-muted p-16 text-center">Nenhum mapeamento encontrado para esta busca.</div>
+                    : arvorePronta.map(root => <ArvoreNode key={root.id} node={root} searchTerm={filtroArvore} />)
+                  }
                 </div>
               </div>
             )}
