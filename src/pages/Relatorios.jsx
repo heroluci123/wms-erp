@@ -136,41 +136,36 @@ const OPRow = ({ op }) => {
 export function Relatorios() {
   const [activeTab, setActiveTab] = useState('balanco')
   const [presetAtivo, setPresetAtivo] = useState(2)
-  const [dataInicio, setDataInicio] = useState(() => subDays(new Date(), 29).toISOString().slice(0,10))
-  const [dataFim, setDataFim] = useState(() => new Date().toISOString().slice(0,10))
-  // Controla QUANDO buscar — incrementado por preset e pelo botão Buscar
-  const [triggerBusca, setTriggerBusca] = useState(0)
 
-  const [balanco, setBalanco] = useState([])
-  const [arvoreData, setArvoreData] = useState({ produtos: [], arvore: [] })
+  // Datas de edição (o que o usuário digita)
+  const [dataInicio, setDataInicio] = useState(() => subDays(new Date(), 29).toISOString().slice(0,10))
+  const [dataFim,    setDataFim   ] = useState(() => new Date().toISOString().slice(0,10))
+
+  // Datas "aplicadas" — apenas estas disparam a query
+  const [periodoAtivo, setPeriodoAtivo] = useState(() => ({
+    inicio: subDays(new Date(), 29).toISOString().slice(0,10),
+    fim:    new Date().toISOString().slice(0,10),
+  }))
+
+  const [balanco,       setBalanco      ] = useState([])
+  const [arvoreData,    setArvoreData   ] = useState({ produtos: [], arvore: [] })
   const [ordensProducao, setOrdensProducao] = useState([])
 
-  const [filtroProduto, setFiltroProduto] = useState('')
-  const [filtroArvore, setFiltroArvore] = useState('')
-  const [filtroOP, setFiltroOP] = useState('')
-  const [filtroStatusOP, setFiltroStatusOP] = useState('TODOS')
+  const [filtroProduto,    setFiltroProduto   ] = useState('')
+  const [filtroArvore,     setFiltroArvore    ] = useState('')
+  const [filtroOP,         setFiltroOP        ] = useState('')
+  const [filtroStatusOP,   setFiltroStatusOP  ] = useState('TODOS')
   const [agruparMateriaPrima, setAgruparMateriaPrima] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  // Presets definem datas E disparam busca automaticamente
-  const aplicarPreset = (index) => {
-    setPresetAtivo(index)
-    const [ini, fim] = PRESETS[index].getRange()
-    setDataInicio(ini)
-    setDataFim(fim)
-    setTriggerBusca(t => t + 1)
-  }
-
-  // Botão manual de busca
-  const buscar = () => setTriggerBusca(t => t + 1)
-
-  const carregarRelatorios = async () => {
+  // ── recebe datas como parâmetro → sem stale closure ──────────────────────
+  const carregarRelatorios = async (inicio, fim) => {
     setLoading(true)
     try {
       const [bal, arv, ops] = await Promise.all([
-        relatoriosQueries.getBalanco(dataInicio, dataFim),
+        relatoriosQueries.getBalanco(inicio, fim),
         relatoriosQueries.getArvoreProducao(),
-        relatoriosQueries.getOrdensProducao(dataInicio, dataFim),
+        relatoriosQueries.getOrdensProducao(inicio, fim),
       ])
       setBalanco(bal)
       setArvoreData(arv)
@@ -182,8 +177,27 @@ export function Relatorios() {
     }
   }
 
-  // Só busca quando triggerBusca muda (mount inicial + presets + botão Buscar)
-  useEffect(() => { carregarRelatorios() }, [triggerBusca])
+  // Dispara sempre que periodoAtivo mudar (inclusive no mount)
+  useEffect(() => {
+    carregarRelatorios(periodoAtivo.inicio, periodoAtivo.fim)
+  }, [periodoAtivo])
+
+  // Presets: atualiza input + aplica a query imediatamente
+  const aplicarPreset = (index) => {
+    const [ini, fim] = PRESETS[index].getRange()
+    setPresetAtivo(index)
+    setDataInicio(ini)
+    setDataFim(fim)
+    setPeriodoAtivo({ inicio: ini, fim: fim })
+  }
+
+  // Botão Buscar: aplica o que está nos inputs
+  const buscar = () => {
+    setPresetAtivo(null)
+    setPeriodoAtivo({ inicio: dataInicio, fim: dataFim })
+  }
+
+
 
   // ─── Árvore ───────────────────────────────────────────────────────────────
   const arvorePronta = useMemo(() => {
@@ -285,8 +299,9 @@ export function Relatorios() {
     return [{ name: 'Entradas', valor: i, fill: '#10b981' }, { name: 'Saídas', valor: s, fill: '#ef4444' }]
   }, [balancoView])
 
-  // ─── Filtro de Período compartilhado ─────────────────────────────────────
-  const FiltroPeriodo = () => (
+
+  // Bloco de filtro de período — JSX inline (não sub-componente) para não desmontar inputs a cada render
+  const filtroPeriodoJSX = (
     <div className="card card--elevated mb-24 p-16">
       <div className="flex items-center gap-16 flex-wrap">
         <div className="flex items-center gap-8 text-sm font-bold text-muted"><Calendar size={16} /> Período:</div>
@@ -299,7 +314,6 @@ export function Relatorios() {
               color: presetAtivo === i ? 'var(--primary)' : 'var(--text-muted)'
             }}>{p.label}</button>
           ))}
-          {/* Separador visual */}
           <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
           <input
             type="date"
@@ -316,20 +330,19 @@ export function Relatorios() {
             onChange={e => { setDataFim(e.target.value); setPresetAtivo(null) }}
             onKeyDown={e => e.key === 'Enter' && buscar()}
           />
-          <button
-            onClick={buscar}
-            style={{
-              padding: '6px 18px', borderRadius: 20, fontSize: 12, fontWeight: 700,
-              background: 'var(--primary)', color: '#fff', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6
-            }}
-          >
+          <button onClick={buscar} style={{
+            padding: '6px 18px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+            background: 'var(--primary)', color: '#fff', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6
+          }}>
             <Search size={13} /> Buscar
           </button>
         </div>
       </div>
     </div>
   )
+
+
 
   return (
     <div className="p-24 max-w-[1400px] mx-auto fade-in">
@@ -363,7 +376,7 @@ export function Relatorios() {
             {/* ── ABA BALANÇO ──────────────────────────────────────────────── */}
             {activeTab === 'balanco' && (
               <div>
-                <FiltroPeriodo />
+                {filtroPeriodoJSX}
                 <div className="flex justify-between items-center mb-24 flex-wrap gap-16">
                   <div className="flex gap-16 items-center flex-1">
                     <div className="relative flex-1 max-w-[400px]">
@@ -460,7 +473,7 @@ export function Relatorios() {
             {/* ── ABA ORDENS DE PRODUÇÃO ───────────────────────────────────── */}
             {activeTab === 'ops' && (
               <div>
-                <FiltroPeriodo />
+                {filtroPeriodoJSX}
 
                 {/* KPIs */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 12, marginBottom: 24 }}>
