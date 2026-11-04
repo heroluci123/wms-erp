@@ -347,7 +347,7 @@ export function Relatorios() {
 
   return (
     <div className="p-24 max-w-[1400px] mx-auto fade-in">
-      <div className="flex items-center justify-between mb-24">
+      <div className="flex items-center justify-between mb-24 no-print">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-12">
             <PieChart className="text-primary" size={28} /> Relatórios
@@ -357,7 +357,7 @@ export function Relatorios() {
       </div>
 
       {/* ─── Tabs ────────────────────────────────────────────────────────────── */}
-      <div className="flex gap-8 mb-24 flex-wrap">
+      <div className="flex gap-8 mb-24 flex-wrap no-print">
         <button className={`btn ${activeTab === 'balanco' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('balanco')}>
           <TrendingUp size={18} /> Balanço de Entradas e Saídas
         </button>
