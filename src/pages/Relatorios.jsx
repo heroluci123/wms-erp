@@ -3,6 +3,7 @@ import { PieChart, TrendingUp, ChevronRight, ChevronDown, PackageOpen, Layers, C
 import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import * as relatoriosQueries from '../queries/relatorios'
+import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao'
 
 const fmtKg = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg'
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -361,7 +362,7 @@ export function Relatorios() {
           <TrendingUp size={18} /> Balanço de Entradas e Saídas
         </button>
         <button className={`btn ${activeTab === 'ops' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('ops')}>
-          <Factory size={18} /> Ordens de Produção
+          <Factory size={18} /> Transformação & Rendimento (OPs)
         </button>
         <button className={`btn ${activeTab === 'arvore' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('arvore')}>
           <Layers size={18} /> Árvore de Produção (BOM)
@@ -470,97 +471,9 @@ export function Relatorios() {
               </div>
             )}
 
-            {/* ── ABA ORDENS DE PRODUÇÃO ───────────────────────────────────── */}
+            {/* ── ABA TRANSFORMAÇÃO & RENDIMENTO (OPs) ────────────────────── */}
             {activeTab === 'ops' && (
-              <div>
-                {filtroPeriodoJSX}
-
-                {/* KPIs */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 12, marginBottom: 24 }}>
-                  {[
-                    { label: 'Total de OPs',   value: opKpis.total,                             color: 'var(--primary)' },
-                    { label: 'Concluídas',     value: opKpis.concluidas,                        color: '#10b981' },
-                    { label: 'Abertas',        value: opKpis.abertas,                           color: '#fbbf24' },
-                    { label: 'Peso Enviado',   value: fmtNum(opKpis.totalEnviado) + ' kg',      color: 'var(--text)' },
-                    { label: 'Retornado',      value: fmtNum(opKpis.totalRetornado) + ' kg',    color: '#10b981' },
-                    { label: 'Perda Total',    value: fmtNum(opKpis.totalPerda) + ' kg',        color: '#ef4444' },
-                    { label: 'Rendimento',     value: opKpis.rendimento + '%',                  color: Number(opKpis.rendimento) >= 80 ? '#10b981' : Number(opKpis.rendimento) >= 60 ? '#fbbf24' : '#ef4444' },
-                  ].map((k, i) => (
-                    <div key={i} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>{k.label}</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: k.color }}>{k.value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Filtros e CSV */}
-                <div className="flex items-center gap-16 mb-16 flex-wrap">
-                  <div className="relative flex-1 max-w-[360px]">
-                    <Search size={16} className="absolute left-12 top-12 text-muted" />
-                    <input type="text" placeholder="Buscar por matéria-prima, lote ou OP#..." className="form-input pl-36" value={filtroOP} onChange={e => setFiltroOP(e.target.value)} />
-                  </div>
-                  <div className="flex gap-8">
-                    {['TODOS','CONCLUIDA','ABERTA','CANCELADA'].map(s => (
-                      <button key={s} onClick={() => setFiltroStatusOP(s)} style={{
-                        padding: '6px 16px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: '1.5px solid',
-                        borderColor: filtroStatusOP === s ? 'var(--primary)' : 'transparent',
-                        background: filtroStatusOP === s ? 'var(--primary-light)' : 'var(--bg-2)',
-                        color: filtroStatusOP === s ? 'var(--primary)' : 'var(--text-muted)'
-                      }}>
-                        {s === 'TODOS' ? 'Todos' : s.charAt(0) + s.slice(1).toLowerCase()}
-                      </button>
-                    ))}
-                  </div>
-                  <button className="btn btn--secondary" style={{ marginLeft: 'auto' }} onClick={exportarCSVOPs}>
-                    <Download size={18} /> Exportar CSV ({opsView.length} OPs)
-                  </button>
-                </div>
-
-                {/* Tabela */}
-                {opsView.length === 0 ? (
-                  <div className="text-center p-32 text-muted bg-bg-1 rounded">
-                    <Factory size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                    <p>Nenhuma ordem de produção encontrada no período selecionado.</p>
-                  </div>
-                ) : (
-                  <div className="table-container" style={{ overflowX: 'auto' }}>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>OP #</th>
-                          <th>Matéria-Prima</th>
-                          <th>Lote</th>
-                          <th>Status</th>
-                          <th style={{ textAlign: 'right' }}>Enviado (kg)</th>
-                          <th style={{ textAlign: 'right' }}>Retornado (kg)</th>
-                          <th style={{ textAlign: 'right' }}>Perda (kg)</th>
-                          <th style={{ textAlign: 'right' }}>Rendimento</th>
-                          <th style={{ textAlign: 'right' }}>Cx Geradas</th>
-                          <th style={{ textAlign: 'right' }}>Kg Gerados</th>
-                          <th>Início</th>
-                          <th>Fim</th>
-                          <th>Operador</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {opsView.map(op => <OPRow key={op.id} op={op} />)}
-                      </tbody>
-                      <tfoot>
-                        <tr style={{ background: 'var(--bg-1)', fontWeight: 700 }}>
-                          <td colSpan={4} className="text-muted text-sm">Total ({opsView.length} OPs)</td>
-                          <td style={{ textAlign: 'right' }} className="font-mono">{fmtNum(opsView.reduce((s,o) => s+Number(o.peso_enviado||0),0))}</td>
-                          <td style={{ textAlign: 'right' }} className="font-mono text-success">{fmtNum(opsView.reduce((s,o) => s+Number(o.peso_retornado||0),0))}</td>
-                          <td style={{ textAlign: 'right' }} className="font-mono text-danger">{fmtNum(opsView.reduce((s,o) => s+Number(o.perda||0),0))}</td>
-                          <td></td>
-                          <td style={{ textAlign: 'right' }} className="font-mono text-primary">{opsView.reduce((s,o) => s+Number(o.qtd_caixas_geradas||0),0)} cx</td>
-                          <td style={{ textAlign: 'right' }} className="font-mono text-primary">{fmtNum(opsView.reduce((s,o) => s+Number(o.kg_gerados||0),0))}</td>
-                          <td colSpan={3}></td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                )}
-              </div>
+              <RelatorioDossieProducao titulo="Dossiê de Transformação & Rendimento (OPs)" />
             )}
 
             {/* ── ABA ÁRVORE ───────────────────────────────────────────────── */}

@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore'
 import * as producaoQueries from '../queries/producao.js'
 import * as produtosQueries from '../queries/produtos.js'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
+import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 
 const fmtDataHora = (str) => {
@@ -36,7 +37,7 @@ function inicioMes() { const d = new Date(); return `${d.getFullYear()}-${String
 function HistoricoRelatorios() {
   const [di, setDi] = useState(inicioMes())
   const [df, setDf] = useState(hoje())
-  const [subTab, setSubTab] = useState('produto') // 'produto' | 'geral'
+  const [subTab, setSubTab] = useState('dossie') // 'dossie' | 'produto' | 'geral'
   const [loading, setLoading] = useState(false)
   const [dadosProduto, setDadosProduto] = useState(null)
   const [dadosGeral, setDadosGeral] = useState(null)
@@ -125,8 +126,39 @@ function HistoricoRelatorios() {
 
   return (
     <div>
-      {/* ── FILTRO DE DATA ── */}
-      <div className="card mb-16" style={{ background: 'var(--bg-2)' }}>
+      {/* ── SUB-ABAS ── */}
+      <div className="flex gap-12 mb-16">
+        <button
+          className={`btn ${subTab === 'dossie' ? 'btn--primary' : 'btn--ghost'}`}
+          style={{ flex: 1 }}
+          onClick={() => setSubTab('dossie')}
+        >
+          <Factory size={16} /> Dossiê de Rendimento & Rastreabilidade
+        </button>
+        <button
+          className={`btn ${subTab === 'produto' ? 'btn--primary' : 'btn--ghost'}`}
+          style={{ flex: 1 }}
+          onClick={() => setSubTab('produto')}
+        >
+          <Package size={16} /> Produto Acabado
+        </button>
+        <button
+          className={`btn ${subTab === 'geral' ? 'btn--primary' : 'btn--ghost'}`}
+          style={{ flex: 1 }}
+          onClick={() => setSubTab('geral')}
+        >
+          <BarChart2 size={16} /> Relatório Geral
+        </button>
+      </div>
+
+      {subTab === 'dossie' && (
+        <RelatorioDossieProducao titulo="Dossiê de Transformação & Rendimento" />
+      )}
+
+      {subTab !== 'dossie' && (
+        <>
+          {/* ── FILTRO DE DATA ── */}
+          <div className="card mb-16" style={{ background: 'var(--bg-2)' }}>
         <div className="flex items-center gap-8 mb-12">
           <Calendar size={16} style={{ color: 'var(--primary)' }} />
           <span className="font-bold text-sm" style={{ color: 'var(--primary)' }}>Período</span>
@@ -164,23 +196,7 @@ function HistoricoRelatorios() {
         </div>
       </div>
 
-      {/* ── SUB-ABAS ── */}
-      <div className="flex gap-12 mb-16">
-        <button
-          className={`btn ${subTab === 'produto' ? 'btn--primary' : 'btn--ghost'}`}
-          style={{ flex: 1 }}
-          onClick={() => setSubTab('produto')}
-        >
-          <Package size={16} /> Produto Acabado
-        </button>
-        <button
-          className={`btn ${subTab === 'geral' ? 'btn--primary' : 'btn--ghost'}`}
-          style={{ flex: 1 }}
-          onClick={() => setSubTab('geral')}
-        >
-          <BarChart2 size={16} /> Relatório Geral
-        </button>
-      </div>
+
 
       {/* ═══════════════ ABA PRODUTO ACABADO ═══════════════ */}
       {subTab === 'produto' && (
@@ -399,6 +415,8 @@ function HistoricoRelatorios() {
             </>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   )

@@ -516,3 +516,163 @@ export async function relatorioProdutoAcabadoPeriodo(dataInicio, dataFim) {
   })
   return res.rows
 }
+
+
+/**
+ * Retorna lista completa de Dossiês de Produção (com matérias-primas e produtos gerados)
+ * com rastreabilidade de caixas físicas e status de romaneio/expedição em tempo real.
+ */
+export async function listarDossiesProducao(filtros = {}) {
+  const { dataInicio, dataFim, cliente, endereco, busca } = filtros;
+  
+  let sql = `
+    SELECT 
+      op.id,
+      op.codigo,
+      op.nome,
+      op.status,
+      COALESCE(op.cliente, 'INTERNO') as cliente,
+      COALESCE(op.endereco, 'PRODUCAO') as endereco,
+      COALESCE(op.data_producao, DATE(op.created_at)) as data_producao,
+      op.operador_nome,
+      op.created_at,
+      op.updated_at,
+      op.rendimento_pct,
+      op.perda_pct
+    FROM ordens_producao op
+    WHERE 1=1
+  `;
+  const args = [];
+
+  if (dataInicio && dataFim) {
+    sql += ` AND DATE(COALESCE(op.data_producao, op.created_at)) BETWEEN ? AND ?`;
+    args.push(dataInicio, dataFim);
+  }
+
+  if (cliente && cliente !== 'TODOS') {
+    sql += ` AND op.cliente = ?`;
+    args.push(cliente);
+  }
+
+  if (endereco && endereco !== 'TODOS') {
+    sql += ` AND op.endereco = ?`;
+    args.push(endereco);
+  }
+
+  sql += ` ORDER BY op.data_producao DESC, op.created_at DESC`;
+
+  const opRes = await db.execute({ sql, args });
+  const ops = opRes.rows;
+
+  if (ops.length === 0) return [];
+
+  // Carrega insumos e retornos para todas as OPs encontradas
+  const opIds = ops.map(o => o.id);
+  const placeholders = opIds.map(() => '?').join(',');
+
+  const insumosRes = await db.execute({
+    sql: `
+      SELECT 
+        oi.op_id,
+        oi.id as item_id,
+        oi.caixa_id,
+        oi.peso_kg,
+        oi.created_at,
+        c.ean_caixa,
+        c.validade,
+        c.lote,
+        c.status as caixa_status,
+        p.id as produto_id,
+        p.codigo as produto_codigo,
+        p.descricao as produto_descricao,
+        p.grupo as produto_grupo
+      FROM op_insumos oi
+      JOIN estoque_caixas c ON c.id = oi.caixa_id
+      JOIN produtos p ON p.id = oi.produto_id
+      WHERE oi.op_id IN (${placeholders})
+      ORDER BY oi.id ASC
+    `,
+    args: opIds
+  });
+
+  const retornosRes = await db.execute({
+    sql: `
+      SELECT 
+        oret.op_id,
+        oret.id as item_id,
+        oret.caixa_id,
+        oret.peso_kg,
+        oret.created_at,
+        c.ean_caixa,
+        c.validade,
+        c.lote,
+        c.status as caixa_status,
+        c.endereco as caixa_endereco,
+        p.id as produto_id,
+        p.codigo as produto_codigo,
+        p.descricao as produto_descricao,
+        p.grupo as produto_grupo,
+        r.codigo as romaneio_codigo,
+        r.cliente as romaneio_cliente,
+        r.expedido_at as romaneio_expedido_em
+      FROM op_retornos oret
+      JOIN estoque_caixas c ON c.id = oret.caixa_id
+      JOIN produtos p ON p.id = oret.produto_id
+      LEFT JOIN romaneios_itens ri ON ri.caixa_id = c.id
+      LEFT JOIN romaneios r ON r.id = ri.romaneio_id
+      WHERE oret.op_id IN (${placeholders})
+      ORDER BY oret.id ASC
+    `,
+    args: opIds
+  });
+
+  // Agrupa por op_id
+  const insumosPorOp = {};
+  for (const item of insumosRes.rows) {
+    if (!insumosPorOp[item.op_id]) insumosPorOp[item.op_id] = [];
+    insumosPorOp[item.op_id].push(item);
+  }
+
+  const retornosPorOp = {};
+  for (const item of retornosRes.rows) {
+    if (!retornosPorOp[item.op_id]) retornosPorOp[item.op_id] = [];
+    retornosPorOp[item.op_id].push(item);
+  }
+
+  const dossies = ops.map(op => {
+    const insumos = insumosPorOp[op.id] || [];
+    const retornos = retornosPorOp[op.id] || [];
+
+    const totalEntradaKg = insumos.reduce((sum, i) => sum + (Number(i.peso_kg) || 0), 0);
+    const totalSaidaKg = retornos.reduce((sum, r) => sum + (Number(r.peso_kg) || 0), 0);
+    const diferencaKg = parseFloat((totalSaidaKg - totalEntradaKg).toFixed(2));
+    const quebraKg = totalEntradaKg > totalSaidaKg ? parseFloat((totalEntradaKg - totalSaidaKg).toFixed(2)) : 0;
+    const rendimento = totalEntradaKg > 0 ? parseFloat(((totalSaidaKg / totalEntradaKg) * 100).toFixed(1)) : 0;
+
+    return {
+      ...op,
+      insumos,
+      retornos,
+      total_entrada_kg: parseFloat(totalEntradaKg.toFixed(2)),
+      total_saida_kg: parseFloat(totalSaidaKg.toFixed(2)),
+      diferenca_kg: diferencaKg,
+      quebra_kg: quebraKg,
+      rendimento_calc: rendimento
+    };
+  });
+
+  // Filtro de busca textual opcional (por código, nome, cliente ou EAN)
+  if (busca && busca.trim()) {
+    const termo = busca.trim().toLowerCase();
+    return dossies.filter(d => 
+      (d.codigo && d.codigo.toLowerCase().includes(termo)) ||
+      (d.nome && d.nome.toLowerCase().includes(termo)) ||
+      (d.cliente && d.cliente.toLowerCase().includes(termo)) ||
+      (d.endereco && d.endereco.toLowerCase().includes(termo)) ||
+      d.insumos.some(i => (i.ean_caixa && i.ean_caixa.toLowerCase().includes(termo)) || (i.produto_descricao && i.produto_descricao.toLowerCase().includes(termo))) ||
+      d.retornos.some(r => (r.ean_caixa && r.ean_caixa.toLowerCase().includes(termo)) || (r.produto_descricao && r.produto_descricao.toLowerCase().includes(termo)))
+    );
+  }
+
+  return dossies;
+}
