@@ -446,35 +446,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             color: #047857 !important;
           }
 
-          .print-signatures {
-            display: flex !important;
-            justify-content: space-around !important;
-            margin-top: 24px !important;
-            padding-bottom: 8px !important;
-          }
-
-          .print-sign-col {
-            text-align: center !important;
-            width: 40% !important;
-          }
-
-          .print-sign-line {
-            border-bottom: 1px solid #0f172a !important;
-            margin-bottom: 4px !important;
-          }
-
-          .print-sign-name {
-            font-size: 9px !important;
-            font-weight: 700 !important;
-            color: #0f172a !important;
-          }
-
-          .print-sign-role {
-            font-size: 7.5px !important;
-            color: #64748b !important;
-          }
-
-          .print-footer {
+.print-footer {
             display: flex !important;
             justify-content: space-between !important;
             border-top: 1px solid #cbd5e1 !important;
@@ -1023,19 +995,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                 </div>
               </div>
 
-              {/* ASSINATURAS GERENCIAIS */}
-              <div className="print-signatures">
-                <div className="print-sign-col">
-                  <div className="print-sign-line"></div>
-                  <div className="print-sign-name">Supervisor de Produção & Estoque</div>
-                  <div className="print-sign-role">Conferência Física e Serialização</div>
-                </div>
-                <div className="print-sign-col">
-                  <div className="print-sign-line"></div>
-                  <div className="print-sign-name">Gerência Industrial / Qualidade</div>
-                  <div className="print-sign-role">Aprovação e Fechamento de Rendimento</div>
-                </div>
-              </div>
+
             </div>
           );
         })}
