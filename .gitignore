@@ -8,3 +8,5 @@ dist-electron/
 import_*.js
 import_*.csv
 wms-local.db*
+
+backup_*.json

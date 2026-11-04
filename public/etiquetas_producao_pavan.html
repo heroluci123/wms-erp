@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Etiquetas - Produção Pavan (29/10/2026)</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, -apple-system, sans-serif;
+      background: #0f172a;
+      color: #333;
+      padding: 24px;
+    }
+    .header-bar {
+      max-width: 900px;
+      margin: 0 auto 20px auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #1e293b;
+      padding: 16px 24px;
+      border-radius: 12px;
+      color: #f8fafc;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .header-bar h1 { font-size: 20px; font-weight: 700; color: #38bdf8; }
+    .header-bar p { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+    .btn-print {
+      background: #10b981;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-print:hover { background: #059669; }
+
+    .grid {
+      max-width: 900px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+    }
+
+    /* Etiqueta Térmica Padrão Frigorífico (aprox 100mm x 55mm) */
+    .etiqueta {
+      background: #fff;
+      border: 2px solid #000;
+      border-radius: 6px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-inside: avoid;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+
+    .etiqueta-topo {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #000;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+    }
+    .marca {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      color: #b91c1c;
+    }
+    .local-tag {
+      font-size: 11px;
+      font-weight: 800;
+      background: #000;
+      color: #fff;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    .prod-desc {
+      font-size: 19px;
+      font-weight: 900;
+      color: #000;
+      line-height: 1.2;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .prod-code {
+      font-size: 12px;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 8px;
+    }
+
+    .dados-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      background: #f8fafc;
+      border: 1px dashed #64748b;
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .dado-item .label {
+      font-size: 10px;
+      text-transform: uppercase;
+      font-weight: bold;
+      color: #64748b;
+    }
+    .dado-item .valor {
+      font-size: 13px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .dado-item.destaque .valor {
+      font-size: 18px;
+      color: #b91c1c;
+    }
+
+    .barcode-container {
+      text-align: center;
+      margin-top: 4px;
+    }
+    .barcode-container svg {
+      width: 100%;
+      max-height: 60px;
+    }
+    .ean-text {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      color: #000;
+      margin-top: 2px;
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        padding: 0;
+      }
+      .header-bar { display: none; }
+      .grid {
+        display: block;
+        max-width: 100%;
+      }
+      .etiqueta {
+        margin: 0 auto 15px auto;
+        border: 2px solid #000;
+        page-break-after: always;
+        width: 100mm;
+        height: 55mm;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-bar">
+    <div>
+      <h1>🏷️ 8 Etiquetas Geradas - Local: PRODUÇÃO PAVAN</h1>
+      <p>Data de Fabricação: 29/10/2026 | Validade: 27/04/2027 | Salvas no Banco WMSphere</p>
+    </div>
+    <button class="btn-print" onclick="window.print()">
+      🖨️ Imprimir Etiquetas
+    </button>
+  </div>
+
+  <div class="grid" id="etiquetas-container"></div>
+
+  <script>
+    const etiquetas = [
+      { prod: 'BLEND 160', cod: '7641', peso: '20,35 kg', ean: '0025735601007641', fab: '29/10/2026', val: '27/04/2027', lote: '291026' },
+      { prod: 'BLEND 160', cod: '7641', peso: '4,70 kg',  ean: '0025735602007641', fab: '29/10/2026', val: '27/04/2027', lote: '291026' },
+      { prod: 'BLEND 160', cod: '7641', peso: '17,10 kg', ean: '0025735603007641', fab: '29/10/2026', val: '27/04/2027', lote: '291026' },
+      { prod: 'OSSOBUCO (TRICARNE)', cod: '3322', peso: '11,80 kg', ean: '0025735604000047', fab: '29/10/2026', val: '27/04/2027', lote: '291026' },
+      { prod: 'OSSOBUCO (TRICARNE)', cod: '3322', peso: '13,45 kg', ean: '0025735605000047', fab: '29/10/2026', val: '27/04/2027', lote: '291026' },
+      { prod: 'FRALDA TRASEIRO RED', cod: '5657', peso: '13,35 kg', ean: '0025735606005657', fab: '29/10/2026', val: '27/04/2027', lote: '291026' },
+      { prod: 'FRALDA TRASEIRO RED', cod: '5657', peso: '6,20 kg',  ean: '0025735607005657', fab: '29/10/2026', val: '27/04/2027', lote: '291026' },
+      { prod: 'APARA OSSOBUCO', cod: '7642', peso: '3,55 kg', ean: '0025735608007642', fab: '29/10/2026', val: '27/04/2027', lote: '291026' }
+    ];
+
+    const container = document.getElementById('etiquetas-container');
+    etiquetas.forEach((item, idx) => {
+      const card = document.createElement('div');
+      card.className = 'etiqueta';
+      card.innerHTML = `
+        <div>
+          <div class="etiqueta-topo">
+            <span class="marca">TRICARNES</span>
+            <span class="local-tag">PRODUÇÃO PAVAN</span>
+          </div>
+          <div class="prod-desc">${item.prod}</div>
+          <div class="prod-code">CÓDIGO INTERNO: ${item.cod} | LOTE: ${item.lote}</div>
+          <div class="dados-grid">
+            <div class="dado-item destaque">
+              <div class="label">Peso Líquido</div>
+              <div class="valor">${item.peso}</div>
+            </div>
+            <div class="dado-item">
+              <div class="label">Data Produção</div>
+              <div class="valor">${item.fab}</div>
+            </div>
+            <div class="dado-item">
+              <div class="label">Validade</div>
+              <div class="valor">${item.val}</div>
+            </div>
+            <div class="dado-item">
+              <div class="label">Regra EAN</div>
+              <div class="valor">SUFIXO ${item.ean.slice(-6)}</div>
+            </div>
+          </div>
+        </div>
+        <div class="barcode-container">
+          <svg id="barcode-${idx}"></svg>
+          <div class="ean-text">${item.ean}</div>
+        </div>
+      `;
+      container.appendChild(card);
+
+      setTimeout(() => {
+        try {
+          JsBarcode(`#barcode-${idx}`, item.ean, {
+            format: "CODE128",
+            width: 2,
+            height: 48,
+            displayValue: false,
+            margin: 0
+          });
+        } catch(e) {
+          console.error('Erro ao renderizar código:', e);
+        }
+      }, 50);
+    });
+  </script>
+</body>
+</html>
