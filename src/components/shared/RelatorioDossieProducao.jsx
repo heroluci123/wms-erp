@@ -474,6 +474,16 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             </p>
           </div>
           <div className="flex gap-8">
+            <a 
+              href="/etiquetas_producao_pavan.html" 
+              target="_blank" 
+              rel="noreferrer"
+              className="btn btn--secondary btn--sm"
+              style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              title="Abrir página de impressão das etiquetas térmicas da produção"
+            >
+              🏷️ Etiquetas Térmicas (PAVAN)
+            </a>
             <button className="btn btn--secondary btn--sm" onClick={exportarCSV} title="Exportar dados completos para Excel/CSV">
               <Download size={15} /> Exportar Excel
             </button>
@@ -739,9 +749,21 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                             <div className="flex items-center gap-6 font-bold text-sm text-success">
                               <Package size={16} /> Produtos Finais Gerados (Saída)
                             </div>
-                            <span className="text-xs text-muted font-mono font-bold">
-                              {op.retornos ? op.retornos.length : 0} caixa(s) | {fmtKg(op.total_saida_kg)}
-                            </span>
+                            <div className="flex items-center gap-8">
+                              <span className="text-xs text-muted font-mono font-bold">
+                                {op.retornos ? op.retornos.length : 0} caixa(s) | {fmtKg(op.total_saida_kg)}
+                              </span>
+                              <a 
+                                href="/etiquetas_producao_pavan.html" 
+                                target="_blank" 
+                                rel="noreferrer"
+                                className="btn btn--secondary btn--sm py-2 px-8 text-[11px] font-bold flex items-center gap-4"
+                                style={{ textDecoration: 'none' }}
+                                title="Abrir e imprimir as etiquetas térmicas com código de barras"
+                              >
+                                🏷️ Imprimir Etiquetas
+                              </a>
+                            </div>
                           </div>
 
                           {!op.retornos || op.retornos.length === 0 ? (
