@@ -4,6 +4,8 @@ import { format, subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import * as relatoriosQueries from '../queries/relatorios'
 import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao'
+import RelatorioGeralWms from '../components/shared/RelatorioGeralWms'
+import { FileSpreadsheet } from 'lucide-react'
 
 const fmtKg = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg'
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -135,7 +137,7 @@ const OPRow = ({ op }) => {
 
 // ─── Componente Principal ────────────────────────────────────────────────────
 export function Relatorios() {
-  const [activeTab, setActiveTab] = useState('balanco')
+  const [activeTab, setActiveTab] = useState('executivo')
   const [presetAtivo, setPresetAtivo] = useState(2)
 
   // Datas de edição (o que o usuário digita)
@@ -358,6 +360,9 @@ export function Relatorios() {
 
       {/* ─── Tabs ────────────────────────────────────────────────────────────── */}
       <div className="flex gap-8 mb-24 flex-wrap no-print">
+        <button className={`btn ${activeTab === 'executivo' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('executivo')}>
+          <FileSpreadsheet size={18} /> Relatório Geral: Estoque, Entradas e Saídas (PDF & Excel)
+        </button>
         <button className={`btn ${activeTab === 'balanco' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('balanco')}>
           <TrendingUp size={18} /> Balanço de Entradas e Saídas
         </button>
@@ -370,7 +375,9 @@ export function Relatorios() {
       </div>
 
       <div className="card p-24">
-        {loading ? (
+        {activeTab === 'executivo' ? (
+          <RelatorioGeralWms />
+        ) : loading ? (
           <div className="text-center p-32 text-muted">Carregando...</div>
         ) : (
           <>

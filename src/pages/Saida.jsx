@@ -402,6 +402,11 @@ function RomaneioItensAccordion({ itens, onRemoveCaixa }) {
           <h1 className="page-header__title">Saída de Materiais</h1>
           <p className="page-header__subtitle">Montagem e despacho de romaneios para clientes</p>
         </div>
+        <div className="flex gap-12 items-center">
+          <a href="#/relatorios" className="btn btn--secondary" style={{ textDecoration: 'none' }} title="Abrir Relatório Executivo de Romaneios e Estoque em PDF ou Excel">
+            📊 Relatório de Romaneios (PDF & Excel)
+          </a>
+        </div>
       </div>
 
       <div style={{ display:'flex', gap:4, marginBottom:24, borderBottom:'2px solid var(--border)', paddingBottom:0 }}>

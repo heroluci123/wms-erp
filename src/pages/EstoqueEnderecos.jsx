@@ -191,6 +191,9 @@ export function EstoqueEnderecos() {
           </p>
         </div>
         <div className="flex gap-12 items-center">
+          <a href="#/relatorios" className="btn btn--secondary" style={{ textDecoration: 'none' }} title="Abrir Relatório Executivo completo para exportar em PDF ou Excel">
+            📊 Relatório PDF & Excel
+          </a>
           <button className="btn btn--secondary" onClick={exportarCSV}><FileDown size={16} /> Exportar CSV</button>
           <button className="btn btn--primary" onClick={carregarDados}><RefreshCw size={16} className={loading ? 'spin' : ''} /> Atualizar</button>
         </div>
