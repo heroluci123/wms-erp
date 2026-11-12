@@ -576,7 +576,7 @@ export async function conferirCaixaRomaneio(romaneio_id, codigoBipado, operador_
         FROM romaneios_itens ri
         JOIN estoque_caixas ec ON ri.caixa_id = ec.id
         JOIN produtos p ON ri.produto_id = p.id
-        WHERE ri.romaneio_id = ? AND ec.ean_caixa = ?
+        WHERE ri.romaneio_id = ? AND LTRIM(ec.ean_caixa, '0') = LTRIM(?, '0')
         LIMIT 1
       `,
       args: [romaneio_id, codigoLimpo]

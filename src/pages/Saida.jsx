@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LogOut,
   Plus,
@@ -19,7 +19,6 @@ import {
   Search
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
-import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
 import * as producaoQueries from '../queries/producao.js'
 import * as saidaQueries from '../queries/saida.js'
@@ -230,11 +229,11 @@ export function Saida() {
 
     try {
       const res = await movimentacoesQueries.identificarCodigoMovimentacao(clean)
-      if (!res.encontrado || res.tipo !== 'CAIXA') {
+      if (!res || res.tipo !== 'CAIXA' || !res.dados) {
         return toastError(
-          res.encontrado
+          res && res.tipo && res.tipo !== 'DESCONHECIDO'
             ? `Código lido é um ${res.tipo}. Na separação, bipe a etiqueta individual da CAIXA.`
-            : 'Caixa não encontrada ou código inválido.'
+            : 'Caixa não encontrada no estoque disponível (ou código inválido).'
         )
       }
 
@@ -412,17 +411,14 @@ export function Saida() {
     toastSuccess(`Romaneio ${rom.codigo} reaberto para separação.`)
   }
 
-  // Hook global do scanner ativo somente na tela certa
-  useBarcodeScanner(
-    (code) => {
-      if (aba === 'SEPARACAO' && romaneioAtual && !fefoAlerta && !regraAlerta && !modalFinalizarParcial) {
-        processarBipeSeparacao(code)
-      } else if (aba === 'EXPEDICAO' && romaneioConfAtual) {
-        processarBipeConferencia(code)
-      }
-    },
-    (aba === 'SEPARACAO' && Boolean(romaneioAtual)) || (aba === 'EXPEDICAO' && Boolean(romaneioConfAtual))
-  )
+  // Mantém foco no leitor ao alternar entre separação e conferência
+  useEffect(() => {
+    if (aba === 'SEPARACAO' && romaneioAtual && !fefoAlerta && !regraAlerta && !modalFinalizarParcial) {
+      setTimeout(() => sepInputRef.current?.focus(), 60)
+    } else if (aba === 'EXPEDICAO' && romaneioConfAtual) {
+      setTimeout(() => confInputRef.current?.focus(), 60)
+    }
+  }, [aba, romaneioAtual, romaneioConfAtual, fefoAlerta, regraAlerta, modalFinalizarParcial])
 
   const handleAbrirRomaneioImpressao = async (romaneioId) => {
     try {
