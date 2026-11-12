@@ -143,7 +143,9 @@ export const pedidosQueries = {
         FROM estoque_caixas
         GROUP BY produto_id
       ) hist ON hist.produto_id = p.id
-      ORDER BY p.descricao ASC
+      ORDER BY
+        CASE WHEN COALESCE(ec.saldo_kg, 0) > 0 OR COALESCE(ec.qtd_caixas, 0) > 0 THEN 0 ELSE 1 END ASC,
+        p.descricao ASC
     `)
     return res.rows
   },

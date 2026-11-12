@@ -44,6 +44,17 @@ const normTxt = (v) =>
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
 
+const temSaldoProduto = (p) => Number(p?.saldo_kg || 0) > 0 || Number(p?.qtd_caixas || 0) > 0
+
+/** Ordena produtos priorizando itens com saldo em estoque antes dos zerados */
+const ordenarProdutosSaldoPrimeiro = (lista) =>
+  [...lista].sort((a, b) => {
+    const prioA = temSaldoProduto(a) ? 0 : 1
+    const prioB = temSaldoProduto(b) ? 0 : 1
+    if (prioA !== prioB) return prioA - prioB
+    return String(a?.descricao || '').localeCompare(String(b?.descricao || ''), 'pt-BR')
+  })
+
 const fmtCx = (v) => {
   const n = Number(v || 0)
   const rounded = Math.abs(n - Math.round(n)) < 0.01 ? Math.round(n) : Number(n.toFixed(2))
@@ -169,29 +180,31 @@ export function Pedidos() {
 
   const sugestoesProdutos = useMemo(() => {
     const q = normTxt(descricaoInput)
-    if (!q) return produtos.slice(0, 12)
-    return produtos
-      .filter(
+    if (!q) return ordenarProdutosSaldoPrimeiro(produtos).slice(0, 12)
+    return ordenarProdutosSaldoPrimeiro(
+      produtos.filter(
         (p) =>
           normTxt(p.descricao).includes(q) ||
           normTxt(p.codigo).includes(q) ||
           normTxt(p.ean).includes(q)
       )
-      .slice(0, 15)
+    ).slice(0, 15)
   }, [produtos, descricaoInput])
 
   const produtosModalFiltrados = useMemo(() => {
     const q = normTxt(modalBuscaTexto)
-    return produtos.filter((p) => {
-      if (modalSomenteComSaldo && Number(p.saldo_kg || 0) <= 0) return false
-      if (!q) return true
-      return (
-        normTxt(p.descricao).includes(q) ||
-        normTxt(p.codigo).includes(q) ||
-        normTxt(p.ean).includes(q) ||
-        normTxt(p.grupo).includes(q)
-      )
-    })
+    return ordenarProdutosSaldoPrimeiro(
+      produtos.filter((p) => {
+        if (modalSomenteComSaldo && !temSaldoProduto(p)) return false
+        if (!q) return true
+        return (
+          normTxt(p.descricao).includes(q) ||
+          normTxt(p.codigo).includes(q) ||
+          normTxt(p.ean).includes(q) ||
+          normTxt(p.grupo).includes(q)
+        )
+      })
+    )
   }, [produtos, modalBuscaTexto, modalSomenteComSaldo])
 
   const kpis = useMemo(() => {
