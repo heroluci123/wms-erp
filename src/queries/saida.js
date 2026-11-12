@@ -317,7 +317,7 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
       return { success: false, error: 'Este romaneio não está aberto para separação.' }
     }
 
-    const cxCheck = await db.execute({ sql: 'SELECT status, endereco, peso_kg, produto_id FROM estoque_caixas WHERE id = ?', args: [caixa.id] })
+    const cxCheck = await db.execute({ sql: 'SELECT ean_caixa, status, endereco, peso_kg, produto_id FROM estoque_caixas WHERE id = ?', args: [caixa.id] })
     if (cxCheck.rows.length === 0) {
       return { success: false, error: 'Caixa não encontrada no estoque.' }
     }
@@ -388,15 +388,14 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
 
     await db.execute({
       sql: `
-        INSERT INTO caixas_historico (caixa_id, tipo_evento, endereco_origem, endereco_destino, operador_id, operador_nome, observacao)
-        VALUES (?, 'SEPARACAO', ?, 'EXPEDICAO', ?, ?, ?)
+        INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
+        VALUES (?, ?, 'SEPARACAO', ?, ?)
       `,
       args: [
         caixa.id,
-        cxAtual.endereco || caixa.endereco || null,
-        operador_id,
-        operador_nome,
-        `Separada no romaneio ${romaneio.codigo}`
+        cxAtual.ean_caixa || caixa.ean_caixa || '',
+        `Separada no romaneio ${romaneio.codigo} (origem: ${cxAtual.endereco || caixa.endereco || '-'} -> EXPEDICAO)`,
+        operador_nome || 'Sistema'
       ]
     })
 
@@ -435,7 +434,7 @@ export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, p
       return { success: false, error: 'Reabra a separação antes de remover caixas.' }
     }
 
-    const cxRes = await db.execute({ sql: 'SELECT endereco FROM estoque_caixas WHERE id = ?', args: [caixa_id] })
+    const cxRes = await db.execute({ sql: 'SELECT ean_caixa, endereco FROM estoque_caixas WHERE id = ?', args: [caixa_id] })
     const endReal = cxRes.rows[0]?.endereco || endereco
 
     await db.execute({ sql: `DELETE FROM romaneios_itens WHERE id = ?`, args: [item_id] })
@@ -446,10 +445,15 @@ export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, p
 
     await db.execute({
       sql: `
-        INSERT INTO caixas_historico (caixa_id, tipo_evento, endereco_origem, endereco_destino, operador_id, operador_nome, observacao)
-        VALUES (?, 'ESTORNO', 'EXPEDICAO', ?, ?, ?, ?)
+        INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
+        VALUES (?, ?, 'ESTORNO', ?, ?)
       `,
-      args: [caixa_id, endReal || null, operador_id, operador_nome, `Removida da separação ${romRes.rows[0].codigo}`]
+      args: [
+        caixa_id,
+        cxRes.rows[0]?.ean_caixa || '',
+        `Removida da separação ${romRes.rows[0].codigo} (devolvida para ${endReal || '-'})`,
+        operador_nome || 'Sistema'
+      ]
     })
 
     if (endReal) {
@@ -611,10 +615,10 @@ export async function conferirCaixaRomaneio(romaneio_id, codigoBipado, operador_
 
     await db.execute({
       sql: `
-        INSERT INTO caixas_historico (caixa_id, tipo_evento, endereco_origem, endereco_destino, operador_id, operador_nome, observacao)
-        VALUES (?, 'CONFERENCIA', 'EXPEDICAO', 'EXPEDICAO', ?, ?, ?)
+        INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
+        VALUES (?, ?, 'CONFERENCIA', ?, ?)
       `,
-      args: [item.caixa_id, operador_id, operador_nome, `Conferência de embarque ${rom.codigo}`]
+      args: [item.caixa_id, item.ean_caixa || '', `Conferência de embarque ${rom.codigo}`, operador_nome || 'Sistema']
     })
 
     const statsRes = await db.execute({
@@ -677,7 +681,12 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
     }
 
     const itensRes = await db.execute({
-      sql: `SELECT id, caixa_id, produto_id, peso_kg, conferido FROM romaneios_itens WHERE romaneio_id = ?`,
+      sql: `
+        SELECT ri.id, ri.caixa_id, ri.produto_id, ri.peso_kg, ri.conferido, ec.ean_caixa, ec.lote
+        FROM romaneios_itens ri
+        JOIN estoque_caixas ec ON ri.caixa_id = ec.id
+        WHERE ri.romaneio_id = ?
+      `,
       args: [romaneio_id]
     })
     if (itensRes.rows.length === 0) {
@@ -700,18 +709,26 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
 
       await db.execute({
         sql: `
-          INSERT INTO caixas_historico (caixa_id, tipo_evento, endereco_origem, endereco_destino, operador_id, operador_nome, observacao)
-          VALUES (?, 'EXPEDICAO', 'EXPEDICAO', ?, ?, ?, ?)
+          INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
+          VALUES (?, ?, 'EXPEDICAO', ?, ?)
         `,
-        args: [item.caixa_id, rom.cliente, operador_id, operador_nome, `Expedido no romaneio ${rom.codigo}`]
+        args: [item.caixa_id, item.ean_caixa || '', `Expedido no romaneio ${rom.codigo} para ${rom.cliente}`, operador_nome || 'Sistema']
       })
 
       await db.execute({
         sql: `
-          INSERT INTO movimentacoes_log (tipo, produto_id, origem, destino, qtd_caixas, qtd_kg, operador_id, observacao)
-          VALUES ('DESPACHO', ?, 'EXPEDICAO', ?, 1, ?, ?, ?)
+          INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo, num_pedido, cliente)
+          VALUES (?, 'EXPEDICAO', 'SAIDA_DEFINITIVA', ?, 1, ?, ?, ?, 'DESPACHO', ?, ?)
         `,
-        args: [item.produto_id, rom.cliente, item.peso_kg, operador_id, `Romaneio ${rom.codigo}`]
+        args: [
+          item.produto_id,
+          item.lote || '',
+          item.peso_kg,
+          operador_id || null,
+          operador_nome || 'Sistema',
+          rom.codigo,
+          rom.cliente || ''
+        ]
       })
     }
 

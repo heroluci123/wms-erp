@@ -501,7 +501,7 @@ export const pedidosQueries = {
     for (const rom of romRes.rows) {
       const itensRes = await db.execute({
         sql: `
-          SELECT ri.caixa_id, ec.endereco
+          SELECT ri.caixa_id, ec.ean_caixa, ec.endereco
           FROM romaneios_itens ri
           JOIN estoque_caixas ec ON ri.caixa_id = ec.id
           WHERE ri.romaneio_id = ?
@@ -517,16 +517,14 @@ export const pedidosQueries = {
         })
         await db.execute({
           sql: `
-            INSERT INTO caixas_historico (caixa_id, tipo_evento, endereco_origem, endereco_destino, operador_id, operador_nome, observacao)
-            VALUES (?, 'ESTORNO', ?, ?, ?, ?, ?)
+            INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
+            VALUES (?, ?, 'ESTORNO', ?, ?)
           `,
           args: [
             item.caixa_id,
-            item.endereco || null,
-            item.endereco || null,
-            operador?.id || null,
-            operador?.nome || 'Admin',
-            `Cancelamento do ${ped.codigo} (${rom.codigo})`
+            item.ean_caixa || '',
+            `Cancelamento do ${ped.codigo} (${rom.codigo})`,
+            operador?.nome || 'Admin'
           ]
         })
       }
