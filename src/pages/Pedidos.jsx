@@ -76,6 +76,7 @@ export function Pedidos() {
   const [loading, setLoading] = useState(false)
   const [pedidos, setPedidos] = useState([])
   const [produtos, setProdutos] = useState([])
+  const [clientes, setClientes] = useState([])
 
   // Filtros do Gerenciador
   const [filtroStatus, setFiltroStatus] = useState('TODOS')
@@ -87,7 +88,14 @@ export function Pedidos() {
   const [editId, setEditId] = useState(null)
   const [editCodigo, setEditCodigo] = useState('')
   const [titulo, setTitulo] = useState('')
-  const [cliente, setCliente] = useState('PAVAN')
+  const [clienteIdSelecionado, setClienteIdSelecionado] = useState(null)
+  const [mostrarTrocaCliente, setMostrarTrocaCliente] = useState(false)
+  const [modalNovoClienteAberto, setModalNovoClienteAberto] = useState(false)
+  const [novoCliForm, setNovoCliForm] = useState({
+    codigo: '', razao_social: '', nome_fantasia: '', cnpj_cpf: '', inscricao_estadual: '',
+    endereco: '', numero: '', bairro: '', cep: '', cidade: '', uf: 'SP', pais: 'BRASIL',
+    telefone: '', icms: 'CONTRIBUINTE'
+  })
   const [previsaoEntrega, setPrevisaoEntrega] = useState('')
   const [observacoes, setObservacoes] = useState('')
   const [itensForm, setItensForm] = useState([])
@@ -123,17 +131,23 @@ export function Pedidos() {
   const carregarDados = async () => {
     setLoading(true)
     try {
-      const [listaPed, listaProd] = await Promise.all([
+      const [listaPed, listaProd, listaCli] = await Promise.all([
         pedidosQueries.listarPedidos({
           status: filtroStatus,
           busca: filtroBusca,
           dataInicio: dataInicio || null,
           dataFim: dataFim || null
         }),
-        pedidosQueries.listarSaldosProdutosParaPedido()
+        pedidosQueries.listarSaldosProdutosParaPedido(),
+        pedidosQueries.listarClientes()
       ])
       setPedidos(listaPed)
       setProdutos(listaProd)
+      setClientes(listaCli)
+      if (!clienteIdSelecionado && listaCli.length > 0) {
+        const pad = listaCli.find((c) => Number(c.is_padrao) === 1) || listaCli[0]
+        setClienteIdSelecionado(pad.id)
+      }
     } catch (err) {
       toastError('Erro ao carregar pedidos: ' + err.message)
     } finally {
@@ -204,11 +218,22 @@ export function Pedidos() {
     }
   }
 
+  const clientePadrao = useMemo(
+    () => clientes.find((c) => Number(c.is_padrao) === 1) || clientes[0] || null,
+    [clientes]
+  )
+
+  const clienteAtivo = useMemo(
+    () => clientes.find((c) => Number(c.id) === Number(clienteIdSelecionado)) || clientePadrao,
+    [clientes, clienteIdSelecionado, clientePadrao]
+  )
+
   const resetarFormulario = () => {
     setEditId(null)
     setEditCodigo('')
     setTitulo('')
-    setCliente('PAVAN')
+    setClienteIdSelecionado(clientePadrao?.id || null)
+    setMostrarTrocaCliente(false)
     setPrevisaoEntrega('')
     setObservacoes('')
     setItensForm([])
@@ -399,7 +424,8 @@ export function Pedidos() {
       setEditId(ped.id)
       setEditCodigo(ped.codigo)
       setTitulo(ped.titulo || '')
-      setCliente(ped.cliente || 'PAVAN')
+      setClienteIdSelecionado(ped.cliente_id || clientePadrao?.id || null)
+      setMostrarTrocaCliente(false)
       setPrevisaoEntrega(ped.previsao_entrega ? String(ped.previsao_entrega).slice(0, 10) : '')
       setObservacoes(ped.observacoes || '')
       setItensForm(
@@ -412,6 +438,8 @@ export function Pedidos() {
           peso_medio_cx: Number(it.peso_medio_cx || 0),
           qtd_kg_solicitada: String(it.qtd_kg_solicitada),
           qtd_caixas_solicitada: it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : '',
+          unidade_solicitada: it.unidade_solicitada === 'CX' ? 'CX' : 'KG',
+          qtd_solicitada_exibicao: it.qtd_solicitada_exibicao != null ? Number(it.qtd_solicitada_exibicao) : Number(it.qtd_kg_solicitada),
           observacao: it.observacao || ''
         }))
       )
@@ -473,6 +501,12 @@ export function Pedidos() {
           ...next[idx],
           qtd_kg_solicitada: String(Number(novoKg.toFixed(3))),
           qtd_caixas_solicitada: novoCx,
+          unidade_solicitada:
+            next[idx].unidade_solicitada === unidadeInput ? unidadeInput : 'KG',
+          qtd_solicitada_exibicao:
+            next[idx].unidade_solicitada === unidadeInput && unidadeInput === 'CX'
+              ? Number(novoCx || 0)
+              : Number(novoKg.toFixed(3)),
           observacao: obsItemInput.trim() || next[idx].observacao
         }
         return next
@@ -488,12 +522,37 @@ export function Pedidos() {
           peso_medio_cx: pesoPorCx,
           qtd_kg_solicitada: String(kgFinal),
           qtd_caixas_solicitada: cxFinal !== null ? String(cxFinal) : '',
+          unidade_solicitada: unidadeInput,
+          qtd_solicitada_exibicao: qtdNum,
           observacao: obsItemInput.trim()
         }
       ]
     })
 
     limparCamposItem(true)
+  }
+
+  const handleSalvarNovoCliente = async (e) => {
+    e.preventDefault()
+    if (!novoCliForm.razao_social.trim()) {
+      return toastWarning('Informe a Razão Social do cliente.')
+    }
+    try {
+      const criado = await pedidosQueries.criarCliente(novoCliForm)
+      const listaCli = await pedidosQueries.listarClientes()
+      setClientes(listaCli)
+      setClienteIdSelecionado(criado.id)
+      setModalNovoClienteAberto(false)
+      setMostrarTrocaCliente(false)
+      setNovoCliForm({
+        codigo: '', razao_social: '', nome_fantasia: '', cnpj_cpf: '', inscricao_estadual: '',
+        endereco: '', numero: '', bairro: '', cep: '', cidade: '', uf: 'SP', pais: 'BRASIL',
+        telefone: '', icms: 'CONTRIBUINTE'
+      })
+      toastSuccess(`Cliente "${criado.razao_social}" cadastrado e selecionado neste pedido.`)
+    } catch (err) {
+      toastError('Erro ao cadastrar cliente: ' + err.message)
+    }
   }
 
   const handleSalvarPedido = async (liberar) => {
@@ -506,8 +565,13 @@ export function Pedidos() {
       qtd_caixas_solicitada: i.qtd_caixas_solicitada
         ? Number(String(i.qtd_caixas_solicitada).replace(',', '.'))
         : null,
+      unidade_solicitada: i.unidade_solicitada || 'KG',
+      qtd_solicitada_exibicao: i.qtd_solicitada_exibicao != null ? Number(i.qtd_solicitada_exibicao) : null,
       observacao: i.observacao || ''
     }))
+
+    const cliId = clienteAtivo?.id || null
+    const cliNome = clienteAtivo?.razao_social || 'BEEF CONTAINER LIMITADA'
 
     setLoading(true)
     try {
@@ -515,7 +579,8 @@ export function Pedidos() {
         await pedidosQueries.atualizarPedido({
           id: editId,
           titulo,
-          cliente,
+          cliente_id: cliId,
+          cliente: cliNome,
           previsao_entrega: previsaoEntrega || null,
           observacoes,
           itens: payloadItens,
@@ -529,7 +594,8 @@ export function Pedidos() {
       } else {
         const res = await pedidosQueries.criarPedido({
           titulo,
-          cliente,
+          cliente_id: cliId,
+          cliente: cliNome,
           previsao_entrega: previsaoEntrega || null,
           observacoes,
           itens: payloadItens,
@@ -695,7 +761,7 @@ export function Pedidos() {
                 <label className="form-label">Buscar Pedido / Título / Cliente</label>
                 <input
                   className="form-input"
-                  placeholder="PED-0001, Título, PAVAN..."
+                  placeholder="PED-0001, Título, BEEF CONTAINER..."
                   value={filtroBusca}
                   onChange={(e) => setFiltroBusca(e.target.value)}
                 />
@@ -770,7 +836,7 @@ export function Pedidos() {
                           <td>
                             <div style={{ fontWeight: 700 }}>{ped.titulo}</div>
                             <div className="text-muted text-xs">
-                              {ped.cliente || 'PAVAN'} • Criado em {fmtDataHora(ped.created_at)} por {ped.criado_por_nome || '-'}
+                              {ped.cliente || 'BEEF CONTAINER LIMITADA'} • Criado em {fmtDataHora(ped.created_at)} por {ped.criado_por_nome || '-'}
                             </div>
                           </td>
                           <td>
@@ -897,24 +963,92 @@ export function Pedidos() {
             </button>
           </div>
 
+          {/* Cartão automático do Cliente Padrão (BEEF CONTAINER LIMITADA) + opção futura de troca/cadastro */}
+          <div
+            style={{
+              background: 'rgba(13, 20, 36, 0.72)',
+              border: '1px solid var(--border)',
+              borderRadius: '10px',
+              padding: '12px 14px',
+              marginBottom: '16px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <div className="text-xs text-muted" style={{ textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '2px' }}>
+                  Cliente Destinatário (Pré-selecionado automaticamente)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span className="badge badge--info font-mono">Cód. {clienteAtivo?.codigo || '737'}</span>
+                  <strong style={{ fontSize: '15px', color: '#f8fafc' }}>
+                    {clienteAtivo?.razao_social || 'BEEF CONTAINER LIMITADA'}
+                  </strong>
+                  {Number(clienteAtivo?.is_padrao) === 1 && (
+                    <span className="badge badge--success">Cliente Padrão</span>
+                  )}
+                </div>
+                <div className="text-xs text-muted" style={{ marginTop: '4px', lineHeight: 1.5 }}>
+                  CNPJ: <span className="font-mono">{clienteAtivo?.cnpj_cpf || '54.142.043/0001-30'}</span>
+                  {' • '}IE: <span className="font-mono">{clienteAtivo?.inscricao_estadual || '513236396113'}</span>
+                  {' • '}ICMS: {clienteAtivo?.icms || 'CONTRIBUINTE'}
+                  <br />
+                  Endereço: {clienteAtivo?.endereco || 'DOUTOR HEITOR NASCIMENTO DE 3/4 A 598/599'}
+                  {clienteAtivo?.numero ? `, Nº ${clienteAtivo.numero}` : ', Nº 581'}
+                  {clienteAtivo?.bairro ? ` • ${clienteAtivo.bairro}` : ' • MORUMBI'}
+                  {' • '}
+                  {clienteAtivo?.cidade || 'PAULINIA'}/{clienteAtivo?.uf || 'SP'}
+                  {' • '}CEP: <span className="font-mono">{clienteAtivo?.cep || '13140-729'}</span>
+                  {clienteAtivo?.telefone ? ` • Fone: ${clienteAtivo.telefone}` : ' • Fone: (19)99199-231'}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => setMostrarTrocaCliente((v) => !v)}
+                >
+                  {mostrarTrocaCliente ? 'Fechar Seleção' : 'Alterar / Cadastrar Cliente'}
+                </button>
+              </div>
+            </div>
+
+            {mostrarTrocaCliente && (
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div style={{ flex: '1 1 280px' }}>
+                  <label className="form-label">Selecionar Cliente Cadastrado</label>
+                  <select
+                    className="form-input"
+                    value={clienteIdSelecionado || ''}
+                    onChange={(e) => setClienteIdSelecionado(Number(e.target.value))}
+                  >
+                    {clientes.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.codigo ? `[${c.codigo}] ` : ''}{c.razao_social} ({c.cidade}/{c.uf})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => setModalNovoClienteAberto(true)}
+                >
+                  <Plus size={14} /> Novo Cliente
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Dados principais */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
             <div style={{ gridColumn: 'span 2' }}>
-              <label className="form-label">Título do Pedido (sai no Romaneio de Embarque) *</label>
+              <label className="form-label">Título do Pedido (sai no Romaneio e na Folha do Pedido) *</label>
               <input
                 className="form-input"
-                placeholder="Ex: Carga PAVAN Terça-feira / Pedido Lote 45"
+                placeholder="Ex: Carga Quinta-feira / Pedido Semana 46"
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="form-label">Cliente / Destino</label>
-              <input
-                className="form-input"
-                placeholder="PAVAN"
-                value={cliente}
-                onChange={(e) => setCliente(e.target.value)}
               />
             </div>
             <div>
@@ -1422,6 +1556,8 @@ export function Pedidos() {
                                     return {
                                       ...r,
                                       qtd_kg_solicitada: v,
+                                      unidade_solicitada: 'KG',
+                                      qtd_solicitada_exibicao: kg > 0 ? kg : r.qtd_solicitada_exibicao,
                                       qtd_caixas_solicitada: pm > 0 && kg > 0 ? String(Math.max(1, Math.round(kg / pm))) : r.qtd_caixas_solicitada
                                     }
                                   })
@@ -1712,6 +1848,94 @@ export function Pedidos() {
                 )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Modal para Cadastro Futuro de Outros Clientes */}
+      {modalNovoClienteAberto && (
+        <div className="modal-overlay" style={{ padding: '16px' }} onClick={() => setModalNovoClienteAberto(false)}>
+          <form
+            className="card"
+            style={{ width: '740px', maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '20px' }}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleSalvarNovoCliente}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px' }}>Cadastrar Novo Cliente</h2>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModalNovoClienteAberto(false)}>
+                <X size={15} /> Fechar
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+              <div>
+                <label className="form-label">Código</label>
+                <input className="form-input font-mono" value={novoCliForm.codigo} onChange={(e) => setNovoCliForm({ ...novoCliForm, codigo: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">Razão Social *</label>
+                <input className="form-input" required value={novoCliForm.razao_social} onChange={(e) => setNovoCliForm({ ...novoCliForm, razao_social: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">Nome Fantasia</label>
+                <input className="form-input" value={novoCliForm.nome_fantasia} onChange={(e) => setNovoCliForm({ ...novoCliForm, nome_fantasia: e.target.value })} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+              <div>
+                <label className="form-label">CPF / CNPJ</label>
+                <input className="form-input font-mono" value={novoCliForm.cnpj_cpf} onChange={(e) => setNovoCliForm({ ...novoCliForm, cnpj_cpf: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">Inscrição Estadual</label>
+                <input className="form-input font-mono" value={novoCliForm.inscricao_estadual} onChange={(e) => setNovoCliForm({ ...novoCliForm, inscricao_estadual: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">Telefone</label>
+                <input className="form-input font-mono" value={novoCliForm.telefone} onChange={(e) => setNovoCliForm({ ...novoCliForm, telefone: e.target.value })} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 1fr', gap: '10px', marginBottom: '10px' }}>
+              <div>
+                <label className="form-label">Endereço</label>
+                <input className="form-input" value={novoCliForm.endereco} onChange={(e) => setNovoCliForm({ ...novoCliForm, endereco: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">Número</label>
+                <input className="form-input" value={novoCliForm.numero} onChange={(e) => setNovoCliForm({ ...novoCliForm, numero: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">Bairro</label>
+                <input className="form-input" value={novoCliForm.bairro} onChange={(e) => setNovoCliForm({ ...novoCliForm, bairro: e.target.value })} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 140px 1fr', gap: '10px', marginBottom: '16px' }}>
+              <div>
+                <label className="form-label">Cidade</label>
+                <input className="form-input" value={novoCliForm.cidade} onChange={(e) => setNovoCliForm({ ...novoCliForm, cidade: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">UF</label>
+                <input className="form-input" maxLength={2} value={novoCliForm.uf} onChange={(e) => setNovoCliForm({ ...novoCliForm, uf: e.target.value.toUpperCase() })} />
+              </div>
+              <div>
+                <label className="form-label">CEP</label>
+                <input className="form-input font-mono" value={novoCliForm.cep} onChange={(e) => setNovoCliForm({ ...novoCliForm, cep: e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label">ICMS</label>
+                <input className="form-input" value={novoCliForm.icms} onChange={(e) => setNovoCliForm({ ...novoCliForm, icms: e.target.value })} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button type="button" className="btn btn--secondary" onClick={() => setModalNovoClienteAberto(false)}>Cancelar</button>
+              <button type="submit" className="btn btn--success">Salvar Cliente</button>
+            </div>
+          </form>
         </div>
       )}
 

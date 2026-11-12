@@ -452,6 +452,55 @@ async function runMigrations(db) {
   await tryExecute("ALTER TABLE romaneios_itens ADD COLUMN conferido_at DATETIME;")
   await tryExecute("ALTER TABLE romaneios_itens ADD COLUMN conferido_por TEXT;")
   await tryExecute("CREATE INDEX IF NOT EXISTS idx_romaneios_pedido ON romaneios(pedido_id);")
+
+  // ── Clientes (padrão inicial: BEEF CONTAINER LIMITADA) ──────────────────────
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS clientes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo TEXT UNIQUE,
+      razao_social TEXT NOT NULL,
+      nome_fantasia TEXT NOT NULL,
+      cnpj_cpf TEXT DEFAULT '',
+      inscricao_estadual TEXT DEFAULT '',
+      endereco TEXT DEFAULT '',
+      numero TEXT DEFAULT '',
+      complemento TEXT DEFAULT '',
+      bairro TEXT DEFAULT '',
+      cep TEXT DEFAULT '',
+      cidade TEXT DEFAULT '',
+      uf TEXT DEFAULT '',
+      pais TEXT DEFAULT 'BRASIL',
+      telefone TEXT DEFAULT '',
+      icms TEXT DEFAULT 'CONTRIBUINTE',
+      is_padrao INTEGER DEFAULT 0,
+      ativo INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+  try {
+    const cliCheck = await db.execute("SELECT id FROM clientes WHERE codigo = '737' OR UPPER(razao_social) = 'BEEF CONTAINER LIMITADA' LIMIT 1")
+    if (cliCheck.rows.length === 0) {
+      await db.execute({
+        sql: `
+          INSERT INTO clientes (
+            codigo, razao_social, nome_fantasia, cnpj_cpf, inscricao_estadual,
+            endereco, numero, complemento, bairro, cep, cidade, uf, pais,
+            telefone, icms, is_padrao, ativo
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
+        `,
+        args: [
+          '737', 'BEEF CONTAINER LIMITADA', 'BEEF CONTAINER LIMITADA',
+          '54.142.043/0001-30', '513236396113',
+          'DOUTOR HEITOR NASCIMENTO DE 3/4 A 598/599', '581', '',
+          'MORUMBI', '13140-729', 'PAULINIA', 'SP', 'BRASIL',
+          '(19)99199-231', 'CONTRIBUINTE'
+        ]
+      })
+    }
+  } catch (e) {}
+  await tryExecute("ALTER TABLE pedidos ADD COLUMN cliente_id INTEGER REFERENCES clientes(id);")
+  await tryExecute("ALTER TABLE pedidos_itens ADD COLUMN unidade_solicitada TEXT DEFAULT 'KG';")
+  await tryExecute("ALTER TABLE pedidos_itens ADD COLUMN qtd_solicitada_exibicao REAL DEFAULT NULL;")
 }
 
 module.exports = { runMigrations }

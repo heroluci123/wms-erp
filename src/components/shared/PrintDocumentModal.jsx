@@ -4,8 +4,17 @@ import { Printer, X } from 'lucide-react'
 export const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
 
-export const fmtNum = (v) =>
-  Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+export const fmtNum = (v, decimals = 2) =>
+  Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+
+export const fmtQtdLivre = (v) => {
+  const n = Number(v || 0)
+  const isInt = Math.abs(n - Math.round(n)) < 0.001
+  return n.toLocaleString('pt-BR', {
+    minimumFractionDigits: isInt ? 0 : 2,
+    maximumFractionDigits: 2
+  })
+}
 
 export const fmtData = (d) => {
   if (!d) return '-'
@@ -24,12 +33,14 @@ export const fmtDataHora = (d) => {
   return dt.toLocaleString('pt-BR')
 }
 
-export function PrintDocumentModal({ title, onClose, autoPrint = true, children }) {
+export function PrintDocumentModal({ title, onClose, autoPrint = true, orientation = 'portrait', children }) {
+  const isLandscape = orientation === 'landscape'
+
   useEffect(() => {
     if (!autoPrint) return undefined
     const t = setTimeout(() => {
       window.print()
-    }, 200)
+    }, 220)
     return () => clearTimeout(t)
   }, [autoPrint])
 
@@ -40,7 +51,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
         position: 'fixed',
         inset: 0,
         zIndex: 9999,
-        backgroundColor: 'rgba(15, 23, 42, 0.85)',
+        backgroundColor: 'rgba(15, 23, 42, 0.88)',
         overflowY: 'auto',
         padding: '20px',
         display: 'flex',
@@ -50,12 +61,12 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
     >
       <style>{`
         .wms-print-sheet {
-          width: 210mm;
+          width: ${isLandscape ? '297mm' : '210mm'};
           max-width: 100%;
-          min-height: 297mm;
+          min-height: ${isLandscape ? '205mm' : '297mm'};
           background: #ffffff;
           color: #0f172a;
-          padding: 12mm 14mm;
+          padding: ${isLandscape ? '9mm 11mm' : '12mm 14mm'};
           border-radius: 6px;
           box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -68,8 +79,8 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           justify-content: space-between;
           align-items: flex-start;
           border-bottom: 2px solid #0f172a;
-          padding-bottom: 10px;
-          margin-bottom: 12px;
+          padding-bottom: 8px;
+          margin-bottom: 10px;
           gap: 16px;
         }
         .wms-print-brand {
@@ -80,7 +91,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
         }
         .wms-print-brand-sub {
           font-size: 9.5px;
-          color: #475569;
+          color: #334155;
           margin-top: 2px;
         }
         .wms-print-doc-title {
@@ -97,12 +108,12 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           border: 1px solid #cbd5e1;
           border-radius: 4px;
           padding: 9px 12px;
-          margin-bottom: 12px;
+          margin-bottom: 10px;
         }
         .wms-print-meta-label {
-          font-size: 9px;
+          font-size: 8.5px;
           text-transform: uppercase;
-          color: #64748b;
+          color: #475569;
           font-weight: 700;
           letter-spacing: 0.4px;
         }
@@ -113,34 +124,35 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           margin-top: 1px;
         }
         .wms-print-section-title {
-          font-size: 10.5px;
+          font-size: 10px;
           font-weight: 800;
           text-transform: uppercase;
           letter-spacing: 0.4px;
           color: #0f172a;
-          background: #e2e8f0;
+          background: #f1f5f9;
           padding: 5px 8px;
           border-left: 4px solid #0f172a;
-          margin: 12px 0 6px 0;
+          border-bottom: 1px solid #cbd5e1;
+          margin: 10px 0 6px 0;
         }
         .wms-print-table {
           width: 100%;
           border-collapse: collapse;
           margin-bottom: 10px;
-          font-size: 10.5px;
+          font-size: 11px;
         }
         .wms-print-table th {
-          background: #0f172a;
-          color: #ffffff;
+          background: #f1f5f9;
+          color: #0f172a;
           text-align: left;
-          padding: 5px 7px;
+          padding: 6px 8px;
           font-size: 9.5px;
           text-transform: uppercase;
-          font-weight: 700;
-          border: 1px solid #0f172a;
+          font-weight: 800;
+          border: 1px solid #334155;
         }
         .wms-print-table td {
-          padding: 5px 7px;
+          padding: 6px 8px;
           border: 1px solid #cbd5e1;
           vertical-align: middle;
           color: #0f172a;
@@ -149,9 +161,10 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           background: #f8fafc;
         }
         .wms-print-table tfoot td {
-          background: #e2e8f0;
+          background: #f1f5f9;
+          color: #0f172a;
           font-weight: 800;
-          border: 1px solid #94a3b8;
+          border: 1px solid #334155;
         }
         .wms-print-mono {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -163,13 +176,14 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           padding: 8px 10px;
           margin-top: 8px;
           font-size: 10.5px;
-          min-height: 36px;
+          color: #0f172a;
+          min-height: 32px;
         }
         .wms-print-signatures {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 24px;
-          margin-top: 28px;
+          margin-top: 24px;
           page-break-inside: avoid;
         }
         .wms-print-sign-box {
@@ -180,7 +194,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
         }
         .wms-print-sign-line {
           border-top: 1px solid #0f172a;
-          margin-top: 34px;
+          margin-top: 30px;
           padding-top: 4px;
           font-size: 10px;
           font-weight: 700;
@@ -189,24 +203,24 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
         }
         .wms-print-sign-sub {
           font-size: 9.5px;
-          color: #475569;
+          color: #334155;
           margin-top: 5px;
           line-height: 1.5;
         }
         .wms-print-footer {
-          margin-top: 16px;
+          margin-top: 14px;
           padding-top: 6px;
           border-top: 1px solid #cbd5e1;
           display: flex;
           justify-content: space-between;
           font-size: 9px;
-          color: #64748b;
+          color: #475569;
         }
 
         @media print {
           @page {
-            size: A4 portrait;
-            margin: 8mm 10mm 10mm 10mm;
+            size: A4 ${orientation};
+            margin: 8mm 10mm 8mm 10mm;
           }
           body * {
             visibility: hidden !important;
@@ -225,6 +239,8 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           .wms-print-sheet,
           .wms-print-sheet * {
             visibility: visible !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .wms-print-sheet {
             position: absolute !important;
@@ -243,7 +259,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
       <div
         className="wms-print-toolbar no-print"
         style={{
-          width: '210mm',
+          width: isLandscape ? '297mm' : '210mm',
           maxWidth: '100%',
           display: 'flex',
           justifyContent: 'space-between',
@@ -257,7 +273,9 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           gap: '12px'
         }}
       >
-        <div style={{ fontWeight: 700, fontSize: '14px' }}>{title}</div>
+        <div style={{ fontWeight: 700, fontSize: '14px' }}>
+          {title} {isLandscape ? '(Paisagem / A4 Horizontal)' : '(Retrato / A4 Vertical)'}
+        </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             type="button"

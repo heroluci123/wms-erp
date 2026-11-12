@@ -84,8 +84,10 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
 
       {/* Título do Pedido em destaque */}
       <div style={{
-        background: '#0f172a',
-        color: '#ffffff',
+        background: '#f1f5f9',
+        border: '1.5px solid #0f172a',
+        borderLeft: '6px solid #0f172a',
+        color: '#0f172a',
         padding: '8px 12px',
         borderRadius: '4px',
         marginBottom: '10px',
@@ -95,14 +97,14 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
         gap: '12px'
       }}>
         <div>
-          <div style={{ fontSize: '9px', textTransform: 'uppercase', opacity: 0.8 }}>
+          <div style={{ fontSize: '9px', textTransform: 'uppercase', fontWeight: 800, color: '#475569' }}>
             {temPedido ? 'Título do Pedido / Identificação da Carga' : 'Identificação / Destino'}
           </div>
-          <div style={{ fontSize: '14px', fontWeight: 800 }}>{tituloPrincipal}</div>
+          <div style={{ fontSize: '14px', fontWeight: 900, color: '#0f172a' }}>{tituloPrincipal}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '9px', textTransform: 'uppercase', opacity: 0.8 }}>Situação</div>
-          <div style={{ fontSize: '11px', fontWeight: 700 }}>{statusDocumento}</div>
+          <div style={{ fontSize: '9px', textTransform: 'uppercase', fontWeight: 800, color: '#475569' }}>Situação</div>
+          <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#0f172a' }}>{statusDocumento}</div>
         </div>
       </div>
 

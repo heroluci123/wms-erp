@@ -11,7 +11,106 @@ async function gerarProximoCodigoPedido() {
   return `PED-${String(seq).padStart(4, '0')}`
 }
 
+function consolidarItensPedido(itens = []) {
+  const consolidados = new Map()
+  for (const item of itens) {
+    const pid = Number(item.produto_id)
+    const kg = Number(item.qtd_kg_solicitada)
+    const cx =
+      item.qtd_caixas_solicitada !== '' && item.qtd_caixas_solicitada != null
+        ? Number(item.qtd_caixas_solicitada)
+        : null
+    const unid = item.unidade_solicitada === 'CX' ? 'CX' : 'KG'
+    const qtdExib =
+      item.qtd_solicitada_exibicao !== '' && item.qtd_solicitada_exibicao != null
+        ? Number(item.qtd_solicitada_exibicao)
+        : unid === 'CX' && cx
+          ? cx
+          : kg
+
+    if (!pid || !Number.isFinite(kg) || kg <= 0) {
+      throw new Error('Todos os itens do pedido devem ter produto selecionado e peso (kg) maior que zero.')
+    }
+
+    if (consolidados.has(pid)) {
+      const prev = consolidados.get(pid)
+      prev.qtd_kg_solicitada = Number((prev.qtd_kg_solicitada + kg).toFixed(3))
+      if (cx !== null) prev.qtd_caixas_solicitada = (prev.qtd_caixas_solicitada || 0) + cx
+      if (prev.unidade_solicitada === unid) {
+        prev.qtd_solicitada_exibicao = Number(((prev.qtd_solicitada_exibicao || 0) + qtdExib).toFixed(3))
+      } else {
+        prev.unidade_solicitada = 'KG'
+        prev.qtd_solicitada_exibicao = prev.qtd_kg_solicitada
+      }
+      if (item.observacao && !prev.observacao) prev.observacao = String(item.observacao).trim()
+    } else {
+      consolidados.set(pid, {
+        produto_id: pid,
+        qtd_kg_solicitada: Number(kg.toFixed(3)),
+        qtd_caixas_solicitada: cx !== null && Number.isFinite(cx) && cx > 0 ? cx : null,
+        unidade_solicitada: unid,
+        qtd_solicitada_exibicao: Number((qtdExib || kg).toFixed(3)),
+        observacao: String(item.observacao || '').trim()
+      })
+    }
+  }
+  return Array.from(consolidados.values())
+}
+
 export const pedidosQueries = {
+  /** Lista clientes cadastrados (BEEF CONTAINER LIMITADA vem marcada como padrão) */
+  async listarClientes() {
+    const res = await db.execute(`
+      SELECT *
+      FROM clientes
+      WHERE ativo = 1
+      ORDER BY is_padrao DESC, razao_social ASC
+    `)
+    return res.rows
+  },
+
+  /** Cadastra um novo cliente para uso futuro em pedidos */
+  async criarCliente(dados) {
+    const razao = (dados.razao_social || '').trim()
+    const fantasia = (dados.nome_fantasia || razao).trim()
+    if (!razao) throw new Error('Informe a Razão Social do cliente.')
+
+    const res = await db.execute({
+      sql: `
+        INSERT INTO clientes (
+          codigo, razao_social, nome_fantasia, cnpj_cpf, inscricao_estadual,
+          endereco, numero, complemento, bairro, cep, cidade, uf, pais,
+          telefone, icms, is_padrao, ativo
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `,
+      args: [
+        (dados.codigo || '').trim() || null,
+        razao,
+        fantasia,
+        (dados.cnpj_cpf || '').trim(),
+        (dados.inscricao_estadual || '').trim(),
+        (dados.endereco || '').trim(),
+        (dados.numero || '').trim(),
+        (dados.complemento || '').trim(),
+        (dados.bairro || '').trim(),
+        (dados.cep || '').trim(),
+        (dados.cidade || '').trim(),
+        (dados.uf || '').trim().toUpperCase(),
+        (dados.pais || 'BRASIL').trim(),
+        (dados.telefone || '').trim(),
+        (dados.icms || 'CONTRIBUINTE').trim(),
+        dados.is_padrao ? 1 : 0
+      ]
+    })
+
+    const id = Number(res.lastInsertRowid)
+    if (dados.is_padrao) {
+      await db.execute({ sql: 'UPDATE clientes SET is_padrao = CASE WHEN id = ? THEN 1 ELSE 0 END', args: [id] })
+    }
+    const created = await db.execute({ sql: 'SELECT * FROM clientes WHERE id = ?', args: [id] })
+    return created.rows[0]
+  },
+
   /** Lista todos os produtos com saldo serializado disponível para separação */
   async listarSaldosProdutosParaPedido() {
     const res = await db.execute(`
@@ -127,6 +226,16 @@ export const pedidosQueries = {
     if (pedRes.rows.length === 0) return null
     const pedido = pedRes.rows[0]
 
+    let clienteDados = null
+    if (pedido.cliente_id) {
+      const cliRes = await db.execute({ sql: 'SELECT * FROM clientes WHERE id = ?', args: [pedido.cliente_id] })
+      clienteDados = cliRes.rows[0] || null
+    }
+    if (!clienteDados) {
+      const padRes = await db.execute('SELECT * FROM clientes WHERE is_padrao = 1 AND ativo = 1 ORDER BY id ASC LIMIT 1')
+      clienteDados = padRes.rows[0] || null
+    }
+
     const itensRes = await db.execute({
       sql: `
         SELECT
@@ -214,39 +323,33 @@ export const pedidosQueries = {
 
     return {
       ...pedido,
+      cliente_dados: clienteDados,
       itens: itensRes.rows,
       caixas: caixasRomaneio
     }
   },
 
   /** Cria novo pedido com itens */
-  async criarPedido({ titulo, cliente = 'PAVAN', previsao_entrega = null, observacoes = '', itens = [], operador, liberar = true }) {
+  async criarPedido({ titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], operador, liberar = true }) {
     const tituloTrim = (titulo || '').trim()
-    if (!tituloTrim) throw new Error('Informe o título do pedido (ex: Pedido PAVAN Semana 12).')
+    if (!tituloTrim) throw new Error('Informe o título do pedido (ex: Carga Quinta-feira).')
     if (!Array.isArray(itens) || itens.length === 0) throw new Error('Adicione pelo menos um item ao pedido.')
 
-    const consolidados = new Map()
-    for (const item of itens) {
-      const pid = Number(item.produto_id)
-      const kg = Number(item.qtd_kg_solicitada)
-      const cx = item.qtd_caixas_solicitada !== '' && item.qtd_caixas_solicitada != null ? Number(item.qtd_caixas_solicitada) : null
-      if (!pid || !Number.isFinite(kg) || kg <= 0) {
-        throw new Error('Todos os itens do pedido devem ter produto selecionado e peso (kg) maior que zero.')
+    const itensConsolidados = consolidarItensPedido(itens)
+
+    let resolvedClienteId = cliente_id ? Number(cliente_id) : null
+    let resolvedClienteNome = (cliente || '').trim()
+    if (!resolvedClienteId) {
+      const padRes = await db.execute('SELECT id, razao_social FROM clientes WHERE is_padrao = 1 AND ativo = 1 LIMIT 1')
+      if (padRes.rows.length > 0) {
+        resolvedClienteId = padRes.rows[0].id
+        if (!resolvedClienteNome) resolvedClienteNome = padRes.rows[0].razao_social
       }
-      if (consolidados.has(pid)) {
-        const prev = consolidados.get(pid)
-        prev.qtd_kg_solicitada = Number((prev.qtd_kg_solicitada + kg).toFixed(3))
-        if (cx !== null) prev.qtd_caixas_solicitada = (prev.qtd_caixas_solicitada || 0) + cx
-        if (item.observacao && !prev.observacao) prev.observacao = String(item.observacao).trim()
-      } else {
-        consolidados.set(pid, {
-          produto_id: pid,
-          qtd_kg_solicitada: Number(kg.toFixed(3)),
-          qtd_caixas_solicitada: cx !== null && Number.isFinite(cx) && cx > 0 ? cx : null,
-          observacao: String(item.observacao || '').trim()
-        })
-      }
+    } else if (!resolvedClienteNome) {
+      const cliRes = await db.execute({ sql: 'SELECT razao_social FROM clientes WHERE id = ?', args: [resolvedClienteId] })
+      if (cliRes.rows.length > 0) resolvedClienteNome = cliRes.rows[0].razao_social
     }
+    if (!resolvedClienteNome) resolvedClienteNome = 'BEEF CONTAINER LIMITADA'
 
     const codigo = await gerarProximoCodigoPedido()
     const status = liberar ? 'LIBERADO' : 'RASCUNHO'
@@ -254,14 +357,15 @@ export const pedidosQueries = {
     const res = await db.execute({
       sql: `
         INSERT INTO pedidos (
-          codigo, titulo, cliente, previsao_entrega, observacoes, status,
+          codigo, titulo, cliente_id, cliente, previsao_entrega, observacoes, status,
           criado_por_id, criado_por_nome, liberado_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'LIBERADO' THEN CURRENT_TIMESTAMP ELSE NULL END)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'LIBERADO' THEN CURRENT_TIMESTAMP ELSE NULL END)
       `,
       args: [
         codigo,
         tituloTrim,
-        (cliente || 'PAVAN').trim() || 'PAVAN',
+        resolvedClienteId,
+        resolvedClienteNome,
         previsao_entrega || null,
         (observacoes || '').trim(),
         status,
@@ -272,13 +376,23 @@ export const pedidosQueries = {
     })
 
     const pedidoId = Number(res.lastInsertRowid)
-    for (const item of consolidados.values()) {
+    for (const item of itensConsolidados) {
       await db.execute({
         sql: `
-          INSERT INTO pedidos_itens (pedido_id, produto_id, qtd_kg_solicitada, qtd_caixas_solicitada, observacao)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO pedidos_itens (
+            pedido_id, produto_id, qtd_kg_solicitada, qtd_caixas_solicitada,
+            unidade_solicitada, qtd_solicitada_exibicao, observacao
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
-        args: [pedidoId, item.produto_id, item.qtd_kg_solicitada, item.qtd_caixas_solicitada, item.observacao]
+        args: [
+          pedidoId,
+          item.produto_id,
+          item.qtd_kg_solicitada,
+          item.qtd_caixas_solicitada,
+          item.unidade_solicitada,
+          item.qtd_solicitada_exibicao,
+          item.observacao
+        ]
       })
     }
 
@@ -286,8 +400,8 @@ export const pedidosQueries = {
   },
 
   /** Atualiza pedido em status RASCUNHO ou LIBERADO */
-  async atualizarPedido({ id, titulo, cliente = 'PAVAN', previsao_entrega = null, observacoes = '', itens = [], liberar }) {
-    const check = await db.execute({ sql: 'SELECT id, status FROM pedidos WHERE id = ?', args: [id] })
+  async atualizarPedido({ id, titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], liberar }) {
+    const check = await db.execute({ sql: 'SELECT id, status, cliente_id FROM pedidos WHERE id = ?', args: [id] })
     if (check.rows.length === 0) throw new Error('Pedido não encontrado.')
     const atual = check.rows[0]
     if (!['RASCUNHO', 'LIBERADO'].includes(atual.status)) {
@@ -298,34 +412,15 @@ export const pedidosQueries = {
     if (!tituloTrim) throw new Error('Informe o título do pedido.')
     if (!Array.isArray(itens) || itens.length === 0) throw new Error('O pedido precisa de pelo menos um item.')
 
-    const consolidados = new Map()
-    for (const item of itens) {
-      const pid = Number(item.produto_id)
-      const kg = Number(item.qtd_kg_solicitada)
-      const cx = item.qtd_caixas_solicitada !== '' && item.qtd_caixas_solicitada != null ? Number(item.qtd_caixas_solicitada) : null
-      if (!pid || !Number.isFinite(kg) || kg <= 0) {
-        throw new Error('Todos os itens devem ter produto e peso (kg) maior que zero.')
-      }
-      if (consolidados.has(pid)) {
-        const prev = consolidados.get(pid)
-        prev.qtd_kg_solicitada = Number((prev.qtd_kg_solicitada + kg).toFixed(3))
-        if (cx !== null) prev.qtd_caixas_solicitada = (prev.qtd_caixas_solicitada || 0) + cx
-      } else {
-        consolidados.set(pid, {
-          produto_id: pid,
-          qtd_kg_solicitada: Number(kg.toFixed(3)),
-          qtd_caixas_solicitada: cx !== null && Number.isFinite(cx) && cx > 0 ? cx : null,
-          observacao: String(item.observacao || '').trim()
-        })
-      }
-    }
-
+    const itensConsolidados = consolidarItensPedido(itens)
     const novoStatus = liberar === true ? 'LIBERADO' : liberar === false ? 'RASCUNHO' : atual.status
+    const resolvedClienteId = cliente_id ? Number(cliente_id) : atual.cliente_id || null
 
     await db.execute({
       sql: `
         UPDATE pedidos
         SET titulo = ?,
+            cliente_id = ?,
             cliente = ?,
             previsao_entrega = ?,
             observacoes = ?,
@@ -336,7 +431,8 @@ export const pedidosQueries = {
       `,
       args: [
         tituloTrim,
-        (cliente || 'PAVAN').trim() || 'PAVAN',
+        resolvedClienteId,
+        (cliente || 'BEEF CONTAINER LIMITADA').trim() || 'BEEF CONTAINER LIMITADA',
         previsao_entrega || null,
         (observacoes || '').trim(),
         novoStatus,
@@ -346,13 +442,23 @@ export const pedidosQueries = {
     })
 
     await db.execute({ sql: 'DELETE FROM pedidos_itens WHERE pedido_id = ?', args: [id] })
-    for (const item of consolidados.values()) {
+    for (const item of itensConsolidados) {
       await db.execute({
         sql: `
-          INSERT INTO pedidos_itens (pedido_id, produto_id, qtd_kg_solicitada, qtd_caixas_solicitada, observacao)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO pedidos_itens (
+            pedido_id, produto_id, qtd_kg_solicitada, qtd_caixas_solicitada,
+            unidade_solicitada, qtd_solicitada_exibicao, observacao
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
-        args: [id, item.produto_id, item.qtd_kg_solicitada, item.qtd_caixas_solicitada, item.observacao]
+        args: [
+          id,
+          item.produto_id,
+          item.qtd_kg_solicitada,
+          item.qtd_caixas_solicitada,
+          item.unidade_solicitada,
+          item.qtd_solicitada_exibicao,
+          item.observacao
+        ]
       })
     }
 
