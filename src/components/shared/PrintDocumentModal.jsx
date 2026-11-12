@@ -189,23 +189,23 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
         .wms-print-sign-box {
           border: 1px solid #94a3b8;
           border-radius: 4px;
-          padding: 10px 12px;
+          padding: 14px 16px;
           background: #ffffff;
         }
         .wms-print-sign-line {
           border-top: 1px solid #0f172a;
-          margin-top: 30px;
-          padding-top: 4px;
-          font-size: 10px;
+          margin-top: 52px;
+          padding-top: 5px;
+          font-size: 10.5px;
           font-weight: 700;
           text-align: center;
           color: #0f172a;
         }
         .wms-print-sign-sub {
-          font-size: 9.5px;
+          font-size: 10px;
           color: #334155;
-          margin-top: 5px;
-          line-height: 1.5;
+          margin-top: 8px;
+          line-height: 1.85;
         }
         .wms-print-footer {
           margin-top: 14px;

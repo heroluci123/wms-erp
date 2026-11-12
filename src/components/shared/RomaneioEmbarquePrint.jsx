@@ -152,13 +152,12 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
       <table className="wms-print-table">
         <thead>
           <tr>
-            <th style={{ width: '9%' }}>Cód.</th>
-            <th style={{ width: temPedido ? '37%' : '53%' }}>Produto</th>
-            {temPedido && <th style={{ width: '13%', textAlign: 'right' }}>Kg Pedido</th>}
-            <th style={{ width: '14%', textAlign: 'right' }}>Kg Embarque</th>
+            <th style={{ width: '10%' }}>Cód.</th>
+            <th style={{ width: temPedido ? '42%' : '62%' }}>Produto</th>
+            {temPedido && <th style={{ width: '14%', textAlign: 'right' }}>Kg Pedido</th>}
+            <th style={{ width: temPedido ? '15%' : '16%', textAlign: 'right' }}>Kg Embarque</th>
             {temPedido && <th style={{ width: '11%', textAlign: 'right' }}>Diferença</th>}
-            <th style={{ width: '8%', textAlign: 'center' }}>Caixas</th>
-            <th style={{ width: '8%', textAlign: 'center' }}>Conf.</th>
+            <th style={{ width: temPedido ? '8%' : '12%', textAlign: 'center' }}>Caixas</th>
           </tr>
         </thead>
         <tbody>
@@ -189,7 +188,6 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
                 </td>
               )}
               <td style={{ textAlign: 'center', fontWeight: 700 }}>{r.caixas}</td>
-              <td style={{ textAlign: 'center' }}>{r.conferidas}/{r.caixas}</td>
             </tr>
           ))}
         </tbody>
@@ -204,7 +202,6 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
               </td>
             )}
             <td style={{ textAlign: 'center' }}>{totalCaixas} cx</td>
-            <td style={{ textAlign: 'center' }}>{qtdConferidas}/{totalCaixas}</td>
           </tr>
         </tfoot>
       </table>
@@ -217,12 +214,11 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
         <thead>
           <tr>
             <th style={{ width: '5%', textAlign: 'center' }}>#</th>
-            <th style={{ width: '31%' }}>Produto</th>
-            <th style={{ width: '22%' }}>EAN / Código da Caixa</th>
-            <th style={{ width: '10%', textAlign: 'center' }}>Lote</th>
-            <th style={{ width: '11%', textAlign: 'center' }}>Validade</th>
-            <th style={{ width: '11%', textAlign: 'right' }}>Peso</th>
-            <th style={{ width: '10%', textAlign: 'center' }}>Conf.</th>
+            <th style={{ width: '35%' }}>Produto</th>
+            <th style={{ width: '24%' }}>EAN / Código da Caixa</th>
+            <th style={{ width: '12%', textAlign: 'center' }}>Lote</th>
+            <th style={{ width: '12%', textAlign: 'center' }}>Validade</th>
+            <th style={{ width: '12%', textAlign: 'right' }}>Peso</th>
           </tr>
         </thead>
         <tbody>
@@ -234,17 +230,15 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
               <td className="wms-print-mono" style={{ textAlign: 'center' }}>{cx.lote || '-'}</td>
               <td style={{ textAlign: 'center' }}>{fmtData(cx.validade)}</td>
               <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtKg(cx.peso_kg)}</td>
-              <td style={{ textAlign: 'center', fontWeight: 700, color: Number(cx.conferido) === 1 ? '#15803d' : '#64748b' }}>
-                {Number(cx.conferido) === 1 ? 'OK' : 'Pendente'}
-              </td>
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr>
-            <td colSpan={5} style={{ textAlign: 'right' }}>TOTAL GERAL DO ROMANEIO:</td>
+            <td colSpan={5} style={{ textAlign: 'right' }}>
+              TOTAL GERAL DO ROMANEIO ({totalCaixas} cx):
+            </td>
             <td style={{ textAlign: 'right' }}>{fmtKg(totalPeso)}</td>
-            <td style={{ textAlign: 'center' }}>{totalCaixas} cx</td>
           </tr>
         </tfoot>
       </table>
@@ -256,27 +250,31 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
       )}
 
       {/* Assinaturas obrigatórias (coleta própria PAVAN - sem placa/motorista) */}
-      <div className="wms-print-signatures">
+      <div className="wms-print-signatures" style={{ marginTop: '28px' }}>
         <div className="wms-print-sign-box">
-          <div style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
+          <div style={{ fontSize: '10.5px', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
             Expedido por (Tricarnes / WMS)
           </div>
           <div className="wms-print-sign-sub">
-            Nome: {romaneio.operador_expedicao_nome || romaneio.operador_conferencia_nome || '___________________________________'}<br />
-            Data/Hora: {romaneio.expedido_at ? fmtDataHora(romaneio.expedido_at) : '____/____/________  ____:____'}
+            Nome Legível: _______________________________________<br />
+            Data / Hora: ____/____/________ &nbsp;&nbsp; ____:____
           </div>
-          <div className="wms-print-sign-line">Assinatura de quem expediu</div>
+          <div className="wms-print-sign-line" style={{ marginTop: '56px' }}>
+            Assinatura de quem expediu
+          </div>
         </div>
 
         <div className="wms-print-sign-box">
-          <div style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
+          <div style={{ fontSize: '10.5px', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
             Recebido / Retirado por ({clienteExibido})
           </div>
           <div className="wms-print-sign-sub">
             Nome Legível: _______________________________________<br />
             RG / CPF: _______________________ &nbsp; Data: ____/____/________
           </div>
-          <div className="wms-print-sign-line">Assinatura de quem retirou / conferiu</div>
+          <div className="wms-print-sign-line" style={{ marginTop: '56px' }}>
+            Assinatura de quem retirou / conferiu
+          </div>
         </div>
       </div>
 
