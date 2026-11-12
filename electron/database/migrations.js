@@ -409,6 +409,49 @@ async function runMigrations(db) {
   }
   
   await tryExecute("ALTER TABLE produtos ADD COLUMN grupo TEXT DEFAULT '';")
+
+  // ── Pedidos de Saída e Conferência na Expedição ────────────────────────────
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS pedidos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo TEXT NOT NULL UNIQUE,
+      titulo TEXT NOT NULL,
+      cliente TEXT NOT NULL DEFAULT 'PAVAN',
+      previsao_entrega DATE,
+      observacoes TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'LIBERADO',
+      criado_por_id INTEGER,
+      criado_por_nome TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      liberado_at DATETIME,
+      separado_at DATETIME,
+      expedido_at DATETIME,
+      cancelado_at DATETIME
+    );
+  `)
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS pedidos_itens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pedido_id INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+      produto_id INTEGER NOT NULL REFERENCES produtos(id),
+      qtd_kg_solicitada REAL NOT NULL DEFAULT 0,
+      qtd_caixas_solicitada REAL DEFAULT NULL,
+      observacao TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(pedido_id, produto_id)
+    );
+  `)
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_pedidos_status ON pedidos(status);")
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_pedidos_itens_pedido ON pedidos_itens(pedido_id);")
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_pedidos_itens_produto ON pedidos_itens(produto_id);")
+  await tryExecute("ALTER TABLE romaneios ADD COLUMN pedido_id INTEGER REFERENCES pedidos(id);")
+  await tryExecute("ALTER TABLE romaneios ADD COLUMN conferido_at DATETIME;")
+  await tryExecute("ALTER TABLE romaneios ADD COLUMN operador_conferencia_nome TEXT;")
+  await tryExecute("ALTER TABLE romaneios_itens ADD COLUMN conferido INTEGER DEFAULT 0;")
+  await tryExecute("ALTER TABLE romaneios_itens ADD COLUMN conferido_at DATETIME;")
+  await tryExecute("ALTER TABLE romaneios_itens ADD COLUMN conferido_por TEXT;")
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_romaneios_pedido ON romaneios(pedido_id);")
 }
 
 module.exports = { runMigrations }

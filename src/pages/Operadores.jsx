@@ -20,6 +20,7 @@ export function Operadores() {
       recebimento: false,
       movimentacao: false,
       saida: false,
+      pedidos: false,
       expedicao: false,
       inventario_coletor: false,
       inventario_gestao: false,
@@ -103,6 +104,7 @@ export function Operadores() {
         recebimento: !!permissoesObj.recebimento,
         movimentacao: !!permissoesObj.movimentacao,
         saida: !!permissoesObj.saida,
+        pedidos: !!permissoesObj.pedidos,
         expedicao: !!permissoesObj.expedicao,
         inventario_coletor: !!permissoesObj.inventario_coletor,
         inventario_gestao: !!permissoesObj.inventario_gestao,
@@ -136,6 +138,7 @@ export function Operadores() {
         recebimento: false,
         movimentacao: false,
         saida: false,
+        pedidos: false,
         expedicao: false,
         inventario_coletor: false,
         inventario_gestao: false,
@@ -245,6 +248,10 @@ export function Operadores() {
                 <label className="flex items-center gap-8 cursor-pointer text-sm">
                   <input type="checkbox" checked={formData.permissoes.saida} onChange={() => togglePermissao('saida')} />
                   Saída de Materiais
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.pedidos} onChange={() => togglePermissao('pedidos')} />
+                  Pedidos (Criar / Gerenciar)
                 </label>
                 <label className="flex items-center gap-8 cursor-pointer text-sm">
                   <input type="checkbox" checked={formData.permissoes.expedicao} onChange={() => togglePermissao('expedicao')} />

@@ -19,6 +19,7 @@ import { Produtos } from './pages/Produtos'
 import { Rastreabilidade } from './pages/Rastreabilidade'
 import { Producao } from './pages/Producao'
 import { Saida } from './pages/Saida'
+import { Pedidos } from './pages/Pedidos'
 import { Desmembramento } from './pages/Desmembramento'
 import { Locais } from './pages/Locais'
 import { Operadores } from './pages/Operadores'
@@ -46,6 +47,7 @@ function App() {
           <Route path="movimentacao" element={<Movimentacao />} />
           <Route path="producao" element={<Producao />} />
           <Route path="desmembramento" element={<Desmembramento />} />
+          <Route path="pedidos" element={<Pedidos />} />
           <Route path="saida" element={<Saida />} />
 
           <Route path="inventario" element={<Inventario />} />

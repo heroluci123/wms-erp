@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -72,7 +72,7 @@ function Sidebar() {
         <Map size={18} /> Mapa de Capacidade
       </NavLink>
       
-      { (operador?.permissoes?.recebimento || operador?.permissoes?.movimentacao || operador?.permissoes?.saida || operador?.permissoes?.expedicao) && (
+      { (operador?.permissoes?.recebimento || operador?.permissoes?.movimentacao || operador?.permissoes?.saida || operador?.permissoes?.expedicao || Number(operador?.is_adm) === 1 || operador?.perfil === 'gestor' || operador?.permissoes?.pedidos) && (
         <div className="sidebar__section-label">Operação</div>
       )}
       
@@ -94,6 +94,11 @@ function Sidebar() {
       {operador?.permissoes?.movimentacao && (
         <NavLink to="/desmembramento" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <Scissors size={18} /> Desmembramento
+        </NavLink>
+      )}
+      {(Number(operador?.is_adm) === 1 || operador?.perfil === 'gestor' || operador?.permissoes?.pedidos) && (
+        <NavLink to="/pedidos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <ClipboardList size={18} /> Pedidos
         </NavLink>
       )}
       {operador?.permissoes?.saida && (
