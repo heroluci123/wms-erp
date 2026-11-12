@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ClipboardList,
   Plus,
@@ -14,7 +14,9 @@ import {
   AlertTriangle,
   ShieldAlert,
   Package,
-  RefreshCw
+  RefreshCw,
+  Scale,
+  Box
 } from 'lucide-react'
 import { pedidosQueries } from '../queries/pedidos'
 import * as saidaQueries from '../queries/saida'
@@ -23,22 +25,38 @@ import { FolhaPedidoPrint } from '../components/shared/FolhaPedidoPrint'
 import { RomaneioEmbarquePrint } from '../components/shared/RomaneioEmbarquePrint'
 
 const STATUS_BADGE = {
-  RASCUNHO: { label: 'Rascunho', cls: 'badge-neutral' },
-  LIBERADO: { label: 'Liberado p/ Separação', cls: 'badge-info' },
-  EM_SEPARACAO: { label: 'Em Separação', cls: 'badge-warning' },
-  AGUARDANDO_CONFERENCIA: { label: 'Separação Finalizada', cls: 'badge-purple' },
-  EM_CONFERENCIA: { label: 'Em Conferência', cls: 'badge-warning' },
-  EXPEDIDO: { label: 'Expedido', cls: 'badge-success' },
-  CANCELADO: { label: 'Cancelado', cls: 'badge-danger' }
+  RASCUNHO: { label: 'Rascunho', cls: 'badge--neutral' },
+  LIBERADO: { label: 'Liberado p/ Separação', cls: 'badge--info' },
+  EM_SEPARACAO: { label: 'Em Separação', cls: 'badge--warning' },
+  AGUARDANDO_CONFERENCIA: { label: 'Separação Finalizada', cls: 'badge--purple' },
+  EM_CONFERENCIA: { label: 'Em Conferência', cls: 'badge--warning' },
+  EXPEDIDO: { label: 'Expedido', cls: 'badge--success' },
+  CANCELADO: { label: 'Cancelado', cls: 'badge--danger' }
 }
 
-const fmtKg = (v) => `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
+const normTxt = (v) =>
+  String(v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
+const fmtKg = (v) =>
+  `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
+
+const fmtCx = (v) => {
+  const n = Number(v || 0)
+  const rounded = Math.abs(n - Math.round(n)) < 0.01 ? Math.round(n) : Number(n.toFixed(2))
+  return `${rounded.toLocaleString('pt-BR')} cx`
+}
+
 const fmtData = (d) => {
   if (!d) return '-'
   const s = String(d).split('T')[0].split(' ')[0]
   const p = s.split('-')
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s
 }
+
 const fmtDataHora = (d) => {
   if (!d) return '-'
   const raw = String(d)
@@ -74,12 +92,28 @@ export function Pedidos() {
   const [observacoes, setObservacoes] = useState('')
   const [itensForm, setItensForm] = useState([])
 
-  // Seletor para adicionar item
-  const [buscaProduto, setBuscaProduto] = useState('')
-  const [produtoSelecionadoId, setProdutoSelecionadoId] = useState('')
-  const [kgItemInput, setKgItemInput] = useState('')
-  const [cxItemInput, setCxItemInput] = useState('')
+  // Novo seletor integrado de produto (Código + Autocomplete Descrição + Lupa)
+  const [codigoInput, setCodigoInput] = useState('')
+  const [descricaoInput, setDescricaoInput] = useState('')
+  const [produtoSelecionado, setProdutoSelecionado] = useState(null)
+  const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
+  const [indiceSugestao, setIndiceSugestao] = useState(-1)
+
+  // Modal da lupa
+  const [modalBuscaAberto, setModalBuscaAberto] = useState(false)
+  const [modalBuscaTexto, setModalBuscaTexto] = useState('')
+  const [modalSomenteComSaldo, setModalSomenteComSaldo] = useState(false)
+
+  // Quantidade, Unidade (KG padrão / CX) e Peso Manual fallback
+  const [unidadeInput, setUnidadeInput] = useState('KG') // 'KG' | 'CX'
+  const [qtdInput, setQtdInput] = useState('')
+  const [pesoManualCxInput, setPesoManualCxInput] = useState('')
   const [obsItemInput, setObsItemInput] = useState('')
+
+  const codigoRef = useRef(null)
+  const descricaoRef = useRef(null)
+  const qtdRef = useRef(null)
+  const modalBuscaRef = useRef(null)
 
   // Modais de detalhes & impressão
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null)
@@ -113,16 +147,38 @@ export function Pedidos() {
     }
   }, [podeGerenciarPedidos, filtroStatus, dataInicio, dataFim])
 
-  const produtosFiltrados = useMemo(() => {
-    const q = buscaProduto.trim().toLowerCase()
-    if (!q) return produtos
-    return produtos.filter(
-      (p) =>
-        String(p.descricao || '').toLowerCase().includes(q) ||
-        String(p.codigo || '').toLowerCase().includes(q) ||
-        String(p.ean || '').toLowerCase().includes(q)
-    )
-  }, [produtos, buscaProduto])
+  useEffect(() => {
+    if (modalBuscaAberto) {
+      setTimeout(() => modalBuscaRef.current?.focus(), 60)
+    }
+  }, [modalBuscaAberto])
+
+  const sugestoesProdutos = useMemo(() => {
+    const q = normTxt(descricaoInput)
+    if (!q) return produtos.slice(0, 12)
+    return produtos
+      .filter(
+        (p) =>
+          normTxt(p.descricao).includes(q) ||
+          normTxt(p.codigo).includes(q) ||
+          normTxt(p.ean).includes(q)
+      )
+      .slice(0, 15)
+  }, [produtos, descricaoInput])
+
+  const produtosModalFiltrados = useMemo(() => {
+    const q = normTxt(modalBuscaTexto)
+    return produtos.filter((p) => {
+      if (modalSomenteComSaldo && Number(p.saldo_kg || 0) <= 0) return false
+      if (!q) return true
+      return (
+        normTxt(p.descricao).includes(q) ||
+        normTxt(p.codigo).includes(q) ||
+        normTxt(p.ean).includes(q) ||
+        normTxt(p.grupo).includes(q)
+      )
+    })
+  }, [produtos, modalBuscaTexto, modalSomenteComSaldo])
 
   const kpis = useMemo(() => {
     return {
@@ -133,6 +189,21 @@ export function Pedidos() {
     }
   }, [pedidos])
 
+  const limparCamposItem = (focarCodigo = false) => {
+    setCodigoInput('')
+    setDescricaoInput('')
+    setProdutoSelecionado(null)
+    setMostrarSugestoes(false)
+    setIndiceSugestao(-1)
+    setUnidadeInput('KG')
+    setQtdInput('')
+    setPesoManualCxInput('')
+    setObsItemInput('')
+    if (focarCodigo) {
+      setTimeout(() => codigoRef.current?.focus(), 40)
+    }
+  }
+
   const resetarFormulario = () => {
     setEditId(null)
     setEditCodigo('')
@@ -141,11 +212,176 @@ export function Pedidos() {
     setPrevisaoEntrega('')
     setObservacoes('')
     setItensForm([])
-    setBuscaProduto('')
-    setProdutoSelecionadoId('')
-    setKgItemInput('')
-    setCxItemInput('')
-    setObsItemInput('')
+    limparCamposItem(false)
+  }
+
+  const aplicarProdutoSelecionado = (prod, focarQtd = true) => {
+    setProdutoSelecionado(prod)
+    setCodigoInput(prod.codigo || '')
+    setDescricaoInput(prod.descricao || '')
+    setMostrarSugestoes(false)
+    setIndiceSugestao(-1)
+    setPesoManualCxInput('')
+    if (focarQtd) {
+      setTimeout(() => {
+        qtdRef.current?.focus()
+        qtdRef.current?.select?.()
+      }, 40)
+    }
+  }
+
+  // Digitação no campo Código: identificação automática por código exato ou EAN
+  const handleCodigoChange = (val) => {
+    setCodigoInput(val)
+    const clean = val.trim().toLowerCase()
+    if (!clean) {
+      setProdutoSelecionado(null)
+      setDescricaoInput('')
+      return
+    }
+    const match = produtos.find(
+      (p) =>
+        String(p.codigo || '').trim().toLowerCase() === clean ||
+        String(p.ean || '').trim().toLowerCase() === clean
+    )
+    if (match) {
+      setProdutoSelecionado(match)
+      setDescricaoInput(match.descricao || '')
+      setMostrarSugestoes(false)
+    } else if (produtoSelecionado) {
+      setProdutoSelecionado(null)
+      setDescricaoInput('')
+    }
+  }
+
+  const handleCodigoKeyDown = (e) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    if (produtoSelecionado) {
+      qtdRef.current?.focus()
+      qtdRef.current?.select?.()
+      return
+    }
+    const clean = codigoInput.trim().toLowerCase()
+    if (!clean) {
+      descricaoRef.current?.focus()
+      return
+    }
+    const prefixMatches = produtos.filter((p) =>
+      String(p.codigo || '').trim().toLowerCase().startsWith(clean)
+    )
+    if (prefixMatches.length === 1) {
+      aplicarProdutoSelecionado(prefixMatches[0], true)
+    } else if (prefixMatches.length > 1) {
+      setModalBuscaTexto(codigoInput.trim())
+      setModalBuscaAberto(true)
+    } else {
+      toastWarning(`Nenhum produto encontrado com o código "${codigoInput.trim()}".`)
+    }
+  }
+
+  // Digitação no campo Descrição: abre sugestões abaixo
+  const handleDescricaoChange = (val) => {
+    setDescricaoInput(val)
+    setMostrarSugestoes(true)
+    setIndiceSugestao(0)
+    if (produtoSelecionado && normTxt(val) !== normTxt(produtoSelecionado.descricao)) {
+      setProdutoSelecionado(null)
+      setCodigoInput('')
+    }
+  }
+
+  const handleDescricaoKeyDown = (e) => {
+    if (!mostrarSugestoes || sugestoesProdutos.length === 0) {
+      if (e.key === 'ArrowDown') {
+        setMostrarSugestoes(true)
+        setIndiceSugestao(0)
+      }
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setIndiceSugestao((prev) => Math.min(sugestoesProdutos.length - 1, prev + 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setIndiceSugestao((prev) => Math.max(0, prev - 1))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const chosen = sugestoesProdutos[indiceSugestao >= 0 ? indiceSugestao : 0]
+      if (chosen) aplicarProdutoSelecionado(chosen, true)
+    } else if (e.key === 'Escape') {
+      setMostrarSugestoes(false)
+    }
+  }
+
+  // Conversão dinâmica KG <-> CX + cálculo de saldo projetado
+  const conversaoItem = useMemo(() => {
+    if (!produtoSelecionado) return null
+    const pesoMedioCadastro = Number(produtoSelecionado.peso_medio_cx || 0)
+    const pesoManual = Number(String(pesoManualCxInput).replace(',', '.') || 0)
+    const pesoPorCx = pesoMedioCadastro > 0 ? pesoMedioCadastro : pesoManual
+
+    const itemExistente = itensForm.find((i) => Number(i.produto_id) === Number(produtoSelecionado.id))
+    const kgJaNoPedido = Number(String(itemExistente?.qtd_kg_solicitada || 0).replace(',', '.') || 0)
+    const cxJaNoPedido = Number(
+      String(itemExistente?.qtd_caixas_solicitada || 0).replace(',', '.') ||
+        (pesoPorCx > 0 ? kgJaNoPedido / pesoPorCx : 0)
+    )
+
+    const qtdDigitada = Number(String(qtdInput).replace(',', '.'))
+    const qtdValida = Number.isFinite(qtdDigitada) && qtdDigitada > 0 ? qtdDigitada : 0
+
+    const saldoAtualKg = Number(produtoSelecionado.saldo_kg || 0)
+    const saldoAtualCx = Number(produtoSelecionado.qtd_caixas || 0)
+
+    const lancamentoKg =
+      unidadeInput === 'KG'
+        ? qtdValida
+        : pesoPorCx > 0
+          ? Number((qtdValida * pesoPorCx).toFixed(3))
+          : 0
+
+    const lancamentoCx =
+      unidadeInput === 'CX'
+        ? qtdValida
+        : pesoPorCx > 0
+          ? Number((qtdValida / pesoPorCx).toFixed(2))
+          : 0
+
+    const projetadoKg = Number((saldoAtualKg - kgJaNoPedido - lancamentoKg).toFixed(3))
+    const projetadoCx = Number((saldoAtualCx - cxJaNoPedido - lancamentoCx).toFixed(2))
+
+    return {
+      pesoMedioCadastro,
+      pesoPorCx,
+      precisaPesoManualCx: unidadeInput === 'CX' && pesoMedioCadastro <= 0,
+      saldoAtualKg,
+      saldoAtualCx,
+      kgJaNoPedido,
+      cxJaNoPedido,
+      lancamentoKg,
+      lancamentoCx,
+      projetadoKg,
+      projetadoCx
+    }
+  }, [produtoSelecionado, unidadeInput, qtdInput, pesoManualCxInput, itensForm])
+
+  const handleTrocarUnidade = (novaUnidade) => {
+    if (novaUnidade === unidadeInput) return
+    const qtdAtual = Number(String(qtdInput).replace(',', '.'))
+    const pesoPorCx = conversaoItem?.pesoPorCx || 0
+
+    if (Number.isFinite(qtdAtual) && qtdAtual > 0 && pesoPorCx > 0) {
+      if (novaUnidade === 'CX') {
+        const emCx = Number((qtdAtual / pesoPorCx).toFixed(2))
+        setQtdInput(String(emCx))
+      } else {
+        const emKg = Number((qtdAtual * pesoPorCx).toFixed(2))
+        setQtdInput(String(emKg))
+      }
+    }
+    setUnidadeInput(novaUnidade)
+    setTimeout(() => qtdRef.current?.focus(), 20)
   }
 
   const abrirNovoPedido = () => {
@@ -173,11 +409,13 @@ export function Pedidos() {
           produto_descricao: it.produto_descricao,
           saldo_kg: Number(it.estoque_disponivel_kg || 0),
           qtd_caixas_estoque: Number(it.estoque_disponivel_caixas || 0),
+          peso_medio_cx: Number(it.peso_medio_cx || 0),
           qtd_kg_solicitada: String(it.qtd_kg_solicitada),
           qtd_caixas_solicitada: it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : '',
           observacao: it.observacao || ''
         }))
       )
+      limparCamposItem(false)
       setAba('FORM')
     } catch (err) {
       toastError('Erro ao carregar pedido para edição: ' + err.message)
@@ -185,30 +423,51 @@ export function Pedidos() {
   }
 
   const handleAdicionarItem = () => {
-    const pid = Number(produtoSelecionadoId)
-    const kg = Number(String(kgItemInput).replace(',', '.'))
-    const cx = cxItemInput.trim() ? Number(String(cxItemInput).replace(',', '.')) : ''
+    if (!produtoSelecionado) {
+      return toastWarning('Localize e selecione um produto pelo código, descrição ou pela lupa.')
+    }
+    const qtdNum = Number(String(qtdInput).replace(',', '.'))
+    if (!Number.isFinite(qtdNum) || qtdNum <= 0) {
+      return toastWarning('Informe a quantidade do pedido maior que zero.')
+    }
 
-    if (!pid) return toastWarning('Selecione um produto do cadastro.')
-    if (!Number.isFinite(kg) || kg <= 0) return toastWarning('Informe a quantidade em kg maior que zero.')
+    const pesoPorCx = conversaoItem?.pesoPorCx || 0
+    if (unidadeInput === 'CX' && pesoPorCx <= 0) {
+      return toastWarning(
+        'Este produto ainda não possui peso médio por caixa no estoque. Informe o kg médio por caixa ou alterne para KG.'
+      )
+    }
 
-    const prod = produtos.find((p) => Number(p.id) === pid)
-    if (!prod) return toastError('Produto inválido.')
+    const kgFinal =
+      unidadeInput === 'KG'
+        ? Number(qtdNum.toFixed(3))
+        : Number((qtdNum * pesoPorCx).toFixed(3))
 
-    if (Number(prod.saldo_kg || 0) < kg) {
+    const cxFinal =
+      unidadeInput === 'CX'
+        ? Number(qtdNum.toFixed(2))
+        : pesoPorCx > 0
+          ? Math.max(1, Math.round(kgFinal / pesoPorCx))
+          : null
+
+    if (
+      (unidadeInput === 'KG' && (conversaoItem?.projetadoKg ?? 0) < 0) ||
+      (unidadeInput === 'CX' && (conversaoItem?.projetadoCx ?? 0) < 0)
+    ) {
       toastWarning(
-        `Atenção: "${prod.descricao}" possui ${fmtKg(prod.saldo_kg)} disponível no estoque atual (solicitado ${fmtKg(kg)}). Item adicionado mesmo assim.`
+        `Item incluído acima do estoque atual: "${produtoSelecionado.descricao}" ficará com saldo projetado negativo após o pedido.`
       )
     }
 
     setItensForm((prev) => {
-      const idx = prev.findIndex((i) => Number(i.produto_id) === pid)
+      const idx = prev.findIndex((i) => Number(i.produto_id) === Number(produtoSelecionado.id))
       if (idx >= 0) {
         const next = [...prev]
-        const novoKg = Number(next[idx].qtd_kg_solicitada || 0) + kg
+        const novoKg = Number(next[idx].qtd_kg_solicitada || 0) + kgFinal
+        const prevCx = next[idx].qtd_caixas_solicitada !== '' ? Number(next[idx].qtd_caixas_solicitada) : 0
         const novoCx =
-          cx !== '' || next[idx].qtd_caixas_solicitada !== ''
-            ? String((Number(next[idx].qtd_caixas_solicitada || 0) + Number(cx || 0)) || '')
+          cxFinal !== null || next[idx].qtd_caixas_solicitada !== ''
+            ? String(Number((prevCx + (cxFinal || 0)).toFixed(2)))
             : ''
         next[idx] = {
           ...next[idx],
@@ -221,22 +480,20 @@ export function Pedidos() {
       return [
         ...prev,
         {
-          produto_id: prod.id,
-          produto_codigo: prod.codigo,
-          produto_descricao: prod.descricao,
-          saldo_kg: Number(prod.saldo_kg || 0),
-          qtd_caixas_estoque: Number(prod.qtd_caixas || 0),
-          qtd_kg_solicitada: String(Number(kg.toFixed(3))),
-          qtd_caixas_solicitada: cx !== '' ? String(cx) : '',
+          produto_id: produtoSelecionado.id,
+          produto_codigo: produtoSelecionado.codigo,
+          produto_descricao: produtoSelecionado.descricao,
+          saldo_kg: Number(produtoSelecionado.saldo_kg || 0),
+          qtd_caixas_estoque: Number(produtoSelecionado.qtd_caixas || 0),
+          peso_medio_cx: pesoPorCx,
+          qtd_kg_solicitada: String(kgFinal),
+          qtd_caixas_solicitada: cxFinal !== null ? String(cxFinal) : '',
           observacao: obsItemInput.trim()
         }
       ]
     })
 
-    setProdutoSelecionadoId('')
-    setKgItemInput('')
-    setCxItemInput('')
-    setObsItemInput('')
+    limparCamposItem(true)
   }
 
   const handleSalvarPedido = async (liberar) => {
@@ -371,6 +628,7 @@ export function Pedidos() {
   }
 
   const totalFormKg = itensForm.reduce((s, i) => s + Number(String(i.qtd_kg_solicitada).replace(',', '.') || 0), 0)
+  const totalFormCx = itensForm.reduce((s, i) => s + Number(String(i.qtd_caixas_solicitada).replace(',', '.') || 0), 0)
 
   return (
     <div className="page-container">
@@ -387,14 +645,14 @@ export function Pedidos() {
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             type="button"
-            className={`btn ${aba === 'GERENCIADOR' ? 'btn-primary' : 'btn-secondary'}`}
+            className={`btn ${aba === 'GERENCIADOR' ? 'btn--primary' : 'btn--secondary'}`}
             onClick={() => setAba('GERENCIADOR')}
           >
             <ClipboardList size={16} /> Gerenciador de Pedidos
           </button>
           <button
             type="button"
-            className={`btn ${aba === 'FORM' ? 'btn-primary' : 'btn-success'}`}
+            className={`btn ${aba === 'FORM' ? 'btn--primary' : 'btn--success'}`}
             onClick={abrirNovoPedido}
           >
             <Plus size={16} /> Novo Pedido
@@ -435,14 +693,12 @@ export function Pedidos() {
             >
               <div style={{ flex: '1 1 240px' }}>
                 <label className="form-label">Buscar Pedido / Título / Cliente</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    className="form-input"
-                    placeholder="PED-0001, Título, PAVAN..."
-                    value={filtroBusca}
-                    onChange={(e) => setFiltroBusca(e.target.value)}
-                  />
-                </div>
+                <input
+                  className="form-input"
+                  placeholder="PED-0001, Título, PAVAN..."
+                  value={filtroBusca}
+                  onChange={(e) => setFiltroBusca(e.target.value)}
+                />
               </div>
               <div style={{ flex: '0 1 210px' }}>
                 <label className="form-label">Status</label>
@@ -465,10 +721,10 @@ export function Pedidos() {
                 <label className="form-label">Até</label>
                 <input type="date" className="form-input" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
               </div>
-              <button type="submit" className="btn btn-primary" disabled={loading}>
+              <button type="submit" className="btn btn--primary" disabled={loading}>
                 <Search size={15} /> Filtrar
               </button>
-              <button type="button" className="btn btn-secondary" onClick={carregarDados} disabled={loading}>
+              <button type="button" className="btn btn--secondary" onClick={carregarDados} disabled={loading}>
                 <RefreshCw size={15} /> Atualizar
               </button>
             </form>
@@ -499,7 +755,7 @@ export function Pedidos() {
                   </thead>
                   <tbody>
                     {pedidos.map((ped) => {
-                      const st = STATUS_BADGE[ped.status] || { label: ped.status, cls: 'badge-neutral' }
+                      const st = STATUS_BADGE[ped.status] || { label: ped.status, cls: 'badge--neutral' }
                       const pct =
                         Number(ped.total_kg_solicitado) > 0
                           ? Math.min(100, Math.round((Number(ped.total_kg_separado) / Number(ped.total_kg_solicitado)) * 100))
@@ -553,7 +809,7 @@ export function Pedidos() {
                             <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                               <button
                                 type="button"
-                                className="btn btn-secondary btn-sm"
+                                className="btn btn--secondary btn--sm"
                                 title="Ver detalhes do pedido"
                                 onClick={() => handleVerDetalhes(ped.id)}
                               >
@@ -561,7 +817,7 @@ export function Pedidos() {
                               </button>
                               <button
                                 type="button"
-                                className="btn btn-secondary btn-sm"
+                                className="btn btn--secondary btn--sm"
                                 title="Imprimir Folha do Pedido"
                                 onClick={() => handleImprimirFolhaPedido(ped.id)}
                               >
@@ -570,7 +826,7 @@ export function Pedidos() {
                               {podeImprimirRomaneio && (
                                 <button
                                   type="button"
-                                  className="btn btn-primary btn-sm"
+                                  className="btn btn--primary btn--sm"
                                   title="Imprimir Romaneio de Embarque"
                                   onClick={() => handleImprimirRomaneioEmbarque(ped)}
                                 >
@@ -580,7 +836,7 @@ export function Pedidos() {
                               {ped.status === 'RASCUNHO' && (
                                 <button
                                   type="button"
-                                  className="btn btn-success btn-sm"
+                                  className="btn btn--success btn--sm"
                                   title="Liberar para Separação"
                                   onClick={() => handleLiberar(ped)}
                                 >
@@ -590,7 +846,7 @@ export function Pedidos() {
                               {['RASCUNHO', 'LIBERADO'].includes(ped.status) && (
                                 <button
                                   type="button"
-                                  className="btn btn-secondary btn-sm"
+                                  className="btn btn--secondary btn--sm"
                                   title="Editar Pedido"
                                   onClick={() => abrirEditarPedido(ped.id)}
                                 >
@@ -600,7 +856,7 @@ export function Pedidos() {
                               {!['EXPEDIDO', 'CANCELADO'].includes(ped.status) && (
                                 <button
                                   type="button"
-                                  className="btn btn-danger btn-sm"
+                                  className="btn btn--danger btn--sm"
                                   title="Cancelar Pedido"
                                   onClick={() => handleCancelar(ped)}
                                 >
@@ -626,12 +882,12 @@ export function Pedidos() {
             <div>
               <h2 style={{ margin: 0 }}>{editId ? `Editando Pedido ${editCodigo}` : 'Novo Pedido de Saída'}</h2>
               <p className="text-muted text-xs" style={{ marginTop: '4px' }}>
-                Sem valores financeiros por enquanto — defina os produtos e o peso solicitado (kg) para separação na câmara.
+                Localize os produtos pelo código, pela descrição com autocomplete ou pela lupa, escolha KG ou CX e acompanhe o saldo projetado na hora.
               </p>
             </div>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn--secondary"
               onClick={() => {
                 resetarFormulario()
                 setAba('GERENCIADOR')
@@ -682,84 +938,421 @@ export function Pedidos() {
             />
           </div>
 
-          {/* Adicionar item */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: '8px', padding: '14px', marginBottom: '18px' }}>
-            <div style={{ fontWeight: 700, marginBottom: '10px', fontSize: '14px' }}>Adicionar Item do Cadastro de Produtos</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 120px 110px 1fr auto', gap: '10px', alignItems: 'end' }}>
+          {/* ── Novo Seletor Dinâmico de Produtos (Código + Autocomplete + Lupa + KG/CX) ── */}
+          <div
+            style={{
+              background: 'rgba(13, 20, 36, 0.9)',
+              border: '1px solid var(--border-light)',
+              borderRadius: '12px',
+              padding: '16px',
+              marginBottom: '20px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Package size={17} className="text-info" />
+                Lançar Item do Cadastro de Produtos
+              </div>
+              <span className="text-xs text-muted">
+                Digite o <strong>Código</strong>, pesquise na <strong>Descrição</strong> ou clique na <strong>Lupa</strong>
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '145px minmax(260px, 1.8fr) 205px minmax(140px, 1fr) auto',
+                gap: '10px',
+                alignItems: 'end'
+              }}
+            >
+              {/* 1. Campo Código */}
               <div>
-                <label className="form-label">Filtrar produto</label>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Código</span>
+                  {produtoSelecionado && (
+                    <span style={{ color: '#4ade80', fontWeight: 700, fontSize: '11px' }}>✓ OK</span>
+                  )}
+                </label>
                 <input
-                  className="form-input"
-                  placeholder="Código ou nome..."
-                  value={buscaProduto}
-                  onChange={(e) => setBuscaProduto(e.target.value)}
+                  ref={codigoRef}
+                  className="form-input font-mono"
+                  placeholder="Ex: 5897"
+                  value={codigoInput}
+                  onChange={(e) => handleCodigoChange(e.target.value)}
+                  onKeyDown={handleCodigoKeyDown}
                 />
               </div>
-              <div>
-                <label className="form-label">Produto *</label>
-                <select
-                  className="form-input"
-                  value={produtoSelecionadoId}
-                  onChange={(e) => setProdutoSelecionadoId(e.target.value)}
-                >
-                  <option value="">-- Selecione um produto --</option>
-                  {produtosFiltrados.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.codigo ? `[${p.codigo}] ` : ''}
-                      {p.descricao} — Disp: {Number(p.saldo_kg || 0).toFixed(2)} kg ({p.qtd_caixas} cx)
-                    </option>
-                  ))}
-                </select>
+
+              {/* 2. Campo Descrição com Autocomplete + 3. Botão Lupa */}
+              <div style={{ position: 'relative' }}>
+                <label className="form-label">Descrição do Produto *</label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      ref={descricaoRef}
+                      className="form-input"
+                      placeholder="Comece a digitar o nome do produto..."
+                      value={descricaoInput}
+                      onFocus={() => setMostrarSugestoes(true)}
+                      onBlur={() => setTimeout(() => setMostrarSugestoes(false), 160)}
+                      onChange={(e) => handleDescricaoChange(e.target.value)}
+                      onKeyDown={handleDescricaoKeyDown}
+                      style={{
+                        paddingRight: descricaoInput ? '30px' : undefined,
+                        borderColor: produtoSelecionado ? 'var(--success)' : undefined
+                      }}
+                    />
+                    {descricaoInput && (
+                      <button
+                        type="button"
+                        title="Limpar seleção"
+                        onClick={() => limparCamposItem(false)}
+                        style={{
+                          position: 'absolute',
+                          right: '8px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          padding: '2px'
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--icon"
+                    title="Pesquisar produto na tabela completa (Lupa)"
+                    onClick={() => {
+                      setModalBuscaTexto(descricaoInput || codigoInput || '')
+                      setModalBuscaAberto(true)
+                    }}
+                    style={{ height: '40px', width: '42px', justifyContent: 'center', flexShrink: 0 }}
+                  >
+                    <Search size={17} />
+                  </button>
+                </div>
+
+                {/* Lista de Sugestões de Autocomplete */}
+                {mostrarSugestoes && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      left: 0,
+                      right: '48px',
+                      zIndex: 80,
+                      background: '#0f172a',
+                      border: '1px solid var(--accent)',
+                      borderRadius: '10px',
+                      boxShadow: '0 16px 36px rgba(0,0,0,0.75)',
+                      maxHeight: '290px',
+                      overflowY: 'auto'
+                    }}
+                  >
+                    {sugestoesProdutos.length === 0 ? (
+                      <div style={{ padding: '12px 14px', fontSize: '12.5px', color: '#94a3b8' }}>
+                        Nenhum produto encontrado para "{descricaoInput}". Use a lupa para explorar o cadastro.
+                      </div>
+                    ) : (
+                      sugestoesProdutos.map((p, idx) => {
+                        const ativo = idx === indiceSugestao
+                        const temSaldo = Number(p.saldo_kg || 0) > 0
+                        return (
+                          <div
+                            key={p.id}
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              aplicarProdutoSelecionado(p, true)
+                            }}
+                            onMouseEnter={() => setIndiceSugestao(idx)}
+                            style={{
+                              padding: '9px 12px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: '10px',
+                              borderBottom: '1px solid rgba(51, 65, 85, 0.5)',
+                              background: ativo ? 'rgba(59, 130, 246, 0.22)' : 'transparent'
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span
+                                  className="font-mono"
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    color: '#38bdf8',
+                                    background: 'rgba(56, 189, 248, 0.14)',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px'
+                                  }}
+                                >
+                                  {p.codigo || 'S/C'}
+                                </span>
+                                <span style={{ fontWeight: 700, fontSize: '13px', color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {p.descricao}
+                                </span>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0, fontSize: '11.5px', fontFamily: 'var(--font-mono)' }}>
+                              <span style={{ color: temSaldo ? '#4ade80' : '#94a3b8', fontWeight: 700 }}>
+                                {fmtKg(p.saldo_kg)}
+                              </span>
+                              <span style={{ color: '#94a3b8', marginLeft: '6px' }}>({p.qtd_caixas} cx)</span>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* 4. Quantidade + Seletor KG / CX */}
               <div>
-                <label className="form-label">Qtd (kg) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  className="form-input"
-                  placeholder="Ex: 40"
-                  value={kgItemInput}
-                  onChange={(e) => setKgItemInput(e.target.value)}
-                />
+                <label className="form-label">Quantidade ({unidadeInput}) *</label>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'stretch' }}>
+                  <input
+                    ref={qtdRef}
+                    type="number"
+                    step={unidadeInput === 'KG' ? '0.01' : '1'}
+                    min="0.01"
+                    className="form-input font-mono"
+                    placeholder={unidadeInput === 'KG' ? 'Ex: 40' : 'Ex: 2'}
+                    value={qtdInput}
+                    onChange={(e) => setQtdInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleAdicionarItem()
+                      }
+                    }}
+                    style={{ flex: 1, minWidth: '80px', fontWeight: 700 }}
+                  />
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      background: 'var(--bg-1)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      padding: '2px',
+                      gap: '2px'
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleTrocarUnidade('KG')}
+                      style={{
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '0 10px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: unidadeInput === 'KG' ? 'var(--accent)' : 'transparent',
+                        color: unidadeInput === 'KG' ? '#ffffff' : 'var(--text-secondary)'
+                      }}
+                    >
+                      KG
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTrocarUnidade('CX')}
+                      style={{
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '0 10px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: unidadeInput === 'CX' ? 'var(--accent)' : 'transparent',
+                        color: unidadeInput === 'CX' ? '#ffffff' : 'var(--text-secondary)'
+                      }}
+                    >
+                      CX
+                    </button>
+                  </div>
+                </div>
               </div>
+
+              {/* 5. Observação do item */}
               <div>
-                <label className="form-label">Cx Prev.</label>
-                <input
-                  type="number"
-                  step="1"
-                  min="0"
-                  className="form-input"
-                  placeholder="Opcional"
-                  value={cxItemInput}
-                  onChange={(e) => setCxItemInput(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="form-label">Obs. item</label>
+                <label className="form-label">Obs. do Item</label>
                 <input
                   className="form-input"
                   placeholder="Opcional"
                   value={obsItemInput}
                   onChange={(e) => setObsItemInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleAdicionarItem()
+                    }
+                  }}
                 />
               </div>
-              <button type="button" className="btn btn-primary" onClick={handleAdicionarItem}>
+
+              <button type="button" className="btn btn--primary" style={{ height: '40px' }} onClick={handleAdicionarItem}>
                 <Plus size={16} /> Adicionar
               </button>
             </div>
+
+            {/* Painel Dinâmico de Estoque Atual, Conversão KG<->CX e Saldo Projetado */}
+            {produtoSelecionado && conversaoItem && (
+              <div
+                style={{
+                  marginTop: '14px',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  background: '#0d1526',
+                  border:
+                    (unidadeInput === 'KG' ? conversaoItem.projetadoKg : conversaoItem.projetadoCx) < 0
+                      ? '1px solid #f59e0b'
+                      : '1px solid rgba(56, 189, 248, 0.35)',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '16px'
+                }}
+              >
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center' }}>
+                  <div>
+                    <div className="text-xs text-muted" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Produto Selecionado
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#f8fafc' }}>
+                      {produtoSelecionado.codigo ? `[${produtoSelecionado.codigo}] ` : ''}
+                      {produtoSelecionado.descricao}
+                    </div>
+                    <div className="text-xs" style={{ color: '#94a3b8', marginTop: '2px' }}>
+                      Cadastro: <strong>{produtoSelecionado.unidade || 'CX'}</strong>
+                      {conversaoItem.pesoMedioCadastro > 0 ? (
+                        <>
+                          {' '}• Peso médio/cx: <strong>{conversaoItem.pesoMedioCadastro.toFixed(2)} kg/cx</strong>
+                        </>
+                      ) : (
+                        <> • Sem peso médio histórico de caixa</>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Estoque Atual na Unidade Selecionada */}
+                  <div style={{ paddingLeft: '14px', borderLeft: '1px solid var(--border)' }}>
+                    <div className="text-xs text-muted" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {unidadeInput === 'KG' ? <Scale size={12} /> : <Box size={12} />}
+                      ESTOQUE ATUAL ({unidadeInput})
+                    </div>
+                    <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#38bdf8' }}>
+                      {unidadeInput === 'KG' ? fmtKg(conversaoItem.saldoAtualKg) : fmtCx(conversaoItem.saldoAtualCx)}
+                    </div>
+                    <div className="text-xs text-muted font-mono">
+                      {unidadeInput === 'KG'
+                        ? `Equiv.: ${fmtCx(conversaoItem.saldoAtualCx)}`
+                        : `Equiv.: ${fmtKg(conversaoItem.saldoAtualKg)}`}
+                    </div>
+                  </div>
+
+                  {/* Este Lançamento + Equivalente */}
+                  <div style={{ paddingLeft: '14px', borderLeft: '1px solid var(--border)' }}>
+                    <div className="text-xs text-muted">SOLICITADO NESTE ITEM</div>
+                    <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#e2e8f0' }}>
+                      {unidadeInput === 'KG' ? fmtKg(conversaoItem.lancamentoKg) : fmtCx(conversaoItem.lancamentoCx)}
+                    </div>
+                    <div className="text-xs text-muted font-mono">
+                      {conversaoItem.pesoPorCx > 0
+                        ? unidadeInput === 'KG'
+                          ? `≈ ${fmtCx(conversaoItem.lancamentoCx)}`
+                          : `≈ ${fmtKg(conversaoItem.lancamentoKg)}`
+                        : 'Conversão p/ cx indisponível'}
+                    </div>
+                  </div>
+
+                  {/* Saldo Projetado Após Pedido na Unidade Selecionada */}
+                  <div style={{ paddingLeft: '14px', borderLeft: '1px solid var(--border)' }}>
+                    <div className="text-xs text-muted">PROJETADO APÓS PEDIDO ({unidadeInput})</div>
+                    {(() => {
+                      const valProj = unidadeInput === 'KG' ? conversaoItem.projetadoKg : conversaoItem.projetadoCx
+                      const negativo = valProj < 0
+                      return (
+                        <>
+                          <div
+                            className="font-mono"
+                            style={{
+                              fontSize: '18px',
+                              fontWeight: 800,
+                              color: negativo ? '#fbbf24' : '#4ade80'
+                            }}
+                          >
+                            {unidadeInput === 'KG' ? fmtKg(conversaoItem.projetadoKg) : fmtCx(conversaoItem.projetadoCx)}
+                          </div>
+                          <div className="text-xs font-mono" style={{ color: negativo ? '#fcd34d' : '#94a3b8' }}>
+                            {unidadeInput === 'KG'
+                              ? conversaoItem.pesoPorCx > 0
+                                ? `≈ ${fmtCx(conversaoItem.projetadoCx)}`
+                                : ''
+                              : `≈ ${fmtKg(conversaoItem.projetadoKg)}`}
+                            {conversaoItem.kgJaNoPedido > 0 && ` (inclui ${fmtKg(conversaoItem.kgJaNoPedido)} já no pedido)`}
+                          </div>
+                        </>
+                      )
+                    })()}
+                  </div>
+                </div>
+
+                {/* Fallback manual caso o usuário selecione CX para produto que nunca teve caixa pesada */}
+                {conversaoItem.precisaPesoManualCx && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      background: '#2c1f09',
+                      border: '1px solid #f59e0b',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      color: '#fde68a'
+                    }}
+                  >
+                    <AlertTriangle size={16} />
+                    <span className="text-xs">Sem histórico de peso/cx. Informe kg por caixa:</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      className="form-input font-mono"
+                      placeholder="Ex: 20"
+                      value={pesoManualCxInput}
+                      onChange={(e) => setPesoManualCxInput(e.target.value)}
+                      style={{ width: '90px', height: '32px', padding: '4px 8px' }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Lista de itens */}
           <div style={{ marginBottom: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
               <strong>Itens do Pedido ({itensForm.length})</strong>
-              <span className="font-mono font-bold">Total Solicitado: {fmtKg(totalFormKg)}</span>
+              <span className="font-mono font-bold">
+                Total Solicitado: {fmtKg(totalFormKg)} {totalFormCx > 0 ? `• ~${fmtCx(totalFormCx)}` : ''}
+              </span>
             </div>
 
             {itensForm.length === 0 ? (
               <div className="text-muted text-sm" style={{ padding: '20px', textAlign: 'center', border: '1px dashed rgba(148, 163, 184, 0.3)', borderRadius: '6px' }}>
-                Nenhum item adicionado ainda. Use o formulário acima para incluir os produtos solicitados.
+                Nenhum item adicionado ainda. Use os campos acima (Código, Descrição ou Lupa) para incluir os produtos solicitados.
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -768,9 +1361,10 @@ export function Pedidos() {
                     <tr>
                       <th>Código</th>
                       <th>Produto</th>
-                      <th style={{ textAlign: 'right' }}>Saldo em Estoque</th>
+                      <th style={{ textAlign: 'right' }}>Estoque Atual</th>
                       <th style={{ width: '140px' }}>Kg Solicitado *</th>
                       <th style={{ width: '110px' }}>Cx Previstas</th>
+                      <th style={{ textAlign: 'right' }}>Saldo Projetado</th>
                       <th>Obs.</th>
                       <th style={{ textAlign: 'right' }}>Remover</th>
                     </tr>
@@ -778,31 +1372,60 @@ export function Pedidos() {
                   <tbody>
                     {itensForm.map((item, idx) => {
                       const kgNum = Number(String(item.qtd_kg_solicitada).replace(',', '.') || 0)
-                      const abaixoEstoque = kgNum > Number(item.saldo_kg || 0)
+                      const cxNum = Number(String(item.qtd_caixas_solicitada).replace(',', '.') || 0)
+                      const projKg = Number((Number(item.saldo_kg || 0) - kgNum).toFixed(2))
+                      const projCx = Number((Number(item.qtd_caixas_estoque || 0) - cxNum).toFixed(2))
+                      const abaixoEstoque = projKg < 0
                       return (
                         <tr key={item.produto_id}>
                           <td className="font-mono">{item.produto_codigo || '-'}</td>
                           <td>
                             <div style={{ fontWeight: 700 }}>{item.produto_descricao}</div>
                             {abaixoEstoque && (
-                              <div style={{ color: '#f59e0b', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                                <AlertTriangle size={12} /> Solicitado acima do estoque atual ({fmtKg(item.saldo_kg)})
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  marginTop: '4px',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  background: '#2c1f09',
+                                  border: '1px solid #f59e0b',
+                                  color: '#fde68a',
+                                  fontSize: '11px',
+                                  fontWeight: 600
+                                }}
+                              >
+                                <AlertTriangle size={12} /> Solicitado acima do estoque atual
                               </div>
                             )}
                           </td>
                           <td style={{ textAlign: 'right' }} className="font-mono">
-                            {fmtKg(item.saldo_kg)} ({item.qtd_caixas_estoque} cx)
+                            <div>{fmtKg(item.saldo_kg)}</div>
+                            <div className="text-xs text-muted">{fmtCx(item.qtd_caixas_estoque)}</div>
                           </td>
                           <td>
                             <input
                               type="number"
                               step="0.01"
                               min="0.01"
-                              className="form-input"
+                              className="form-input font-mono"
                               value={item.qtd_kg_solicitada}
                               onChange={(e) => {
                                 const v = e.target.value
-                                setItensForm((prev) => prev.map((r, i) => (i === idx ? { ...r, qtd_kg_solicitada: v } : r)))
+                                const kg = Number(String(v).replace(',', '.') || 0)
+                                setItensForm((prev) =>
+                                  prev.map((r, i) => {
+                                    if (i !== idx) return r
+                                    const pm = Number(r.peso_medio_cx || 0)
+                                    return {
+                                      ...r,
+                                      qtd_kg_solicitada: v,
+                                      qtd_caixas_solicitada: pm > 0 && kg > 0 ? String(Math.max(1, Math.round(kg / pm))) : r.qtd_caixas_solicitada
+                                    }
+                                  })
+                                )
                               }}
                             />
                           </td>
@@ -811,13 +1434,21 @@ export function Pedidos() {
                               type="number"
                               step="1"
                               min="0"
-                              className="form-input"
+                              className="form-input font-mono"
                               value={item.qtd_caixas_solicitada}
                               onChange={(e) => {
                                 const v = e.target.value
                                 setItensForm((prev) => prev.map((r, i) => (i === idx ? { ...r, qtd_caixas_solicitada: v } : r)))
                               }}
                             />
+                          </td>
+                          <td style={{ textAlign: 'right' }} className="font-mono">
+                            <div style={{ fontWeight: 700, color: projKg < 0 ? '#fbbf24' : '#4ade80' }}>
+                              {fmtKg(projKg)}
+                            </div>
+                            <div className="text-xs" style={{ color: projCx < 0 ? '#fcd34d' : '#94a3b8' }}>
+                              {item.qtd_caixas_solicitada ? fmtCx(projCx) : '-'}
+                            </div>
                           </td>
                           <td>
                             <input
@@ -832,7 +1463,7 @@ export function Pedidos() {
                           <td style={{ textAlign: 'right' }}>
                             <button
                               type="button"
-                              className="btn btn-danger btn-sm"
+                              className="btn btn--danger btn--sm"
                               onClick={() => setItensForm((prev) => prev.filter((_, i) => i !== idx))}
                             >
                               <Trash2 size={14} />
@@ -848,12 +1479,116 @@ export function Pedidos() {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => handleSalvarPedido(false)}>
+            <button type="button" className="btn btn--secondary" disabled={loading} onClick={() => handleSalvarPedido(false)}>
               Salvar como Rascunho
             </button>
-            <button type="button" className="btn btn-success" disabled={loading} onClick={() => handleSalvarPedido(true)}>
+            <button type="button" className="btn btn--success" disabled={loading} onClick={() => handleSalvarPedido(true)}>
               <Send size={16} /> Liberar Pedido para Separação
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════ MODAL LUPA: TABELA DE PRODUTOS ══════════════════ */}
+      {modalBuscaAberto && (
+        <div
+          className="modal-overlay"
+          style={{ padding: '16px' }}
+          onClick={() => setModalBuscaAberto(false)}
+        >
+          <div
+            className="card"
+            style={{ width: '960px', maxWidth: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', padding: '20px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '12px' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Search size={19} className="text-info" /> Pesquisar Produto no Cadastro
+                </h2>
+                <div className="text-muted text-xs" style={{ marginTop: '2px' }}>
+                  Clique em qualquer linha para selecionar o produto automaticamente.
+                </div>
+              </div>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModalBuscaAberto(false)}>
+                <X size={15} /> Fechar
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 280px' }}>
+                <input
+                  ref={modalBuscaRef}
+                  className="form-input"
+                  placeholder="Filtrar por código, EAN, descrição ou grupo..."
+                  value={modalBuscaTexto}
+                  onChange={(e) => setModalBuscaTexto(e.target.value)}
+                />
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                <input
+                  type="checkbox"
+                  checked={modalSomenteComSaldo}
+                  onChange={(e) => setModalSomenteComSaldo(e.target.checked)}
+                />
+                Somente com saldo disponível (&gt; 0)
+              </label>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, border: '1px solid var(--border)', borderRadius: '8px' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '110px' }}>Código</th>
+                    <th>Descrição</th>
+                    <th style={{ width: '75px' }}>Unid.</th>
+                    <th style={{ textAlign: 'right', width: '120px' }}>Estoque (KG)</th>
+                    <th style={{ textAlign: 'right', width: '95px' }}>Estoque (CX)</th>
+                    <th style={{ textAlign: 'right', width: '110px' }}>Média kg/cx</th>
+                    <th style={{ textAlign: 'right', width: '110px' }}>Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {produtosModalFiltrados.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '28px' }} className="text-muted">
+                        Nenhum produto encontrado para o filtro informado.
+                      </td>
+                    </tr>
+                  ) : (
+                    produtosModalFiltrados.map((p) => (
+                      <tr
+                        key={p.id}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          aplicarProdutoSelecionado(p, true)
+                          setModalBuscaAberto(false)
+                        }}
+                      >
+                        <td className="font-mono font-bold" style={{ color: '#38bdf8' }}>{p.codigo || '-'}</td>
+                        <td>
+                          <div style={{ fontWeight: 700 }}>{p.descricao}</div>
+                          {p.grupo && <div className="text-xs text-muted">{p.grupo}</div>}
+                        </td>
+                        <td className="font-mono">{p.unidade || 'CX'}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: Number(p.saldo_kg) > 0 ? '#4ade80' : '#94a3b8' }} className="font-mono">
+                          {fmtKg(p.saldo_kg)}
+                        </td>
+                        <td style={{ textAlign: 'right' }} className="font-mono">{fmtCx(p.qtd_caixas)}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono text-muted">
+                          {Number(p.peso_medio_cx) > 0 ? `${Number(p.peso_medio_cx).toFixed(2)} kg` : '-'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button type="button" className="btn btn--primary btn--sm">
+                            Selecionar
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -861,16 +1596,8 @@ export function Pedidos() {
       {/* Modal de Detalhes do Pedido */}
       {pedidoDetalhe && (
         <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(2, 6, 23, 0.78)',
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
+          className="modal-overlay"
+          style={{ padding: '16px' }}
         >
           <div className="card" style={{ width: '920px', maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px', gap: '12px' }}>
@@ -884,7 +1611,7 @@ export function Pedidos() {
                   {pedidoDetalhe.romaneio_codigo ? ` • Romaneio: ${pedidoDetalhe.romaneio_codigo}` : ''}
                 </div>
               </div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPedidoDetalhe(null)}>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setPedidoDetalhe(null)}>
                 <X size={16} /> Fechar
               </button>
             </div>
@@ -938,7 +1665,7 @@ export function Pedidos() {
                           <td>
                             {cx.produto_descricao}
                             {Number(cx.extra_fora_pedido) === 1 && (
-                              <span className="badge badge-warning" style={{ marginLeft: '6px' }}>Extra</span>
+                              <span className="badge badge--warning" style={{ marginLeft: '6px' }}>Extra</span>
                             )}
                           </td>
                           <td className="font-mono">{cx.ean_caixa}</td>
@@ -947,9 +1674,9 @@ export function Pedidos() {
                           <td style={{ textAlign: 'right' }}>{fmtKg(cx.peso_kg)}</td>
                           <td style={{ textAlign: 'center' }}>
                             {Number(cx.conferido) === 1 ? (
-                              <span className="badge badge-success">Conferida</span>
+                              <span className="badge badge--success">Conferida</span>
                             ) : (
-                              <span className="badge badge-neutral">Pendente</span>
+                              <span className="badge badge--neutral">Pendente</span>
                             )}
                           </td>
                         </tr>
@@ -963,7 +1690,7 @@ export function Pedidos() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn--secondary"
                 onClick={() => {
                   setPrintPedido(pedidoDetalhe)
                 }}
@@ -974,7 +1701,7 @@ export function Pedidos() {
                 ['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA', 'EXPEDIDO'].includes(pedidoDetalhe.status) && (
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn btn--primary"
                     onClick={async () => {
                       const rom = await saidaQueries.detalhesRomaneio(pedidoDetalhe.romaneio_id)
                       setPrintRomaneio(rom)

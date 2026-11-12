@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LogOut,
   Plus,
@@ -472,7 +472,7 @@ export function Saida() {
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
-            className={`btn ${aba === 'SEPARACAO' ? 'btn-primary' : 'btn-secondary'}`}
+            className={`btn ${aba === 'SEPARACAO' ? 'btn--primary' : 'btn--secondary'}`}
             onClick={() => setAba('SEPARACAO')}
           >
             📦 Separação de Pedidos
@@ -480,18 +480,18 @@ export function Saida() {
           {podeExpedir && (
             <button
               type="button"
-              className={`btn ${aba === 'EXPEDICAO' ? 'btn-primary' : 'btn-secondary'}`}
+              className={`btn ${aba === 'EXPEDICAO' ? 'btn--primary' : 'btn--secondary'}`}
               onClick={() => setAba('EXPEDICAO')}
             >
               🚚 Conferência &amp; Expedição
               {romaneiosExpedicao.length > 0 && (
-                <span className="badge badge-warning" style={{ marginLeft: '6px' }}>{romaneiosExpedicao.length}</span>
+                <span className="badge badge--warning" style={{ marginLeft: '6px' }}>{romaneiosExpedicao.length}</span>
               )}
             </button>
           )}
           <button
             type="button"
-            className={`btn ${aba === 'HISTORICO' ? 'btn-primary' : 'btn-secondary'}`}
+            className={`btn ${aba === 'HISTORICO' ? 'btn--primary' : 'btn--secondary'}`}
             onClick={() => setAba('HISTORICO')}
           >
             🕓 Histórico
@@ -530,7 +530,7 @@ export function Saida() {
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
-                  className="btn btn-primary"
+                  className="btn btn--primary"
                   onClick={() => setPrintRomaneio(ultimoFinalizado)}
                 >
                   <Printer size={16} /> Imprimir Romaneio de Embarque
@@ -538,7 +538,7 @@ export function Saida() {
                 {podeExpedir && (
                   <button
                     type="button"
-                    className="btn btn-success"
+                    className="btn btn--success"
                     onClick={() => {
                       setAba('EXPEDICAO')
                       carregarExpedicao(ultimoFinalizado.id)
@@ -562,7 +562,7 @@ export function Saida() {
                   Clique em um pedido abaixo para iniciar ou continuar a bipagem das caixas.
                 </p>
               </div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={carregarFilaSeparacao} disabled={loading}>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={carregarFilaSeparacao} disabled={loading}>
                 Atualizar Fila
               </button>
             </div>
@@ -597,7 +597,7 @@ export function Saida() {
                           <span className="font-mono font-bold" style={{ fontSize: '13px', color: '#38bdf8' }}>
                             {ped.codigo}{ped.romaneio_codigo ? ` • ${ped.romaneio_codigo}` : ''}
                           </span>
-                          <span className={`badge ${emAndamento ? 'badge-warning' : 'badge-info'}`}>
+                          <span className={`badge ${emAndamento ? 'badge--warning' : 'badge--info'}`}>
                             {emAndamento ? 'Em Separação' : 'Liberado'}
                           </span>
                         </div>
@@ -622,7 +622,7 @@ export function Saida() {
                         </div>
                         <button
                           type="button"
-                          className={`btn ${emAndamento ? 'btn-warning' : 'btn-primary'}`}
+                          className={`btn ${emAndamento ? 'btn--warning' : 'btn--primary'}`}
                           style={{ width: '100%', justifyContent: 'center' }}
                           onClick={() => handleSelecionarPedido(ped)}
                         >
@@ -649,7 +649,7 @@ export function Saida() {
                   <button
                     key={r.id}
                     type="button"
-                    className="btn btn-secondary"
+                    className="btn btn--secondary"
                     onClick={async () => setRomaneioAtual(await saidaQueries.detalhesRomaneio(r.id))}
                   >
                     {r.codigo} — {r.cliente} ({r.total_caixas} cx / {fmtKg(r.total_peso)})
@@ -663,7 +663,7 @@ export function Saida() {
           <div style={{ marginTop: '24px', textAlign: 'center' }}>
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn btn--secondary btn--sm"
               style={{ opacity: 0.65, fontSize: '12px' }}
               onClick={() => setMostrarEmergencia((v) => !v)}
             >
@@ -698,7 +698,7 @@ export function Saida() {
                       onChange={(e) => setAvulsoPrevisao(e.target.value)}
                     />
                   </div>
-                  <button type="submit" className="btn btn-warning" disabled={loading}>
+                  <button type="submit" className="btn btn--warning" disabled={loading}>
                     <Plus size={15} /> Abrir
                   </button>
                 </div>
@@ -716,9 +716,9 @@ export function Saida() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span className="badge badge-info font-mono">{romaneioAtual.codigo}</span>
+                  <span className="badge badge--info font-mono">{romaneioAtual.codigo}</span>
                   {romaneioAtual.pedido_codigo && (
-                    <span className="badge badge-purple font-mono">{romaneioAtual.pedido_codigo}</span>
+                    <span className="badge badge--purple font-mono">{romaneioAtual.pedido_codigo}</span>
                   )}
                   <span className="text-muted text-xs">Separador: {romaneioAtual.operador_nome}</span>
                 </div>
@@ -735,7 +735,7 @@ export function Saida() {
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn--secondary"
                   onClick={() => {
                     setRomaneioAtual(null)
                     carregarFilaSeparacao()
@@ -743,10 +743,10 @@ export function Saida() {
                 >
                   ← Voltar à Fila
                 </button>
-                <button type="button" className="btn btn-danger" onClick={handleExcluirRomaneioAberto}>
+                <button type="button" className="btn btn--danger" onClick={handleExcluirRomaneioAberto}>
                   <Trash2 size={15} /> Excluir
                 </button>
-                <button type="button" className="btn btn-success" onClick={handleSolicitarFinalizarSeparacao}>
+                <button type="button" className="btn btn--success" onClick={handleSolicitarFinalizarSeparacao}>
                   <CheckCircle2 size={16} /> Finalizar Separação
                 </button>
               </div>
@@ -811,11 +811,11 @@ export function Saida() {
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             {excedeu50 ? (
-                              <span className="badge badge-warning">Acima +50%</span>
+                              <span className="badge badge--warning">Acima +50%</span>
                             ) : completo ? (
-                              <span className="badge badge-success">Atendido</span>
+                              <span className="badge badge--success">Atendido</span>
                             ) : (
-                              <span className="badge badge-neutral">Pendente</span>
+                              <span className="badge badge--neutral">Pendente</span>
                             )}
                           </td>
                         </tr>
@@ -846,7 +846,7 @@ export function Saida() {
                 onChange={(e) => setCodigoInput(e.target.value)}
                 style={{ fontSize: '15px', fontFamily: 'monospace' }}
               />
-              <button type="submit" className="btn btn-primary">Adicionar Caixa</button>
+              <button type="submit" className="btn btn--primary">Adicionar Caixa</button>
             </form>
           </div>
 
@@ -880,7 +880,7 @@ export function Saida() {
                         <td>
                           <span style={{ fontWeight: 700 }}>{item.produto_descricao}</span>
                           {Number(item.extra_fora_pedido) === 1 && (
-                            <span className="badge badge-warning" style={{ marginLeft: '8px' }}>Fora do Pedido (Confirmado)</span>
+                            <span className="badge badge--warning" style={{ marginLeft: '8px' }}>Fora do Pedido (Confirmado)</span>
                           )}
                         </td>
                         <td className="font-mono">{item.ean_caixa}</td>
@@ -891,7 +891,7 @@ export function Saida() {
                         <td style={{ textAlign: 'right' }}>
                           <button
                             type="button"
-                            className="btn btn-danger btn-sm"
+                            className="btn btn--danger btn--sm"
                             title="Remover caixa da separação e devolver ao estoque"
                             onClick={() => handleRemoverCaixa(item)}
                           >
@@ -915,7 +915,7 @@ export function Saida() {
           <div className="card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <h2 style={{ margin: 0, fontSize: '16px' }}>Aguardando Conferência ({romaneiosExpedicao.length})</h2>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => carregarExpedicao()}>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => carregarExpedicao()}>
                 Atualizar
               </button>
             </div>
@@ -950,7 +950,7 @@ export function Saida() {
                         <span className="font-mono font-bold" style={{ fontSize: '13px' }}>
                           {rom.codigo}{rom.pedido_codigo ? ` • ${rom.pedido_codigo}` : ''}
                         </span>
-                        <span className={`badge ${completo ? 'badge-success' : 'badge-warning'}`}>
+                        <span className={`badge ${completo ? 'badge--success' : 'badge--warning'}`}>
                           {conf}/{tot} cx conf.
                         </span>
                       </div>
@@ -961,7 +961,7 @@ export function Saida() {
                       <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
                         <button
                           type="button"
-                          className="btn btn-secondary btn-sm"
+                          className="btn btn--secondary btn--sm"
                           style={{ flex: 1, justifyContent: 'center' }}
                           onClick={(e) => {
                             e.stopPropagation()
@@ -984,11 +984,11 @@ export function Saida() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
                 <div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span className="badge badge-info font-mono">{romaneioConfAtual.codigo}</span>
+                    <span className="badge badge--info font-mono">{romaneioConfAtual.codigo}</span>
                     {romaneioConfAtual.pedido_codigo && (
-                      <span className="badge badge-purple font-mono">{romaneioConfAtual.pedido_codigo}</span>
+                      <span className="badge badge--purple font-mono">{romaneioConfAtual.pedido_codigo}</span>
                     )}
-                    <span className={`badge ${romaneioConfAtual.conferenciasSummary?.todasConferidas ? 'badge-success' : 'badge-warning'}`}>
+                    <span className={`badge ${romaneioConfAtual.conferenciasSummary?.todasConferidas ? 'badge--success' : 'badge--warning'}`}>
                       {romaneioConfAtual.conferenciasSummary?.todasConferidas
                         ? '100% Conferido — Pronto p/ Expedir'
                         : `Conferência: ${romaneioConfAtual.conferenciasSummary?.qtdConferidas || 0} / ${romaneioConfAtual.conferenciasSummary?.totalCaixas || 0} caixas`}
@@ -1006,21 +1006,21 @@ export function Saida() {
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
-                    className="btn btn-secondary"
+                    className="btn btn--secondary"
                     onClick={() => handleAbrirRomaneioImpressao(romaneioConfAtual.id)}
                   >
                     <Printer size={16} /> Imprimir Romaneio de Embarque
                   </button>
                   <button
                     type="button"
-                    className="btn btn-secondary"
+                    className="btn btn--secondary"
                     onClick={() => handleReabrirSeparacao(romaneioConfAtual)}
                   >
                     <RotateCcw size={15} /> Reabrir Separação
                   </button>
                   <button
                     type="button"
-                    className="btn btn-success"
+                    className="btn btn--success"
                     disabled={loading || !romaneioConfAtual.conferenciasSummary?.todasConferidas}
                     title={
                       romaneioConfAtual.conferenciasSummary?.todasConferidas
@@ -1085,7 +1085,7 @@ export function Saida() {
                   onChange={(e) => setConfCodigoInput(e.target.value)}
                   style={{ fontSize: '15px', fontFamily: 'monospace' }}
                 />
-                <button type="submit" className="btn btn-primary">Conferir Caixa</button>
+                <button type="submit" className="btn btn--primary">Conferir Caixa</button>
               </form>
 
               {confErroBanner && (
@@ -1128,9 +1128,9 @@ export function Saida() {
                         >
                           <td>
                             {ok ? (
-                              <span className="badge badge-success">✅ Conferida</span>
+                              <span className="badge badge--success">✅ Conferida</span>
                             ) : (
-                              <span className="badge badge-warning">⏳ Pendente</span>
+                              <span className="badge badge--warning">⏳ Pendente</span>
                             )}
                           </td>
                           <td style={{ fontWeight: 700 }}>{cx.produto_descricao}</td>
@@ -1175,12 +1175,12 @@ export function Saida() {
                 <label className="form-label">Previsão Entrega</label>
                 <input type="date" className="form-input" value={previsaoFiltro} onChange={(e) => setPrevisaoFiltro(e.target.value)} />
               </div>
-              <button type="submit" className="btn btn-primary" disabled={loading}>
+              <button type="submit" className="btn btn--primary" disabled={loading}>
                 <Search size={15} /> Filtrar
               </button>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn--secondary"
                 onClick={() => {
                   setDataInicio('')
                   setDataFim('')
@@ -1255,14 +1255,14 @@ export function Saida() {
                               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                                 <button
                                   type="button"
-                                  className="btn btn-primary btn-sm"
+                                  className="btn btn--primary btn--sm"
                                   onClick={() => handleAbrirRomaneioImpressao(rom.id)}
                                 >
                                   <Printer size={14} /> Romaneio
                                 </button>
                                 <button
                                   type="button"
-                                  className="btn btn-secondary btn-sm"
+                                  className="btn btn--secondary btn--sm"
                                   onClick={() => handleToggleHistDetalhes(rom.id)}
                                 >
                                   {aberto ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
@@ -1339,10 +1339,10 @@ export function Saida() {
               ))}
             </ul>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setFefoAlerta(null)}>
+              <button type="button" className="btn btn--secondary" onClick={() => setFefoAlerta(null)}>
                 Cancelar
               </button>
-              <button type="button" className="btn btn-warning" onClick={confirmarFefo}>
+              <button type="button" className="btn btn--warning" onClick={confirmarFefo}>
                 Separar esta caixa mesmo assim
               </button>
             </div>
@@ -1373,10 +1373,10 @@ export function Saida() {
             </h3>
             <p style={{ fontSize: '14px', lineHeight: 1.5 }}>{regraAlerta.mensagem}</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setRegraAlerta(null)}>
+              <button type="button" className="btn btn--secondary" onClick={() => setRegraAlerta(null)}>
                 Não incluir
               </button>
-              <button type="button" className="btn btn-warning" onClick={confirmarRegraPedido}>
+              <button type="button" className="btn btn--warning" onClick={confirmarRegraPedido}>
                 Confirmar e Incluir Caixa
               </button>
             </div>
@@ -1413,10 +1413,10 @@ export function Saida() {
               ))}
             </ul>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setModalFinalizarParcial(null)}>
+              <button type="button" className="btn btn--secondary" onClick={() => setModalFinalizarParcial(null)}>
                 Continuar Separando
               </button>
-              <button type="button" className="btn btn-success" onClick={executarFinalizacaoSeparacao}>
+              <button type="button" className="btn btn--success" onClick={executarFinalizacaoSeparacao}>
                 Finalizar Mesmo Assim
               </button>
             </div>

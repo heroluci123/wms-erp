@@ -25,7 +25,7 @@ export function ToastContainer() {
           </div>
           <button
             onClick={() => removeToast(toast.id)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#cbd5e1', padding: 2 }}
           >
             <X size={14} />
           </button>

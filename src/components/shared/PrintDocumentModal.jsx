@@ -261,7 +261,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn--primary"
             onClick={() => window.print()}
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
@@ -269,7 +269,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, children 
           </button>
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn--secondary"
             onClick={onClose}
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >

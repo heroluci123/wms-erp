@@ -24,17 +24,26 @@ export const pedidosQueries = {
         p.unidade,
         p.grupo,
         COALESCE(ec.saldo_kg, 0) AS saldo_kg,
-        COALESCE(ec.qtd_caixas, 0) AS qtd_caixas
+        COALESCE(ec.qtd_caixas, 0) AS qtd_caixas,
+        COALESCE(ec.peso_medio_disp, hist.peso_medio_hist, 0) AS peso_medio_cx
       FROM produtos p
       LEFT JOIN (
         SELECT
           produto_id,
           ROUND(SUM(peso_kg), 3) AS saldo_kg,
-          COUNT(*) AS qtd_caixas
+          COUNT(*) AS qtd_caixas,
+          ROUND(AVG(peso_kg), 4) AS peso_medio_disp
         FROM estoque_caixas
         WHERE status = 'DISPONIVEL'
         GROUP BY produto_id
       ) ec ON ec.produto_id = p.id
+      LEFT JOIN (
+        SELECT
+          produto_id,
+          ROUND(AVG(peso_kg), 4) AS peso_medio_hist
+        FROM estoque_caixas
+        GROUP BY produto_id
+      ) hist ON hist.produto_id = p.id
       ORDER BY p.descricao ASC
     `)
     return res.rows
@@ -137,6 +146,15 @@ export const pedidosQueries = {
             FROM estoque_caixas ec
             WHERE ec.produto_id = pi.produto_id AND ec.status = 'DISPONIVEL'
           ), 0) AS estoque_disponivel_caixas,
+          COALESCE((
+            SELECT ROUND(AVG(ec.peso_kg), 4)
+            FROM estoque_caixas ec
+            WHERE ec.produto_id = pi.produto_id AND ec.status = 'DISPONIVEL'
+          ), (
+            SELECT ROUND(AVG(ec2.peso_kg), 4)
+            FROM estoque_caixas ec2
+            WHERE ec2.produto_id = pi.produto_id
+          ), 0) AS peso_medio_cx,
           COALESCE((
             SELECT ROUND(SUM(ri.peso_kg), 3)
             FROM romaneios_itens ri
