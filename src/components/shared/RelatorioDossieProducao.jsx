@@ -5,8 +5,10 @@ import {
   TrendingUp, Scale, AlertCircle
 } from 'lucide-react';
 import * as producaoQueries from '../../queries/producao';
+import { exportProducaoExcel } from '../../utils/exportProducaoExcel';
 
 const fmtKg = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg';
+const fmtKg3 = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' kg';
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => {
   if (!d) return '-';
@@ -16,10 +18,12 @@ const fmtDate = (d) => {
   return d;
 };
 
-export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação & Rendimento", enderecoFixo = null }) {
+export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação & Rendimento", enderecoFixo = null, opIdInicial = null }) {
   const [loading, setLoading] = useState(false);
+  const [exportando, setExportando] = useState(false);
   const [dossies, setDossies] = useState([]);
-  
+  const [opsDisponiveis, setOpsDisponiveis] = useState([]);
+
   // Filtros
   const [dataInicio, setDataInicio] = useState(() => {
     const d = new Date();
@@ -27,12 +31,23 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
     return d.toISOString().slice(0, 10);
   });
   const [dataFim, setDataFim] = useState(() => new Date().toISOString().slice(0, 10));
+  const [filtroOpId, setFiltroOpId] = useState(opIdInicial ? String(opIdInicial) : 'TODOS');
   const [filtroCliente, setFiltroCliente] = useState('TODOS');
   const [filtroEndereco, setFiltroEndereco] = useState(enderecoFixo || 'TODOS');
   const [busca, setBusca] = useState('');
   
   // Controle de cards expandidos no modo tela
   const [expandidos, setExpandidos] = useState({});
+
+  useEffect(() => {
+    if (opIdInicial) setFiltroOpId(String(opIdInicial));
+  }, [opIdInicial]);
+
+  useEffect(() => {
+    producaoQueries.listarOPs('TODAS')
+      .then((ops) => setOpsDisponiveis(ops || []))
+      .catch(() => {});
+  }, []);
 
   const carregarDados = async () => {
     setLoading(true);
@@ -42,11 +57,16 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
         dataFim,
         cliente: filtroCliente,
         endereco: enderecoFixo || filtroEndereco,
-        busca
+        busca,
+        opId: filtroOpId !== 'TODOS' ? Number(filtroOpId) : null,
       });
       setDossies(lista);
       if (lista.length > 0) {
-        setExpandidos(prev => ({ ...prev, [lista[0].id]: true }));
+        const autoOpen = { [lista[0].id]: true };
+        if (filtroOpId !== 'TODOS') {
+          lista.forEach((o) => { autoOpen[o.id] = true; });
+        }
+        setExpandidos(prev => ({ ...prev, ...autoOpen }));
       }
     } catch (err) {
       console.error('Erro ao carregar dossiês:', err);
@@ -57,7 +77,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
 
   useEffect(() => {
     carregarDados();
-  }, [dataInicio, dataFim, filtroCliente, filtroEndereco]);
+  }, [dataInicio, dataFim, filtroCliente, filtroEndereco, filtroOpId]);
 
   const handleBuscar = (e) => {
     e.preventDefault();
@@ -92,94 +112,46 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
   // KPIs Totais do Relatório
   const kpis = useMemo(() => {
     const totalOps = dossies.length;
+    const totalEntradaCaixas = dossies.reduce((s, d) => s + (Number(d.total_entrada_caixas ?? d.insumos?.length) || 0), 0);
     const totalEntradaKg = dossies.reduce((s, d) => s + (Number(d.total_entrada_kg) || 0), 0);
+    const totalEntradaBrutoKg = dossies.reduce((s, d) => s + (Number(d.total_entrada_bruto_kg ?? d.total_entrada_kg) || 0), 0);
     const totalSaidaKg = dossies.reduce((s, d) => s + (Number(d.total_saida_kg) || 0), 0);
+    const totalSaidaBrutoKg = dossies.reduce((s, d) => s + (Number(d.total_saida_bruto_kg ?? d.total_saida_kg) || 0), 0);
     const diferencaKg = totalSaidaKg - totalEntradaKg;
     const rendMedio = totalEntradaKg > 0 ? ((totalSaidaKg / totalEntradaKg) * 100).toFixed(1) : 0;
-    const totalCaixasGeradas = dossies.reduce((s, d) => s + (d.retornos ? d.retornos.length : 0), 0);
+    const totalCaixasGeradas = dossies.reduce((s, d) => s + (Number(d.total_saida_caixas ?? d.retornos?.length) || 0), 0);
     const totalCaixasExpedidas = dossies.reduce((s, d) => s + (d.retornos ? d.retornos.filter(r => r.caixa_status === 'EXPEDIDA').length : 0), 0);
-    return { totalOps, totalEntradaKg, totalSaidaKg, diferencaKg, rendMedio, totalCaixasGeradas, totalCaixasExpedidas };
+    return {
+      totalOps,
+      totalEntradaCaixas,
+      totalEntradaKg,
+      totalEntradaBrutoKg,
+      totalSaidaKg,
+      totalSaidaBrutoKg,
+      diferencaKg,
+      rendMedio,
+      totalCaixasGeradas,
+      totalCaixasExpedidas,
+    };
   }, [dossies]);
 
-  // Exportar Excel (CSV)
-  const exportarCSV = () => {
+  // Exportar Excel (.xlsx) estruturado
+  const exportarExcel = async () => {
     if (dossies.length === 0) return;
-    const header = [
-      'OP_CODIGO',
-      'OP_NOME',
-      'CLIENTE',
-      'ENDERECO_PRODUCAO',
-      'DATA_PRODUCAO',
-      'STATUS_OP',
-      'TIPO_REGISTRO',
-      'PRODUTO_CODIGO',
-      'PRODUTO_DESCRICAO',
-      'EAN_CAIXA',
-      'PESO_KG',
-      'VALIDADE',
-      'LOTE',
-      'SITUACAO_CAIXA',
-      'ROMANEIO_DESTINO',
-      'ROMANEIO_CLIENTE',
-      'ROMANEIO_DATA_EXPEDICAO'
-    ].join(';') + '\n';
-
-    const rows = [];
-    dossies.forEach(op => {
-      // Insumos
-      (op.insumos || []).forEach(ins => {
-        rows.push([
-          op.codigo,
-          `"${op.nome}"`,
-          `"${op.cliente || ''}"`,
-          `"${op.endereco || ''}"`,
-          fmtDate(op.data_producao),
-          op.status,
-          'ENTRADA (INSUMO)',
-          ins.produto_codigo || '',
-          `"${ins.produto_descricao || ''}"`,
-          `'${ins.ean_caixa || ''}'`,
-          String(Number(ins.peso_kg || 0).toFixed(2)).replace('.', ','),
-          fmtDate(ins.validade),
-          ins.lote || '',
-          'CONSUMIDA',
-          '',
-          '',
-          ''
-        ].join(';'));
+    setExportando(true);
+    try {
+      const opObj = opsDisponiveis.find(o => String(o.id) === String(filtroOpId));
+      await exportProducaoExcel({
+        dossies,
+        dataInicio,
+        dataFim,
+        opSelecionadaLabel: opObj ? `${opObj.codigo} — ${opObj.nome}` : '',
       });
-
-      // Retornos
-      (op.retornos || []).forEach(ret => {
-        rows.push([
-          op.codigo,
-          `"${op.nome}"`,
-          `"${op.cliente || ''}"`,
-          `"${op.endereco || ''}"`,
-          fmtDate(op.data_producao),
-          op.status,
-          'SAIDA (PRODUTO GERADO)',
-          ret.produto_codigo || '',
-          `"${ret.produto_descricao || ''}"`,
-          `'${ret.ean_caixa || ''}'`,
-          String(Number(ret.peso_kg || 0).toFixed(2)).replace('.', ','),
-          fmtDate(ret.validade),
-          ret.lote || '',
-          ret.caixa_status || 'DISPONIVEL',
-          ret.romaneio_codigo || '',
-          `"${ret.romaneio_cliente || ''}"`,
-          ret.romaneio_expedido_em ? fmtDate(ret.romaneio_expedido_em) : ''
-        ].join(';'));
-      });
-    });
-
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(header + rows.join('\n'));
-    const link = document.createElement('a');
-    link.setAttribute('href', csvContent);
-    link.setAttribute('download', `dossie_producao_transformacao_${dataInicio}_${dataFim}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    } catch (err) {
+      console.error('Erro ao gerar Excel de produção:', err);
+    } finally {
+      setExportando(false);
+    }
   };
 
   return (
@@ -194,7 +166,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
 
         @media print {
           @page {
-            size: A4 portrait;
+            size: A4 landscape;
             margin: 8mm 10mm 10mm 10mm;
           }
 
@@ -313,8 +285,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             border: 1px solid #94a3b8 !important;
             border-radius: 4px !important;
             margin-bottom: 16px !important;
-            page-break-inside: avoid !important;
-            overflow: hidden !important;
+            break-inside: auto !important;
           }
 
           .print-op-header {
@@ -484,8 +455,8 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             >
               🏷️ Etiquetas Térmicas (PAVAN)
             </a>
-            <button className="btn btn--secondary btn--sm" onClick={exportarCSV} title="Exportar dados completos para Excel/CSV">
-              <Download size={15} /> Exportar Excel
+            <button className="btn btn--secondary btn--sm" onClick={exportarExcel} disabled={exportando || dossies.length === 0} title="Exportar relatório completo para Excel (.xlsx)">
+              <Download size={15} /> {exportando ? 'Gerando Excel...' : 'Exportar Excel (.xlsx)'}
             </button>
             <button className="btn btn--primary btn--sm" onClick={() => window.print()} title="Imprimir ou Salvar em PDF">
               <Printer size={15} /> Imprimir / PDF
@@ -496,6 +467,21 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
         {/* FILTROS */}
         <div className="card p-16 mb-20" style={{ background: 'var(--bg-2)' }}>
           <form onSubmit={handleBuscar} className="flex gap-12 items-end flex-wrap">
+            <div className="form-group mb-0" style={{ minWidth: 210 }}>
+              <label className="text-xs text-muted font-bold uppercase mb-4 block">Ordem de Produção (OP)</label>
+              <select
+                className="form-input form-input--sm"
+                value={filtroOpId}
+                onChange={e => setFiltroOpId(e.target.value)}
+              >
+                <option value="TODOS">Todas as OPs no período</option>
+                {opsDisponiveis.map(op => (
+                  <option key={op.id} value={String(op.id)}>
+                    {op.codigo} — {op.nome} ({op.status})
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="form-group mb-0" style={{ minWidth: 140 }}>
               <label className="text-xs text-muted font-bold uppercase mb-4 block">Data Inicial</label>
               <input 
@@ -574,26 +560,28 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             <div className="text-lg font-black text-primary mt-4">{kpis.totalOps} OPs</div>
           </div>
           <div className="card p-12 text-center" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-            <div className="text-xs text-muted font-bold uppercase">Entrada Insumos</div>
+            <div className="text-xs text-muted font-bold uppercase">Entrada Líquida ({kpis.totalEntradaCaixas} cx)</div>
             <div className="text-lg font-black text-warning mt-4">{fmtKg(kpis.totalEntradaKg)}</div>
           </div>
           <div className="card p-12 text-center" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-            <div className="text-xs text-muted font-bold uppercase">Saída Produzida</div>
+            <div className="text-xs text-muted font-bold uppercase">Saída Bruta</div>
+            <div className="text-lg font-black mt-4" style={{ color: 'var(--text-primary)' }}>{fmtKg(kpis.totalSaidaBrutoKg)}</div>
+          </div>
+          <div className="card p-12 text-center" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+            <div className="text-xs text-muted font-bold uppercase">Saída Líquida ({kpis.totalCaixasGeradas} cx)</div>
             <div className="text-lg font-black text-success mt-4">{fmtKg(kpis.totalSaidaKg)}</div>
+          </div>
+          <div className="card p-12 text-center" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+            <div className="text-xs text-muted font-bold uppercase">Diferença / Quebra</div>
+            <div className="text-lg font-black mt-4" style={{ color: kpis.diferencaKg >= 0 ? 'var(--success)' : '#fb923c' }}>
+              {kpis.diferencaKg >= 0 ? '+' : ''}{fmtKg(kpis.diferencaKg)}
+            </div>
           </div>
           <div className="card p-12 text-center" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
             <div className="text-xs text-muted font-bold uppercase">Rendimento Médio</div>
             <div className="text-lg font-black mt-4" style={{ color: Number(kpis.rendMedio) >= 90 ? 'var(--success)' : 'var(--primary)' }}>
               {kpis.rendMedio}%
             </div>
-          </div>
-          <div className="card p-12 text-center" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-            <div className="text-xs text-muted font-bold uppercase">Caixas Geradas</div>
-            <div className="text-lg font-black mt-4">{kpis.totalCaixasGeradas} cx</div>
-          </div>
-          <div className="card p-12 text-center" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-            <div className="text-xs text-muted font-bold uppercase">Já Expedidas</div>
-            <div className="text-lg font-black text-info mt-4">{kpis.totalCaixasExpedidas} cx</div>
           </div>
         </div>
 
@@ -661,21 +649,22 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                           </span>
                         </div>
                         <div className="text-xs text-muted mt-4 flex items-center gap-12 flex-wrap">
-                          <span>📅 Produzido em: <strong>{fmtDate(op.data_producao)}</strong></span>
-                          <span>👤 Operador: <strong>{op.operador_nome || 'Administrador'}</strong></span>
+                          <span>📅 Abertura/Prod.: <strong>{fmtDate(op.data_producao)}</strong></span>
+                          <span>👤 Criador: <strong>{op.criado_por_nome || op.operador_nome || 'Administrador'}</strong></span>
                         </div>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-24 text-right">
                       <div>
-                        <div className="text-xs text-muted">Entrada Insumo</div>
+                        <div className="text-xs text-muted">Entrada ({op.total_entrada_caixas ?? (op.insumos?.length || 0)} cx)</div>
                         <div className="font-mono font-bold text-warning">{fmtKg(op.total_entrada_kg)}</div>
                       </div>
                       <div className="text-muted font-bold">➔</div>
                       <div>
-                        <div className="text-xs text-muted">Saída Gerada</div>
+                        <div className="text-xs text-muted">Saída ({op.total_saida_caixas ?? (op.retornos?.length || 0)} cx)</div>
                         <div className="font-mono font-bold text-success">{fmtKg(op.total_saida_kg)}</div>
+                        <div className="text-[10px] text-muted">Bruto: {fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)}</div>
                       </div>
                       <div className="border-l border-border pl-16">
                         <div className="text-xs text-muted">Rendimento</div>
@@ -695,10 +684,10 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                         <div className="card p-12 bg-bg-1 border border-border">
                           <div className="flex justify-between items-center mb-8 border-b border-border pb-6">
                             <div className="flex items-center gap-6 font-bold text-sm text-warning">
-                              <Layers size={16} /> Matéria-Prima Consumida (Entrada)
+                              <Layers size={16} /> Entradas na Produção (Matéria-Prima)
                             </div>
                             <span className="text-xs text-muted font-mono font-bold">
-                              {op.insumos ? op.insumos.length : 0} caixa(s) | {fmtKg(op.total_entrada_kg)}
+                              {op.total_entrada_caixas ?? (op.insumos ? op.insumos.length : 0)} cx | Bruto: {fmtKg(op.total_entrada_bruto_kg ?? op.total_entrada_kg)} | Líq: {fmtKg(op.total_entrada_kg)}
                             </span>
                           </div>
 
@@ -710,30 +699,39 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                 <thead>
                                   <tr className="text-muted text-[11px] border-b border-border text-left">
                                     <th className="py-4">Produto</th>
-                                    <th className="py-4">EAN da Caixa</th>
+                                    <th className="py-4">EAN</th>
+                                    <th className="py-4">Lote</th>
                                     <th className="py-4">Validade</th>
-                                    <th className="py-4 text-right">Peso (Kg)</th>
+                                    <th className="py-4 text-right">Bruto</th>
+                                    <th className="py-4 text-right">Líquido</th>
                                     <th className="py-4">Status</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {op.insumos.map((ins, idx) => (
-                                    <tr key={idx} className="border-b border-border hover:bg-bg-1">
-                                      <td className="py-6 font-bold">{ins.produto_descricao}</td>
-                                      <td className="py-6 font-mono text-muted">{ins.ean_caixa}</td>
-                                      <td className="py-6">{fmtDate(ins.validade)}</td>
-                                      <td className="py-6 text-right font-mono font-bold text-warning">{fmtNum(ins.peso_kg)}</td>
-                                      <td className="py-6">
-                                        <span className="text-[10px] uppercase font-bold text-muted px-4 py-1 rounded bg-bg-2 border border-border">
-                                          {ins.caixa_status || 'CONSUMIDA'}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  ))}
+                                  {op.insumos.map((ins, idx) => {
+                                    const liq = Number(ins.peso_kg || 0);
+                                    const bruto = ins.peso_bruto_kg != null ? Number(ins.peso_bruto_kg) : Number((liq + Number(ins.tara_kg || 0)).toFixed(2));
+                                    return (
+                                      <tr key={idx} className="border-b border-border hover:bg-bg-1">
+                                        <td className="py-6 font-bold">{ins.produto_descricao}</td>
+                                        <td className="py-6 font-mono text-muted">{ins.ean_caixa}</td>
+                                        <td className="py-6 font-mono">{ins.lote || '-'}</td>
+                                        <td className="py-6">{fmtDate(ins.validade)}</td>
+                                        <td className="py-6 text-right font-mono text-muted">{fmtNum(bruto)}</td>
+                                        <td className="py-6 text-right font-mono font-bold text-warning">{fmtNum(liq)}</td>
+                                        <td className="py-6">
+                                          <span className="text-[10px] uppercase font-bold text-muted px-4 py-1 rounded bg-bg-2 border border-border">
+                                            {ins.caixa_status || 'CONSUMIDA'}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                                 <tfoot>
                                   <tr className="font-bold border-t border-border">
-                                    <td colSpan={3} className="pt-8 text-muted">Total de Entrada:</td>
+                                    <td colSpan={4} className="pt-8 text-muted">Total Entrada ({op.total_entrada_caixas ?? op.insumos.length} cx):</td>
+                                    <td className="pt-8 text-right font-mono text-muted">{fmtKg(op.total_entrada_bruto_kg ?? op.total_entrada_kg)}</td>
                                     <td className="pt-8 text-right font-mono text-warning text-sm">{fmtKg(op.total_entrada_kg)}</td>
                                     <td></td>
                                   </tr>
@@ -747,23 +745,11 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                         <div className="card p-12 bg-bg-1 border border-border">
                           <div className="flex justify-between items-center mb-8 border-b border-border pb-6">
                             <div className="flex items-center gap-6 font-bold text-sm text-success">
-                              <Package size={16} /> Produtos Finais Gerados (Saída)
+                              <Package size={16} /> Saídas da Produção (Produtos Gerados)
                             </div>
-                            <div className="flex items-center gap-8">
-                              <span className="text-xs text-muted font-mono font-bold">
-                                {op.retornos ? op.retornos.length : 0} caixa(s) | {fmtKg(op.total_saida_kg)}
-                              </span>
-                              <a 
-                                href="/etiquetas_producao_pavan.html" 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="btn btn--secondary btn--sm py-2 px-8 text-[11px] font-bold flex items-center gap-4"
-                                style={{ textDecoration: 'none' }}
-                                title="Abrir e imprimir as etiquetas térmicas com código de barras"
-                              >
-                                🏷️ Imprimir Etiquetas
-                              </a>
-                            </div>
+                            <span className="text-xs text-muted font-mono font-bold">
+                              {op.total_saida_caixas ?? (op.retornos ? op.retornos.length : 0)} cx | Bruto: {fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)} | Líq: {fmtKg(op.total_saida_kg)}
+                            </span>
                           </div>
 
                           {!op.retornos || op.retornos.length === 0 ? (
@@ -774,19 +760,33 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                 <thead>
                                   <tr className="text-muted text-[11px] border-b border-border text-left">
                                     <th className="py-4">Produto Gerado</th>
-                                    <th className="py-4">EAN Caixa</th>
-                                    <th className="py-4 text-right">Peso (Kg)</th>
+                                    <th className="py-4">EAN Gerado</th>
+                                    <th className="py-4">Lote</th>
+                                    <th className="py-4">Prod / Val</th>
+                                    <th className="py-4 text-right">Tara</th>
+                                    <th className="py-4 text-right">Bruto</th>
+                                    <th className="py-4 text-right">Líquido</th>
                                     <th className="py-4">Rastreabilidade</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {op.retornos.map((ret, idx) => {
                                     const isExpedida = ret.caixa_status === 'EXPEDIDA';
+                                    const liq = Number(ret.peso_kg || 0);
+                                    const tara = Number(ret.tara_kg || 0);
+                                    const bruto = ret.peso_bruto_kg != null ? Number(ret.peso_bruto_kg) : Number((liq + tara).toFixed(2));
                                     return (
                                       <tr key={idx} className="border-b border-border hover:bg-bg-1">
                                         <td className="py-6 font-bold">{ret.produto_descricao}</td>
                                         <td className="py-6 font-mono text-muted">{ret.ean_caixa}</td>
-                                        <td className="py-6 text-right font-mono font-bold text-success">{fmtNum(ret.peso_kg)}</td>
+                                        <td className="py-6 font-mono">{ret.lote || '-'}</td>
+                                        <td className="py-6 text-[11px]">
+                                          <div>P: {fmtDate(ret.data_producao || op.data_producao)}</div>
+                                          <div className="text-muted">V: {fmtDate(ret.validade)}</div>
+                                        </td>
+                                        <td className="py-6 text-right font-mono text-muted">{fmtKg3(tara)}</td>
+                                        <td className="py-6 text-right font-mono text-muted">{fmtNum(bruto)}</td>
+                                        <td className="py-6 text-right font-mono font-bold text-success">{fmtNum(liq)}</td>
                                         <td className="py-6">
                                           {isExpedida ? (
                                             <div className="flex items-center gap-4 text-info font-bold text-[11px]">
@@ -806,7 +806,8 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                 </tbody>
                                 <tfoot>
                                   <tr className="font-bold border-t border-border">
-                                    <td colSpan={2} className="pt-8 text-muted">Total de Saída:</td>
+                                    <td colSpan={5} className="pt-8 text-muted">Total Saída ({op.total_saida_caixas ?? op.retornos.length} cx):</td>
+                                    <td className="pt-8 text-right font-mono text-muted">{fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)}</td>
                                     <td className="pt-8 text-right font-mono text-success text-sm">{fmtKg(op.total_saida_kg)}</td>
                                     <td></td>
                                   </tr>
@@ -818,20 +819,20 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
 
                       </div>
 
-                      {/* ── NOTA DE AUDITORIA DO RENDIMENTO ── */}
+                      {/* ── NOTA DE AUDITORIA / CONSOLIDAÇÃO DO RENDIMENTO ── */}
                       <div className="mt-12 p-10 rounded bg-bg-2 border border-border flex justify-between items-center flex-wrap gap-8 text-xs">
                         <div className="text-muted">
-                          ⚖️ Balanço da Transformação: 
-                          Entrada <strong>{fmtKg(op.total_entrada_kg)}</strong> ➔ 
-                          Saída <strong>{fmtKg(op.total_saida_kg)}</strong>
+                          ⚖️ Consolidação da OP:
+                          Entrada <strong>{op.total_entrada_caixas ?? op.insumos?.length ?? 0} cx / {fmtKg(op.total_entrada_kg)}</strong> ➔
+                          Saída <strong>{op.total_saida_caixas ?? op.retornos?.length ?? 0} cx</strong> (Bruto: <strong>{fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)}</strong> | Líq.: <strong>{fmtKg(op.total_saida_kg)}</strong>)
                           {op.diferenca_kg !== 0 && (
                             <span className="ml-8 font-mono">
-                              ({op.diferenca_kg > 0 ? `+${op.diferenca_kg} kg de ganho/aditivo` : `${op.diferenca_kg} kg de quebra de desossa`})
+                              ({op.diferenca_kg > 0 ? `+${op.diferenca_kg} kg ganho` : `${op.diferenca_kg} kg diferença/quebra`})
                             </span>
                           )}
                         </div>
                         <div>
-                          Rendimento Oficial: <strong className="font-mono text-sm" style={{ color: rendColor }}>{rend}%</strong>
+                          Rendimento: <strong className="font-mono text-sm" style={{ color: rendColor }}>{rend}%</strong>
                         </div>
                       </div>
                     </div>
@@ -910,43 +911,50 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
               <div className="print-op-meta-grid">
                 <div><span>Cliente / Destino:</span> <strong>{op.cliente || 'PAVAN'}</strong></div>
                 <div><span>Local / Endereço:</span> <strong>{op.endereco || 'PRODUÇÃO'}</strong></div>
-                <div><span>Data de Produção:</span> <strong>{fmtDate(op.data_producao)}</strong></div>
-                <div><span>Operador / Resp.:</span> <strong>{op.operador_nome || 'Administrador'}</strong></div>
+                <div><span>Data Abertura/Prod.:</span> <strong>{fmtDate(op.data_producao)}</strong></div>
+                <div><span>Criador:</span> <strong>{op.criado_por_nome || op.operador_nome || 'Administrador'}</strong></div>
                 <div><span>Rendimento da OP:</span> <strong className="print-rend-highlight">{rend}%</strong></div>
               </div>
 
               {/* TABELA 1: MATÉRIA-PRIMA UTILIZADA (ENTRADA) */}
               <div className="print-section-title">
-                1. MATÉRIA-PRIMA CONSUMIDA NO PROCESSO (ENTRADAS) — {op.insumos ? op.insumos.length : 0} caixas | Total: {fmtKg(op.total_entrada_kg)}
+                1. ENTRADAS NA PRODUÇÃO (MATÉRIA-PRIMA) — {op.total_entrada_caixas ?? (op.insumos ? op.insumos.length : 0)} caixas | Bruto: {fmtKg(op.total_entrada_bruto_kg ?? op.total_entrada_kg)} | Líquido: {fmtKg(op.total_entrada_kg)}
               </div>
               <table className="print-table">
                 <thead>
                   <tr>
                     <th style={{ width: '4%' }}>#</th>
                     <th style={{ width: '8%' }}>Código</th>
-                    <th style={{ width: '32%' }}>Descrição da Matéria-Prima</th>
-                    <th style={{ width: '22%' }}>EAN da Caixa Física</th>
-                    <th style={{ width: '10%' }}>Lote</th>
-                    <th style={{ width: '10%' }}>Validade</th>
-                    <th style={{ width: '14%', textAlign: 'right' }}>Peso (Kg)</th>
+                    <th style={{ width: '28%' }}>Descrição da Matéria-Prima</th>
+                    <th style={{ width: '20%' }}>EAN da Caixa Física</th>
+                    <th style={{ width: '8%' }}>Lote</th>
+                    <th style={{ width: '9%' }}>Validade</th>
+                    <th style={{ width: '11%', textAlign: 'right' }}>Bruto (Kg)</th>
+                    <th style={{ width: '12%', textAlign: 'right' }}>Líquido (Kg)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {op.insumos && op.insumos.map((ins, i) => (
-                    <tr key={i} className={i % 2 === 1 ? 'print-tr-alt' : ''}>
-                      <td style={{ textAlign: 'center' }}>{i + 1}</td>
-                      <td className="print-mono">{ins.produto_codigo || '-'}</td>
-                      <td><strong>{ins.produto_descricao}</strong></td>
-                      <td className="print-mono">{ins.ean_caixa}</td>
-                      <td className="print-mono" style={{ textAlign: 'center' }}>{ins.lote || '-'}</td>
-                      <td style={{ textAlign: 'center' }}>{fmtDate(ins.validade)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(ins.peso_kg)} kg</td>
-                    </tr>
-                  ))}
+                  {op.insumos && op.insumos.map((ins, i) => {
+                    const liq = Number(ins.peso_kg || 0);
+                    const bruto = ins.peso_bruto_kg != null ? Number(ins.peso_bruto_kg) : Number((liq + Number(ins.tara_kg || 0)).toFixed(2));
+                    return (
+                      <tr key={i} className={i % 2 === 1 ? 'print-tr-alt' : ''}>
+                        <td style={{ textAlign: 'center' }}>{i + 1}</td>
+                        <td className="print-mono">{ins.produto_codigo || '-'}</td>
+                        <td><strong>{ins.produto_descricao}</strong></td>
+                        <td className="print-mono">{ins.ean_caixa}</td>
+                        <td className="print-mono" style={{ textAlign: 'center' }}>{ins.lote || '-'}</td>
+                        <td style={{ textAlign: 'center' }}>{fmtDate(ins.validade)}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtNum(bruto)} kg</td>
+                        <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(liq)} kg</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="print-tfoot-row">
-                    <td colSpan={6} style={{ textAlign: 'right' }}><strong>TOTAL DE MATÉRIA-PRIMA CONSUMIDA:</strong></td>
+                    <td colSpan={6} style={{ textAlign: 'right' }}><strong>TOTAL DE ENTRADAS ({op.total_entrada_caixas ?? (op.insumos ? op.insumos.length : 0)} cx):</strong></td>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_entrada_bruto_kg ?? op.total_entrada_kg)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_entrada_kg)}</td>
                   </tr>
                 </tfoot>
@@ -954,31 +962,42 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
 
               {/* TABELA 2: PRODUTOS FABRICADOS (SAÍDA) */}
               <div className="print-section-title" style={{ marginTop: '8px' }}>
-                2. PRODUTOS ACABADOS FABRICADOS (SAÍDAS) — {op.retornos ? op.retornos.length : 0} caixas | Total: {fmtKg(op.total_saida_kg)}
+                2. SAÍDAS DA PRODUÇÃO (PRODUTOS GERADOS) — {op.total_saida_caixas ?? (op.retornos ? op.retornos.length : 0)} caixas | Bruto: {fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)} | Líquido: {fmtKg(op.total_saida_kg)}
               </div>
               <table className="print-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '4%' }}>#</th>
-                    <th style={{ width: '8%' }}>Código</th>
-                    <th style={{ width: '26%' }}>Produto Gerado</th>
-                    <th style={{ width: '20%' }}>EAN da Caixa Física</th>
-                    <th style={{ width: '10%' }}>Validade</th>
-                    <th style={{ width: '12%', textAlign: 'right' }}>Peso (Kg)</th>
-                    <th style={{ width: '20%' }}>Situação / Rastreabilidade</th>
+                    <th style={{ width: '3%' }}>#</th>
+                    <th style={{ width: '7%' }}>Cód.</th>
+                    <th style={{ width: '21%' }}>Produto Gerado</th>
+                    <th style={{ width: '16%' }}>EAN Gerado</th>
+                    <th style={{ width: '7%' }}>Lote</th>
+                    <th style={{ width: '8%' }}>Data Prod.</th>
+                    <th style={{ width: '8%' }}>Validade</th>
+                    <th style={{ width: '7%', textAlign: 'right' }}>Tara</th>
+                    <th style={{ width: '8%', textAlign: 'right' }}>Bruto</th>
+                    <th style={{ width: '8%', textAlign: 'right' }}>Líquido</th>
+                    <th style={{ width: '14%' }}>Situação</th>
                   </tr>
                 </thead>
                 <tbody>
                   {op.retornos && op.retornos.map((ret, i) => {
                     const isExp = ret.caixa_status === 'EXPEDIDA';
+                    const liq = Number(ret.peso_kg || 0);
+                    const tara = Number(ret.tara_kg || 0);
+                    const bruto = ret.peso_bruto_kg != null ? Number(ret.peso_bruto_kg) : Number((liq + tara).toFixed(2));
                     return (
                       <tr key={i} className={i % 2 === 1 ? 'print-tr-alt' : ''}>
                         <td style={{ textAlign: 'center' }}>{i + 1}</td>
                         <td className="print-mono">{ret.produto_codigo || '-'}</td>
                         <td><strong>{ret.produto_descricao}</strong></td>
                         <td className="print-mono">{ret.ean_caixa}</td>
+                        <td className="print-mono" style={{ textAlign: 'center' }}>{ret.lote || '-'}</td>
+                        <td style={{ textAlign: 'center' }}>{fmtDate(ret.data_producao || op.data_producao)}</td>
                         <td style={{ textAlign: 'center' }}>{fmtDate(ret.validade)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(ret.peso_kg)} kg</td>
+                        <td style={{ textAlign: 'right' }}>{tara.toFixed(3).replace('.', ',')} kg</td>
+                        <td style={{ textAlign: 'right' }}>{fmtNum(bruto)} kg</td>
+                        <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(liq)} kg</td>
                         <td>
                           {isExp ? (
                             <span className="print-badge-expedida">EXPEDIDA ({ret.romaneio_codigo || 'ROMANEIO'})</span>
@@ -992,26 +1011,30 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                 </tbody>
                 <tfoot>
                   <tr className="print-tfoot-row">
-                    <td colSpan={5} style={{ textAlign: 'right' }}><strong>TOTAL DE PRODUTOS GERADOS:</strong></td>
+                    <td colSpan={8} style={{ textAlign: 'right' }}><strong>TOTAL DE SAÍDAS ({op.total_saida_caixas ?? (op.retornos ? op.retornos.length : 0)} cx):</strong></td>
+                    <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_saida_kg)}</td>
                     <td></td>
                   </tr>
                 </tfoot>
               </table>
 
-              {/* BALANÇO OFICIAL DE RENDIMENTO */}
+              {/* BALANÇO OFICIAL / CONSOLIDAÇÃO DE RENDIMENTO */}
               <div className="print-audit-box">
                 <div className="print-audit-col">
-                  <div><strong>Entrada Insumos:</strong> {fmtKg(op.total_entrada_kg)}</div>
-                  <div><strong>Saída Produzida:</strong> {fmtKg(op.total_saida_kg)}</div>
-                  <div><strong>Balanço Operacional:</strong> {op.diferenca_kg >= 0 ? `+${op.diferenca_kg}` : op.diferenca_kg} kg {op.diferenca_kg >= 0 ? '(ganho/marinada)' : '(quebra industrial)'}</div>
+                  <div><strong>Caixas Entrada / Saída:</strong> {op.total_entrada_caixas ?? (op.insumos?.length || 0)} cx ➔ {op.total_saida_caixas ?? (op.retornos?.length || 0)} cx</div>
+                  <div><strong>Peso Entrada (Líquido):</strong> {fmtKg(op.total_entrada_kg)}</div>
+                  <div><strong>Peso Saída Bruto / Líquido:</strong> {fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)} / {fmtKg(op.total_saida_kg)}</div>
                 </div>
                 <div className="print-audit-col center">
                   <div className="print-audit-rend-label">RENDIMENTO INDUSTRIAL</div>
                   <div className="print-audit-rend-value">{rend}%</div>
+                  <div style={{ fontSize: '8px', marginTop: '2px' }}>
+                    Diferença: {op.diferenca_kg >= 0 ? `+${op.diferenca_kg}` : op.diferenca_kg} kg
+                  </div>
                 </div>
                 <div className="print-audit-col">
-                  <div><strong>Status do Lote:</strong> {op.status}</div>
+                  <div><strong>Status da OP:</strong> {op.status}</div>
                   <div><strong>Caixas Expedidas:</strong> {op.retornos ? op.retornos.filter(r => r.caixa_status === 'EXPEDIDA').length : 0} cx</div>
                   <div><strong>Caixas em Estoque:</strong> {op.retornos ? op.retornos.filter(r => r.caixa_status !== 'EXPEDIDA').length : 0} cx</div>
                 </div>

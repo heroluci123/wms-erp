@@ -1,5 +1,6 @@
 import { db } from '../lib/db.js';
 import { listarDossiesProducao } from './producao.js';
+import { ensureRastreabilidadeSchema } from './taras.js';
 
 export async function getBalanco(dataInicio, dataFim) {
   const res = await db.execute({
@@ -64,12 +65,14 @@ export async function getOPSubprodutos(lote) {
  * (Saídas por Romaneio, Entradas do Período, Estoque Consolidado por Produto e Estoque por Caixa)
  */
 export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
+  await ensureRastreabilidadeSchema();
   const [estRes, romRes, saiRes, entRes] = await Promise.all([
     // 1. Estoque Atual (Caixa a Caixa)
     db.execute({
       sql: `
         SELECT
-          c.id, c.ean_caixa, c.endereco, c.lote, c.validade, c.peso_kg,
+          c.id, c.ean_caixa, c.endereco, c.lote, c.data_producao, c.validade,
+          c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.origem_tipo,
           c.status as status_caixa, c.palete_id, c.created_at, c.updated_at,
           p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
           p.status_curva, p.valor_unitario, p.unidade, p.grupo,
@@ -111,7 +114,8 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
           r.created_at as romaneio_criado_em, r.expedido_at as romaneio_expedido_em,
           r.operador_nome as operador_montagem, r.operador_expedicao_nome as operador_expedicao,
           ri.id as item_id, ri.caixa_id, ri.produto_id, ri.peso_kg,
-          c.ean_caixa, c.lote, c.validade, c.endereco as endereco_atual_ou_origem,
+          c.ean_caixa, c.lote, c.data_producao, c.validade, c.peso_bruto_kg, c.tara_kg,
+          c.endereco as endereco_atual_ou_origem,
           c.status as caixa_status_atual,
           p.codigo as produto_codigo, p.descricao as produto_descricao,
           p.grupo, p.tipo_produto, p.valor_unitario
@@ -129,7 +133,8 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
     db.execute({
       sql: `
         SELECT
-          c.id, c.ean_caixa, c.endereco, c.lote, c.validade, c.peso_kg,
+          c.id, c.ean_caixa, c.endereco, c.lote, c.data_producao, c.validade,
+          c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.origem_tipo,
           c.status as status_caixa, c.created_at, c.updated_at,
           p.id as produto_id, p.codigo as produto_codigo, p.descricao as produto_descricao,
           p.grupo, p.tipo_produto, p.valor_unitario,

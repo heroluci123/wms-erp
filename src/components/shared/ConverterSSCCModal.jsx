@@ -1,149 +1,147 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Tag, Check, ArrowRight } from 'lucide-react';
-import * as movimentacoesQueries from '../../queries/movimentacoes.js';
-import { useAppStore } from '../../store/appStore';
+import React, { useState, useEffect, useRef } from 'react'
+import { X, Tag, Check, ArrowRight } from 'lucide-react'
+import * as movimentacoesQueries from '../../queries/movimentacoes.js'
+import { tarasQueries } from '../../queries/taras.js'
+import { useAppStore } from '../../store/appStore'
+import PesagemTaraFields, { resolverTaraSelecionada } from './PesagemTaraFields.jsx'
+import { validarPesagemTara, hojeIsoLocal, fmtKg2, fmtDataBR } from '../../utils/rastreabilidade.js'
 
 /**
- * Modal de Conversão de EAN Genérico → SSCC Único
- *
- * Aparece quando um EAN genérico (já vinculado a um produto via regra CONTEM/EXATO)
- * é bipado durante Movimentação ou Inventário Cíclico.
- *
- * O operador tem a caixa física na mão. O sistema pede o peso real e a validade
- * daquela caixa específica, gera um código interno único (INT-xxx) e cria um registro
- * em estoque_caixas — convertendo o item legado agregado para rastreabilidade por caixa.
- *
- * Props:
- *  - isOpen: boolean
- *  - onClose: () => void
- *  - produto: objeto produto encontrado via regra genérica
- *  - eanGenerico: string — o EAN genérico que foi bipado (ex: "460")
- *  - onConvertido: ({ ean_gerado, peso_kg, validade }) => void — chamado após gravar
+ * Modal de Conversão de EAN Genérico → Etiqueta Única Rastreada
  */
 export function ConverterSSCCModal({ isOpen, onClose, produto, eanGenerico, onConvertido }) {
-  const { operador, toastSuccess, toastError } = useAppStore();
-  const [pesoKg, setPesoKg] = useState('');
-  const [validade, setValidade] = useState('');
-  const [salvando, setSalvando] = useState(false);
-  const pesoRef = useRef(null);
+  const { operador, toastSuccess, toastError } = useAppStore()
+  const [taras, setTaras] = useState([])
+  const [formPesagem, setFormPesagem] = useState({
+    data_producao: hojeIsoLocal(),
+    validade: '',
+    tara_id: '',
+    peso_bruto: '',
+  })
+  const [salvando, setSalvando] = useState(false)
+  const pesoBrutoRef = useRef(null)
 
   useEffect(() => {
-    if (isOpen) {
-      setPesoKg('');
-      setValidade('');
-      setSalvando(false);
-      setTimeout(() => pesoRef.current?.focus(), 150);
-    }
-  }, [isOpen]);
+    if (!isOpen) return
+    setSalvando(false)
+    tarasQueries.listar(true).then((lista) => {
+      setTaras(lista)
+      const padrao = resolverTaraSelecionada(lista, '')
+      setFormPesagem({
+        data_producao: hojeIsoLocal(),
+        validade: '',
+        tara_id: padrao ? String(padrao.id) : '',
+        peso_bruto: '',
+      })
+      setTimeout(() => pesoBrutoRef.current?.focus(), 150)
+    }).catch(() => {})
+  }, [isOpen])
 
   const handleConfirmar = async (e) => {
-    e.preventDefault();
-    if (!pesoKg || parseFloat(pesoKg) <= 0) return toastError('Atenção', 'Informe o peso real desta caixa.');
-    if (!validade) return toastError('Atenção', 'Informe a data de validade.');
+    e?.preventDefault()
+    const taraAtual = resolverTaraSelecionada(taras, formPesagem.tara_id)
+    const valid = validarPesagemTara({
+      dataProducao: formPesagem.data_producao,
+      validade: formPesagem.validade,
+      taraId: taraAtual?.id,
+      taraKg: taraAtual?.peso_kg ?? 0,
+      pesoBruto: formPesagem.peso_bruto,
+    })
+    if (!valid.ok) return toastError('Dados inválidos', valid.erro)
 
-    setSalvando(true);
+    setSalvando(true)
     try {
-      // Gera código interno único para esta caixa física
-      const eanGerado = `INT-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      const eanGerado = await tarasQueries.gerarProximoEanInterno(produto?.codigo || '')
 
-      // Cria o registro serializado em estoque_caixas
       const res = await movimentacoesQueries.receberCaixaSerializada({
         ean_caixa: eanGerado,
         produto_id: produto.id,
         palete_id: null,
-        peso_kg: parseFloat(pesoKg),
-        validade,
+        peso_kg: valid.peso_liquido_kg,
+        peso_bruto_kg: valid.peso_bruto_kg,
+        tara_id: valid.tara_id,
+        tara_kg: valid.tara_kg,
+        data_producao: valid.data_producao,
+        lote: valid.lote,
+        validade: valid.validade,
+        origem_tipo: 'CONVERSAO_EAN',
         operador_id: operador?.id || null,
         operador_nome: operador?.nome || 'Sistema',
-      });
+      })
 
       if (!res.success) {
-        toastError('Erro ao converter', res.error);
-        return;
+        toastError('Erro ao converter', res.error)
+        return
       }
 
-      toastSuccess('✅ Caixa convertida para SSCC!', `${produto.descricao} — ${pesoKg} kg — Val: ${validade}`);
-      onConvertido?.({ ean_gerado: eanGerado, peso_kg: parseFloat(pesoKg), validade });
-      onClose();
+      toastSuccess(
+        'Caixa convertida e rastreada!',
+        `${produto.descricao} • Líq ${fmtKg2(valid.peso_liquido_kg)} • Lote ${valid.lote} • Val: ${fmtDataBR(valid.validade)}`
+      )
+      onConvertido?.({
+        ean_gerado: eanGerado,
+        peso_kg: valid.peso_liquido_kg,
+        peso_bruto_kg: valid.peso_bruto_kg,
+        tara_kg: valid.tara_kg,
+        data_producao: valid.data_producao,
+        lote: valid.lote,
+        validade: valid.validade,
+      })
+      onClose()
     } catch (err) {
-      toastError('Erro', err.message);
+      toastError('Erro', err.message)
     } finally {
-      setSalvando(false);
+      setSalvando(false)
     }
-  };
+  }
 
-  if (!isOpen || !produto) return null;
+  if (!isOpen || !produto) return null
 
   return (
     <div className="modal-overlay">
-      <div className="modal-content" style={{ maxWidth: 480 }}>
-
-        {/* HEADER */}
+      <div className="modal-content" style={{ maxWidth: 560 }}>
         <div className="modal-header">
           <h2 className="flex items-center gap-8" style={{ color: 'var(--warning)' }}>
-            <Tag size={20} /> Converter para SSCC Único
+            <Tag size={20} /> Converter para Caixa Rastreada
           </h2>
           <button className="btn btn--ghost" onClick={onClose}><X size={20} /></button>
         </div>
 
         <div className="modal-body">
-
-          {/* Info do EAN genérico */}
           <div style={{
             background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.35)',
-            borderRadius: 10, padding: '12px 16px', marginBottom: 20
+            borderRadius: 10, padding: '12px 16px', marginBottom: 16,
           }}>
-            <div style={{ fontSize: 11, color: 'var(--warning)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>
+            <div style={{ fontSize: 11, color: 'var(--warning)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
               EAN Genérico detectado
             </div>
-            <div style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 700, color: 'white', marginBottom: 4 }}>
+            <div style={{ fontFamily: 'monospace', fontSize: 17, fontWeight: 700, color: 'white', marginBottom: 4 }}>
               {eanGenerico}
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              Este código pertence a <strong style={{ color: 'white' }}>{produto.descricao}</strong>, mas não é único por caixa.
+              Produto: <strong style={{ color: 'white' }}>{produto.descricao}</strong>
             </div>
           </div>
 
-          {/* Instruções */}
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
-            Você tem esta caixa na mão. Informe o <strong>peso real</strong> e a <strong>validade</strong> dela para que o sistema gere um código único de rastreabilidade.
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
+            Informe <strong>Data de Produção</strong> (lote gerado automaticamente), <strong>Validade</strong>, <strong>Tara</strong> e <strong>Peso Bruto</strong>. O peso líquido será calculado automaticamente.
           </p>
 
-          {/* Formulário */}
           <form onSubmit={handleConfirmar}>
-            <div className="form-grid form-grid--2" style={{ marginBottom: 20 }}>
-              <div className="form-group">
-                <label className="form-label">Peso real desta caixa (KG) *</label>
-                <input
-                  ref={pesoRef}
-                  type="number"
-                  step="0.001"
-                  className="form-input form-input--number"
-                  placeholder="Ex: 12.350"
-                  value={pesoKg}
-                  onChange={e => setPesoKg(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Validade *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  value={validade}
-                  onChange={e => setValidade(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
+            <PesagemTaraFields
+              taras={taras}
+              value={formPesagem}
+              onChange={(next) => setFormPesagem(next)}
+              pesoBrutoRef={pesoBrutoRef}
+              onEnterPesoBruto={handleConfirmar}
+            />
 
-            {/* Preview do que será gerado */}
             <div style={{
               background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)',
-              borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 12, color: 'var(--text-muted)'
+              borderRadius: 8, padding: '10px 14px', margin: '16px 0', fontSize: 12, color: 'var(--text-muted)',
             }}>
               <ArrowRight size={12} style={{ display: 'inline', marginRight: 6, color: 'var(--primary)' }} />
-              Um código interno único será gerado automaticamente <span style={{ color: 'var(--primary)' }}>(INT-xxx)</span> e vinculado a esta caixa específica.
+              Será gerado automaticamente um EAN interno exclusivo de 16 dígitos para esta caixa.
             </div>
 
             <div className="flex gap-12">
@@ -158,5 +156,5 @@ export function ConverterSSCCModal({ isOpen, onClose, produto, eanGenerico, onCo
         </div>
       </div>
     </div>
-  );
+  )
 }

@@ -501,6 +501,107 @@ async function runMigrations(db) {
   await tryExecute("ALTER TABLE pedidos ADD COLUMN cliente_id INTEGER REFERENCES clientes(id);")
   await tryExecute("ALTER TABLE pedidos_itens ADD COLUMN unidade_solicitada TEXT DEFAULT 'KG';")
   await tryExecute("ALTER TABLE pedidos_itens ADD COLUMN qtd_solicitada_exibicao REAL DEFAULT NULL;")
+
+  // ── Taras, Rastreabilidade de Pesagem, Desmembramento e OP Planejada ───────
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS taras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      peso_kg REAL NOT NULL,
+      ativo INTEGER DEFAULT 1,
+      padrao INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+  try {
+    const tarasRes = await db.execute("SELECT COUNT(*) AS total FROM taras")
+    if (Number(tarasRes.rows[0]?.total || 0) === 0) {
+      await db.execute({ sql: "INSERT INTO taras (nome, peso_kg, ativo, padrao) VALUES (?, ?, 1, 1)", args: ['Caixa de 1,000 kg', 1.0] })
+      await db.execute({ sql: "INSERT INTO taras (nome, peso_kg, ativo, padrao) VALUES (?, ?, 1, 0)", args: ['Caixa de 0,700 kg', 0.7] })
+    }
+  } catch (e) {}
+
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS ean_sequencias (
+      chave TEXT PRIMARY KEY,
+      ultimo_numero INTEGER NOT NULL DEFAULT 900000,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+  await tryExecute("INSERT OR IGNORE INTO ean_sequencias (chave, ultimo_numero) VALUES ('CAIXA_INTERNA', 900000);")
+
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS desmembramentos_vinculos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo_operacao TEXT NOT NULL,
+      caixa_origem_id INTEGER NOT NULL,
+      ean_origem TEXT NOT NULL,
+      caixa_destino_id INTEGER NOT NULL,
+      ean_destino TEXT NOT NULL,
+      produto_id INTEGER NOT NULL,
+      peso_liquido_kg REAL NOT NULL,
+      peso_bruto_kg REAL DEFAULT NULL,
+      tara_kg REAL DEFAULT 0,
+      lote TEXT DEFAULT '',
+      data_producao DATE DEFAULT NULL,
+      validade DATE DEFAULT NULL,
+      operador_id INTEGER,
+      operador_nome TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_desm_ean_origem ON desmembramentos_vinculos(ean_origem);")
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_desm_ean_destino ON desmembramentos_vinculos(ean_destino);")
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_desm_op_cod ON desmembramentos_vinculos(codigo_operacao);")
+
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS op_itens_previstos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      op_id INTEGER NOT NULL REFERENCES ordens_producao(id) ON DELETE CASCADE,
+      tipo TEXT CHECK(tipo IN ('ENTRADA','SAIDA')) NOT NULL,
+      produto_id INTEGER NOT NULL REFERENCES produtos(id),
+      qtd_caixas_prevista REAL DEFAULT NULL,
+      peso_kg_previsto REAL DEFAULT NULL,
+      observacao TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_op_itens_prev_op ON op_itens_previstos(op_id);")
+
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN peso_bruto_kg REAL DEFAULT NULL;")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN tara_id INTEGER DEFAULT NULL;")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN tara_kg REAL DEFAULT 0;")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN data_producao DATE DEFAULT NULL;")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN origem_tipo TEXT DEFAULT 'RECEBIMENTO';")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN caixa_origem_id INTEGER DEFAULT NULL;")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN ean_origem TEXT DEFAULT NULL;")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN op_id INTEGER DEFAULT NULL;")
+  await tryExecute("ALTER TABLE estoque_caixas ADD COLUMN operador_cadastro_nome TEXT DEFAULT NULL;")
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_estoque_caixas_op ON estoque_caixas(op_id);")
+  await tryExecute("CREATE INDEX IF NOT EXISTS idx_estoque_caixas_ean_origem ON estoque_caixas(ean_origem);")
+
+  await tryExecute("ALTER TABLE op_insumos ADD COLUMN peso_bruto_kg REAL DEFAULT NULL;")
+  await tryExecute("ALTER TABLE op_insumos ADD COLUMN tara_kg REAL DEFAULT 0;")
+  await tryExecute("ALTER TABLE op_insumos ADD COLUMN data_producao DATE DEFAULT NULL;")
+  await tryExecute("ALTER TABLE op_insumos ADD COLUMN lote TEXT DEFAULT '';")
+
+  await tryExecute("ALTER TABLE op_retornos ADD COLUMN peso_bruto_kg REAL DEFAULT NULL;")
+  await tryExecute("ALTER TABLE op_retornos ADD COLUMN tara_id INTEGER DEFAULT NULL;")
+  await tryExecute("ALTER TABLE op_retornos ADD COLUMN tara_kg REAL DEFAULT 0;")
+  await tryExecute("ALTER TABLE op_retornos ADD COLUMN data_producao DATE DEFAULT NULL;")
+  await tryExecute("ALTER TABLE op_retornos ADD COLUMN validade DATE DEFAULT NULL;")
+  await tryExecute("ALTER TABLE op_retornos ADD COLUMN lote TEXT DEFAULT '';")
+
+  await tryExecute("ALTER TABLE ordens_producao ADD COLUMN observacoes TEXT DEFAULT '';")
+  await tryExecute("ALTER TABLE ordens_producao ADD COLUMN criado_por_id INTEGER DEFAULT NULL;")
+  await tryExecute("ALTER TABLE ordens_producao ADD COLUMN criado_por_nome TEXT DEFAULT NULL;")
+  await tryExecute("ALTER TABLE ordens_producao ADD COLUMN liberada_em DATETIME DEFAULT NULL;")
+
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN peso_bruto_contado_kg REAL DEFAULT NULL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN tara_id INTEGER DEFAULT NULL;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN tara_kg REAL DEFAULT 0;")
+  await tryExecute("ALTER TABLE inventario_itens ADD COLUMN data_producao_contada DATE DEFAULT NULL;")
 }
 
 module.exports = { runMigrations }

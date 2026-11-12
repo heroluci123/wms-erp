@@ -64,7 +64,17 @@ async function syncFromRemote() {
         const { runMigrations } = require(migPath)
         // Para rodar no banco local (better-sqlite3), criamos um wrapper que imita a API assíncrona
         await runMigrations({
-          executeMultiple: async (sqlStr) => localDb.exec(sqlStr)
+          executeMultiple: async (sqlStr) => localDb.exec(sqlStr),
+          execute: async (query) => {
+            const sql = typeof query === 'string' ? query : query.sql
+            const args = typeof query === 'string' ? [] : (query.args || [])
+            const stmt = localDb.prepare(sql)
+            if (/^\s*(SELECT|PRAGMA|EXPLAIN)/i.test(sql)) {
+              return { rows: stmt.all(...args) }
+            }
+            const info = stmt.run(...args)
+            return { rows: [], lastInsertRowid: info.lastInsertRowid, rowsAffected: info.changes }
+          }
         })
       }
     } catch(e) {
@@ -72,9 +82,9 @@ async function syncFromRemote() {
     }
 
     const tables = [
-      'produtos', 'operadores', 'locais', 'estoque_posicao', 'movimentacoes_log', 
-      'inventarios', 'inventario_itens', 'produtos_eans', 'ordens_producao', 
-      'paletes', 'estoque_caixas'
+      'produtos', 'operadores', 'locais', 'taras', 'estoque_posicao', 'movimentacoes_log', 
+      'inventarios', 'inventario_itens', 'produtos_eans', 'ordens_producao', 'op_itens_previstos',
+      'paletes', 'estoque_caixas', 'op_insumos', 'op_retornos', 'desmembramentos_vinculos'
     ]
 
     for (const table of tables) {

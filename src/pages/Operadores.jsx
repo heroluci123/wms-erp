@@ -35,7 +35,9 @@ export function Operadores() {
       rastreabilidade: false,
       retorno_producao: false,
       desmembramento: false,
-      consulta_estoque: false
+      consulta_estoque: false,
+      taras: false,
+      reimpressao: true
     }
   })
 
@@ -118,7 +120,9 @@ export function Operadores() {
         rastreabilidade: !!permissoesObj.rastreabilidade,
         retorno_producao: !!permissoesObj.retorno_producao,
         desmembramento: !!permissoesObj.desmembramento,
-        consulta_estoque: !!permissoesObj.consulta_estoque
+        consulta_estoque: !!permissoesObj.consulta_estoque,
+        taras: !!permissoesObj.taras,
+        reimpressao: permissoesObj.reimpressao === undefined ? true : !!permissoesObj.reimpressao
       }
     })
     setIsEditing(true)
@@ -152,7 +156,9 @@ export function Operadores() {
         rastreabilidade: false,
         retorno_producao: false,
         desmembramento: false,
-        consulta_estoque: false
+        consulta_estoque: false,
+        taras: false,
+        reimpressao: true
       }
     })
     setAlterandoSenha(false)
@@ -317,6 +323,14 @@ export function Operadores() {
                 <label className="flex items-center gap-8 cursor-pointer text-sm">
                   <input type="checkbox" checked={formData.permissoes.desmembramento} onChange={() => togglePermissao('desmembramento')} />
                   Desmembramento
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.reimpressao} onChange={() => togglePermissao('reimpressao')} />
+                  Reimpressão de Etiquetas
+                </label>
+                <label className="flex items-center gap-8 cursor-pointer text-sm">
+                  <input type="checkbox" checked={formData.permissoes.taras} onChange={() => togglePermissao('taras')} />
+                  Cadastro de Taras
                 </label>
               </div>
               <p className="text-xs text-muted mt-8">* Dashboard e Mapa de Capacidade estão sempre disponíveis para todos.</p>

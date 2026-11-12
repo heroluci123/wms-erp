@@ -296,14 +296,53 @@ export async function buscarHistoricoCaixa(ean) {
 }
 
 export async function buscarCaixaPorEan(ean) {
+  try {
+    const { ensureRastreabilidadeSchema } = await import('./taras.js')
+    await ensureRastreabilidadeSchema()
+  } catch { /* fallback seguro */ }
+
   const res = await db.execute({
-    sql: `SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo,
-                 pl.codigo as palete_codigo
+    sql: `SELECT c.*, p.codigo as produto_codigo, p.descricao as produto_descricao,
+                 pl.codigo as palete_codigo,
+                 t.nome as tara_nome,
+                 op.codigo as op_codigo, op.nome as op_nome
           FROM estoque_caixas c 
           JOIN produtos p ON c.produto_id = p.id 
           LEFT JOIN paletes pl ON c.palete_id = pl.id
-          WHERE c.ean_caixa = ?`,
+          LEFT JOIN taras t ON c.tara_id = t.id
+          LEFT JOIN ordens_producao op ON c.op_id = op.id
+          WHERE c.ean_caixa = ?
+          LIMIT 1`,
     args: [ean]
   })
-  return res.rows.length > 0 ? res.rows[0] : null
+  if (res.rows.length === 0) return null
+  const caixa = { ...res.rows[0], filhos_desmembramento: [], vinculo_origem: null }
+
+  try {
+    const filhosRes = await db.execute({
+      sql: `
+        SELECT dv.*, ec.status AS destino_status, ec.endereco AS destino_endereco
+        FROM desmembramentos_vinculos dv
+        LEFT JOIN estoque_caixas ec ON dv.caixa_destino_id = ec.id
+        WHERE dv.ean_origem = ?
+        ORDER BY dv.id ASC
+      `,
+      args: [ean],
+    })
+    caixa.filhos_desmembramento = filhosRes.rows || []
+
+    const origRes = await db.execute({
+      sql: `
+        SELECT dv.*, ec.status AS origem_status
+        FROM desmembramentos_vinculos dv
+        LEFT JOIN estoque_caixas ec ON dv.caixa_origem_id = ec.id
+        WHERE dv.ean_destino = ?
+        LIMIT 1
+      `,
+      args: [ean],
+    })
+    caixa.vinculo_origem = origRes.rows[0] || null
+  } catch { /* tabela ainda não populada */ }
+
+  return caixa
 }

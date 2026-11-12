@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box, Unlock } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box, Unlock, Printer } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
@@ -7,7 +7,11 @@ import { ptBR } from 'date-fns/locale'
 import * as movimentacoesQueries from '../queries/movimentacoes.js';
 import * as produtosQueries from '../queries/produtos.js';
 import * as estoqueQueries from '../queries/estoque.js';
+import { tarasQueries } from '../queries/taras.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx';
+import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared/PesagemTaraFields.jsx';
+import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx';
+import { hojeIsoLocal, validarPesagemTara, fmtDataBR, fmtKg2, fmtKg3 } from '../utils/rastreabilidade.js';
 
 // ─── Helper: exportar CSV ────────────────────────────────────────────────────
 function downloadCSV(rows, filename) {
@@ -462,12 +466,20 @@ export function Recebimento() {
   const [caixasDoPalete, setCaixasDoPalete] = useState([])
   const [modalConcluirOpen, setModalConcluirOpen] = useState(false)
   
-  // Formulário de Caixa SSCC
+  // Formulário de Caixa SSCC (novo padrão com Data Produção, Validade, Tara, Peso Bruto -> Peso Líquido e Lote DDMMYY)
   const [eanBipado, setEanBipado] = useState('')
   const [eanCaixaReal, setEanCaixaReal] = useState('')
   const [eanEhUnico, setEanEhUnico] = useState(true)
   const [produtoDetectado, setProdutoDetectado] = useState(null)
-  const [boxData, setBoxData] = useState({ peso_kg: '', validade: '' })
+  const [taras, setTaras] = useState([])
+  const [boxData, setBoxData] = useState({
+    data_producao: hojeIsoLocal(),
+    validade: '',
+    tara_id: '',
+    peso_bruto: '',
+  })
+  const [etiquetaPreview, setEtiquetaPreview] = useState(null)
+  const pesoBrutoRef = useRef(null)
   
   // Modal de EAN
   const [modalEanOpen, setModalEanOpen] = useState(false)
@@ -476,6 +488,13 @@ export function Recebimento() {
   // Carregar dados iniciais
   useEffect(() => {
     carregarPaletesAbertos()
+    tarasQueries.listar(true).then((lista) => {
+      setTaras(lista)
+      const padrao = resolverTaraSelecionada(lista, '')
+      if (padrao) {
+        setBoxData(prev => prev.tara_id ? prev : { ...prev, tara_id: String(padrao.id) })
+      }
+    }).catch(() => {})
   }, [])
 
   const carregarPaletesAbertos = async () => {
@@ -577,11 +596,10 @@ export function Recebimento() {
             toastSuccess('Caixa SSCC Identificada', produto.descricao)
           } else {
             // EAN genérico (identificado por sufixo/regra): usa o EAN original como identificador da caixa
-            // O EAN completo é único por caixa física — apenas o produto é identificado por sufixo
             setEanCaixaReal(val)
-            toastWarning('EAN Genérico', `${produto.descricao} — EAN identificado por sufixo. Informe peso e validade.`)
+            toastWarning('EAN Genérico', `${produto.descricao} — informe datas, tara e peso bruto.`)
           }
-          setTimeout(() => document.getElementById('box-peso')?.focus(), 100)
+          setTimeout(() => pesoBrutoRef.current?.focus(), 100)
         } else {
           setEanDesconhecido(val)
           setModalEanOpen(true)
@@ -593,30 +611,56 @@ export function Recebimento() {
   })
 
   const handleAdicionarCaixa = async (e) => {
-    e.preventDefault()
+    e?.preventDefault()
     if (!paleteAtivo) return toastError('Atenção', 'Selecione um palete.')
     if (!produtoDetectado) return toastError('Atenção', 'Produto não detectado.')
-    if (!boxData.peso_kg || !boxData.validade) return toastWarning('Atenção', 'Informe peso e validade.')
     if (!eanCaixaReal || eanCaixaReal.trim() === '') return toastError('Atenção', 'EAN inválido ou vazio. Bipe novamente.')
-    if (parseFloat(boxData.peso_kg) > 1000) return toastError('Peso Inválido', 'O peso da caixa está muito alto. Verifique se você bipou o código de barras no campo de peso acidentalmente!')
+
+    const taraAtual = resolverTaraSelecionada(taras, boxData.tara_id)
+    const valid = validarPesagemTara({
+      dataProducao: boxData.data_producao,
+      validade: boxData.validade,
+      taraId: taraAtual?.id,
+      taraKg: taraAtual?.peso_kg ?? 0,
+      pesoBruto: boxData.peso_bruto,
+    })
+    if (!valid.ok) return toastWarning('Dados da Caixa', valid.erro)
+    if (valid.peso_bruto_kg > 1000) {
+      return toastError('Peso Inválido', 'O peso bruto da caixa está muito alto. Verifique se você bipou o código de barras no campo de peso acidentalmente!')
+    }
+
     try {
       const res = await movimentacoesQueries.receberCaixaSerializada({
         ean_caixa: eanCaixaReal,
         produto_id: produtoDetectado.id,
         palete_id: paleteAtivo.id,
-        peso_kg: parseFloat(boxData.peso_kg),
-        validade: boxData.validade,
+        peso_kg: valid.peso_liquido_kg,
+        peso_bruto_kg: valid.peso_bruto_kg,
+        tara_id: valid.tara_id,
+        tara_kg: valid.tara_kg,
+        data_producao: valid.data_producao,
+        lote: valid.lote,
+        validade: valid.validade,
+        origem_tipo: 'RECEBIMENTO',
         operador_id: operador.id,
         operador_nome: operador.nome
       })
 
       if (res.success) {
-        toastSuccess('Caixa Adicionada', `${produtoDetectado.descricao} adicionado ao ${paleteAtivo.codigo}.`)
+        toastSuccess(
+          'Caixa Adicionada',
+          `${produtoDetectado.descricao} • Líq ${fmtKg2(valid.peso_liquido_kg)} (Lote ${valid.lote}) no ${paleteAtivo.codigo}.`
+        )
         setEanBipado('')
         setEanCaixaReal('')
         setEanEhUnico(true)
         setProdutoDetectado(null)
-        setBoxData({ peso_kg: '', validade: boxData.validade })
+        setBoxData(prev => ({
+          data_producao: prev.data_producao || hojeIsoLocal(),
+          validade: prev.validade,
+          tara_id: prev.tara_id || (taraAtual ? String(taraAtual.id) : ''),
+          peso_bruto: '',
+        }))
         selecionarPalete(paleteAtivo)
         carregarPaletesAbertos()
         codigoRef.current?.focus()
@@ -758,47 +802,29 @@ export function Recebimento() {
                   </div>
 
                   {produtoDetectado && (
-                    <div style={{ background: 'var(--bg-2)', padding: '12px 16px', borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
+                    <div style={{ background: 'var(--bg-2)', padding: '14px 16px', borderRadius: 10, border: `1px solid ${eanEhUnico ? 'var(--primary)' : 'var(--warning)'}`, marginBottom: 16 }}>
                       <div className="text-xs font-bold mb-4 uppercase" style={{ color: eanEhUnico ? 'var(--primary)' : 'var(--warning)' }}>
-                        {eanEhUnico ? '✅ Caixa SSCC Única' : '⚠️ EAN Genérico (Sufixo)'}
+                        {eanEhUnico ? '✅ Caixa SSCC Identificada' : '⚠️ EAN Genérico (Sufixo)'}
                       </div>
                       <div className="font-bold text-sm" style={{ lineHeight: 1.2 }}>{produtoDetectado.descricao}</div>
-                      <div className="text-xs text-muted mb-4">Código: {produtoDetectado.codigo || '-'}</div>
+                      <div className="text-xs text-muted mb-8">Código: {produtoDetectado.codigo || '-'} • EAN: <span className="font-mono">{eanCaixaReal}</span></div>
                       {!eanEhUnico && (
-                        <div style={{ fontSize: 10, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '4px 8px', color: 'var(--warning)', marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '4px 8px', color: 'var(--warning)', marginBottom: 10 }}>
                           🏷️ Salva com EAN original: <strong style={{ fontFamily: 'monospace' }}>{eanCaixaReal}</strong>
                         </div>
                       )}
 
-                      <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12 }}>
-                        <div className="form-group">
-                          <label className="form-label">Peso Real (KG) *</label>
-                          <input
-                            id="box-peso"
-                            type="number"
-                            step="0.001"
-                            className="form-input form-input--number"
-                            value={boxData.peso_kg}
-                            onChange={e => setBoxData({ ...boxData, peso_kg: e.target.value })}
-                            required
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Data de Validade *</label>
-                          <input
-                            type="date"
-                            className="form-input"
-                            value={boxData.validade}
-                            onChange={e => setBoxData({ ...boxData, validade: e.target.value })}
-                            required
-                          />
-                        </div>
-                      </div>
-                      
+                      <PesagemTaraFields
+                        taras={taras}
+                        value={boxData}
+                        onChange={(next) => setBoxData(next)}
+                        pesoBrutoRef={pesoBrutoRef}
+                        onEnterPesoBruto={handleAdicionarCaixa}
+                      />
+
                       <div className="mt-16 text-right">
                         <button type="submit" className="btn btn--primary btn--lg w-full">
-                          <Check size={18} /> Salvar Caixa
+                          <Check size={18} /> Salvar Caixa no Palete
                         </button>
                       </div>
                     </div>
@@ -813,16 +839,33 @@ export function Recebimento() {
                       <div className="text-center text-muted p-24 text-sm">Nenhuma caixa bipada ainda.</div>
                     ) : (
                       caixasDoPalete.map((c, i) => (
-                        <div key={c.id} style={{ padding: '10px 12px', borderBottom: i < caixasDoPalete.length - 1 ? '1px solid var(--border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div key={c.id} style={{ padding: '10px 12px', borderBottom: i < caixasDoPalete.length - 1 ? '1px solid var(--border)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                           <div>
                             <div className="font-bold text-sm" style={{ lineHeight: 1.2 }}>{c.produto_descricao}</div>
-                            <div className="text-xs text-muted font-mono mt-4">{c.ean_caixa}</div>
-                          </div>
-                          <div className="text-right flex items-center gap-12">
-                            <div>
-                              <div className="font-bold text-cyan text-sm">{c.peso_kg} kg</div>
-                              <div className="text-xs text-muted">Venc: {(() => { try { if (!c.validade) return '-'; const d = new Date(c.validade + 'T00:00:00'); return isNaN(d.getTime()) ? c.validade : format(d, 'dd/MM/yy'); } catch { return c.validade; } })()}</div>
+                            <div className="text-xs text-muted font-mono mt-4">
+                              {c.ean_caixa}
+                              {c.lote ? ` • Lote ${c.lote}` : ''}
+                              {c.data_producao ? ` • Prod ${fmtDataBR(c.data_producao)}` : ''}
                             </div>
+                          </div>
+                          <div className="text-right flex items-center gap-8">
+                            <div>
+                              <div className="font-bold text-cyan text-sm">
+                                Líq: {fmtKg2(c.peso_kg)}
+                              </div>
+                              <div className="text-xs text-muted">
+                                {c.peso_bruto_kg != null ? `Bruto: ${fmtKg2(c.peso_bruto_kg)} | Tara: ${fmtKg3(c.tara_kg || 0)} • ` : ''}
+                                Venc: {fmtDataBR(c.validade)}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn--ghost p-4"
+                              onClick={() => setEtiquetaPreview([c])}
+                              title="Imprimir etiqueta 100x70mm (EAN original)"
+                            >
+                              <Printer size={15} />
+                            </button>
                             <button className="btn btn--ghost text-danger p-4" onClick={() => handleRemoverCaixa(c)} title="Excluir caixa do palete"><Trash2 size={16}/></button>
                           </div>
                         </div>
@@ -846,10 +889,19 @@ export function Recebimento() {
         codigoDesconhecido={eanDesconhecido}
         onRegraSalva={(p) => {
           setProdutoDetectado(p)
+          setEanCaixaReal(eanDesconhecido)
           setEanEhUnico(true)
           setModalEanOpen(false)
-          setTimeout(() => document.getElementById('box-peso')?.focus(), 100)
+          setTimeout(() => pesoBrutoRef.current?.focus(), 100)
         }}
+      />
+
+      <EtiquetaZebraModal
+        isOpen={Boolean(etiquetaPreview)}
+        etiquetas={etiquetaPreview || []}
+        autoPrint={false}
+        onClose={() => setEtiquetaPreview(null)}
+        titulo="Etiqueta da Caixa Recebida"
       />
 
       {/* Modal Concluir Palete */}

@@ -27,6 +27,8 @@ import { MapaCapacidade } from './pages/MapaCapacidade'
 import { ColetorHome } from './pages/ColetorHome'
 import { EanEditor } from './pages/EanEditor'
 import { EstoqueMinimo } from './pages/EstoqueMinimo'
+import { Taras } from './pages/Taras'
+import { ReimpressaoEtiquetas } from './pages/ReimpressaoEtiquetas'
 
 function HomeWrapper() {
   const isMobile = window.innerWidth <= 768
@@ -47,6 +49,8 @@ function App() {
           <Route path="movimentacao" element={<Movimentacao />} />
           <Route path="producao" element={<Producao />} />
           <Route path="desmembramento" element={<Desmembramento />} />
+          <Route path="reimpressao" element={<ReimpressaoEtiquetas />} />
+          <Route path="taras" element={<Taras />} />
           <Route path="pedidos" element={<Pedidos />} />
           <Route path="saida" element={<Saida />} />
 

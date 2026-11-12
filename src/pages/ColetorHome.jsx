@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Package, ArrowRightLeft, ClipboardList, LogOut, PackageOpen, MapPin, Search, Factory, Scissors } from 'lucide-react'
+import { Package, ArrowRightLeft, ClipboardList, LogOut, PackageOpen, MapPin, Search, Factory, Scissors, Printer } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 
 export function ColetorHome() {
@@ -69,6 +69,13 @@ export function ColetorHome() {
       cor: '#14b8a6',
       permissao: 'desmembramento',
     },
+    {
+      label: 'Reimpressão\nEtiquetas',
+      icon: <Printer size={44} />,
+      rota: '/reimpressao',
+      cor: '#06b6d4',
+      permissao: 'reimpressao',
+    },
   ]
 
 
@@ -79,6 +86,9 @@ export function ColetorHome() {
 
   const operacoesFiltradas = operacoes.filter(op => {
     if (isAdm) return true
+    if (op.permissao === 'reimpressao') {
+      return perm.reimpressao !== false && (perm.reimpressao || perm.recebimento || perm.desmembramento || perm.retorno_producao)
+    }
     return op.permissao ? perm[op.permissao] : true
   })
 

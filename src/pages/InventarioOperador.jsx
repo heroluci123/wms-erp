@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { MapPin, Box, CheckCircle2, AlertCircle, Plus, X, Package, Settings, List, ArrowRight, MoveRight, Layers } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as inventariosQueries from '../queries/inventarios.js';
 import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
 import * as estoqueQueries from '../queries/estoque.js'
+import { tarasQueries } from '../queries/taras.js'
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx'
+import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared/PesagemTaraFields.jsx'
+import { hojeIsoLocal, validarPesagemTara, fmtKg2 } from '../utils/rastreabilidade.js'
 
 // ─── Badge de status de item ────────────────────────────────────────────────
 const StatusBadge = ({ status }) => {
@@ -26,12 +29,12 @@ const StatusBadge = ({ status }) => {
 }
 
 export function InventarioOperador() {
-  const { toastSuccess, toastError, toastWarning } = useAppStore()
+  const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
 
   const [inventarios, setInventarios] = useState([])
   const [inventarioAtivo, setInventarioAtivo] = useState(null)
 
-  // step 0 = lista de endereços, 1 = confirmar endereço, 2 = bipar produtos, 3 = qtd manual
+  // step 0 = lista de endereços, 1 = confirmar endereço, 2 = bipar produtos, 3 = pesagem / lote
   const [step, setStep] = useState(1)
 
   // Lista de endereços pendentes agrupados
@@ -42,14 +45,20 @@ export function InventarioOperador() {
   const [itensDoEndereco, setItensDoEndereco] = useState([])
 
   // Contagens locais (em memória) antes de finalizar o endereço
-  const [contagemLocal, setContagemLocal] = useState([]) // { chave, item_id, codigo, descricao, caixas, kg, validade }
+  const [contagemLocal, setContagemLocal] = useState([]) // { chave, item_id, codigo, descricao, caixas, kg, validade, ... }
 
   // Estado do item atual sendo contado
   const [itemAtual, setItemAtual] = useState(null)
 
+  const [taras, setTaras] = useState([])
   const [qtdCaixas, setQtdCaixas] = useState('')
-  const [qtdKg, setQtdKg] = useState('')
-  const [qtdValidade, setQtdValidade] = useState('')
+  const [formPesagem, setFormPesagem] = useState({
+    data_producao: hojeIsoLocal(),
+    validade: '',
+    tara_id: '',
+    peso_bruto: '',
+  })
+  const invPesoBrutoRef = useRef(null)
 
   // Modal DE-PARA (caixa em endereço errado)
   const [modalDePara, setModalDePara] = useState(null) // { caixa, produto, enderecoOrigem }
@@ -71,12 +80,20 @@ export function InventarioOperador() {
 
   const [isFinalizando, setIsFinalizando] = useState(false)
 
-  // ─── 1. Carregar inventários ──────────────────────────────────────────────
+  // ─── 1. Carregar inventários e taras ─────────────────────────────────────
   const carregar = async () => {
     try {
-      const all = await inventariosQueries.listar()
+      const [all, listaTaras] = await Promise.all([
+        inventariosQueries.listar(),
+        tarasQueries.listar(true),
+      ])
       const emContagem = all.filter(i => i.status === 'Em Contagem' || i.status === 'Aberto')
       setInventarios(emContagem)
+      setTaras(listaTaras)
+      const padrao = resolverTaraSelecionada(listaTaras, '')
+      if (padrao) {
+        setFormPesagem(prev => prev.tara_id ? prev : { ...prev, tara_id: String(padrao.id) })
+      }
     } catch (e) {
       toastError('Erro', 'Falha ao buscar inventários')
     }
@@ -140,12 +157,23 @@ export function InventarioOperador() {
   }
 
   // ─── 4. Clicar num endereço da lista ─────────────────────────────────────
+  const resetFormPesagem = (keepDates = false) => {
+    const padrao = resolverTaraSelecionada(taras, formPesagem.tara_id)
+    setFormPesagem(prev => ({
+      data_producao: keepDates && prev.data_producao ? prev.data_producao : hojeIsoLocal(),
+      validade: keepDates ? prev.validade : '',
+      tara_id: padrao ? String(padrao.id) : '',
+      peso_bruto: '',
+    }))
+  }
+
   const selecionarEndereco = (grupo) => {
     setEnderecoAtual(grupo.endereco)
     setItensDoEndereco(grupo.itens)
     setContagemLocal([])
     setItemAtual(null)
-    setQtdCaixas(''); setQtdKg(''); setQtdValidade('')
+    setQtdCaixas('')
+    resetFormPesagem(false)
     setSsccDadosCaixa(null); setSsccModoConfirmacao(false)
     setStep(1)
     setTimeout(() => document.getElementById('inv-endereco')?.focus(), 100)
@@ -172,7 +200,8 @@ export function InventarioOperador() {
   // Volta para a etapa de bipar produto
   const voltarParaProduto = () => {
     setItemAtual(null)
-    setQtdCaixas(''); setQtdKg(''); setQtdValidade('')
+    setQtdCaixas('')
+    resetFormPesagem(false)
     setSsccDadosCaixa(null); setSsccModoConfirmacao(false)
     setStep(2)
     setTimeout(() => document.getElementById('inv-produto')?.focus(), 100)
@@ -238,7 +267,7 @@ export function InventarioOperador() {
       // Busca a caixa no estoque
       const { db } = await import('../lib/db.js')
       const resEstoque = await db.execute({
-        sql: `SELECT peso_kg, validade, ean_caixa, endereco, status FROM estoque_caixas WHERE ean_caixa = ? LIMIT 1`,
+        sql: `SELECT peso_kg, peso_bruto_kg, tara_id, tara_kg, lote, data_producao, validade, ean_caixa, endereco, status FROM estoque_caixas WHERE ean_caixa = ? LIMIT 1`,
         args: [eanBipado]
       })
       const caixaNoEstoque = resEstoque.rows.length > 0 ? resEstoque.rows[0] : null
@@ -285,10 +314,11 @@ export function InventarioOperador() {
         return
       }
 
-      // Caixa não existe no estoque — pedir peso e validade manualmente
+      // Caixa não existe no estoque — pedir Data de Produção (Lote auto), Validade, Tara e Peso Bruto (sem peso líquido manual)
       setSsccDadosCaixa(null)
       setSsccModoConfirmacao(false)
-      setQtdCaixas('1'); setQtdKg(''); setQtdValidade('')
+      setQtdCaixas('1')
+      resetFormPesagem(true)
       setItemAtual({
         id: null, produto_id: produto.id, endereco: enderecoAtual,
         codigo: eanBipado, descricao: produto.descricao,
@@ -296,7 +326,7 @@ export function InventarioOperador() {
         grupo: produto.grupo, status_item: 'Pendente'
       })
       setStep(3)
-      setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
+      setTimeout(() => invPesoBrutoRef.current?.focus(), 120)
     } catch (err) {
       return toastError('Erro', err.message)
     }
@@ -314,7 +344,12 @@ export function InventarioOperador() {
         endereco: enderecoAtual,
         produto_id: produto.id,
         validade: caixaNoEstoque.validade,
-        ean_caixa: eanBipado
+        ean_caixa: eanBipado,
+        lote: caixaNoEstoque.lote || '',
+        data_producao_contada: caixaNoEstoque.data_producao || null,
+        tara_id: caixaNoEstoque.tara_id || null,
+        tara_kg: caixaNoEstoque.tara_kg || 0,
+        peso_bruto_contado_kg: caixaNoEstoque.peso_bruto_kg ?? null,
       })
       if (!res.success) { toastError('Erro', res.error); return }
       item_id = res.item_id
@@ -331,6 +366,11 @@ export function InventarioOperador() {
       codigo: eanBipado,
       descricao: produto.descricao,
       validade: caixaNoEstoque.validade || '',
+      data_producao: caixaNoEstoque.data_producao || null,
+      lote: caixaNoEstoque.lote || '',
+      tara_id: caixaNoEstoque.tara_id || null,
+      tara_kg: Number(caixaNoEstoque.tara_kg || 0),
+      peso_bruto_kg: caixaNoEstoque.peso_bruto_kg ?? null,
       caixas: 1,
       kg: caixaNoEstoque.peso_kg || 0
     }])
@@ -429,14 +469,16 @@ export function InventarioOperador() {
       setModalCadastro(null)
       const p = await produtosQueries.buscarPorCodigo(eanBipado)
       if (p) {
+        setQtdCaixas('1')
+        resetFormPesagem(true)
         setItemAtual({
           id: null, produto_id: p.id, endereco: enderecoAtual,
-          codigo: p.codigo || p.ean, descricao: p.descricao,
+          codigo: eanBipado || p.codigo || p.ean, descricao: p.descricao,
           status_curva: p.status_curva, tipo_produto: p.tipo_produto,
           grupo: p.grupo, status_item: 'Pendente'
         })
         setStep(3)
-        setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
+        setTimeout(() => invPesoBrutoRef.current?.focus(), 120)
       }
     } catch (err) {
       toastError('Erro', err.message)
@@ -465,12 +507,48 @@ export function InventarioOperador() {
   }
 
   const submitContagem = async (e) => {
-    e.preventDefault()
-    if (qtdCaixas === '' || qtdKg === '' || qtdValidade === '') return
+    e?.preventDefault()
+    if (!itemAtual) return
 
-    const cx = parseFloat(qtdCaixas)
-    const kg = parseFloat(qtdKg)
-    const val = qtdValidade
+    const cx = parseFloat(qtdCaixas || '1') || 1
+    let val = ''
+    let kg = 0
+    let dataProducao = null
+    let lote = ''
+    let taraId = null
+    let taraKg = 0
+    let pesoBrutoKg = null
+
+    if (ssccModoConfirmacao && ssccDadosCaixa) {
+      val = ssccDadosCaixa.validade || ''
+      kg = Number(ssccDadosCaixa.peso_kg || 0)
+      dataProducao = ssccDadosCaixa.data_producao || null
+      lote = ssccDadosCaixa.lote || ''
+      taraId = ssccDadosCaixa.tara_id || null
+      taraKg = Number(ssccDadosCaixa.tara_kg || 0)
+      pesoBrutoKg = ssccDadosCaixa.peso_bruto_kg ?? Number((kg + taraKg).toFixed(3))
+    } else {
+      const taraAtual = resolverTaraSelecionada(taras, formPesagem.tara_id)
+      const valid = validarPesagemTara({
+        dataProducao: formPesagem.data_producao,
+        validade: formPesagem.validade,
+        taraId: taraAtual?.id,
+        taraKg: taraAtual?.peso_kg ?? 0,
+        pesoBruto: formPesagem.peso_bruto,
+      })
+      if (!valid.ok) {
+        toastWarning('Dados da Caixa', valid.erro)
+        return
+      }
+      val = valid.validade
+      kg = valid.peso_liquido_kg
+      dataProducao = valid.data_producao
+      lote = valid.lote
+      taraId = valid.tara_id
+      taraKg = valid.tara_kg
+      pesoBrutoKg = valid.peso_bruto_kg
+    }
+
     const chave = `${itemAtual.codigo}__${val}`
     const jaExiste = contagemLocal.find(c => c.chave === chave)
 
@@ -485,7 +563,6 @@ export function InventarioOperador() {
       return
     }
 
-    const valNorm = val ? val.toString().substring(0, 10) : null
     const itemMatch = itensDoEndereco.find(i => i.ean_caixa === itemAtual.codigo)
     let item_id
     if (itemMatch) {
@@ -509,20 +586,28 @@ export function InventarioOperador() {
         endereco: enderecoAtual,
         produto_id: itemAtual.produto_id,
         validade: val,
-        ean_caixa: itemAtual.codigo
+        ean_caixa: itemAtual.codigo,
+        lote,
+        data_producao_contada: dataProducao,
+        tara_id: taraId,
+        tara_kg: taraKg,
+        peso_bruto_contado_kg: pesoBrutoKg,
       })
       if (!res.success) return toastError('Erro', res.error)
       item_id = res.item_id
-      setItensDoEndereco(prev => [...prev, { ...itemAtual, id: item_id, validade: val }])
+      setItensDoEndereco(prev => [...prev, { ...itemAtual, id: item_id, validade: val, lote }])
     }
 
     setContagemLocal(prev => [...prev, {
       chave, item_id, produto_id: itemAtual.produto_id,
       codigo: itemAtual.codigo, descricao: itemAtual.descricao,
-      validade: val, caixas: cx, kg: kg
+      validade: val, data_producao: dataProducao, lote,
+      tara_id: taraId, tara_kg: taraKg, peso_bruto_kg: pesoBrutoKg,
+      caixas: cx, kg: kg
     }])
 
-    toastSuccess('Registrado', 'Volume salvo. Finalize o endereço para enviar.')
+    toastSuccess('Registrado', `Volume salvo • Líq ${fmtKg2(kg)} ${lote ? `• Lote ${lote}` : ''}`)
+    resetFormPesagem(true)
     voltarParaProduto()
   }
 
@@ -537,7 +622,19 @@ export function InventarioOperador() {
       contagemLocal.forEach(c => {
         const existing = groupedCounted.find(g => g.item_id === c.item_id)
         if (existing) { existing.caixas += c.caixas; existing.kg += c.kg }
-        else groupedCounted.push({ item_id: c.item_id, caixas: c.caixas, kg: c.kg, validade: c.validade })
+        else {
+          groupedCounted.push({
+            item_id: c.item_id,
+            caixas: c.caixas,
+            kg: c.kg,
+            validade: c.validade,
+            peso_bruto_kg: c.peso_bruto_kg,
+            tara_id: c.tara_id,
+            tara_kg: c.tara_kg,
+            data_producao: c.data_producao,
+            lote: c.lote,
+          })
+        }
       })
 
       const countedIds = groupedCounted.map(c => c.item_id)
@@ -550,16 +647,31 @@ export function InventarioOperador() {
           item_id: c.item_id,
           qtd_contada_caixas: c.caixas,
           qtd_contada_kg: c.kg,
-          validade_informada: c.validade
+          validade_informada: c.validade,
+          peso_bruto_contado_kg: c.peso_bruto_kg ?? null,
+          tara_id: c.tara_id ?? null,
+          tara_kg: c.tara_kg ?? 0,
+          data_producao_contada: c.data_producao ?? null,
+          lote_contado: c.lote ?? null,
         }))
       )
 
-      // Registrar caixas SSCC no estoque
+      // Registrar caixas SSCC no estoque com peso bruto, tara, líquido e lote automático
       const caixasSSCC = contagemLocal
         .filter(c => c.codigo && c.codigo.length >= 8)
         .map(c => ({
-          ean_caixa: c.codigo, produto_id: c.produto_id, endereco: enderecoAtual,
-          validade: c.validade, peso_kg: c.kg / (c.caixas || 1)
+          ean_caixa: c.codigo,
+          produto_id: c.produto_id,
+          endereco: enderecoAtual,
+          validade: c.validade,
+          data_producao: c.data_producao || null,
+          lote: c.lote || '',
+          peso_kg: c.kg / (c.caixas || 1),
+          peso_bruto_kg: c.peso_bruto_kg ?? null,
+          tara_id: c.tara_id ?? null,
+          tara_kg: c.tara_kg ?? 0,
+          origem_tipo: 'INVENTARIO',
+          operador_cadastro_nome: operador?.nome || 'Inventário',
         }))
       if (caixasSSCC.length > 0) {
         await estoqueQueries.inserirCaixasCargaInicial(caixasSSCC)
@@ -1063,7 +1175,25 @@ export function InventarioOperador() {
                         <button type="submit" className="btn btn--primary flex-1" style={{ background: 'var(--success)', borderColor: 'var(--success)' }}>
                           <CheckCircle2 size={16}/> SIM, está correto
                         </button>
-                        <button type="button" className="btn btn--ghost" style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }} onClick={() => setSsccModoConfirmacao(false)}>
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}
+                          onClick={() => {
+                            const padrao = resolverTaraSelecionada(taras, ssccDadosCaixa?.tara_id)
+                            const liq = Number(ssccDadosCaixa?.peso_kg || 0)
+                            const taraKg = Number(ssccDadosCaixa?.tara_kg ?? padrao?.peso_kg ?? 0)
+                            const bruto = ssccDadosCaixa?.peso_bruto_kg ?? (liq > 0 ? Number((liq + taraKg).toFixed(3)) : '')
+                            setFormPesagem({
+                              data_producao: ssccDadosCaixa?.data_producao || hojeIsoLocal(),
+                              validade: ssccDadosCaixa?.validade || '',
+                              tara_id: padrao ? String(padrao.id) : '',
+                              peso_bruto: bruto ? String(bruto) : '',
+                            })
+                            setSsccModoConfirmacao(false)
+                            setTimeout(() => invPesoBrutoRef.current?.focus(), 100)
+                          }}
+                        >
                           NÃO, editar
                         </button>
                       </div>
@@ -1074,20 +1204,16 @@ export function InventarioOperador() {
                   <>
                     {ssccDadosCaixa && !ssccModoConfirmacao && (
                       <div style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: '8px 12px', marginBottom: 4 }} className="text-sm text-warning">
-                        Ajuste os valores corretos da caixa física:
+                        Ajuste os valores corretos da caixa física (Peso Líquido e Lote DDMMYY calculados automaticamente):
                       </div>
                     )}
-                    <div className="form-group">
-                      <label className="form-label">Validade da Caixa (Física) *</label>
-                      <input id="inv-validade" type="date" className="form-input" value={qtdValidade}
-                        onChange={e => setQtdValidade(e.target.value)} required autoFocus />
-                    </div>
-                    <div className="flex gap-16 items-end">
-                      <div className="form-group" style={{ flex: 1 }}>
-                        <label className="form-label">Peso (KG Físico) *</label>
-                        <input id="inv-kg" type="number" step="0.01" className="form-input form-input--number" value={qtdKg} onChange={e => setQtdKg(e.target.value)} required />
-                      </div>
-                    </div>
+                    <PesagemTaraFields
+                      taras={taras}
+                      value={formPesagem}
+                      onChange={(next) => setFormPesagem(next)}
+                      pesoBrutoRef={invPesoBrutoRef}
+                      onEnterPesoBruto={submitContagem}
+                    />
                     <div className="flex gap-8 mt-8">
                       <button type="submit" className="btn btn--primary btn--lg w-full">
                         <CheckCircle2 size={18}/> {jaBipado ? 'Somar Quantidade' : 'Salvar Volume'}
@@ -1109,14 +1235,16 @@ export function InventarioOperador() {
         onClose={() => { setModalEanOpen(false); setTimeout(() => document.getElementById('inv-produto')?.focus(), 100) }}
         codigoDesconhecido={eanDesconhecido}
         onRegraSalva={(p) => {
+          setQtdCaixas('1')
+          resetFormPesagem(true)
           setItemAtual({
             id: null, produto_id: p.id, endereco: enderecoAtual,
-            codigo: p.codigo || p.ean, descricao: p.descricao,
+            codigo: eanDesconhecido || p.codigo || p.ean, descricao: p.descricao,
             status_curva: p.status_curva, tipo_produto: p.tipo_produto,
             grupo: p.grupo, status_item: 'Pendente'
           })
           setStep(3)
-          setTimeout(() => document.getElementById('inv-validade')?.focus(), 100)
+          setTimeout(() => invPesoBrutoRef.current?.focus(), 120)
         }}
       />
     </div>

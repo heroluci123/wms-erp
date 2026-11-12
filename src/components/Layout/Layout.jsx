@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -72,7 +72,7 @@ function Sidebar() {
         <Map size={18} /> Mapa de Capacidade
       </NavLink>
       
-      { (operador?.permissoes?.recebimento || operador?.permissoes?.movimentacao || operador?.permissoes?.saida || operador?.permissoes?.expedicao || Number(operador?.is_adm) === 1 || operador?.perfil === 'gestor' || operador?.permissoes?.pedidos) && (
+      { (operador?.permissoes?.recebimento || operador?.permissoes?.movimentacao || operador?.permissoes?.saida || operador?.permissoes?.expedicao || operador?.permissoes?.retorno_producao || operador?.permissoes?.desmembramento || operador?.permissoes?.reimpressao || Number(operador?.is_adm) === 1 || operador?.perfil === 'gestor' || operador?.permissoes?.pedidos) && (
         <div className="sidebar__section-label">Operação</div>
       )}
       
@@ -86,14 +86,19 @@ function Sidebar() {
           <ArrowRightLeft size={18} /> Movimentação Interna
         </NavLink>
       )}
-      {operador?.permissoes?.movimentacao && (
+      {(Number(operador?.is_adm) === 1 || operador?.permissoes?.retorno_producao || operador?.permissoes?.movimentacao) && (
         <NavLink to="/producao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <Factory size={18} /> Retorno de Produção
         </NavLink>
       )}
-      {operador?.permissoes?.movimentacao && (
+      {(Number(operador?.is_adm) === 1 || operador?.permissoes?.desmembramento || operador?.permissoes?.movimentacao) && (
         <NavLink to="/desmembramento" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <Scissors size={18} /> Desmembramento
+        </NavLink>
+      )}
+      {(Number(operador?.is_adm) === 1 || (operador?.permissoes?.reimpressao !== false && (operador?.permissoes?.reimpressao || operador?.permissoes?.recebimento || operador?.permissoes?.desmembramento || operador?.permissoes?.retorno_producao || operador?.permissoes?.produtos))) && (
+        <NavLink to="/reimpressao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <Printer size={18} /> Reimpressão Etiquetas
         </NavLink>
       )}
       {(Number(operador?.is_adm) === 1 || operador?.perfil === 'gestor' || operador?.permissoes?.pedidos) && (
@@ -148,9 +153,14 @@ function Sidebar() {
         </NavLink>
       )}
       
-      { (operador?.permissoes?.locais || operador?.permissoes?.operadores) && (
+      { (operador?.permissoes?.locais || operador?.permissoes?.operadores || operador?.permissoes?.taras || operador?.permissoes?.produtos || Number(operador?.is_adm) === 1) && (
         <>
           <div className="sidebar__section-label">Cadastros</div>
+          {(Number(operador?.is_adm) === 1 || operador?.permissoes?.taras || operador?.permissoes?.produtos) && (
+            <NavLink to="/taras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Scale size={18} /> Cadastro de Taras
+            </NavLink>
+          )}
           {operador?.permissoes?.locais && (
             <NavLink to="/locais" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
               <MapPin size={18} /> Cadastro de Locais

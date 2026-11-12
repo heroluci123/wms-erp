@@ -405,15 +405,15 @@ export async function exportRelatorioWmsExcel({
     views: [{ state: 'frozen', ySplit: 4 }]
   });
 
-  wsEnt.mergeCells('A1:K1');
-  wsEnt.getCell('A1').value = 'WMSphere • TRICARNES — RELATÓRIO DE ENTRADAS (RECEBIMENTO / PRODUÇÃO / INVENTÁRIO)';
+  wsEnt.mergeCells('A1:N1');
+  wsEnt.getCell('A1').value = 'WMSphere • TRICARNES — RELATÓRIO DE ENTRADAS (RECEBIMENTO / PRODUÇÃO / INVENTÁRIO / DESMEMBRAMENTO)';
   wsEnt.getCell('A1').font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
   wsEnt.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.indigoDark } };
   wsEnt.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
   wsEnt.getRow(1).height = 28;
 
-  wsEnt.mergeCells('A2:K2');
-  wsEnt.getCell('A2').value = `Período: ${periodoLabel}  |  Caixas Registradas na Entrada: ${entradasCaixas.length} cx  |  Peso Total de Entrada: ${totalEntradaKg.toFixed(2).replace('.', ',')} kg`;
+  wsEnt.mergeCells('A2:N2');
+  wsEnt.getCell('A2').value = `Período: ${periodoLabel}  |  Caixas Registradas na Entrada: ${entradasCaixas.length} cx  |  Peso Líquido Total: ${totalEntradaKg.toFixed(2).replace('.', ',')} kg`;
   wsEnt.getCell('A2').font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
   wsEnt.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subHeaderBg } };
   wsEnt.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
@@ -422,7 +422,8 @@ export async function exportRelatorioWmsExcel({
 
   const headersEnt = [
     'Data/Hora Entrada', 'Origem / Tipo Entrada', 'Código', 'Descrição do Produto',
-    'Grupo', 'EAN da Caixa', 'Endereço', 'Lote', 'Validade', 'Situação Atual', 'Peso (Kg)'
+    'Grupo', 'EAN da Caixa', 'Endereço', 'Lote', 'Data Prod.', 'Validade',
+    'Situação Atual', 'Peso Bruto (Kg)', 'Tara (Kg)', 'Peso Líquido (Kg)'
   ];
   const rHEnt = wsEnt.getRow(4);
   headersEnt.forEach((h, i) => {
@@ -430,7 +431,7 @@ export async function exportRelatorioWmsExcel({
     cell.value = h;
     cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.slateHeader } };
-    cell.alignment = { vertical: 'middle', horizontal: i === 10 ? 'right' : ([0, 2, 6, 7, 8, 9].includes(i) ? 'center' : 'left') };
+    cell.alignment = { vertical: 'middle', horizontal: [11, 12, 13].includes(i) ? 'right' : ([0, 2, 6, 7, 8, 9, 10].includes(i) ? 'center' : 'left') };
     cell.border = thinBorder;
   });
   rHEnt.height = 24;
@@ -439,10 +440,15 @@ export async function exportRelatorioWmsExcel({
     const rIdx = 5 + idx;
     const row = wsEnt.getRow(rIdx);
     const dtEnt = toExcelDateTimeBRT(item.created_at);
+    const prodDate = toExcelDateOnly(item.data_producao);
     const valDate = toExcelDateOnly(item.validade);
-    const origem = item.origem_operacao === 'PRODUCAO' || item.endereco === 'PRODUÇÃO PAVAN'
+    const liq = Number(item.peso_kg || 0);
+    const tara = Number(item.tara_kg || 0);
+    const bruto = item.peso_bruto_kg != null ? Number(item.peso_bruto_kg) : Number((liq + tara).toFixed(2));
+    const origemRaw = String(item.origem_tipo || '').toUpperCase();
+    const origem = origemRaw === 'PRODUCAO' || item.origem_operacao === 'PRODUCAO' || item.endereco === 'PRODUÇÃO PAVAN' || item.endereco === 'PRODUCAO'
       ? 'RETORNO DE PRODUÇÃO'
-      : 'CARGA / RECEBIMENTO';
+      : (origemRaw || item.origem_operacao || 'CARGA / RECEBIMENTO');
 
     row.getCell(1).value = dtEnt;
     row.getCell(2).value = origem;
@@ -452,27 +458,33 @@ export async function exportRelatorioWmsExcel({
     row.getCell(6).value = String(item.ean_caixa || '');
     row.getCell(7).value = item.endereco || '-';
     row.getCell(8).value = item.lote || '-';
-    row.getCell(9).value = valDate;
-    row.getCell(10).value = item.status_caixa || 'DISPONIVEL';
-    row.getCell(11).value = Number(item.peso_kg || 0);
+    row.getCell(9).value = prodDate;
+    row.getCell(10).value = valDate;
+    row.getCell(11).value = item.status_caixa || 'DISPONIVEL';
+    row.getCell(12).value = bruto;
+    row.getCell(13).value = tara;
+    row.getCell(14).value = liq;
 
     if (dtEnt) row.getCell(1).numFmt = 'dd/mm/yyyy hh:mm';
     row.getCell(3).numFmt = '@';
     row.getCell(6).numFmt = '@';
-    if (valDate) row.getCell(9).numFmt = 'dd/mm/yyyy';
-    row.getCell(11).numFmt = '#,##0.00';
+    if (prodDate) row.getCell(9).numFmt = 'dd/mm/yyyy';
+    if (valDate) row.getCell(10).numFmt = 'dd/mm/yyyy';
+    row.getCell(12).numFmt = '#,##0.00';
+    row.getCell(13).numFmt = '#,##0.000';
+    row.getCell(14).numFmt = '#,##0.00';
 
-    for (let c = 1; c <= 11; c++) {
+    for (let c = 1; c <= 14; c++) {
       const cell = row.getCell(c);
       cell.font = { name: 'Calibri', size: 10, color: { argb: COLORS.navyDark } };
       cell.border = thinBorder;
       if (idx % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.zebraBg } };
-      if ([1, 3, 7, 8, 9, 10].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      else if (c === 11) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      if ([1, 3, 7, 8, 9, 10, 11].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      else if ([12, 13, 14].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'right' };
       else cell.alignment = { vertical: 'middle', horizontal: 'left' };
     }
     row.getCell(6).font = { name: 'Consolas', size: 9.5, color: { argb: COLORS.navyDark } };
-    row.getCell(11).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
+    row.getCell(14).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
     row.height = 19;
   });
 
@@ -480,9 +492,13 @@ export async function exportRelatorioWmsExcel({
   const entTotRow = wsEnt.getRow(entEndRow + 1);
   entTotRow.getCell(1).value = 'TOTAIS';
   entTotRow.getCell(4).value = `${entradasCaixas.length} caixas registradas`;
-  entTotRow.getCell(11).value = entradasCaixas.length > 0 ? { formula: `SUBTOTAL(109,K5:K${entEndRow})`, result: totalEntradaKg } : 0;
-  entTotRow.getCell(11).numFmt = '#,##0.00';
-  for (let c = 1; c <= 11; c++) {
+  entTotRow.getCell(12).value = entradasCaixas.length > 0 ? { formula: `SUBTOTAL(109,L5:L${entEndRow})`, result: entradasCaixas.reduce((s, x) => s + Number(x.peso_bruto_kg ?? x.peso_kg ?? 0), 0) } : 0;
+  entTotRow.getCell(13).value = entradasCaixas.length > 0 ? { formula: `SUBTOTAL(109,M5:M${entEndRow})`, result: entradasCaixas.reduce((s, x) => s + Number(x.tara_kg || 0), 0) } : 0;
+  entTotRow.getCell(14).value = entradasCaixas.length > 0 ? { formula: `SUBTOTAL(109,N5:N${entEndRow})`, result: totalEntradaKg } : 0;
+  entTotRow.getCell(12).numFmt = '#,##0.00';
+  entTotRow.getCell(13).numFmt = '#,##0.000';
+  entTotRow.getCell(14).numFmt = '#,##0.00';
+  for (let c = 1; c <= 14; c++) {
     const cell = entTotRow.getCell(c);
     cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
@@ -492,14 +508,15 @@ export async function exportRelatorioWmsExcel({
       left: { style: 'thin', color: { argb: COLORS.borderGray } },
       right: { style: 'thin', color: { argb: COLORS.borderGray } }
     };
-    if (c === 11) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+    if ([12, 13, 14].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'right' };
   }
   entTotRow.height = 22;
 
-  wsEnt.autoFilter = `A4:K${entEndRow}`;
+  wsEnt.autoFilter = `A4:N${entEndRow}`;
   wsEnt.columns = [
     { width: 19 }, { width: 23 }, { width: 10 }, { width: 38 },
-    { width: 16 }, { width: 20 }, { width: 17 }, { width: 11 }, { width: 13 }, { width: 15 }, { width: 14 }
+    { width: 16 }, { width: 20 }, { width: 17 }, { width: 11 }, { width: 13 }, { width: 13 }, { width: 15 },
+    { width: 15 }, { width: 12 }, { width: 16 }
   ];
 
   // =========================================================================
@@ -644,15 +661,15 @@ export async function exportRelatorioWmsExcel({
     views: [{ state: 'frozen', ySplit: 4 }]
   });
 
-  wsEst.mergeCells('A1:M1');
+  wsEst.mergeCells('A1:P1');
   wsEst.getCell('A1').value = 'WMSphere • TRICARNES — ESTOQUE ATUAL DETALHADO POR CAIXA FÍSICA';
   wsEst.getCell('A1').font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
   wsEst.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.navyDark } };
   wsEst.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
   wsEst.getRow(1).height = 28;
 
-  wsEst.mergeCells('A2:M2');
-  wsEst.getCell('A2').value = `Posição Atual  |  Total de Caixas: ${estoqueAtual.length} cx  |  Peso Total: ${totalEstoqueKg.toFixed(2).replace('.', ',')} kg`;
+  wsEst.mergeCells('A2:P2');
+  wsEst.getCell('A2').value = `Posição Atual  |  Total de Caixas: ${estoqueAtual.length} cx  |  Peso Líquido Total: ${totalEstoqueKg.toFixed(2).replace('.', ',')} kg`;
   wsEst.getCell('A2').font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
   wsEst.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subHeaderBg } };
   wsEst.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
@@ -661,8 +678,8 @@ export async function exportRelatorioWmsExcel({
 
   const headersEst = [
     'Endereço', 'Código', 'Descrição do Produto', 'Grupo', 'Tipo', 'Curva',
-    'Armazen.', 'EAN da Caixa', 'Lote', 'Validade', 'Dias p/ Vencer',
-    'Status', 'Peso (Kg)'
+    'Armazen.', 'EAN da Caixa', 'Lote', 'Data Prod.', 'Validade', 'Dias p/ Vencer',
+    'Status', 'Peso Bruto (Kg)', 'Tara (Kg)', 'Peso Líquido (Kg)'
   ];
   const headerRowEst = wsEst.getRow(4);
   headersEst.forEach((h, i) => {
@@ -670,7 +687,7 @@ export async function exportRelatorioWmsExcel({
     cell.value = h;
     cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.slateHeader } };
-    cell.alignment = { vertical: 'middle', horizontal: i === 10 || i === 12 ? 'right' : ([0, 1, 5, 6, 8, 9, 11].includes(i) ? 'center' : 'left') };
+    cell.alignment = { vertical: 'middle', horizontal: [11, 13, 14, 15].includes(i) ? 'right' : ([0, 1, 5, 6, 8, 9, 10, 12].includes(i) ? 'center' : 'left') };
     cell.border = thinBorder;
   });
   headerRowEst.height = 24;
@@ -678,9 +695,12 @@ export async function exportRelatorioWmsExcel({
   estSorted.forEach((item, idx) => {
     const rIdx = 5 + idx;
     const row = wsEst.getRow(rIdx);
+    const prodDate = toExcelDateOnly(item.data_producao);
     const valDate = toExcelDateOnly(item.validade);
     const dias = daysBetweenDateOnly(item.validade);
     const peso = Number(item.peso_kg || 0);
+    const tara = Number(item.tara_kg || 0);
+    const bruto = item.peso_bruto_kg != null ? Number(item.peso_bruto_kg) : Number((peso + tara).toFixed(2));
 
     row.getCell(1).value = item.endereco || '-';
     row.getCell(2).value = String(item.codigo || '');
@@ -691,36 +711,42 @@ export async function exportRelatorioWmsExcel({
     row.getCell(7).value = item.tipo_armazenamento || 'FRIO';
     row.getCell(8).value = String(item.ean_caixa || '');
     row.getCell(9).value = item.lote || '-';
-    row.getCell(10).value = valDate;
-    row.getCell(11).value = dias !== null ? dias : '-';
-    row.getCell(12).value = item.status_caixa || item.status || 'DISPONIVEL';
-    row.getCell(13).value = peso;
+    row.getCell(10).value = prodDate;
+    row.getCell(11).value = valDate;
+    row.getCell(12).value = dias !== null ? dias : '-';
+    row.getCell(13).value = item.status_caixa || item.status || 'DISPONIVEL';
+    row.getCell(14).value = bruto;
+    row.getCell(15).value = tara;
+    row.getCell(16).value = peso;
 
     row.getCell(2).numFmt = '@';
     row.getCell(8).numFmt = '@';
-    if (valDate) row.getCell(10).numFmt = 'dd/mm/yyyy';
-    if (dias !== null) row.getCell(11).numFmt = '#,##0';
-    row.getCell(13).numFmt = '#,##0.00';
+    if (prodDate) row.getCell(10).numFmt = 'dd/mm/yyyy';
+    if (valDate) row.getCell(11).numFmt = 'dd/mm/yyyy';
+    if (dias !== null) row.getCell(12).numFmt = '#,##0';
+    row.getCell(14).numFmt = '#,##0.00';
+    row.getCell(15).numFmt = '#,##0.000';
+    row.getCell(16).numFmt = '#,##0.00';
 
-    for (let c = 1; c <= 13; c++) {
+    for (let c = 1; c <= 16; c++) {
       const cell = row.getCell(c);
       cell.font = { name: 'Calibri', size: 10, color: { argb: COLORS.navyDark } };
       cell.border = thinBorder;
       if (idx % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.zebraBg } };
-      if ([1, 2, 6, 7, 9, 10, 12].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      else if ([11, 13].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      if ([1, 2, 6, 7, 9, 10, 11, 13].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      else if ([12, 14, 15, 16].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'right' };
       else cell.alignment = { vertical: 'middle', horizontal: 'left' };
     }
     row.getCell(8).font = { name: 'Consolas', size: 9.5, color: { argb: COLORS.navyDark } };
-    row.getCell(13).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
+    row.getCell(16).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
 
     if (dias !== null) {
       if (dias < 0) {
-        row.getCell(11).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.redBg } };
-        row.getCell(11).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.redText } };
+        row.getCell(12).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.redBg } };
+        row.getCell(12).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.redText } };
       } else if (dias <= 30) {
-        row.getCell(11).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.amberBg } };
-        row.getCell(11).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.amberText } };
+        row.getCell(12).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.amberBg } };
+        row.getCell(12).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.amberText } };
       }
     }
     row.height = 19;
@@ -730,10 +756,14 @@ export async function exportRelatorioWmsExcel({
   const estTotalRow = wsEst.getRow(estEndRow + 1);
   estTotalRow.getCell(1).value = 'TOTAIS';
   estTotalRow.getCell(3).value = estSorted.length > 0 ? { formula: `COUNTA(H5:H${estEndRow}) & " caixas"`, result: `${estSorted.length} caixas` } : '0 caixas';
-  estTotalRow.getCell(13).value = estSorted.length > 0 ? { formula: `SUBTOTAL(109,M5:M${estEndRow})`, result: totalEstoqueKg } : 0;
-  estTotalRow.getCell(13).numFmt = '#,##0.00';
+  estTotalRow.getCell(14).value = estSorted.length > 0 ? { formula: `SUBTOTAL(109,N5:N${estEndRow})`, result: estSorted.reduce((s, x) => s + Number(x.peso_bruto_kg ?? x.peso_kg ?? 0), 0) } : 0;
+  estTotalRow.getCell(15).value = estSorted.length > 0 ? { formula: `SUBTOTAL(109,O5:O${estEndRow})`, result: estSorted.reduce((s, x) => s + Number(x.tara_kg || 0), 0) } : 0;
+  estTotalRow.getCell(16).value = estSorted.length > 0 ? { formula: `SUBTOTAL(109,P5:P${estEndRow})`, result: totalEstoqueKg } : 0;
+  estTotalRow.getCell(14).numFmt = '#,##0.00';
+  estTotalRow.getCell(15).numFmt = '#,##0.000';
+  estTotalRow.getCell(16).numFmt = '#,##0.00';
 
-  for (let c = 1; c <= 13; c++) {
+  for (let c = 1; c <= 16; c++) {
     const cell = estTotalRow.getCell(c);
     cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
@@ -743,15 +773,15 @@ export async function exportRelatorioWmsExcel({
       left: { style: 'thin', color: { argb: COLORS.borderGray } },
       right: { style: 'thin', color: { argb: COLORS.borderGray } }
     };
-    if (c === 13) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+    if ([14, 15, 16].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'right' };
   }
   estTotalRow.height = 22;
 
-  wsEst.autoFilter = `A4:M${estEndRow}`;
+  wsEst.autoFilter = `A4:P${estEndRow}`;
   wsEst.columns = [
     { width: 17 }, { width: 10 }, { width: 38 }, { width: 16 }, { width: 15 }, { width: 8 },
-    { width: 13 }, { width: 20 }, { width: 10 }, { width: 13 }, { width: 14 },
-    { width: 14 }, { width: 14 }
+    { width: 13 }, { width: 20 }, { width: 10 }, { width: 13 }, { width: 13 }, { width: 14 },
+    { width: 14 }, { width: 15 }, { width: 12 }, { width: 16 }
   ];
 
   // Download no navegador

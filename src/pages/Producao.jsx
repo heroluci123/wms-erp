@@ -1,1002 +1,1332 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { Layers, Plus, Factory, Check, Info, ArrowRight, Package, Trash2, Unlock, BarChart2, Download, Calendar, ChevronRight, AlertTriangle } from 'lucide-react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
+import {
+  Factory, Plus, Check, Trash2, Unlock, BarChart2, ScanBarcode,
+  AlertTriangle, Package, Printer, Edit3, ShieldAlert, ArrowDownToLine,
+  ArrowUpFromLine, RefreshCw, Play, FileText, Search, X, Lock
+} from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as producaoQueries from '../queries/producao.js'
 import * as produtosQueries from '../queries/produtos.js'
-import * as movimentacoesQueries from '../queries/movimentacoes.js'
-import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao'
-import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
+import { tarasQueries } from '../queries/taras.js'
+import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared/PesagemTaraFields.jsx'
+import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx'
+import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao.jsx'
+import {
+  fmtDataBR,
+  fmtDataHoraBR,
+  fmtKg2,
+  fmtKg3,
+  hojeIsoLocal,
+  validarPesagemTara,
+} from '../utils/rastreabilidade.js'
 
-const fmtDataHora = (str) => {
-  if (!str) return '-'
-  const s = str.trim()
-  const iso = /[Zz+\-]\d*$/.test(s) ? s : s.replace(' ', 'T') + 'Z'
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  })
+const STATUS_BADGE = {
+  RASCUNHO: { label: 'Rascunho (ADM)', bg: 'rgba(148,163,184,0.16)', color: '#cbd5e1', border: 'rgba(148,163,184,0.35)' },
+  LIBERADA: { label: 'Liberada', bg: 'rgba(34,197,94,0.16)', color: '#4ade80', border: 'rgba(34,197,94,0.38)' },
+  ABERTA: { label: 'Em Produção', bg: 'rgba(56,189,248,0.16)', color: '#38bdf8', border: 'rgba(56,189,248,0.38)' },
+  FECHADA: { label: 'Finalizada', bg: 'rgba(167,139,250,0.16)', color: '#c4b5fd', border: 'rgba(167,139,250,0.38)' },
 }
 
-// ─── HELPER CSV ───────────────────────────────────────────────────────────────
-function downloadCSV(content, filename) {
-  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename })
-  document.body.appendChild(a); a.click(); document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+function OpStatusBadge({ status }) {
+  const s = STATUS_BADGE[status] || { label: status || '-', bg: 'var(--bg-3)', color: 'var(--text-secondary)', border: 'var(--border)' }
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
+      background: s.bg, color: s.color, border: `1px solid ${s.border}`, whiteSpace: 'nowrap',
+    }}>
+      {s.label}
+    </span>
+  )
 }
 
-// ─── DATA HELPERS ─────────────────────────────────────────────────────────────
-function toDateStr(d) { return d.toISOString().slice(0, 10) }
-function hoje() { return toDateStr(new Date()) }
-function ontem() { const d = new Date(); d.setDate(d.getDate() - 1); return toDateStr(d) }
-function inicioSemana() { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return toDateStr(d) }
-function inicioMes() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01` }
+function SeletorProdutoInline({ produtos, placeholder, onSelect }) {
+  const [busca, setBusca] = useState('')
+  const [aberto, setAberto] = useState(false)
 
-// ─── COMPONENTE DE RELATÓRIOS ─────────────────────────────────────────────────
-function HistoricoRelatorios() {
-  const [di, setDi] = useState(inicioMes())
-  const [df, setDf] = useState(hoje())
-  const [subTab, setSubTab] = useState('dossie') // 'dossie' | 'produto' | 'geral'
-  const [loading, setLoading] = useState(false)
-  const [dadosProduto, setDadosProduto] = useState(null)
-  const [dadosGeral, setDadosGeral] = useState(null)
-
-  const aplicarAtalho = (tipo) => {
-    if (tipo === 'hoje') { setDi(hoje()); setDf(hoje()) }
-    else if (tipo === 'ontem') { setDi(ontem()); setDf(ontem()) }
-    else if (tipo === 'semana') { setDi(inicioSemana()); setDf(hoje()) }
-    else if (tipo === 'mes') { setDi(inicioMes()); setDf(hoje()) }
-  }
-
-  const carregar = async () => {
-    if (!di || !df) return
-    setLoading(true)
-    try {
-      const [prod, geral] = await Promise.all([
-        producaoQueries.relatorioProdutoAcabadoPeriodo(di, df),
-        producaoQueries.relatorioOPsPeriodo(di, df)
-      ])
-      setDadosProduto(prod)
-      setDadosGeral(geral)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { carregar() }, [])
-
-  const fmtDt = (s) => {
-    if (!s) return '-'
-    const iso = s.includes('T') ? s : s.replace(' ', 'T') + 'Z'
-    return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  }
-
-  // KPIs produto acabado
-  const kpiProduto = useMemo(() => {
-    if (!dadosProduto) return null
-    const totalKg = dadosProduto.reduce((s, r) => s + Number(r.kg_total || 0), 0)
-    const totalCx = dadosProduto.reduce((s, r) => s + Number(r.num_caixas || 0), 0)
-    const totalOps = new Set(dadosProduto.map(r => r.num_ops)).size
-    return { totalKg, totalCx, totalProdutos: dadosProduto.length }
-  }, [dadosProduto])
-
-  // KPIs geral
-  const kpiGeral = useMemo(() => {
-    if (!dadosGeral) return null
-    const totalKgInsumo = dadosGeral.reduce((s, r) => s + Number(r.kg_insumo || 0), 0)
-    const totalKgRetorno = dadosGeral.reduce((s, r) => s + Number(r.kg_retorno || 0), 0)
-    const rendMedio = totalKgInsumo > 0 ? (totalKgRetorno / totalKgInsumo * 100) : 0
-    return { totalOps: dadosGeral.length, totalKgInsumo, totalKgRetorno, rendMedio }
-  }, [dadosGeral])
-
-  // Máximo kg para o gráfico
-  const maxKgChart = useMemo(() => {
-    if (!dadosProduto || dadosProduto.length === 0) return 1
-    return Math.max(...dadosProduto.map(r => Number(r.kg_total || 0)))
-  }, [dadosProduto])
-
-  const exportarProdutoCSV = () => {
-    if (!dadosProduto || dadosProduto.length === 0) return
-    const header = 'PRODUTO_CODIGO;PRODUTO;GRUPO;NUM_OPS;NUM_CAIXAS;KG_TOTAL\n'
-    const rows = dadosProduto.map(r =>
-      `${r.produto_codigo};${r.produto_descricao};${r.grupo || ''};${r.num_ops};${r.num_caixas};${String(Number(r.kg_total || 0).toFixed(2)).replace('.', ',')}`
-    ).join('\n')
-    downloadCSV(header + rows, `relatorio_produto_acabado_${di}_${df}.csv`)
-  }
-
-  const exportarGeralCSV = () => {
-    if (!dadosGeral || dadosGeral.length === 0) return
-    const header = 'OP;NOME;OPERADOR;DATA_ABERTURA;KG_INSUMO;KG_RETORNO;KG_SUBPRODUTO;RENDIMENTO_%\n'
-    const rows = dadosGeral.map(r => {
-      const kgInsumo = Number(r.kg_insumo || 0)
-      const kgRetorno = Number(r.kg_retorno || 0)
-      const subproduto = Math.max(0, kgInsumo - kgRetorno)
-      const rend = kgInsumo > 0 ? (kgRetorno / kgInsumo * 100).toFixed(2) : '0'
-      return `${r.codigo};${r.nome};${r.operador_nome || ''};${fmtDt(r.created_at)};${kgInsumo.toFixed(2).replace('.', ',')};${kgRetorno.toFixed(2).replace('.', ',')};${subproduto.toFixed(2).replace('.', ',')};${rend.replace('.', ',')}`
-    }).join('\n')
-    downloadCSV(header + rows, `relatorio_geral_producao_${di}_${df}.csv`)
-  }
-
-  const periodoLabel = di === df
-    ? `${fmtDt(di + 'T12:00:00')}`
-    : `${fmtDt(di + 'T12:00:00')} → ${fmtDt(df + 'T12:00:00')}`
+  const filtrados = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    if (!q) return produtos.slice(0, 12)
+    return produtos
+      .filter(p =>
+        String(p.codigo || '').toLowerCase().includes(q) ||
+        String(p.descricao || '').toLowerCase().includes(q)
+      )
+      .slice(0, 20)
+  }, [busca, produtos])
 
   return (
-    <div>
-      {/* ── SUB-ABAS ── */}
-      <div className="flex gap-12 mb-16">
-        <button
-          className={`btn ${subTab === 'dossie' ? 'btn--primary' : 'btn--ghost'}`}
-          style={{ flex: 1 }}
-          onClick={() => setSubTab('dossie')}
-        >
-          <Factory size={16} /> Dossiê de Rendimento & Rastreabilidade
-        </button>
-        <button
-          className={`btn ${subTab === 'produto' ? 'btn--primary' : 'btn--ghost'}`}
-          style={{ flex: 1 }}
-          onClick={() => setSubTab('produto')}
-        >
-          <Package size={16} /> Produto Acabado
-        </button>
-        <button
-          className={`btn ${subTab === 'geral' ? 'btn--primary' : 'btn--ghost'}`}
-          style={{ flex: 1 }}
-          onClick={() => setSubTab('geral')}
-        >
-          <BarChart2 size={16} /> Relatório Geral
-        </button>
+    <div style={{ position: 'relative' }}>
+      <div className="search-box" style={{ padding: '7px 12px' }}>
+        <Search size={15} color="var(--text-muted)" />
+        <input
+          type="text"
+          placeholder={placeholder || 'Digite código ou nome do produto...'}
+          value={busca}
+          onFocus={() => setAberto(true)}
+          onBlur={() => setTimeout(() => setAberto(false), 180)}
+          onChange={e => { setBusca(e.target.value); setAberto(true) }}
+        />
+        {busca && (
+          <button type="button" onClick={() => setBusca('')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <X size={14} />
+          </button>
+        )}
       </div>
 
-      {subTab === 'dossie' && (
-        <RelatorioDossieProducao titulo="Dossiê de Transformação & Rendimento" />
-      )}
-
-      {subTab !== 'dossie' && (
-        <>
-          {/* ── FILTRO DE DATA ── */}
-          <div className="card mb-16" style={{ background: 'var(--bg-2)' }}>
-        <div className="flex items-center gap-8 mb-12">
-          <Calendar size={16} style={{ color: 'var(--primary)' }} />
-          <span className="font-bold text-sm" style={{ color: 'var(--primary)' }}>Período</span>
-          <span className="text-xs text-muted ml-8">{periodoLabel}</span>
-        </div>
-        <div className="flex flex-wrap gap-8 mb-12">
-          {[
-            { label: 'Hoje', key: 'hoje' },
-            { label: 'Ontem', key: 'ontem' },
-            { label: 'Esta Semana', key: 'semana' },
-            { label: 'Este Mês', key: 'mes' },
-          ].map(a => (
+      {aberto && filtrados.length > 0 && (
+        <div style={{
+          position: 'absolute', left: 0, right: 0, top: 'calc(100% + 4px)', zIndex: 50,
+          background: 'var(--bg-2)', border: '1px solid var(--border-light)', borderRadius: 8,
+          maxHeight: 230, overflowY: 'auto', boxShadow: '0 14px 32px rgba(0,0,0,0.55)',
+        }}>
+          {filtrados.map(p => (
             <button
-              key={a.key}
-              className="btn btn--ghost btn--sm"
-              style={{ fontSize: 12 }}
-              onClick={() => aplicarAtalho(a.key)}
+              key={p.id}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                onSelect(p)
+                setBusca('')
+                setAberto(false)
+              }}
+              style={{
+                width: '100%', textAlign: 'left', padding: '9px 12px',
+                background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)',
+                color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13,
+              }}
             >
-              {a.label}
+              <span><strong>{p.codigo || '-'}</strong> — {p.descricao}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{p.tipo_produto || ''}</span>
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap gap-12 items-end">
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Data Início</label>
-            <input type="date" className="form-input" value={di} onChange={e => setDi(e.target.value)} style={{ width: 160 }} />
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Data Fim</label>
-            <input type="date" className="form-input" value={df} onChange={e => setDf(e.target.value)} style={{ width: 160 }} />
-          </div>
-          <button className="btn btn--primary" onClick={carregar} disabled={loading}>
-            {loading ? 'Carregando...' : 'Aplicar Filtro'}
-          </button>
-        </div>
-      </div>
-
-
-
-      {/* ═══════════════ ABA PRODUTO ACABADO ═══════════════ */}
-      {subTab === 'produto' && (
-        <div>
-          {dadosProduto === null ? (
-            <div className="text-center text-muted py-32">Aplique o filtro para ver os relatórios.</div>
-          ) : (
-            <>
-              {/* KPI Cards */}
-              {kpiProduto && (
-                <div className="grid grid-cols-3 gap-16 mb-16">
-                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
-                    <div style={{ fontSize: 30, fontWeight: 900, color: 'var(--success)' }}>{Number(kpiProduto.totalKg).toFixed(0)} kg</div>
-                    <div className="text-xs text-muted uppercase font-bold mt-4">Total Produzido</div>
-                  </div>
-                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
-                    <div style={{ fontSize: 30, fontWeight: 900, color: 'var(--primary)' }}>{kpiProduto.totalCx}</div>
-                    <div className="text-xs text-muted uppercase font-bold mt-4">Caixas Geradas</div>
-                  </div>
-                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
-                    <div style={{ fontSize: 30, fontWeight: 900, color: 'var(--warning)' }}>{kpiProduto.totalProdutos}</div>
-                    <div className="text-xs text-muted uppercase font-bold mt-4">Produtos Distintos</div>
-                  </div>
-                </div>
-              )}
-
-              {dadosProduto.length === 0 ? (
-                <div className="card text-center text-muted py-32">Nenhuma produção no período selecionado.</div>
-              ) : (
-                <div className="card p-0">
-                  {/* Header da tabela + CSV */}
-                  <div className="flex items-center justify-between p-16" style={{ borderBottom: '1px solid var(--border)' }}>
-                    <div>
-                      <div className="font-bold text-primary">Consolidado por Produto</div>
-                      <div className="text-xs text-muted">{dadosProduto.length} produto(s) · {periodoLabel}</div>
-                    </div>
-                    <button className="btn btn--ghost btn--sm flex items-center gap-8" onClick={exportarProdutoCSV}>
-                      <Download size={14} /> CSV
-                    </button>
-                  </div>
-
-                  {/* Gráfico de barras */}
-                  <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-                    <div className="text-xs text-muted font-bold uppercase mb-12">Kg Produzido por Produto</div>
-                    <div className="flex flex-col gap-10">
-                      {dadosProduto.map(r => {
-                        const pct = maxKgChart > 0 ? (Number(r.kg_total) / maxKgChart * 100) : 0
-                        const totalKgGeral = kpiProduto?.totalKg || 1
-                        const share = (Number(r.kg_total) / totalKgGeral * 100).toFixed(1)
-                        return (
-                          <div key={r.produto_id}>
-                            <div className="flex justify-between items-center mb-4">
-                              <span className="text-sm font-bold" style={{ maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.produto_descricao}</span>
-                              <span className="text-sm font-mono" style={{ color: 'var(--success)' }}>{Number(r.kg_total).toFixed(2)} kg <span className="text-muted text-xs">({share}%)</span></span>
-                            </div>
-                            <div style={{ height: 8, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, var(--success), var(--primary))', borderRadius: 99, transition: 'width 0.6s ease' }} />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Tabela detalhada */}
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
-                          <th style={{ textAlign: 'left', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Produto</th>
-                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Código</th>
-                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Grupo</th>
-                          <th style={{ textAlign: 'center', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Nº OPs</th>
-                          <th style={{ textAlign: 'center', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Caixas</th>
-                          <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Kg Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dadosProduto.map((r, i) => (
-                          <tr key={r.produto_id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
-                            <td style={{ padding: '10px 16px', fontWeight: 600 }}>{r.produto_descricao}</td>
-                            <td style={{ padding: '10px 8px', fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>{r.produto_codigo}</td>
-                            <td style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: 12 }}>{r.grupo || '—'}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--primary)' }}>{r.num_ops}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'center', color: 'var(--text-muted)' }}>{r.num_caixas}</td>
-                            <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--success)', fontFamily: 'monospace' }}>{Number(r.kg_total).toFixed(2)} kg</td>
-                          </tr>
-                        ))}
-                        {/* Linha total */}
-                        <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-2)' }}>
-                          <td colSpan={5} style={{ padding: '10px 16px', fontWeight: 700, fontSize: 13 }}>TOTAL</td>
-                          <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 900, color: 'var(--success)', fontFamily: 'monospace', fontSize: 15 }}>
-                            {kpiProduto ? Number(kpiProduto.totalKg).toFixed(2) : '—'} kg
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ═══════════════ ABA GERAL ═══════════════ */}
-      {subTab === 'geral' && (
-        <div>
-          {dadosGeral === null ? (
-            <div className="text-center text-muted py-32">Aplique o filtro para ver os relatórios.</div>
-          ) : (
-            <>
-              {/* KPI Cards */}
-              {kpiGeral && (
-                <div className="grid grid-cols-4 gap-12 mb-16">
-                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--primary)' }}>{kpiGeral.totalOps}</div>
-                    <div className="text-xs text-muted uppercase font-bold mt-4">OPs Finalizadas</div>
-                  </div>
-                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--cyan)' }}>{kpiGeral.totalKgInsumo.toFixed(0)} kg</div>
-                    <div className="text-xs text-muted uppercase font-bold mt-4">Total Insumo</div>
-                  </div>
-                  <div className="card" style={{ textAlign: 'center', background: 'var(--bg-2)' }}>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--success)' }}>{kpiGeral.totalKgRetorno.toFixed(0)} kg</div>
-                    <div className="text-xs text-muted uppercase font-bold mt-4">Total Produzido</div>
-                  </div>
-                  <div className="card" style={{ textAlign: 'center', background: kpiGeral.rendMedio < 85 ? 'rgba(239,68,68,0.1)' : 'var(--bg-2)', border: kpiGeral.rendMedio < 85 ? '1px solid var(--danger)' : undefined }}>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: kpiGeral.rendMedio < 85 ? 'var(--danger)' : kpiGeral.rendMedio < 92 ? 'var(--warning)' : 'var(--success)' }}>
-                      {kpiGeral.rendMedio.toFixed(1)}%
-                    </div>
-                    <div className="text-xs text-muted uppercase font-bold mt-4">Rendimento Médio</div>
-                  </div>
-                </div>
-              )}
-
-              {dadosGeral.length === 0 ? (
-                <div className="card text-center text-muted py-32">Nenhuma OP finalizada no período selecionado.</div>
-              ) : (
-                <div className="card p-0">
-                  <div className="flex items-center justify-between p-16" style={{ borderBottom: '1px solid var(--border)' }}>
-                    <div>
-                      <div className="font-bold text-primary">Relatório Geral de Produção</div>
-                      <div className="text-xs text-muted">{dadosGeral.length} OP(s) · {periodoLabel}</div>
-                    </div>
-                    <button className="btn btn--ghost btn--sm flex items-center gap-8" onClick={exportarGeralCSV}>
-                      <Download size={14} /> CSV
-                    </button>
-                  </div>
-
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
-                          <th style={{ textAlign: 'left', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>OP</th>
-                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Produto/Nome</th>
-                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Data</th>
-                          <th style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Operador</th>
-                          <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Kg Insumo</th>
-                          <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Kg Produzido</th>
-                          <th style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Subproduto</th>
-                          <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Rendimento</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dadosGeral.map((r, i) => {
-                          const kgInsumo = Number(r.kg_insumo || 0)
-                          const kgRetorno = Number(r.kg_retorno || 0)
-                          const subprod = Math.max(0, kgInsumo - kgRetorno)
-                          const rend = kgInsumo > 0 ? (kgRetorno / kgInsumo * 100) : 0
-                          const rendBaixo = rend < 85 && kgInsumo > 0
-                          const rendMedio = rend >= 85 && rend < 92
-                          const rendColor = rendBaixo ? 'var(--danger)' : rendMedio ? 'var(--warning)' : 'var(--success)'
-                          return (
-                            <tr key={r.id} style={{
-                              borderBottom: '1px solid var(--border)',
-                              background: rendBaixo ? 'rgba(239,68,68,0.05)' : i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'
-                            }}>
-                              <td style={{ padding: '10px 16px' }}>
-                                <div className="font-bold font-mono text-primary" style={{ fontSize: 13 }}>{r.codigo}</div>
-                              </td>
-                              <td style={{ padding: '10px 8px', maxWidth: 160 }}>
-                                <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nome}</div>
-                              </td>
-                              <td style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: 12 }}>{fmtDataHora(r.created_at)}</td>
-                              <td style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: 12 }}>{r.operador_nome || '—'}</td>
-                              <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--cyan)' }}>{kgInsumo.toFixed(2)}</td>
-                              <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--success)' }}>{kgRetorno.toFixed(2)}</td>
-                              <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--warning)' }}>{subprod.toFixed(2)}</td>
-                              <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                                <span style={{ fontWeight: 700, color: rendColor, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                  {rendBaixo && <AlertTriangle size={12} />}
-                                  {rend.toFixed(2)}%
-                                </span>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                        {/* Linha de totais */}
-                        {kpiGeral && (
-                          <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-2)' }}>
-                            <td colSpan={4} style={{ padding: '10px 16px', fontWeight: 700 }}>TOTAL ({kpiGeral.totalOps} OPs)</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--cyan)' }}>{kpiGeral.totalKgInsumo.toFixed(2)}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--success)' }}>{kpiGeral.totalKgRetorno.toFixed(2)}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--warning)' }}>{Math.max(0, kpiGeral.totalKgInsumo - kpiGeral.totalKgRetorno).toFixed(2)}</td>
-                            <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 900, color: kpiGeral.rendMedio < 85 ? 'var(--danger)' : kpiGeral.rendMedio < 92 ? 'var(--warning)' : 'var(--success)' }}>
-                              {kpiGeral.rendMedio.toFixed(2)}%
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-        </>
       )}
     </div>
   )
 }
 
 export function Producao() {
-  const { toastSuccess, toastError, toastWarning, operador } = useAppStore()
-  const [ops, setOps] = useState([])
+  const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
+  const isAdm = Number(operador?.is_adm) === 1
+
+  const [abaPrincipal, setAbaPrincipal] = useState('ativas') // 'ativas' | 'config' | 'fechadas' | 'relatorios'
+  const [opsAtivas, setOpsAtivas] = useState([])
   const [opsFechadas, setOpsFechadas] = useState([])
-  const [activeTab, setActiveTab] = useState('abertas')
+  const [produtos, setProdutos] = useState([])
+  const [taras, setTaras] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  // Execução de OP
   const [opSelecionada, setOpSelecionada] = useState(null)
-  const [detalhes, setDetalhes] = useState(null)
-  
-  const [modalRetorno, setModalRetorno] = useState(null)
-  const [modalFefo, setModalFefo] = useState(null)
-  const [modalRemoverItem, setModalRemoverItem] = useState(null)
-  const [modalFinalizarOP, setModalFinalizarOP] = useState(false)
-  const [modalNovaOP, setModalNovaOP] = useState(false)
-  const [modalCancelarOP, setModalCancelarOP] = useState(false)
-  const [modalReabrirOP, setModalReabrirOP] = useState(false)
+  const [subAbaOp, setSubAbaOp] = useState('entradas') // 'entradas' | 'saidas'
 
-  const historico = detalhes ? [
-    ...detalhes.insumos.map(i => ({ ...i, tipoMov: 'INSUMO' })),
-    ...detalhes.retornos.map(r => ({ ...r, tipoMov: 'RETORNO' }))
-  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : []
+  // Scanner / Entrada
+  const [scanEntrada, setScanEntrada] = useState('')
+  const [buscandoEntrada, setBuscandoEntrada] = useState(false)
+  const [confirmacaoEntrada, setConfirmacaoEntrada] = useState(null) // { caixa, avisoFefo, foraPrevisto }
+  const entradaRef = useRef(null)
 
-  const carregarOPs = async () => {
+  // Formulário Saída da Produção
+  const [produtoSaidaId, setProdutoSaidaId] = useState('')
+  const [mostrarTodosProdutosSaida, setMostrarTodosProdutosSaida] = useState(false)
+  const [formSaida, setFormSaida] = useState({
+    data_producao: hojeIsoLocal(),
+    validade: '',
+    tara_id: '',
+    peso_bruto: '',
+  })
+  const [salvandoSaida, setSalvandoSaida] = useState(false)
+  const pesoBrutoSaidaRef = useRef(null)
+
+  // Etiquetas Zebra 100x70mm
+  const [etiquetasModal, setEtiquetasModal] = useState({ open: false, itens: [], autoPrint: false, titulo: '' })
+
+  // Formulário ADM: Criar / Editar OP
+  const [editOpId, setEditOpId] = useState(null)
+  const [opForm, setOpForm] = useState({
+    nome: '',
+    data_producao: hojeIsoLocal(),
+    observacoes: '',
+    liberarAgora: true,
+    itensEntrada: [], // [{ produto_id, codigo, descricao, peso_kg_previsto, qtd_caixas_prevista }]
+    itensSaida: [],
+  })
+  const [salvandoOp, setSalvandoOp] = useState(false)
+
+  // Dossiê direto de 1 OP selecionada
+  const [dossieOpIdFiltro, setDossieOpIdFiltro] = useState(null)
+
+  const carregarTudo = async () => {
+    setLoading(true)
     try {
-      const dAbertas = await producaoQueries.listarOPs('ABERTA')
-      const dFechadas = await producaoQueries.listarOPs('FECHADA')
-      setOps(dAbertas)
-      setOpsFechadas(dFechadas)
-    } catch (e) {
-      toastError('Erro', 'Falha ao carregar OPs')
+      const [ativas, fechadas, prods, listaTaras] = await Promise.all([
+        producaoQueries.listarOPs('ATIVAS'),
+        producaoQueries.listarOPs('FECHADA'),
+        produtosQueries.listar(),
+        tarasQueries.listar(true),
+      ])
+      setOpsAtivas(isAdm ? ativas : ativas.filter(o => ['LIBERADA', 'ABERTA'].includes(o.status)))
+      setOpsFechadas(fechadas)
+      setProdutos(prods)
+      setTaras(listaTaras)
+
+      const padrao = resolverTaraSelecionada(listaTaras, '')
+      if (padrao) {
+        setFormSaida(prev => prev.tara_id ? prev : { ...prev, tara_id: String(padrao.id) })
+      }
+    } catch (err) {
+      toastError('Erro', `Falha ao carregar Produção: ${err.message}`)
+    } finally {
+      setLoading(false)
     }
   }
 
-  const carregarDetalhes = async (id) => {
+  useEffect(() => { carregarTudo() }, [isAdm])
+
+  const abrirDetalhesOP = async (opId, manterSubAba = false) => {
     try {
-      const d = await producaoQueries.detalhesOP(id)
-      setDetalhes(d)
-    } catch (e) {
-      toastError('Erro', 'Falha ao carregar detalhes')
+      const det = await producaoQueries.detalhesOP(opId)
+      if (!det) return toastError('Erro', 'OP não encontrada.')
+      setOpSelecionada(det)
+      if (!manterSubAba) {
+        setSubAbaOp('entradas')
+      }
+
+      const padrao = resolverTaraSelecionada(taras, formSaida.tara_id)
+      setFormSaida(prev => ({
+        data_producao: det.data_producao || hojeIsoLocal(),
+        validade: prev.validade || '',
+        tara_id: padrao ? String(padrao.id) : prev.tara_id,
+        peso_bruto: '',
+      }))
+
+      if (det.previstos_saida?.length > 0) {
+        const existeAtual = det.previstos_saida.some(p => String(p.produto_id) === String(produtoSaidaId))
+        if (!existeAtual) {
+          setProdutoSaidaId(String(det.previstos_saida[0].produto_id))
+        }
+        setMostrarTodosProdutosSaida(false)
+      } else {
+        setMostrarTodosProdutosSaida(true)
+      }
+    } catch (err) {
+      toastError('Erro', err.message)
     }
   }
 
-  useEffect(() => { carregarOPs() }, [])
+  // ── ADM: Criar / Editar OP ─────────────────────────────────────────────────
+  const iniciarNovaOpAdm = () => {
+    if (!isAdm) return
+    setEditOpId(null)
+    setOpForm({
+      nome: '',
+      data_producao: hojeIsoLocal(),
+      observacoes: '',
+      liberarAgora: true,
+      itensEntrada: [],
+      itensSaida: [],
+    })
+    setAbaPrincipal('config')
+  }
 
-  useEffect(() => {
-    if (opSelecionada) {
-      carregarDetalhes(opSelecionada.id)
-    } else {
-      setDetalhes(null)
+  const iniciarEdicaoOpAdm = (det) => {
+    if (!isAdm) return
+    setEditOpId(det.id)
+    setOpForm({
+      nome: det.nome || '',
+      data_producao: det.data_producao || hojeIsoLocal(),
+      observacoes: det.observacoes || '',
+      liberarAgora: det.status !== 'RASCUNHO',
+      itensEntrada: (det.previstos_entrada || []).map(i => ({
+        produto_id: i.produto_id,
+        codigo: i.produto_codigo,
+        descricao: i.produto_descricao,
+        peso_kg_previsto: i.peso_kg_previsto ?? '',
+        qtd_caixas_prevista: i.qtd_caixas_prevista ?? '',
+      })),
+      itensSaida: (det.previstos_saida || []).map(i => ({
+        produto_id: i.produto_id,
+        codigo: i.produto_codigo,
+        descricao: i.produto_descricao,
+        peso_kg_previsto: i.peso_kg_previsto ?? '',
+        qtd_caixas_prevista: i.qtd_caixas_prevista ?? '',
+      })),
+    })
+    setOpSelecionada(null)
+    setAbaPrincipal('config')
+  }
+
+  const adicionarItemPrevisto = (tipoLista, prod) => {
+    setOpForm(prev => {
+      const listaAtual = prev[tipoLista]
+      if (listaAtual.some(x => x.produto_id === prod.id)) {
+        toastWarning('Produto já incluído', `${prod.descricao} já está na lista.`)
+        return prev
+      }
+      return {
+        ...prev,
+        [tipoLista]: [
+          ...listaAtual,
+          {
+            produto_id: prod.id,
+            codigo: prod.codigo || '',
+            descricao: prod.descricao,
+            peso_kg_previsto: '',
+            qtd_caixas_prevista: '',
+          },
+        ],
+      }
+    })
+  }
+
+  const salvarOpConfigurada = async (e) => {
+    e.preventDefault()
+    if (!isAdm) return toastError('Acesso restrito', 'Apenas Administradores podem criar ou alterar OPs.')
+    if (!opForm.nome.trim()) return toastWarning('Campo obrigatório', 'Informe o título/descrição da Ordem de Produção.')
+
+    const itensPrevistos = [
+      ...opForm.itensEntrada.map(i => ({
+        tipo: 'ENTRADA',
+        produto_id: i.produto_id,
+        peso_kg_previsto: i.peso_kg_previsto ? Number(i.peso_kg_previsto) : null,
+        qtd_caixas_prevista: i.qtd_caixas_prevista ? Number(i.qtd_caixas_prevista) : null,
+      })),
+      ...opForm.itensSaida.map(i => ({
+        tipo: 'SAIDA',
+        produto_id: i.produto_id,
+        peso_kg_previsto: i.peso_kg_previsto ? Number(i.peso_kg_previsto) : null,
+        qtd_caixas_prevista: i.qtd_caixas_prevista ? Number(i.qtd_caixas_prevista) : null,
+      })),
+    ]
+
+    setSalvandoOp(true)
+    try {
+      if (editOpId) {
+        const res = await producaoQueries.atualizarOPConfig(editOpId, {
+          nome: opForm.nome.trim(),
+          data_producao: opForm.data_producao,
+          observacoes: opForm.observacoes,
+          status: opForm.liberarAgora ? 'LIBERADA' : 'RASCUNHO',
+          itensPrevistos,
+        })
+        if (!res.success) return toastError('Erro', res.error)
+        toastSuccess('OP Atualizada', 'Configuração da Ordem de Produção salva com sucesso.')
+        await carregarTudo()
+        setAbaPrincipal('ativas')
+        abrirDetalhesOP(editOpId)
+      } else {
+        const res = await producaoQueries.criarOP({
+          nome: opForm.nome.trim(),
+          data_producao: opForm.data_producao,
+          observacoes: opForm.observacoes,
+          liberarAgora: opForm.liberarAgora,
+          itensPrevistos,
+          operador_id: operador?.id,
+          operador_nome: operador?.nome || 'Administrador',
+        })
+        if (!res.success) return toastError('Erro', res.error)
+        toastSuccess(
+          opForm.liberarAgora ? 'OP Criada e Liberada!' : 'OP Salva como Rascunho',
+          `${res.op.codigo} — ${res.op.nome}`
+        )
+        await carregarTudo()
+        setAbaPrincipal('ativas')
+        if (opForm.liberarAgora) abrirDetalhesOP(res.op.id)
+      }
+    } catch (err) {
+      toastError('Erro fatal', err.message)
+    } finally {
+      setSalvandoOp(false)
+    }
+  }
+
+  // ── OPERADOR: Entrada na Produção (Bipar Caixa Matéria-Prima) ─────────────
+  const handleBiparEntrada = async (e) => {
+    e?.preventDefault()
+    if (!opSelecionada) return
+    const ean = scanEntrada.trim()
+    if (!ean) return
+
+    setBuscandoEntrada(true)
+    try {
+      const res = await producaoQueries.buscarCaixaPorEanParaOP(ean)
+      if (!res.valid) {
+        toastError('Caixa indisponível', res.error)
+        setScanEntrada('')
+        setTimeout(() => entradaRef.current?.focus(), 80)
+        return
+      }
+
+      const cx = res.caixa
+      const prevEntradaIds = (opSelecionada.previstos_entrada || []).map(p => Number(p.produto_id))
+      const foraPrevisto = prevEntradaIds.length > 0 && !prevEntradaIds.includes(Number(cx.produto_id))
+      const avisoFefo = await producaoQueries.verificarFEFO(cx.produto_id, cx.validade)
+
+      if (avisoFefo || foraPrevisto) {
+        setConfirmacaoEntrada({ caixa: cx, avisoFefo, foraPrevisto })
+        return
+      }
+
+      await confirmarAlocacaoEntrada(cx)
+    } catch (err) {
+      toastError('Erro', err.message)
+    } finally {
+      setBuscandoEntrada(false)
+    }
+  }
+
+  const confirmarAlocacaoEntrada = async (cx) => {
+    setConfirmacaoEntrada(null)
+    try {
+      const res = await producaoQueries.alocarInsumos(
+        opSelecionada.id,
+        [cx],
+        operador?.id,
+        operador?.nome || 'Operador'
+      )
+      if (!res.success) return toastError('Erro na Entrada', res.error)
+      toastSuccess('Entrada Registrada', `${cx.produto_descricao} (${fmtKg2(cx.peso_kg)}) alocada na ${opSelecionada.codigo}.`)
+      setScanEntrada('')
+      await abrirDetalhesOP(opSelecionada.id, true)
+      await carregarTudo()
+      setTimeout(() => entradaRef.current?.focus(), 100)
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  // ── OPERADOR: Saída da Produção (Tara + Peso Bruto -> Líquido + Lote + Zebra) ─
+  const produtosSaidaDisponiveis = useMemo(() => {
+    if (!opSelecionada) return produtos
+    if (!mostrarTodosProdutosSaida && opSelecionada.previstos_saida?.length > 0) {
+      return opSelecionada.previstos_saida.map(ps => ({
+        id: ps.produto_id,
+        codigo: ps.produto_codigo,
+        descricao: ps.produto_descricao,
+        peso_kg_previsto: ps.peso_kg_previsto,
+      }))
+    }
+    return produtos
+  }, [opSelecionada, produtos, mostrarTodosProdutosSaida])
+
+  const handleRegistrarSaidaProducao = async (e) => {
+    e?.preventDefault()
+    if (!opSelecionada) return
+    if (!produtoSaidaId) return toastWarning('Produto obrigatório', 'Selecione o produto gerado na produção.')
+
+    const taraAtual = resolverTaraSelecionada(taras, formSaida.tara_id)
+    const valid = validarPesagemTara({
+      dataProducao: formSaida.data_producao,
+      validade: formSaida.validade,
+      taraId: taraAtual?.id,
+      taraKg: taraAtual?.peso_kg ?? 0,
+      pesoBruto: formSaida.peso_bruto,
+    })
+    if (!valid.ok) return toastWarning('Dados da Caixa', valid.erro)
+
+    const prodObj = produtos.find(p => String(p.id) === String(produtoSaidaId))
+    setSalvandoSaida(true)
+    try {
+      const res = await producaoQueries.adicionarRetorno(
+        opSelecionada.id,
+        {
+          produto_id: Number(produtoSaidaId),
+          produto_codigo: prodObj?.codigo || '',
+          peso_kg: valid.peso_liquido_kg,
+          peso_bruto_kg: valid.peso_bruto_kg,
+          tara_id: valid.tara_id,
+          tara_kg: valid.tara_kg,
+          data_producao: valid.data_producao,
+          validade: valid.validade,
+          lote: valid.lote,
+        },
+        operador?.id,
+        operador?.nome || 'Operador'
+      )
+
+      if (!res.success) {
+        toastError('Erro ao gerar saída', res.error)
+        return
+      }
+
+      toastSuccess(
+        'Caixa de Saída Gerada!',
+        `${res.caixa_gerada.produto_descricao} • Líq ${fmtKg2(res.caixa_gerada.peso_liquido_kg)} • EAN ${res.caixa_gerada.ean_caixa}`
+      )
+
+      setFormSaida(prev => ({ ...prev, peso_bruto: '' }))
+      await abrirDetalhesOP(opSelecionada.id, true)
+      await carregarTudo()
+
+      setEtiquetasModal({
+        open: true,
+        itens: [res.caixa_gerada],
+        autoPrint: true,
+        titulo: `Etiqueta OP ${opSelecionada.codigo} — Saída da Produção`,
+      })
+    } catch (err) {
+      toastError('Erro fatal', err.message)
+    } finally {
+      setSalvandoSaida(false)
+    }
+  }
+
+  const reimprimirEtiquetaRetorno = async (ret) => {
+    try {
+      const caixa = await tarasQueries.buscarCaixaParaReimpressao(ret.ean_caixa)
+      await tarasQueries.registrarReimpressaoHistorico({
+        caixa_id: caixa.id,
+        ean_caixa: caixa.ean_caixa,
+        origem_tipo: caixa.origem_tipo || 'PRODUCAO',
+        operador_nome: operador?.nome || 'Operador',
+      })
+      setEtiquetasModal({
+        open: true,
+        itens: [caixa],
+        autoPrint: true,
+        titulo: `Reimpressão — EAN ${caixa.ean_caixa}`,
+      })
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleFinalizarOP = async () => {
+    if (!isAdm || !opSelecionada) return
+    if (!window.confirm(`Deseja finalizar a ${opSelecionada.codigo}? Os insumos alocados serão marcados como consumidos e o rendimento será consolidado.`)) return
+    const res = await producaoQueries.finalizarOP(opSelecionada.id)
+    if (!res.success) return toastError('Erro', res.error)
+    toastSuccess('OP Finalizada!', `${opSelecionada.codigo} concluída com sucesso.`)
+    setOpSelecionada(null)
+    await carregarTudo()
+    setAbaPrincipal('fechadas')
+  }
+
+  const handleReabrirOP = async (op) => {
+    if (!isAdm) return
+    if (!window.confirm(`Deseja reabrir a ${op.codigo} para edição?`)) return
+    const res = await producaoQueries.reabrirOP(op.id)
+    if (!res.success) return toastError('Erro', res.error)
+    toastSuccess('OP Reaberta', `${op.codigo} liberada novamente.`)
+    await carregarTudo()
+    setAbaPrincipal('ativas')
+    abrirDetalhesOP(op.id)
+  }
+
+  const handleCancelarOP = async () => {
+    if (!isAdm || !opSelecionada) return
+    if (!window.confirm(`Excluir permanentemente a ${opSelecionada.codigo}?`)) return
+    const res = await producaoQueries.cancelarOP(opSelecionada.id)
+    if (!res.success) return toastError('Não permitido', res.error)
+    toastSuccess('OP Excluída', `${opSelecionada.codigo} removida.`)
+    setOpSelecionada(null)
+    await carregarTudo()
+  }
+
+  const handleLiberarOP = async (op) => {
+    if (!isAdm) return
+    await producaoQueries.liberarOP(op.id)
+    toastSuccess('OP Liberada!', `${op.codigo} agora está visível para os operadores executarem.`)
+    await carregarTudo()
+    if (opSelecionada?.id === op.id) await abrirDetalhesOP(op.id, true)
+  }
+
+  const handleRemoverItem = async (tipo, item) => {
+    if (!window.confirm(`Remover ${tipo === 'INSUMO' ? 'esta entrada' : 'esta saída'} da ${opSelecionada.codigo}?`)) return
+    const res = await producaoQueries.removerItemOP(opSelecionada.id, tipo, item.id, item.caixa_id)
+    if (!res.success) return toastError('Erro', res.error)
+    toastSuccess('Item removido', 'Registro estornado da OP.')
+    await abrirDetalhesOP(opSelecionada.id, true)
+    await carregarTudo()
+  }
+
+  const abrirDossieCompleto = (opId) => {
+    setOpSelecionada(null)
+    setDossieOpIdFiltro(opId)
+    setAbaPrincipal('relatorios')
+  }
+
+  // Cálculos do resumo da OP aberta
+  const resumoOp = useMemo(() => {
+    if (!opSelecionada) return null
+    const inKg = Number(opSelecionada.peso_insumos || 0)
+    const outLiq = Number(opSelecionada.peso_retornos || 0)
+    const outBruto = Number(opSelecionada.peso_retornos_bruto || 0)
+    const diff = Number((outLiq - inKg).toFixed(2))
+    const rend = inKg > 0 ? Number(((outLiq / inKg) * 100).toFixed(1)) : 0
+    return {
+      qtdIn: opSelecionada.insumos?.length || 0,
+      qtdOut: opSelecionada.retornos?.length || 0,
+      inKg,
+      outLiq,
+      outBruto,
+      diff,
+      rend,
     }
   }, [opSelecionada])
 
-  const { inputRef, handleKeyDown } = useBarcodeScanner({
-    onScan: async (val) => {
-      const codigo = val.toUpperCase().trim()
-      if (!opSelecionada) return toastWarning('Aviso', 'Selecione uma Ordem de Produção primeiro.')
-
-      try {
-        // 1. Tentar identificar se é uma caixa existente (Insumo)
-        const resCod = await movimentacoesQueries.identificarCodigoMovimentacao(codigo)
-        if (resCod && resCod.tipo === 'CAIXA') {
-          const caixa = resCod.dados
-          
-          if (detalhes?.retornos?.some(r => r.caixa_id === caixa.id)) {
-            return toastError('Aviso', 'Esta caixa acabou de ser gerada como retorno nesta OP e não pode ser bipada novamente como insumo aqui.')
-          }
-
-          if (caixa.status !== 'DISPONIVEL') {
-            return toastError('Inválido', `Esta caixa não está disponível (Status: ${caixa.status}).`)
-          }
-          
-          if (caixa.validade) {
-            const caixaMaisVelha = await producaoQueries.verificarFEFO(caixa.produto_id, caixa.validade)
-            if (caixaMaisVelha && caixaMaisVelha.id !== caixa.id) {
-              setModalFefo({ atual: caixa, velha: caixaMaisVelha, op_id: opSelecionada.id })
-              return
-            }
-          }
-          
-          const resAlo = await producaoQueries.alocarInsumos(opSelecionada.id, [caixa], operador.id, operador.nome)
-          if (resAlo.success) {
-            toastSuccess('Insumo Adicionado', `Caixa de ${caixa.peso_kg}kg alocada com sucesso.`)
-            carregarDetalhes(opSelecionada.id)
-          } else {
-            toastError('Erro ao Alocar', resAlo.error)
-          }
-          return
-        }
-
-        // 2. Se não é caixa existente, então é um NOVO produto acabado (Retorno)
-        const resultado = await produtosQueries.buscarPorCodigoComInfo(codigo)
-        if (!resultado) {
-          return toastError('Erro', 'Código EAN não corresponde a nenhum produto cadastrado nem caixa existente.')
-        }
-
-        setModalRetorno({ codigo, produto: resultado.produto })
-
-      } catch (err) {
-        toastError('Erro fatal', err.message)
-      } finally {
-        if (inputRef.current) inputRef.current.value = ''
-      }
-    }
-  })
-
-  const finalizarOP = async () => {
-    try {
-      const res = await producaoQueries.finalizarOP(opSelecionada.id)
-      if (res.success) {
-        toastSuccess('Sucesso', 'Ordem de Produção Finalizada.')
-        setOpSelecionada(null)
-        carregarOPs()
-      } else {
-        toastError('Erro', res.error)
-      }
-    } catch (err) {
-      toastError('Erro', err.message)
-    }
-  }
-
-  const handleRemoverItem = (item) => {
-    setModalRemoverItem(item)
-  }
-
-  const confirmarFefoInsumo = async () => {
-    if (!modalFefo) return
-    const caixa = modalFefo.atual
-    const op_id = modalFefo.op_id || opSelecionada?.id
-    if (!op_id) {
-      toastError('Erro', 'Ordem de Produção não encontrada. Selecione a OP novamente.')
-      setModalFefo(null)
-      return
-    }
-    setModalFefo(null)
-    try {
-      const resAlo = await producaoQueries.alocarInsumos(op_id, [caixa], operador.id, operador.nome)
-      if (resAlo.success) {
-        toastSuccess('Insumo Adicionado', `Caixa de ${caixa.peso_kg}kg alocada com sucesso.`)
-        carregarDetalhes(op_id)
-      } else {
-        toastError('Erro ao Alocar', resAlo.error)
-      }
-    } catch (e) {
-      toastError('Erro', e.message)
-    }
-  }
-
-  const handleNovaOP = async (nome) => {
-    try {
-      const res = await producaoQueries.criarOP(nome, operador.id, operador.nome)
-      if (res.success) {
-        toastSuccess('Sucesso', 'Ordem de Produção criada.')
-        carregarOPs()
-        setOpSelecionada(res.op)
-      } else {
-        toastError('Erro', res.error)
-      }
-    } catch (err) {
-      toastError('Erro', err.message)
-    }
-  }
-
   return (
-    <div style={{ maxWidth: 1000 }}>
-      <div className="page-header mb-24">
+    <div style={{ maxWidth: 1220, margin: '0 auto' }}>
+      {/* HEADER PRINCIPAL */}
+      <div className="page-header" style={{ marginBottom: 18 }}>
         <div>
-          <h1 className="page-header__title">Retorno de Produção</h1>
-          <p className="page-header__subtitle">Acompanhe OPs em aberto e bipagem de produtos acabados</p>
+          <h1 className="page-header__title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Factory size={24} color="var(--cyan)" /> Produção & Ordens de Produção (OP)
+          </h1>
+          <p className="page-header__subtitle">
+            {isAdm
+              ? 'Gestão ADM (criação, configuração de entradas/saídas e liberação) + Execução operacional com pesagem por Tara e impressão Zebra.'
+              : 'Selecione uma OP liberada para registrar as Entradas de Matéria-Prima e gerar as Saídas de Produção com etiqueta automática.'}
+          </p>
         </div>
-        {opSelecionada && (
-          <button className="btn btn--ghost" onClick={() => setOpSelecionada(null)}>Voltar para lista</button>
+
+        {isAdm && (
+          <button type="button" className="btn btn--primary" onClick={iniciarNovaOpAdm}>
+            <Plus size={16} /> Nova Ordem de Produção (ADM)
+          </button>
         )}
       </div>
 
-
-      {!opSelecionada ? (
-        <div className="flex-col gap-24">
-          <div className="flex gap-16 mb-24">
-            <button 
-              className={`btn ${activeTab === 'abertas' ? 'btn--primary' : 'btn--ghost'} flex-1`}
-              onClick={() => setActiveTab('abertas')}
-            >
-              Ordens em Aberto
-            </button>
-            <button 
-              className={`btn ${activeTab === 'historico' ? 'btn--primary' : 'btn--ghost'} flex-1`}
-              onClick={() => setActiveTab('historico')}
-            >
-              Histórico (Finalizadas)
-            </button>
-          </div>
-
-          {activeTab === 'abertas' && (
-            <div>
-              <div className="mb-24">
-                <button className="btn btn--primary w-full" onClick={() => setModalNovaOP(true)}>
-                  <Plus size={18}/> Abrir Nova Ordem de Produção
-                </button>
-              </div>
-              
-              <h2 className="font-bold text-lg mb-16 text-primary">Ordens em Aberto</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 mb-24">
-                {ops.length === 0 && <div className="text-muted col-span-3">Nenhuma Ordem de Produção em aberto.</div>}
-                {ops.map(op => (
-                  <div key={op.id} className="card cursor-pointer hover:border-primary" onClick={() => setOpSelecionada(op)}>
-                    <div className="flex items-center justify-between mb-8">
-                      <span className="font-bold text-lg text-primary">{op.codigo}</span>
-                      <Factory size={20} className="text-muted"/>
-                    </div>
-                    <div className="mb-12 font-bold">{op.nome}</div>
-                    <div className="text-sm text-muted mb-4">Insumos Alocados: <strong className="text-white">{(op.peso_insumos || 0).toFixed(2)} kg</strong></div>
-                    <div className="text-sm text-muted">Retorno até o momento: <strong className="text-white">{(op.peso_retornos || 0).toFixed(2)} kg</strong></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'historico' && (
-            <HistoricoRelatorios />
-          )}
+      {/* AVISO PERFIL OPERADOR */}
+      {!isAdm && !opSelecionada && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8,
+          background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.3)',
+          color: '#bae6fd', fontSize: 12, marginBottom: 16,
+        }}>
+          <Lock size={15} color="#38bdf8" />
+          Modo Operador: A criação, configuração e finalização de OPs são exclusivas de Administradores. Selecione uma OP liberada abaixo para trabalhar.
         </div>
-      ) : (
-        detalhes && (
-          <div className="flex-col gap-24">
-            <div className="card" style={{ background: 'var(--bg-2)' }}>
-              <div className="flex items-center justify-between mb-16">
-                <div>
-                  <h2 className="font-bold text-xl text-primary">{detalhes.codigo} - {detalhes.nome}</h2>
-                  <div className="text-muted text-sm mt-4">
-                    Criado em: {fmtDataHora(detalhes.created_at)} por <span className="font-semibold text-text-primary">{detalhes.operador_nome || 'Sistema'}</span>
-                  </div>
+      )}
+
+      {/* TABS PRINCIPAIS */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 20 }}>
+        <button
+          type="button"
+          className={`btn ${abaPrincipal === 'ativas' ? 'btn--primary' : 'btn--ghost'}`}
+          onClick={() => { setAbaPrincipal('ativas'); setOpSelecionada(null) }}
+        >
+          <Play size={15} /> OPs Liberadas / Em Execução ({opsAtivas.length})
+        </button>
+
+        {isAdm && (
+          <button
+            type="button"
+            className={`btn ${abaPrincipal === 'config' ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => { if (abaPrincipal !== 'config') iniciarNovaOpAdm() }}
+          >
+            <Edit3 size={15} /> {editOpId ? 'Editando OP (ADM)' : 'Criar / Configurar OP (ADM)'}
+          </button>
+        )}
+
+        <button
+          type="button"
+          className={`btn ${abaPrincipal === 'fechadas' ? 'btn--primary' : 'btn--ghost'}`}
+          onClick={() => { setAbaPrincipal('fechadas'); setOpSelecionada(null) }}
+        >
+          <Check size={15} /> OPs Finalizadas ({opsFechadas.length})
+        </button>
+
+        <button
+          type="button"
+          className={`btn ${abaPrincipal === 'relatorios' ? 'btn--primary' : 'btn--ghost'}`}
+          onClick={() => { setDossieOpIdFiltro(null); setOpSelecionada(null); setAbaPrincipal('relatorios') }}
+        >
+          <BarChart2 size={15} /> Relatórios de Produção (Excel / PDF)
+        </button>
+      </div>
+
+      {/* ─── EXECUÇÃO DE OP SELECIONADA ───────────────────────────────────── */}
+      {opSelecionada && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Cabeçalho da OP ativa */}
+          <div className="card">
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setOpSelecionada(null)}>
+                    ← Voltar à Lista
+                  </button>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 900, color: 'var(--cyan)' }}>
+                    {opSelecionada.codigo}
+                  </span>
+                  <OpStatusBadge status={opSelecionada.status} />
                 </div>
-                <div className="flex gap-12">
-                  {detalhes.status !== 'FECHADA' && detalhes.insumos.length === 0 && detalhes.retornos.length === 0 && (
-                    <button className="btn btn--danger flex items-center gap-8" onClick={() => setModalCancelarOP(true)}>
-                      Cancelar OP Vazia
-                    </button>
-                  )}
-                  {detalhes.status !== 'FECHADA' && (
-                    <button className="btn btn--primary flex items-center gap-8" onClick={() => setModalFinalizarOP(true)}>
-                      Finalizar OP <Check size={18}/>
-                    </button>
-                  )}
-                  {detalhes.status === 'FECHADA' && (
-                    <button className="btn btn--outline flex items-center gap-8" onClick={() => setModalReabrirOP(true)}>
-                      <Unlock size={18}/> Reabrir OP
-                    </button>
-                  )}
+                <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+                  {opSelecionada.nome}
+                </h2>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Data de Produção (OP): <strong>{fmtDataBR(opSelecionada.data_producao)}</strong> •
+                  Criada por: <strong>{opSelecionada.criado_por_nome || opSelecionada.operador_nome || 'Administrador'}</strong>
+                  {opSelecionada.observacoes ? ` • Obs: ${opSelecionada.observacoes}` : ''}
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-16 mb-16">
-                <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-                  <div className="text-muted text-sm uppercase font-bold mb-8">Entradas (Insumos)</div>
-                  <div className="text-2xl font-bold font-mono text-cyan mb-8 flex items-center">
-                    {(detalhes.peso_insumos || 0).toFixed(2)} kg 
-                    <span className="text-sm font-normal text-muted ml-8" style={{ fontFamily: 'var(--font-sans)' }}>({detalhes.insumos.length} caixas)</span>
-                  </div>
-                  <div className="text-xs text-muted">
-                    {detalhes.insumos.map((i, idx) => (
-                      <div key={idx}>• {i.produto_descricao} ({i.peso_kg}kg) [EAN: {i.ean_caixa}]</div>
-                    ))}
-                    {detalhes.insumos.length === 0 && 'Nenhum insumo'}
-                  </div>
-                </div>
-
-                <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-                  <div className="text-muted text-sm uppercase font-bold mb-8">Saídas (Retornos)</div>
-                  <div className="text-2xl font-bold font-mono text-success mb-8 flex items-center">
-                    {(detalhes.peso_retornos || 0).toFixed(2)} kg 
-                    <span className="text-sm font-normal text-muted ml-8" style={{ fontFamily: 'var(--font-sans)' }}>({detalhes.retornos.length} caixas)</span>
-                  </div>
-                  <div className="text-xs text-muted">
-                    {detalhes.retornos.map((r, idx) => (
-                      <div key={idx}>• {r.produto_descricao} ({r.peso_kg}kg) [EAN: {r.ean_caixa}]</div>
-                    ))}
-                    {detalhes.retornos.length === 0 && 'Nenhum retorno'}
-                  </div>
-                </div>
-
-                <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-                  <div className="text-muted text-sm uppercase font-bold mb-8">Subproduto (Líquido/Osso)</div>
-                  <div className="text-2xl font-bold font-mono text-warning mb-8">
-                    {Math.max(0, (detalhes.peso_insumos || 0) - (detalhes.peso_retornos || 0)).toFixed(2)} kg
-                  </div>
-                  <div className="flex gap-16 mt-16 pt-16 border-t border-border">
-                    <div>
-                      <div className="text-xs text-muted uppercase">Rendimento</div>
-                      <div className="font-bold text-success">{detalhes.rendimento_pct != null ? detalhes.rendimento_pct : (detalhes.peso_insumos > 0 ? ((detalhes.peso_retornos / detalhes.peso_insumos) * 100).toFixed(2) : 0)}%</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-muted uppercase">Perda (Quebra)</div>
-                      <div className="font-bold text-danger">{detalhes.perda_pct != null ? detalhes.perda_pct : (detalhes.peso_insumos > 0 ? (100 - ((detalhes.peso_retornos / detalhes.peso_insumos) * 100)).toFixed(2) : 0)}%</div>
-                    </div>
-                  </div>
-                  <div className="text-xs text-muted mt-16">
-                    Calculado em tempo real com base na diferença de peso.
-                  </div>
-                </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => abrirDossieCompleto(opSelecionada.id)}>
+                  <FileText size={14} /> Dossiê / Imprimir
+                </button>
+                {isAdm && opSelecionada.status !== 'FECHADA' && (
+                  <>
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => iniciarEdicaoOpAdm(opSelecionada)}>
+                      <Edit3 size={14} /> Editar Config. (ADM)
+                    </button>
+                    {opSelecionada.status === 'RASCUNHO' && (
+                      <button type="button" className="btn btn--primary btn--sm" onClick={() => handleLiberarOP(opSelecionada)}>
+                        <Play size={14} /> Liberar para Produção
+                      </button>
+                    )}
+                    <button type="button" className="btn btn--success btn--sm" onClick={handleFinalizarOP}>
+                      <Check size={14} /> Finalizar OP
+                    </button>
+                    <button type="button" className="btn btn--danger btn--sm" onClick={handleCancelarOP}>
+                      <Trash2 size={14} /> Excluir
+                    </button>
+                  </>
+                )}
+                {isAdm && opSelecionada.status === 'FECHADA' && (
+                  <button type="button" className="btn btn--warning btn--sm" onClick={() => handleReabrirOP(opSelecionada)}>
+                    <Unlock size={14} /> Reabrir OP
+                  </button>
+                )}
               </div>
-
-              {detalhes.status === 'FECHADA' ? (
-                <div className="bg-bg-0 p-16 rounded border border-warning" style={{ color: 'var(--warning)' }}>
-                  <div className="font-bold flex items-center gap-8 mb-8"><Info size={18}/> OP Finalizada</div>
-                  <p className="text-sm">Esta Ordem de Produção está fechada e não pode receber novas movimentações (insumos ou retornos).</p>
-                </div>
-              ) : (
-                <div className="bg-bg-0 p-16 rounded border border-border">
-                  <h3 className="font-bold mb-8 flex items-center gap-8 text-warning"><Plus size={18}/> Bipar Itens para OP</h3>
-                  <p className="text-sm text-muted mb-16">
-                    Bipe o EAN da caixa: 
-                    <br/>- <strong>Insumo:</strong> Se a caixa existir no estoque, será consumida como insumo.
-                    <br/>- <strong>Retorno:</strong> Se a caixa for nova, será tratada como produto acabado (retorno).
-                  </p>
-                  <input
-                    ref={inputRef}
-                    className="form-input form-input--scanner"
-                    placeholder="Bipe a caixa..."
-                    onKeyDown={handleKeyDown}
-                    autoFocus
-                  />
-                </div>
-              )}
             </div>
 
-            {historico.length > 0 && (
-              <div className="card mt-24 p-0">
-                <h3 className="font-bold text-lg text-primary p-16" style={{ borderBottom: '1px solid var(--border)' }}>Histórico de Movimentações</h3>
-                <div className="table-container m-0">
-                  <table style={{ border: 'none' }}>
-                    <thead>
-                      <tr>
-                        <th>Ação</th>
-                        <th>Produto</th>
-                        <th>EAN Caixa</th>
-                        <th style={{ textAlign: 'right' }}>Peso (kg)</th>
-                        <th>Operador</th>
-                        <th style={{ textAlign: 'right' }}>Data/Hora</th>
-                        {detalhes.status !== 'FECHADA' && <th style={{ width: 50 }}></th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historico.map(h => (
-                        <tr key={h.tipoMov + h.id}>
-                          <td>
-                            <span className={`badge ${h.tipoMov === 'INSUMO' ? 'badge--primary' : 'badge--success'}`}>
-                              {h.tipoMov === 'INSUMO' ? 'Saída Insumo' : 'Entrada Retorno'}
-                            </span>
-                          </td>
-                          <td>{h.produto_codigo} - {h.produto_descricao}</td>
-                          <td className="td-mono text-muted">{h.ean_caixa}</td>
-                          <td className={`font-bold ${h.tipoMov === 'INSUMO' ? 'text-primary' : 'text-success'}`} style={{ textAlign: 'right' }}>
-                            {h.peso_kg.toFixed(2)}
-                          </td>
-                          <td className="text-muted text-sm">{h.operador_nome || 'Sistema'}</td>
-                          <td className="text-muted text-sm" style={{ textAlign: 'right' }}>
-                            {fmtDataHora(h.created_at)}
-                          </td>
-                          {detalhes.status !== 'FECHADA' && !detalhes.reaberta && (operador?.is_adm === 1 || operador?.permissoes?.produtos) && (
-                            <td style={{ textAlign: 'center' }}>
-                              <button className="text-danger p-4 hover:bg-danger hover:text-white rounded" onClick={() => handleRemoverItem(h)}>
-                                <Trash2 size={16} />
-                              </button>
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {/* Painel Consolidado da OP */}
+            {resumoOp && (
+              <div style={{
+                marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)',
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12,
+              }}>
+                <div style={{ background: 'var(--bg-1)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>ENTRADAS ({resumoOp.qtdIn} cx)</div>
+                  <strong style={{ fontSize: 17, fontFamily: 'var(--font-mono)', color: '#fbbf24' }}>{fmtKg2(resumoOp.inKg)}</strong>
+                </div>
+                <div style={{ background: 'var(--bg-1)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>SAÍDAS ({resumoOp.qtdOut} cx)</div>
+                  <strong style={{ fontSize: 17, fontFamily: 'var(--font-mono)', color: '#4ade80' }}>{fmtKg2(resumoOp.outLiq)}</strong>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Bruto: {fmtKg2(resumoOp.outBruto)}</div>
+                </div>
+                <div style={{ background: 'var(--bg-1)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>DIFERENÇA / QUEBRA</div>
+                  <strong style={{ fontSize: 17, fontFamily: 'var(--font-mono)', color: resumoOp.diff < 0 ? '#f87171' : '#38bdf8' }}>
+                    {resumoOp.diff >= 0 ? '+' : ''}{fmtKg2(resumoOp.diff)}
+                  </strong>
+                </div>
+                <div style={{ background: 'var(--bg-1)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>RENDIMENTO</div>
+                  <strong style={{ fontSize: 17, fontFamily: 'var(--font-mono)', color: '#38bdf8' }}>{resumoOp.rend}%</strong>
                 </div>
               </div>
             )}
           </div>
-        )
-      )}
 
-      {/* MODAL RETORNO */}
-      {modalRetorno && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-success">Registrar Retorno</h3>
-            <p className="mb-16">Nova caixa de <strong>{modalRetorno.produto.descricao}</strong>.</p>
-            <div className="form-group mb-16">
-              <label className="form-label">Peso da Caixa (kg)</label>
-              <input type="number" step="0.01" className="form-input" autoFocus id="input-peso-retorno" placeholder="Ex: 25.5" />
-            </div>
-            <div className="form-group mb-24">
-              <label className="form-label">Data de Validade</label>
-              <input type="date" className="form-input" id="input-validade-retorno" onKeyDown={(e) => {
-                if (e.key === 'Enter') document.getElementById('btn-confirm-retorno').click()
-              }} />
-            </div>
-            <div className="flex gap-16">
-              <button className="btn btn--ghost" onClick={() => setModalRetorno(null)}>Cancelar</button>
-              <button id="btn-confirm-retorno" className="btn btn--primary flex-1" onClick={async () => {
-                const pesoStr = document.getElementById('input-peso-retorno').value
-                const peso = parseFloat(pesoStr.replace(',', '.'))
-                if (isNaN(peso) || peso <= 0) return toastError('Aviso', 'Peso inválido.')
-
-                const res = await producaoQueries.adicionarRetorno(
-                  opSelecionada.id,
-                  { ean_caixa: modalRetorno.codigo, produto_id: modalRetorno.produto.id, peso_kg: peso, validade: document.getElementById('input-validade-retorno').value || null },
-                  operador.id,
-                  operador.nome
-                )
-
-                if (res.success) {
-                  toastSuccess('Retorno Registrado', `Nova caixa de ${peso}kg adicionada à Produção.`)
-                  carregarDetalhes(opSelecionada.id)
-                  setModalRetorno(null)
-                } else {
-                  toastError('Erro', res.error)
-                }
-              }}>Salvar Retorno</button>
-            </div>
+          {/* Seletor das 2 Sub-telas Operacionais */}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              type="button"
+              className={`btn ${subAbaOp === 'entradas' ? 'btn--warning' : 'btn--secondary'}`}
+              style={{ flex: 1, justifyContent: 'center' }}
+              onClick={() => { setSubAbaOp('entradas'); setTimeout(() => entradaRef.current?.focus(), 80) }}
+            >
+              <ArrowDownToLine size={17} /> 1. Entradas na Produção ({resumoOp?.qtdIn || 0} cx)
+            </button>
+            <button
+              type="button"
+              className={`btn ${subAbaOp === 'saidas' ? 'btn--success' : 'btn--secondary'}`}
+              style={{ flex: 1, justifyContent: 'center' }}
+              onClick={() => { setSubAbaOp('saidas'); setTimeout(() => pesoBrutoSaidaRef.current?.focus(), 80) }}
+            >
+              <ArrowUpFromLine size={17} /> 2. Saída da Produção & Etiquetas ({resumoOp?.qtdOut || 0} cx)
+            </button>
           </div>
-        </div>
-      )}
 
-      {/* MODAL NOVA OP */}
-      {modalNovaOP && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-primary">Nova Ordem de Produção</h3>
-            <p className="mb-16">Informe um nome ou descrição para identificar esta OP.</p>
-            <div className="form-group mb-24">
-              <label className="form-label">Nome da OP</label>
-              <input type="text" className="form-input" autoFocus id="input-nome-op" placeholder="Ex: Produção de Picanha" onKeyDown={(e) => {
-                if (e.key === 'Enter') document.getElementById('btn-confirm-op').click()
-              }} />
-            </div>
-            <div className="flex gap-16">
-              <button className="btn btn--ghost" onClick={() => setModalNovaOP(false)}>Cancelar</button>
-              <button id="btn-confirm-op" className="btn btn--primary flex-1" onClick={async () => {
-                const nome = document.getElementById('input-nome-op').value
-                if (!nome) return toastError('Aviso', 'O nome da OP é obrigatório.')
-                await handleNovaOP(nome)
-                setModalNovaOP(false)
-              }}>Criar OP</button>
-            </div>
-          </div>
-        </div>
-      )}
+          {/* ── SUB-ABA 1: ENTRADAS NA PRODUÇÃO ───────────────────────────── */}
+          {subAbaOp === 'entradas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {opSelecionada.previstos_entrada?.length > 0 && (
+                <div className="card" style={{ padding: '14px 16px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
+                    Matérias-Primas Previstas pelo ADM
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {opSelecionada.previstos_entrada.map(pe => {
+                      const alocado = (opSelecionada.insumos || []).filter(i => i.produto_id === pe.produto_id).reduce((s, x) => s + Number(x.peso_kg || 0), 0)
+                      return (
+                        <div key={pe.id} style={{
+                          padding: '6px 12px', borderRadius: 8, background: 'var(--bg-1)', border: '1px solid var(--border)', fontSize: 12,
+                        }}>
+                          <strong>{pe.produto_codigo} — {pe.produto_descricao}</strong>
+                          <span style={{ color: '#fbbf24', marginLeft: 8, fontFamily: 'var(--font-mono)' }}>
+                            Alocado: {fmtKg2(alocado)} {pe.peso_kg_previsto ? `/ Prev: ${fmtKg2(pe.peso_kg_previsto)}` : ''}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
-      {/* MODAL FINALIZAR OP */}
-      {modalFinalizarOP && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-warning">Finalizar OP</h3>
-            <div className="bg-bg-1 p-16 rounded mb-16 border border-border">
-              <div className="flex justify-between mb-4"><span>Entradas (Insumos):</span> <strong>{(detalhes?.peso_insumos || 0).toFixed(2)} kg</strong></div>
-              <div className="flex justify-between mb-4"><span>Saídas (Retornos):</span> <strong>{(detalhes?.peso_retornos || 0).toFixed(2)} kg</strong></div>
-              <div className="flex justify-between text-warning font-bold border-t border-border pt-4 mt-4">
-                <span>Subproduto (Líquido/Osso):</span> 
-                <span>{Math.max(0, (detalhes?.peso_insumos || 0) - (detalhes?.peso_retornos || 0)).toFixed(2)} kg</span>
+              {['LIBERADA', 'ABERTA'].includes(opSelecionada.status) && (
+                <div className="card">
+                  <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700 }}>
+                    Bipar Caixa de Matéria-Prima para Entrada na {opSelecionada.codigo}
+                  </h3>
+                  <form onSubmit={handleBiparEntrada} style={{ display: 'flex', gap: 10 }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <ScanBarcode size={18} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--cyan)' }} />
+                      <input
+                        ref={entradaRef}
+                        type="text"
+                        className="form-input form-input--scanner"
+                        style={{ paddingLeft: 40 }}
+                        placeholder="Bipe ou digite o EAN da caixa de entrada..."
+                        value={scanEntrada}
+                        onChange={e => setScanEntrada(e.target.value)}
+                        disabled={buscandoEntrada}
+                        autoFocus
+                      />
+                    </div>
+                    <button type="submit" className="btn btn--warning" disabled={buscandoEntrada}>
+                      {buscandoEntrada ? 'Verificando...' : 'Dar Entrada na OP'}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Lista de Entradas Alocadas */}
+              <div className="card">
+                <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700 }}>
+                  Caixas Alocadas na Entrada ({opSelecionada.insumos?.length || 0})
+                </h4>
+                {(!opSelecionada.insumos || opSelecionada.insumos.length === 0) ? (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Nenhuma entrada registrada ainda.</div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textAlign: 'left', fontSize: 11 }}>
+                          <th style={{ padding: '8px 10px' }}>EAN Caixa</th>
+                          <th style={{ padding: '8px 10px' }}>Produto</th>
+                          <th style={{ padding: '8px 10px' }}>Lote / Prod / Val</th>
+                          <th style={{ padding: '8px 10px' }}>Bruto</th>
+                          <th style={{ padding: '8px 10px' }}>Tara</th>
+                          <th style={{ padding: '8px 10px' }}>Peso Líquido</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {opSelecionada.insumos.map(item => (
+                          <tr key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: '#38bdf8' }}>{item.ean_caixa}</td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <strong>{item.produto_descricao}</strong>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cód. {item.produto_codigo || '-'}</div>
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <span style={{ fontFamily: 'monospace' }}>{item.lote || '-'}</span> • Prod {fmtDataBR(item.data_producao)} • Val {fmtDataBR(item.validade)}
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>{fmtKg2(item.peso_bruto_kg)}</td>
+                            <td style={{ padding: '8px 10px' }}>{fmtKg3(item.tara_kg)}</td>
+                            <td style={{ padding: '8px 10px', fontWeight: 700, color: '#fbbf24' }}>{fmtKg2(item.peso_kg)}</td>
+                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                              {opSelecionada.status !== 'FECHADA' && (
+                                <button type="button" className="btn btn--ghost btn--sm text-danger" onClick={() => handleRemoverItem('INSUMO', item)}>
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-              <div className="flex justify-between text-success font-bold pt-4 mt-4">
-                <span>Rendimento Previsto:</span> 
-                <span>{detalhes?.peso_insumos > 0 ? ((detalhes?.peso_retornos / detalhes?.peso_insumos) * 100).toFixed(2) : 0}%</span>
+            </div>
+          )}
+
+          {/* ── SUB-ABA 2: SAÍDA DA PRODUÇÃO ───────────────────────────────── */}
+          {subAbaOp === 'saidas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {['LIBERADA', 'ABERTA'].includes(opSelecionada.status) ? (
+                <form className="card" onSubmit={handleRegistrarSaidaProducao}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#4ade80' }}>
+                        Registrar Nova Caixa de Saída (Endereço: PRODUCAO)
+                      </h3>
+                      <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+                        Data de produção pré-preenchida pela abertura da OP (editável). Lote DDMMYY, Peso Líquido e EAN único gerados automaticamente.
+                      </p>
+                    </div>
+                    {opSelecionada.previstos_saida?.length > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => setMostrarTodosProdutosSaida(v => !v)}
+                      >
+                        {mostrarTodosProdutosSaida ? 'Ver apenas produtos da OP' : 'Mostrar todos os produtos'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Seleção do produto de saída */}
+                  <div style={{ marginBottom: 14 }}>
+                    <label className="form-label" style={{ display: 'block', marginBottom: 6 }}>
+                      Produto Produzido * {opSelecionada.previstos_saida?.length > 0 && !mostrarTodosProdutosSaida ? '(Configurados nesta OP pelo ADM)' : ''}
+                    </label>
+                    <select
+                      className="form-input"
+                      value={produtoSaidaId}
+                      onChange={e => setProdutoSaidaId(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Selecione o produto produzido --</option>
+                      {produtosSaidaDisponiveis.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.codigo ? `[${p.codigo}] ` : ''}{p.descricao}
+                          {p.peso_kg_previsto ? ` (Prev: ${fmtKg2(p.peso_kg_previsto)})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Data Produção (pre-fill da OP), Lote Auto, Validade, Tara, Peso Bruto -> Peso Líquido */}
+                  <PesagemTaraFields
+                    taras={taras}
+                    value={formSaida}
+                    onChange={(next) => setFormSaida(next)}
+                    pesoBrutoRef={pesoBrutoSaidaRef}
+                    onEnterPesoBruto={handleRegistrarSaidaProducao}
+                  />
+
+                  <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                    <button type="submit" className="btn btn--success btn--lg" disabled={salvandoSaida}>
+                      <Printer size={18} />
+                      {salvandoSaida ? 'Gerando Caixa e Etiqueta...' : 'Gerar Caixa de Saída e Imprimir Etiqueta (100×70mm)'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="card" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 18 }}>
+                  OP finalizada — não aceita novas saídas.
+                </div>
+              )}
+
+              {/* Lista das Caixas de Saída Geradas */}
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
+                    Caixas Geradas na Produção ({opSelecionada.retornos?.length || 0})
+                  </h4>
+                  {opSelecionada.retornos?.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      onClick={() => setEtiquetasModal({
+                        open: true,
+                        itens: opSelecionada.retornos,
+                        autoPrint: false,
+                        titulo: `Todas as Etiquetas — ${opSelecionada.codigo}`,
+                      })}
+                    >
+                      <Printer size={14} /> Imprimir Todas ({opSelecionada.retornos.length})
+                    </button>
+                  )}
+                </div>
+
+                {(!opSelecionada.retornos || opSelecionada.retornos.length === 0) ? (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Nenhuma caixa de saída registrada ainda.</div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textAlign: 'left', fontSize: 11 }}>
+                          <th style={{ padding: '8px 10px' }}>EAN Gerado</th>
+                          <th style={{ padding: '8px 10px' }}>Produto</th>
+                          <th style={{ padding: '8px 10px' }}>Lote</th>
+                          <th style={{ padding: '8px 10px' }}>Prod. / Validade</th>
+                          <th style={{ padding: '8px 10px' }}>Bruto / Tara</th>
+                          <th style={{ padding: '8px 10px' }}>Peso Líquido</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {opSelecionada.retornos.map(ret => (
+                          <tr key={ret.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontWeight: 700, color: '#38bdf8' }}>{ret.ean_caixa}</td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <strong>{ret.produto_descricao}</strong>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cód. {ret.produto_codigo || '-'}</div>
+                            </td>
+                            <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontWeight: 700 }}>{ret.lote || '-'}</td>
+                            <td style={{ padding: '8px 10px' }}>
+                              Prod: {fmtDataBR(ret.data_producao)}<br />
+                              Val: <strong>{fmtDataBR(ret.validade)}</strong>
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>
+                              Bruto: {fmtKg2(ret.peso_bruto_kg)}<br />
+                              <span style={{ color: 'var(--text-muted)' }}>Tara: {fmtKg3(ret.tara_kg)}</span>
+                            </td>
+                            <td style={{ padding: '8px 10px', fontWeight: 800, color: '#4ade80' }}>{fmtKg2(ret.peso_kg)}</td>
+                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary btn--sm"
+                                  onClick={() => reimprimirEtiquetaRetorno(ret)}
+                                  title="Imprimir etiqueta Zebra 100x70mm preservando o EAN"
+                                >
+                                  <Printer size={13} /> Etiqueta
+                                </button>
+                                {opSelecionada.status !== 'FECHADA' && (
+                                  <button type="button" className="btn btn--ghost btn--sm text-danger" onClick={() => handleRemoverItem('RETORNO', ret)}>
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-              <div className="flex justify-between text-danger font-bold pt-4 mt-4">
-                <span>Quebra/Perda Prevista:</span> 
-                <span>{detalhes?.peso_insumos > 0 ? (100 - ((detalhes?.peso_retornos / detalhes?.peso_insumos) * 100)).toFixed(2) : 0}%</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── LISTA DE OPS ATIVAS / LIBERADAS ─────────────────────────────── */}
+      {!opSelecionada && abaPrincipal === 'ativas' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 14 }}>
+          {loading ? (
+            <div className="card">Carregando ordens de produção...</div>
+          ) : opsAtivas.length === 0 ? (
+            <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 36, color: 'var(--text-muted)' }}>
+              Nenhuma OP ativa/liberada no momento.
+              {isAdm && ' Clique em "Nova Ordem de Produção (ADM)" para abrir e liberar uma nova OP.'}
+            </div>
+          ) : (
+            opsAtivas.map(op => (
+              <div key={op.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '3px solid var(--cyan)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 16, color: 'var(--cyan)' }}>{op.codigo}</span>
+                  <OpStatusBadge status={op.status} />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{op.nome}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Data Prod: <strong>{fmtDataBR(op.data_producao)}</strong> • Criada por {op.criado_por_nome || op.operador_nome || '-'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, background: 'var(--bg-1)', padding: 10, borderRadius: 8, fontSize: 12 }}>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 10 }}>ENTRADAS ({op.qtd_insumos || 0} cx)</span>
+                    <strong style={{ color: '#fbbf24' }}>{fmtKg2(op.peso_insumos)}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 10 }}>SAÍDAS ({op.qtd_retornos || 0} cx)</span>
+                    <strong style={{ color: '#4ade80' }}>{fmtKg2(op.peso_retornos)}</strong>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+                  {op.status === 'RASCUNHO' && isAdm ? (
+                    <button type="button" className="btn btn--primary btn--sm" style={{ flex: 1, justifyContent: 'center' }} onClick={() => handleLiberarOP(op)}>
+                      <Play size={14} /> Liberar OP
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn--primary btn--sm" style={{ flex: 1, justifyContent: 'center' }} onClick={() => abrirDetalhesOP(op.id)}>
+                      Abrir OP para Operação →
+                    </button>
+                  )}
+                  {isAdm && (
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={async () => { const d = await producaoQueries.detalhesOP(op.id); if (d) iniciarEdicaoOpAdm(d) }} title="Editar configuração ADM">
+                      <Edit3 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ─── ADM: CRIAR / CONFIGURAR OP ───────────────────────────────────── */}
+      {!opSelecionada && abaPrincipal === 'config' && isAdm && (
+        <form className="card" onSubmit={salvarOpConfigurada} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--cyan)' }}>
+                {editOpId ? 'Editar Configuração da Ordem de Produção (ADM)' : 'Nova Ordem de Produção — Configuração ADM'}
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+                Defina os itens de entrada, os itens previstos de saída e a data de produção da OP antes de liberar ao operador.
+              </p>
+            </div>
+            {editOpId && (
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setEditOpId(null); setAbaPrincipal('ativas') }}>
+                Cancelar Edição
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 5 }}>Título / Descrição da OP *</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Ex: Desossa Traseiro Especial Lote Dia"
+                value={opForm.nome}
+                onChange={e => setOpForm(f => ({ ...f, nome: e.target.value }))}
+                required
+              />
+            </div>
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 5 }}>Data de Produção (OP) *</label>
+              <input
+                type="date"
+                className="form-input"
+                value={opForm.data_producao}
+                onChange={e => setOpForm(f => ({ ...f, data_producao: e.target.value }))}
+                required
+              />
+            </div>
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 5 }}>Observações</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Instruções para os operadores..."
+                value={opForm.observacoes}
+                onChange={e => setOpForm(f => ({ ...f, observacoes: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          {/* Grid Lado a Lado: Itens Entrada e Itens Saída */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+            {/* ENTRADAS PREVISTAS */}
+            <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
+              <h4 style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 700, color: '#fbbf24' }}>
+                Itens Previstos de ENTRADA (Matéria-Prima)
+              </h4>
+              <SeletorProdutoInline
+                produtos={produtos}
+                placeholder="Buscar produto de entrada por código ou nome..."
+                onSelect={(p) => adicionarItemPrevisto('itensEntrada', p)}
+              />
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {opForm.itensEntrada.length === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 4px' }}>
+                    Opcional: adicione os produtos que entrarão na produção.
+                  </div>
+                ) : (
+                  opForm.itensEntrada.map((item, idx) => (
+                    <div key={item.produto_id} style={{
+                      display: 'grid', gridTemplateColumns: '1fr 90px auto', gap: 8, alignItems: 'center',
+                      background: 'var(--bg-2)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12,
+                    }}>
+                      <div>
+                        <strong>{item.codigo} — {item.descricao}</strong>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="form-input"
+                        style={{ padding: '6px 8px', fontSize: 12 }}
+                        placeholder="Kg prev."
+                        value={item.peso_kg_previsto}
+                        onChange={e => setOpForm(f => ({
+                          ...f,
+                          itensEntrada: f.itensEntrada.map((x, j) => j === idx ? { ...x, peso_kg_previsto: e.target.value } : x),
+                        }))}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm text-danger"
+                        onClick={() => setOpForm(f => ({ ...f, itensEntrada: f.itensEntrada.filter((_, j) => j !== idx) }))}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
-            <p className="mb-24">Tem certeza que deseja confirmar a finalização? Esta ação baixará os insumos permanentemente e o saldo de subproduto será contabilizado como quebra.</p>
-            <div className="flex gap-16">
-              <button className="btn btn--ghost" onClick={() => setModalFinalizarOP(false)}>Cancelar</button>
-              <button className="btn btn--primary flex-1" onClick={async () => {
-                await finalizarOP()
-                setModalFinalizarOP(false)
-              }}>Confirmar e Finalizar</button>
+
+            {/* SAÍDAS PREVISTAS */}
+            <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
+              <h4 style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 700, color: '#4ade80' }}>
+                Itens Previstos de SAÍDA (Produtos Produzidos)
+              </h4>
+              <SeletorProdutoInline
+                produtos={produtos}
+                placeholder="Buscar produto de saída por código ou nome..."
+                onSelect={(p) => adicionarItemPrevisto('itensSaida', p)}
+              />
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {opForm.itensSaida.length === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 4px' }}>
+                    Opcional: defina os cortes/produtos disponíveis na tela de saída do operador.
+                  </div>
+                ) : (
+                  opForm.itensSaida.map((item, idx) => (
+                    <div key={item.produto_id} style={{
+                      display: 'grid', gridTemplateColumns: '1fr 90px auto', gap: 8, alignItems: 'center',
+                      background: 'var(--bg-2)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12,
+                    }}>
+                      <div>
+                        <strong>{item.codigo} — {item.descricao}</strong>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="form-input"
+                        style={{ padding: '6px 8px', fontSize: 12 }}
+                        placeholder="Kg prev."
+                        value={item.peso_kg_previsto}
+                        onChange={e => setOpForm(f => ({
+                          ...f,
+                          itensSaida: f.itensSaida.map((x, j) => j === idx ? { ...x, peso_kg_previsto: e.target.value } : x),
+                        }))}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm text-danger"
+                        onClick={() => setOpForm(f => ({ ...f, itensSaida: f.itensSaida.filter((_, j) => j !== idx) }))}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={opForm.liberarAgora}
+                onChange={e => setOpForm(f => ({ ...f, liberarAgora: e.target.checked }))}
+              />
+              Liberar OP imediatamente para execução dos operadores
+            </label>
+            <button type="submit" className="btn btn--success btn--lg" disabled={salvandoOp}>
+              <Check size={17} />
+              {salvandoOp ? 'Salvando...' : (editOpId ? 'Salvar Alterações da OP' : (opForm.liberarAgora ? 'Criar e Liberar OP' : 'Salvar como Rascunho'))}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* ─── OPS FINALIZADAS ──────────────────────────────────────────────── */}
+      {!opSelecionada && abaPrincipal === 'fechadas' && (
+        <div className="card">
+          {opsFechadas.length === 0 ? (
+            <div style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted)' }}>Nenhuma OP finalizada registrada ainda.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textAlign: 'left', fontSize: 11 }}>
+                    <th style={{ padding: '8px 10px' }}>OP</th>
+                    <th style={{ padding: '8px 10px' }}>Descrição</th>
+                    <th style={{ padding: '8px 10px' }}>Data Prod.</th>
+                    <th style={{ padding: '8px 10px' }}>Entrada</th>
+                    <th style={{ padding: '8px 10px' }}>Saída (Líq.)</th>
+                    <th style={{ padding: '8px 10px' }}>Rendimento</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {opsFechadas.map(op => (
+                    <tr key={op.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '9px 10px', fontFamily: 'monospace', fontWeight: 800, color: 'var(--cyan)' }}>{op.codigo}</td>
+                      <td style={{ padding: '9px 10px' }}>
+                        <strong>{op.nome}</strong>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Criada por {op.criado_por_nome || op.operador_nome || '-'}</div>
+                      </td>
+                      <td style={{ padding: '9px 10px' }}>{fmtDataBR(op.data_producao)}</td>
+                      <td style={{ padding: '9px 10px' }}>{op.qtd_insumos} cx • {fmtKg2(op.peso_insumos)}</td>
+                      <td style={{ padding: '9px 10px', color: '#4ade80', fontWeight: 700 }}>{op.qtd_retornos} cx • {fmtKg2(op.peso_retornos)}</td>
+                      <td style={{ padding: '9px 10px', fontWeight: 700 }}>{op.rendimento_pct != null ? `${op.rendimento_pct}%` : '-'}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button type="button" className="btn btn--primary btn--sm" onClick={() => abrirDetalhesOP(op.id)}>
+                            Detalhes
+                          </button>
+                          <button type="button" className="btn btn--secondary btn--sm" onClick={() => abrirDossieCompleto(op.id)}>
+                            <FileText size={13} /> Dossiê
+                          </button>
+                          {isAdm && (
+                            <button type="button" className="btn btn--warning btn--sm" onClick={() => handleReabrirOP(op)}>
+                              <Unlock size={13} /> Reabrir
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── ABA RELATÓRIOS DE PRODUÇÃO ──────────────────────────────────── */}
+      {!opSelecionada && abaPrincipal === 'relatorios' && (
+        <RelatorioDossieProducao opIdInicial={dossieOpIdFiltro} />
+      )}
+
+      {/* MODAL CONFIRMAÇÃO ENTRADA (FEFO ou FORA DO PREVISTO) */}
+      {confirmacaoEntrada && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 480, padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <ShieldAlert size={26} color="#f59e0b" />
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Confirmação Necessária na Entrada</h3>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 14 }}>
+              <div>Caixa: <strong>{confirmacaoEntrada.caixa.produto_descricao}</strong> (EAN <span style={{ fontFamily: 'monospace' }}>{confirmacaoEntrada.caixa.ean_caixa}</span>)</div>
+              {confirmacaoEntrada.foraPrevisto && (
+                <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: 'rgba(245,158,11,0.14)', color: '#fde68a' }}>
+                  Este produto não estava na lista de entradas previstas configurada pelo ADM para esta OP.
+                </div>
+              )}
+              {confirmacaoEntrada.avisoFefo && (
+                <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: 'rgba(239,68,68,0.14)', color: '#fecaca' }}>
+                  <strong>Alerta FEFO:</strong> Existe uma caixa com validade mais próxima ({fmtDataBR(confirmacaoEntrada.avisoFefo.validade)}, Endereço: {confirmacaoEntrada.avisoFefo.endereco || '-'}).
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button type="button" className="btn btn--secondary" onClick={() => { setConfirmacaoEntrada(null); setScanEntrada('') }}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn--warning" onClick={() => confirmarAlocacaoEntrada(confirmacaoEntrada.caixa)}>
+                Confirmar Entrada Assim Mesmo
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL FEFO */}
-      {modalFefo && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card p-24 border border-warning" style={{ width: 500, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-warning flex items-center gap-8"><Info /> Alerta FEFO</h3>
-            <p className="mb-16">Você está bipando uma caixa que vence em <strong>{new Date(modalFefo.atual.validade).toLocaleDateString()}</strong>.</p>
-            <p className="mb-24 text-muted">
-              Porém, existe outra caixa de <strong>{modalFefo.velha.produto_descricao}</strong> no endereço <strong className="text-white">{modalFefo.velha.endereco}</strong> que vence antes, no dia <strong className="text-warning">{new Date(modalFefo.velha.validade).toLocaleDateString()}</strong>!
-            </p>
-            <p className="mb-24 font-bold">Recomendamos fortemente que você utilize a caixa mais antiga para evitar perdas.</p>
-            <div className="flex gap-16">
-              <button className="btn btn--primary flex-1" onClick={() => setModalFefo(null)}>Cancelar e Pegar Outra</button>
-              <button className="btn btn--ghost" onClick={confirmarFefoInsumo}>Ignorar e Usar Atual</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL REMOVER ITEM */}
-      {modalRemoverItem && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-danger">Remover Item da OP</h3>
-            <p className="mb-24">Deseja realmente remover este item (<strong>{modalRemoverItem.produto_descricao}</strong>) da OP? Ele será devolvido ao estoque original.</p>
-            <div className="flex gap-16">
-              <button className="btn btn--ghost" onClick={() => setModalRemoverItem(null)}>Cancelar</button>
-              <button className="btn btn--danger flex-1" onClick={async () => {
-                const item = modalRemoverItem
-                try {
-                  const res = await producaoQueries.removerItemOP(opSelecionada.id, item.tipoMov, item.id, item.caixa_id)
-                  if (res.success) {
-                    toastSuccess('Sucesso', 'Item removido da OP e estoque atualizado.')
-                    carregarDetalhes(opSelecionada.id)
-                  } else {
-                    toastError('Erro', res.error)
-                  }
-                } catch (err) {
-                  toastError('Erro', err.message)
-                }
-                setModalRemoverItem(null)
-              }}>Confirmar Remoção</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL CANCELAR OP */}
-      {modalCancelarOP && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-danger">Cancelar OP</h3>
-            <p className="mb-24">Deseja realmente cancelar e excluir esta OP? Ela está vazia, mas esta ação não pode ser desfeita.</p>
-            <div className="flex gap-16">
-              <button className="btn btn--ghost" onClick={() => setModalCancelarOP(false)}>Manter OP</button>
-              <button className="btn btn--danger flex-1" onClick={async () => {
-                const res = await producaoQueries.cancelarOP(opSelecionada.id)
-                if (res.success) {
-                  toastSuccess('Sucesso', 'OP cancelada e excluída.')
-                  setOpSelecionada(null)
-                  carregarOPs()
-                } else {
-                  toastError('Erro', res.error)
-                }
-                setModalCancelarOP(false)
-              }}>Sim, Excluir</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL REABRIR OP */}
-      {modalReabrirOP && opSelecionada && (
-        <div className="modal-overlay animate-fade-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100 }}>
-          <div className="card p-24" style={{ width: 400, maxWidth: '90%' }}>
-            <h3 className="font-bold text-xl mb-16 text-warning">Reabrir Ordem de Produção</h3>
-            <p className="mb-24">Deseja realmente reabrir esta OP? O status voltará para ABERTA e os insumos consumidos retornarão ao estoque disponível.</p>
-            <div className="flex gap-16">
-              <button className="btn btn--ghost" onClick={() => setModalReabrirOP(false)}>Cancelar</button>
-              <button className="btn btn--warning flex-1" onClick={async () => {
-                try {
-                  const res = await producaoQueries.reabrirOP(opSelecionada.id);
-                  if (res.success) {
-                    toastSuccess('OP Reaberta', 'A OP foi reaberta com sucesso.');
-                    setModalReabrirOP(false);
-                    carregarOPs();
-                    carregarDetalhes(opSelecionada.id);
-                  } else {
-                    toastError('Erro', res.error);
-                  }
-                } catch (e) {
-                  toastError('Erro', e.message);
-                }
-              }}>Sim, Reabrir</button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* MODAL DE IMPRESSÃO ZEBRA 100x70MM */}
+      <EtiquetaZebraModal
+        isOpen={etiquetasModal.open}
+        etiquetas={etiquetasModal.itens}
+        autoPrint={etiquetasModal.autoPrint}
+        titulo={etiquetasModal.titulo}
+        onClose={() => {
+          setEtiquetasModal({ open: false, itens: [], autoPrint: false, titulo: '' })
+          setTimeout(() => pesoBrutoSaidaRef.current?.focus(), 80)
+        }}
+      />
     </div>
   )
 }

@@ -1,37 +1,38 @@
 import { db } from '../lib/db.js';
-
-/** Queries de Movimentações — operações atômicas com transação SQLite */
-
 import * as inventariosQueries from './inventarios.js';
+import { ensureRastreabilidadeSchema } from './taras.js';
+import { gerarLotePorData } from '../utils/rastreabilidade.js';
 
 /**
  * Recalcula estoque_posicao para um ou mais endereços a partir do estoque_caixas (fonte de verdade).
- * Previne dessincronização acumulada por somas/subtrações erradas.
+ * Previne dessincronização acumulada por somas/subtrações erradas e preserva lote/validade.
  */
 export async function recalcularPosicaoEnderecos(enderecos) {
   if (!enderecos || enderecos.length === 0) return;
-  const placeholders = enderecos.map(() => '?').join(',');
-  
-  // 1. Calcular saldos reais
+  const listaEnd = [...new Set(enderecos.filter(Boolean))];
+  if (listaEnd.length === 0) return;
+  const placeholders = listaEnd.map(() => '?').join(',');
+
+  // 1. Calcular saldos reais por produto, endereço, lote e validade
   const { rows: saldos } = await db.execute({
-    sql: `SELECT produto_id, endereco, COALESCE(validade,'') as validade,
+    sql: `SELECT produto_id, endereco, COALESCE(lote,'') as lote, COALESCE(validade,'') as validade,
                  COUNT(*) as qtd_caixas, SUM(peso_kg) as qtd_kg
           FROM estoque_caixas
           WHERE status = 'DISPONIVEL' AND endereco IN (${placeholders})
-          GROUP BY produto_id, endereco, COALESCE(validade,'')`,
-    args: enderecos
+          GROUP BY produto_id, endereco, COALESCE(lote,''), COALESCE(validade,'')`,
+    args: listaEnd
   });
 
   // 2. Deletar posições antigas desses endereços
-  await db.execute({ sql: `DELETE FROM estoque_posicao WHERE endereco IN (${placeholders})`, args: enderecos });
+  await db.execute({ sql: `DELETE FROM estoque_posicao WHERE endereco IN (${placeholders})`, args: listaEnd });
 
   // 3. Reinserir com valores corretos
   for (const s of saldos) {
     if ((s.qtd_caixas || 0) <= 0) continue;
     await db.execute({
       sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg, updated_at)
-            VALUES (?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP)`,
-      args: [s.produto_id, s.endereco, s.validade || null, s.qtd_caixas, s.qtd_kg]
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      args: [s.produto_id, s.endereco, s.lote || '', s.validade || null, s.qtd_caixas, s.qtd_kg]
     });
   }
 }
@@ -57,28 +58,69 @@ export async function criarPalete() {
   return res.rows[0];
 }
 
-export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id, peso_kg, validade, operador_id, operador_nome }) {
+export async function receberCaixaSerializada({
+  ean_caixa,
+  produto_id,
+  palete_id,
+  peso_kg,
+  peso_bruto_kg,
+  tara_id,
+  tara_kg = 0,
+  data_producao,
+  lote,
+  validade,
+  origem_tipo = 'RECEBIMENTO',
+  operador_id,
+  operador_nome
+}) {
   try {
-    // 1. Inserir a caixa serializada
+    await ensureRastreabilidadeSchema()
+    const taraVal = Number(tara_kg || 0)
+    const liquidoVal = peso_kg !== undefined && peso_kg !== null
+      ? Number(Number(peso_kg).toFixed(3))
+      : Number((Number(peso_bruto_kg || 0) - taraVal).toFixed(3))
+    const brutoVal = peso_bruto_kg !== undefined && peso_bruto_kg !== null
+      ? Number(Number(peso_bruto_kg).toFixed(3))
+      : Number((liquidoVal + taraVal).toFixed(3))
+    const loteFinal = String(lote || (data_producao ? gerarLotePorData(data_producao) : '') || '').trim()
+
+    // 1. Inserir a caixa serializada com peso bruto, tara, líquido, data produção e lote automático
     const queries = [
       {
-        sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, palete_id, palete_origem_id, peso_kg, validade, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
-        args: [ean_caixa, produto_id, palete_id || null, palete_id || null, peso_kg, validade || null]
+        sql: `INSERT INTO estoque_caixas (
+                ean_caixa, produto_id, palete_id, palete_origem_id, endereco, lote, data_producao, validade,
+                peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
+              ) VALUES (?, ?, ?, ?, 'REC', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
+        args: [
+          ean_caixa, produto_id, palete_id || null, palete_id || null,
+          loteFinal, data_producao || null, validade || null,
+          liquidoVal, brutoVal, tara_id || null, taraVal,
+          origem_tipo || 'RECEBIMENTO', operador_nome || 'Sistema'
+        ]
       },
-      // 2. Aumentar o saldo agregado em REC (mantém compatibilidade com o WMS atual)
+      // 2. Aumentar o saldo agregado em REC preservando lote e validade
       {
-        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'REC', '', ?, 1, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
-        args: [produto_id, validade || null, peso_kg]
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg)
+              VALUES (?, 'REC', ?, ?, 1, ?)
+              ON CONFLICT(produto_id, endereco, lote, validade)
+              DO UPDATE SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [produto_id, loteFinal, validade || null, liquidoVal]
       },
       // 3. Registrar no log
       {
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'FORNECEDOR', 'REC', '', 1, ?, ?, ?, 'RECEBIMENTO')`,
-        args: [produto_id, peso_kg, operador_id || null, operador_nome || 'Sistema']
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
+              VALUES (?, 'FORNECEDOR', 'REC', ?, 1, ?, ?, ?, 'RECEBIMENTO')`,
+        args: [produto_id, loteFinal, liquidoVal, operador_id || null, operador_nome || 'Sistema']
       },
       // 4. Histórico da caixa
       {
-        sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome) VALUES (?, 'RECEBIMENTO', 'Recebida do Fornecedor (Endereço: REC)', ?)`,
-        args: [ean_caixa, operador_nome || 'Sistema']
+        sql: `INSERT INTO caixas_historico (ean_caixa, operacao, detalhes, operador_nome)
+              VALUES (?, 'RECEBIMENTO', ?, ?)`,
+        args: [
+          ean_caixa,
+          `Recebida (REC) • Lote ${loteFinal || '-'} • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liquidoVal.toFixed(2)}kg`,
+          operador_nome || 'Sistema'
+        ]
       }
     ]
 
@@ -90,9 +132,15 @@ export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id
     }
 
     await db.batch(queries, 'write');
-    return { success: true };
+    return {
+      success: true,
+      lote: loteFinal,
+      peso_bruto_kg: brutoVal,
+      tara_kg: taraVal,
+      peso_kg: liquidoVal,
+    };
   } catch (err) {
-    if (err.message.includes('UNIQUE constraint failed: estoque_caixas.ean_caixa')) {
+    if (String(err.message || '').includes('UNIQUE constraint failed: estoque_caixas.ean_caixa')) {
       return { success: false, error: 'Este código EAN já foi recebido.' };
     }
     return { success: false, error: err.message };
@@ -101,34 +149,25 @@ export async function receberCaixaSerializada({ ean_caixa, produto_id, palete_id
 
 export async function removerCaixaSerializada(caixa_id, operador_id, operador_nome) {
   try {
-    // Busca dados da caixa
     const res = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE id = ?`, args: [caixa_id] });
     if (res.rows.length === 0) return { success: false, error: 'Caixa não encontrada.' };
     const caixa = res.rows[0];
+    const endOrigem = caixa.endereco || 'REC';
 
     await db.batch([
-      // 1. Deletar a caixa
       { sql: `DELETE FROM estoque_caixas WHERE id = ?`, args: [caixa_id] },
-      // 2. Subtrair do saldo agregado
       {
-        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - 1, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = 'REC' AND validade IS ?`,
-        args: [caixa.peso_kg, caixa.produto_id, caixa.validade]
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
+              VALUES (?, ?, 'EXCLUIDO', ?, 1, ?, ?, ?, 'AJUSTE')`,
+        args: [caixa.produto_id, endOrigem, caixa.lote || '', caixa.peso_kg, operador_id || null, operador_nome || 'Sistema']
       },
-      // 3. Log de ajuste (deleção)
-      {
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, 'REC', 'EXCLUIDO', '', 1, ?, ?, ?, 'AJUSTE')`,
-        args: [caixa.produto_id, caixa.peso_kg, operador_id || null, operador_nome || 'Sistema']
-      },
-      // 4. Histórico da caixa
       {
         sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome) VALUES (?, ?, 'EXCLUIDA', 'Caixa excluída no recebimento', ?)`,
         args: [caixa.id, caixa.ean_caixa, operador_nome || 'Sistema']
       }
     ], 'write');
 
-    // Limpa saldos zerados
-    await db.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`);
-
+    await recalcularPosicaoEnderecos([endOrigem]);
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -138,17 +177,14 @@ export async function removerCaixaSerializada(caixa_id, operador_id, operador_no
 export async function concluirPalete(palete_id) {
   try {
     const resCount = await db.execute({
-      sql: `SELECT count(*) as qtd FROM estoque_caixas WHERE palete_id = ?`,
+      sql: `SELECT count(*) as qtd FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL'`,
       args: [palete_id]
     });
     if (resCount.rows[0].qtd === 0) {
       return { success: false, error: 'Não é possível finalizar um palete vazio. Por favor, adicione caixas ou feche esta aba.' };
     }
 
-    const { rows: caixas } = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL'`, args: [palete_id] })
-
     const tx = await db.transaction('write')
-
     try {
       await tx.execute({
         sql: `UPDATE paletes SET status = 'FECHADO', endereco_atual = 'DOCA' WHERE id = ?`,
@@ -156,37 +192,18 @@ export async function concluirPalete(palete_id) {
       })
 
       await tx.execute({
-        sql: `UPDATE estoque_caixas SET endereco = 'DOCA' WHERE palete_id = ? AND (endereco IS NULL OR endereco = 'REC')`,
+        sql: `UPDATE estoque_caixas SET endereco = 'DOCA', updated_at = CURRENT_TIMESTAMP WHERE palete_id = ? AND (endereco IS NULL OR endereco = 'REC')`,
         args: [palete_id]
       })
 
-      const agrupamento = {}
-      for (const c of caixas) {
-        if (c.endereco === 'DOCA') continue; // Já foi movido antes, em caso de reabertura
-        const key = `${c.produto_id}_${c.validade}`
-        if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, caixas: 0, kg: 0 }
-        agrupamento[key].caixas += 1
-        agrupamento[key].kg += c.peso_kg
-      }
-
-      for (const g of Object.values(agrupamento)) {
-        await tx.execute({
-          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = 'REC' AND validade IS ?`,
-          args: [g.caixas, g.kg, g.produto_id, g.validade || null]
-        })
-        await tx.execute({
-          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'DOCA', '', ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
-          args: [g.produto_id, g.validade || null, g.caixas, g.kg]
-        })
-      }
-      
-      await tx.execute(`DELETE FROM estoque_posicao WHERE qtd_caixas <= 0 OR qtd_kg <= 0`)
       await tx.commit()
-      return { success: true }
     } catch (e) {
       await tx.rollback()
       throw e
     }
+
+    await recalcularPosicaoEnderecos(['REC', 'DOCA'])
+    return { success: true }
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -504,8 +521,9 @@ export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, o
         });
       }
 
-      const key = `${c.produto_id}_${c.validade}_${origem_real}`;
-      if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, validade: c.validade, origem: origem_real, caixas: 0, kg: 0 };
+      const loteCaixa = c.lote || ''
+      const key = `${c.produto_id}_${loteCaixa}_${c.validade}_${origem_real}`;
+      if (!agrupamento[key]) agrupamento[key] = { produto_id: c.produto_id, lote: loteCaixa, validade: c.validade, origem: origem_real, caixas: 0, kg: 0 };
       agrupamento[key].caixas += 1;
       agrupamento[key].kg += c.peso_kg;
       
@@ -519,20 +537,20 @@ export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, o
     for (const g of Object.values(agrupamento)) {
       // Retira da Origem
       blocos.push({
-        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
-        args: [g.caixas, g.kg, g.produto_id, g.origem, g.validade || '']
+        sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas - ?, qtd_kg = qtd_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE produto_id = ? AND endereco = ? AND COALESCE(lote, '') = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
+        args: [g.caixas, g.kg, g.produto_id, g.origem, g.lote, g.validade || '']
       });
 
       // Insere no Destino
       blocos.push({
-        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
-        args: [g.produto_id, destino, g.validade || null, g.caixas, g.kg]
+        sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
+        args: [g.produto_id, destino, g.lote, g.validade || null, g.caixas, g.kg]
       });
 
       // Log
       blocos.push({
-        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, ?, '', ?, ?, ?, ?, 'TRANSFERENCIA')`,
-        args: [g.produto_id, g.origem, destino, g.caixas, g.kg, operador_id || null, operador_nome || 'Sistema']
+        sql: `INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'TRANSFERENCIA')`,
+        args: [g.produto_id, g.origem, destino, g.lote, g.caixas, g.kg, operador_id || null, operador_nome || 'Sistema']
       });
     }
 

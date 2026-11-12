@@ -1,4 +1,6 @@
 import { db } from '../lib/db.js';
+import { ensureRastreabilidadeSchema } from './taras.js';
+import { gerarLotePorData } from '../utils/rastreabilidade.js';
 
 /** Queries de Inventário — Cíclico, Geral (Wall-to-Wall), Carga Inicial e Ciclos */
 
@@ -103,8 +105,19 @@ export async function ciclos_encerrar({ ciclo_id, forcar = false }) {
   }
 }
 
-export async function registrarContagem({ item_id, qtd_contada_caixas, qtd_contada_kg, validade_informada }) {
+export async function registrarContagem({
+  item_id,
+  qtd_contada_caixas,
+  qtd_contada_kg,
+  validade_informada,
+  peso_bruto_contado_kg = null,
+  tara_id = null,
+  tara_kg = 0,
+  data_producao_contada = null,
+  lote_contado = null
+}) {
   try {
+    await ensureRastreabilidadeSchema()
     const { rows } = await db.execute({
       sql: `SELECT * FROM inventario_itens WHERE id = ?`,
       args: [item_id]
@@ -116,12 +129,35 @@ export async function registrarContagem({ item_id, qtd_contada_caixas, qtd_conta
     const status_item = isOk ? 'OK' : 'Aguardando Ajuste'
 
     const valNorm = validade_informada ? validade_informada.toString().substring(0, 10) : (item.validade_contada || item.validade || null)
+    const dataProdNorm = data_producao_contada ? data_producao_contada.toString().substring(0, 10) : (item.data_producao_contada || null)
+    const loteFinal = lote_contado || (dataProdNorm ? gerarLotePorData(dataProdNorm) : item.lote || '')
 
     await db.execute({
       sql: `UPDATE inventario_itens 
-            SET qtd_contada_caixas = ?, qtd_contada_kg = ?, validade_contada = ?, status_item = ?
+            SET qtd_contada_caixas = ?,
+                qtd_contada_kg = ?,
+                validade_contada = ?,
+                peso_bruto_contado_kg = COALESCE(?, peso_bruto_contado_kg),
+                tara_id = COALESCE(?, tara_id),
+                tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
+                data_producao_contada = COALESCE(?, data_producao_contada),
+                lote = CASE WHEN COALESCE(?, '') != '' THEN ? ELSE lote END,
+                status_item = ?
             WHERE id = ?`,
-      args: [qtd_contada_caixas, qtd_contada_kg, valNorm, status_item, item_id]
+      args: [
+        qtd_contada_caixas,
+        qtd_contada_kg,
+        valNorm,
+        peso_bruto_contado_kg,
+        tara_id,
+        tara_kg,
+        Number(tara_kg || 0),
+        dataProdNorm,
+        loteFinal,
+        loteFinal,
+        status_item,
+        item_id
+      ]
     })
 
     // Atualizar status do inventario se não houver pendentes
@@ -353,6 +389,7 @@ export async function listarItens(inventario_id) {
 
 // Conciliação para Carga Inicial
 export async function conciliarCargaInicial({ inventario_id, operador_id, operador_nome }) {
+  await ensureRastreabilidadeSchema()
   const tx = await db.transaction('write')
   try {
     const { rows: invRows } = await tx.execute({ sql: `SELECT * FROM inventarios WHERE id = ?`, args: [inventario_id] })
@@ -365,20 +402,57 @@ export async function conciliarCargaInicial({ inventario_id, operador_id, operad
     let inseridos = 0
     for (const item of itens) {
       if (!item.ean_caixa) continue
+      const loteFinal = item.lote || (item.data_producao_contada ? gerarLotePorData(item.data_producao_contada) : '')
+      const liqVal = Number(item.qtd_contada_kg || 0)
+      const taraVal = Number(item.tara_kg || 0)
+      const brutoVal = item.peso_bruto_contado_kg != null ? Number(item.peso_bruto_contado_kg) : Number((liqVal + taraVal).toFixed(3))
+
       const { rows: existe } = await tx.execute({
         sql: `SELECT id FROM estoque_caixas WHERE LTRIM(ean_caixa,'0') = LTRIM(?,'0')`,
         args: [item.ean_caixa]
       })
       if (existe.length === 0) {
+        const ins = await tx.execute({
+          sql: `INSERT INTO estoque_caixas (
+                  ean_caixa, produto_id, endereco, lote, data_producao, validade,
+                  peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVENTARIO', ?, 'DISPONIVEL')`,
+          args: [
+            item.ean_caixa, item.produto_id, item.endereco, loteFinal,
+            item.data_producao_contada || null, item.validade_contada || item.validade,
+            liqVal, brutoVal, item.tara_id || null, taraVal, operador_nome || 'Inventário'
+          ]
+        })
         await tx.execute({
-          sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
-          args: [item.ean_caixa, item.produto_id, item.endereco, item.lote || '', item.validade_contada || item.validade, item.qtd_contada_kg || 0]
+          sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
+                VALUES (?, ?, 'RECEBIMENTO_INVENTARIO', ?, ?)`,
+          args: [
+            Number(ins.lastInsertRowid),
+            item.ean_caixa,
+            `Carga Inicial ${item.endereco} • Lote ${loteFinal || '-'} • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liqVal.toFixed(2)}kg`,
+            operador_nome || 'Inventário'
+          ]
         })
         inseridos++
       } else {
         await tx.execute({
-          sql: `UPDATE estoque_caixas SET endereco = ?, status = 'DISPONIVEL', peso_kg = ?, validade = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          args: [item.endereco, item.qtd_contada_kg || 0, item.validade_contada || item.validade, existe[0].id]
+          sql: `UPDATE estoque_caixas
+                SET endereco = ?,
+                    status = 'DISPONIVEL',
+                    lote = COALESCE(NULLIF(?, ''), lote),
+                    data_producao = COALESCE(?, data_producao),
+                    peso_kg = ?,
+                    peso_bruto_kg = COALESCE(?, peso_bruto_kg),
+                    tara_id = COALESCE(?, tara_id),
+                    tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
+                    validade = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?`,
+          args: [
+            item.endereco, loteFinal, item.data_producao_contada || null,
+            liqVal, item.peso_bruto_contado_kg ?? null, item.tara_id ?? null, item.tara_kg ?? null, taraVal,
+            item.validade_contada || item.validade, existe[0].id
+          ]
         })
       }
       await tx.execute({ sql: `UPDATE inventario_itens SET status_item = 'OK' WHERE id = ?`, args: [item.id] })
@@ -611,13 +685,20 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
         const val = item.validade_contada || item.validade
 
         if (item.ean_caixa && qtd > 0) {
+          const loteItem = item.lote || (item.data_producao_contada ? gerarLotePorData(item.data_producao_contada) : '')
+          const taraItem = Number(item.tara_kg || 0)
+          const brutoItem = item.peso_bruto_contado_kg != null ? Number(item.peso_bruto_contado_kg) : Number((Number(kg) + taraItem).toFixed(3))
           eansContados.add(item.ean_caixa.trim())
           caixasContadas.push({
             ean_caixa: item.ean_caixa.trim(),
             produto_id: item.produto_id,
-            lote: item.lote || '',
+            lote: loteItem,
+            data_producao: item.data_producao_contada || null,
             validade: val,
-            peso_kg: kg
+            peso_kg: kg,
+            peso_bruto_kg: brutoItem,
+            tara_id: item.tara_id || null,
+            tara_kg: taraItem
           })
         }
       }
@@ -650,13 +731,34 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
         })
         if (existe.length > 0) {
           await tx.execute({
-            sql: `UPDATE estoque_caixas SET endereco = ?, validade = ?, peso_kg = ?, status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-            args: [endereco, cx.validade, cx.peso_kg, existe[0].id]
+            sql: `UPDATE estoque_caixas
+                  SET endereco = ?,
+                      lote = COALESCE(NULLIF(?, ''), lote),
+                      data_producao = COALESCE(?, data_producao),
+                      validade = ?,
+                      peso_kg = ?,
+                      peso_bruto_kg = COALESCE(?, peso_bruto_kg),
+                      tara_id = COALESCE(?, tara_id),
+                      tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
+                      status = 'DISPONIVEL',
+                      updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?`,
+            args: [
+              endereco, cx.lote, cx.data_producao, cx.validade, cx.peso_kg,
+              cx.peso_bruto_kg, cx.tara_id, cx.tara_kg, cx.tara_kg, existe[0].id
+            ]
           })
         } else {
           await tx.execute({
-            sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
-            args: [cx.ean_caixa, cx.produto_id, endereco, cx.lote, cx.validade, cx.peso_kg]
+            sql: `INSERT INTO estoque_caixas (
+                    ean_caixa, produto_id, endereco, lote, data_producao, validade,
+                    peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVENTARIO', ?, 'DISPONIVEL')`,
+            args: [
+              cx.ean_caixa, cx.produto_id, endereco, cx.lote, cx.data_producao,
+              cx.validade, cx.peso_kg, cx.peso_bruto_kg, cx.tara_id, cx.tara_kg,
+              operador_nome || 'Inventário'
+            ]
           })
         }
       }
@@ -794,18 +896,30 @@ export async function calcularIRA(inventario_id) {
   return { itens, ira_geral: parseFloat(iraGeral) }
 }
 
-export async function adicionarItemSurpresa({ inventario_id, endereco, produto_id, validade, ean_caixa }) {
+export async function adicionarItemSurpresa({
+  inventario_id,
+  endereco,
+  produto_id,
+  validade,
+  ean_caixa,
+  lote = '',
+  data_producao_contada = null,
+  tara_id = null,
+  tara_kg = 0,
+  peso_bruto_contado_kg = null
+}) {
+  await ensureRastreabilidadeSchema()
   // Se o endereço recebeu um item surpresa, ele não está mais vazio.
-  // Deletar o item dummy (VAZIO) se existir para este endereço.
   const { rows: dummyProdRows } = await db.execute({ sql: `SELECT id FROM produtos WHERE codigo = 'VAZIO'`, args: [] })
   const dummyProd = dummyProdRows[0]
   if (dummyProd) {
     await db.execute({ sql: `DELETE FROM inventario_itens WHERE inventario_id = ? AND endereco = ? AND produto_id = ?`, args: [inventario_id, endereco, dummyProd.id] })
   }
 
-  // Considera lotes diferentes (validade_contada diferente) como registros separados se validade for NULL
-  // Com o EAN único, nós apenas verificamos se o EAN já está na lista
   const validadeNorm = validade ? validade.toString().substring(0, 10) : null
+  const dataProdNorm = data_producao_contada ? data_producao_contada.toString().substring(0, 10) : null
+  const loteFinal = lote || (dataProdNorm ? gerarLotePorData(dataProdNorm) : '')
+
   const { rows: existenteRows } = await db.execute({
     sql: `
     SELECT * FROM inventario_itens 
@@ -817,9 +931,26 @@ export async function adicionarItemSurpresa({ inventario_id, endereco, produto_i
   
   const res = await db.execute({
     sql: `
-    INSERT INTO inventario_itens (inventario_id, ean_caixa, endereco, produto_id, lote, validade, validade_contada, qtd_sistema_caixas, qtd_sistema_kg, status_item)
-    VALUES (?, ?, ?, ?, '', NULL, ?, 0, 0, 'Pendente')
-  `, args: [inventario_id, ean_caixa, endereco, produto_id, validadeNorm] })
+    INSERT INTO inventario_itens (
+      inventario_id, ean_caixa, endereco, produto_id, lote, validade, validade_contada,
+      data_producao_contada, tara_id, tara_kg, peso_bruto_contado_kg,
+      qtd_sistema_caixas, qtd_sistema_kg, status_item
+    )
+    VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, 0, 'Pendente')
+  `,
+    args: [
+      inventario_id,
+      ean_caixa,
+      endereco,
+      produto_id,
+      loteFinal,
+      validadeNorm,
+      dataProdNorm,
+      tara_id || null,
+      Number(tara_kg || 0),
+      peso_bruto_contado_kg ?? null
+    ]
+  })
   return { success: true, item_id: res.lastInsertRowid.toString(), status_item: 'Pendente', contagem_atual: 1 }
 }
 

@@ -1,4 +1,6 @@
 import { db } from '../lib/db.js';
+import { ensureRastreabilidadeSchema } from './taras.js';
+import { gerarLotePorData } from '../utils/rastreabilidade.js';
 
 /** Queries de Estoque e Posições */
 
@@ -102,25 +104,73 @@ export async function removerCaixa(id) {
   return { success: true }
 }
 
-// Cria caixas no estoque_caixas durante a Carga Inicial
+// Cria ou atualiza caixas no estoque_caixas durante o Inventário / Carga Inicial
 export async function inserirCaixasCargaInicial(caixas) {
   if (!caixas || caixas.length === 0) return { success: true };
+  await ensureRastreabilidadeSchema();
   const tx = await db.transaction('write');
   try {
     for (const c of caixas) {
+      const loteFinal = String(c.lote || (c.data_producao ? gerarLotePorData(c.data_producao) : '') || '').trim();
+      const taraVal = Number(c.tara_kg || 0);
+      const liqVal = Number(Number(c.peso_kg || 0).toFixed(3));
+      const brutoVal = c.peso_bruto_kg !== undefined && c.peso_bruto_kg !== null
+        ? Number(Number(c.peso_bruto_kg).toFixed(3))
+        : Number((liqVal + taraVal).toFixed(3));
+
       const { rows } = await tx.execute({
         sql: `SELECT id FROM estoque_caixas WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
         args: [c.ean_caixa]
       });
       if (rows.length === 0) {
+        const insRes = await tx.execute({
+          sql: `INSERT INTO estoque_caixas (
+                  ean_caixa, produto_id, endereco, lote, data_producao, validade,
+                  peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
+          args: [
+            c.ean_caixa, c.produto_id, c.endereco,
+            loteFinal, c.data_producao || null, c.validade || null,
+            liqVal, brutoVal, c.tara_id || null, taraVal,
+            c.origem_tipo || 'INVENTARIO', c.operador_cadastro_nome || 'Inventário'
+          ]
+        });
         await tx.execute({
-          sql: `INSERT INTO estoque_caixas (ean_caixa, produto_id, endereco, lote, validade, peso_kg, status) VALUES (?, ?, ?, '', ?, ?, 'DISPONIVEL')`,
-          args: [c.ean_caixa, c.produto_id, c.endereco, c.validade || null, c.peso_kg]
+          sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
+                VALUES (?, ?, 'RECEBIMENTO_INVENTARIO', ?, ?)`,
+          args: [
+            Number(insRes.lastInsertRowid),
+            c.ean_caixa,
+            `Inventário em ${c.endereco} • Lote ${loteFinal || '-'} • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liqVal.toFixed(2)}kg`,
+            c.operador_cadastro_nome || 'Inventário'
+          ]
         });
       } else {
         await tx.execute({
-          sql: `UPDATE estoque_caixas SET endereco = ?, peso_kg = ?, validade = ?, status = 'DISPONIVEL' WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
-          args: [c.endereco, c.peso_kg, c.validade || null, c.ean_caixa]
+          sql: `UPDATE estoque_caixas
+                SET endereco = ?,
+                    lote = COALESCE(NULLIF(?, ''), lote),
+                    data_producao = COALESCE(?, data_producao),
+                    validade = COALESCE(?, validade),
+                    peso_kg = ?,
+                    peso_bruto_kg = COALESCE(?, peso_bruto_kg),
+                    tara_id = COALESCE(?, tara_id),
+                    tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
+                    status = 'DISPONIVEL',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?`,
+          args: [
+            c.endereco,
+            loteFinal,
+            c.data_producao || null,
+            c.validade || null,
+            liqVal,
+            c.peso_bruto_kg ?? null,
+            c.tara_id ?? null,
+            c.tara_kg ?? null,
+            taraVal,
+            rows[0].id
+          ]
         });
       }
     }
