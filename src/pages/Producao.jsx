@@ -21,7 +21,7 @@ import {
 } from '../utils/rastreabilidade.js'
 
 const STATUS_BADGE = {
-  RASCUNHO: { label: 'Rascunho (ADM)', bg: 'rgba(148,163,184,0.16)', color: '#cbd5e1', border: 'rgba(148,163,184,0.35)' },
+  RASCUNHO: { label: 'Rascunho', bg: 'rgba(148,163,184,0.16)', color: '#cbd5e1', border: 'rgba(148,163,184,0.35)' },
   LIBERADA: { label: 'Liberada', bg: 'rgba(34,197,94,0.16)', color: '#4ade80', border: 'rgba(34,197,94,0.38)' },
   ABERTA: { label: 'Em Produção', bg: 'rgba(56,189,248,0.16)', color: '#38bdf8', border: 'rgba(56,189,248,0.38)' },
   FECHADA: { label: 'Finalizada', bg: 'rgba(167,139,250,0.16)', color: '#c4b5fd', border: 'rgba(167,139,250,0.38)' },
@@ -575,14 +575,14 @@ export function Producao() {
           </h1>
           <p className="page-header__subtitle">
             {isAdm
-              ? 'Gestão ADM (criação, configuração de entradas/saídas e liberação) + Execução operacional com pesagem por Tara e impressão Zebra.'
+              ? 'Gestão de Ordens de Produção (criação, configuração de entradas/saídas e liberação) + Execução operacional com pesagem por Tara e impressão Zebra.'
               : 'Selecione uma OP liberada para registrar as Entradas de Matéria-Prima e gerar as Saídas de Produção com etiqueta automática.'}
           </p>
         </div>
 
         {isAdm && (
           <button type="button" className="btn btn--primary" onClick={iniciarNovaOpAdm}>
-            <Plus size={16} /> Nova Ordem de Produção (ADM)
+            <Plus size={16} /> Nova Ordem de Produção
           </button>
         )}
       </div>
@@ -615,7 +615,7 @@ export function Producao() {
             className={`btn ${abaPrincipal === 'config' ? 'btn--primary' : 'btn--ghost'}`}
             onClick={() => { if (abaPrincipal !== 'config') iniciarNovaOpAdm() }}
           >
-            <Edit3 size={15} /> {editOpId ? 'Editando OP (ADM)' : 'Criar / Configurar OP (ADM)'}
+            <Edit3 size={15} /> {editOpId ? 'Editando OP' : 'Criar / Configurar OP'}
           </button>
         )}
 
@@ -669,7 +669,7 @@ export function Producao() {
                 {isAdm && opSelecionada.status !== 'FECHADA' && (
                   <>
                     <button type="button" className="btn btn--secondary btn--sm" onClick={() => iniciarEdicaoOpAdm(opSelecionada)}>
-                      <Edit3 size={14} /> Editar Config. (ADM)
+                      <Edit3 size={14} /> Editar Configuração
                     </button>
                     {opSelecionada.status === 'RASCUNHO' && (
                       <button type="button" className="btn btn--primary btn--sm" onClick={() => handleLiberarOP(opSelecionada)}>
@@ -747,7 +747,7 @@ export function Producao() {
               {opSelecionada.previstos_entrada?.length > 0 && (
                 <div className="card" style={{ padding: '14px 16px' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
-                    Matérias-Primas Previstas pelo ADM
+                    Matérias-Primas Previstas na OP
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     {opSelecionada.previstos_entrada.map(pe => {
@@ -874,7 +874,7 @@ export function Producao() {
                   {/* Seleção do produto de saída */}
                   <div style={{ marginBottom: 14 }}>
                     <label className="form-label" style={{ display: 'block', marginBottom: 6 }}>
-                      Produto Produzido * {opSelecionada.previstos_saida?.length > 0 && !mostrarTodosProdutosSaida ? '(Configurados nesta OP pelo ADM)' : ''}
+                      Produto Produzido * {opSelecionada.previstos_saida?.length > 0 && !mostrarTodosProdutosSaida ? '(Configurados nesta OP)' : ''}
                     </label>
                     <select
                       className="form-input"
@@ -1007,7 +1007,7 @@ export function Producao() {
           ) : opsAtivas.length === 0 ? (
             <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 36, color: 'var(--text-muted)' }}>
               Nenhuma OP ativa/liberada no momento.
-              {isAdm && ' Clique em "Nova Ordem de Produção (ADM)" para abrir e liberar uma nova OP.'}
+              {isAdm && ' Clique em "Nova Ordem de Produção" para abrir e liberar uma nova OP.'}
             </div>
           ) : (
             opsAtivas.map(op => (
@@ -1041,7 +1041,7 @@ export function Producao() {
                     </button>
                   )}
                   {isAdm && (
-                    <button type="button" className="btn btn--secondary btn--sm" onClick={async () => { const d = await producaoQueries.detalhesOP(op.id); if (d) iniciarEdicaoOpAdm(d) }} title="Editar configuração ADM">
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={async () => { const d = await producaoQueries.detalhesOP(op.id); if (d) iniciarEdicaoOpAdm(d) }} title="Editar configuração da OP">
                       <Edit3 size={14} />
                     </button>
                   )}
@@ -1058,7 +1058,7 @@ export function Producao() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
             <div>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--cyan)' }}>
-                {editOpId ? 'Editar Configuração da Ordem de Produção (ADM)' : 'Nova Ordem de Produção — Configuração ADM'}
+                {editOpId ? 'Editar Configuração da Ordem de Produção' : 'Nova Ordem de Produção'}
               </h3>
               <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
                 Defina os itens de entrada, os itens previstos de saída e a data de produção da OP antes de liberar ao operador.
@@ -1295,7 +1295,7 @@ export function Producao() {
               <div>Caixa: <strong>{confirmacaoEntrada.caixa.produto_descricao}</strong> (EAN <span style={{ fontFamily: 'monospace' }}>{confirmacaoEntrada.caixa.ean_caixa}</span>)</div>
               {confirmacaoEntrada.foraPrevisto && (
                 <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: 'rgba(245,158,11,0.14)', color: '#fde68a' }}>
-                  Este produto não estava na lista de entradas previstas configurada pelo ADM para esta OP.
+                  Este produto não estava na lista de entradas previstas configurada para esta OP.
                 </div>
               )}
               {confirmacaoEntrada.avisoFefo && (
