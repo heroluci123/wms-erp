@@ -68,6 +68,7 @@ export async function receberCaixaSerializada({
   peso_bruto_kg,
   tara_id,
   tara_kg = 0,
+  qtd_pecas = null,
   data_producao,
   lote,
   validade,
@@ -85,20 +86,23 @@ export async function receberCaixaSerializada({
     const brutoVal = peso_bruto_kg !== undefined && peso_bruto_kg !== null
       ? Number(Number(peso_bruto_kg).toFixed(3))
       : Number((liquidoVal + taraVal).toFixed(3))
+    const pecasVal = qtd_pecas !== undefined && qtd_pecas !== null && Number(qtd_pecas) > 0
+      ? Math.trunc(Number(qtd_pecas))
+      : null
     const loteFinal = String(lote || (data_producao ? gerarLotePorData(data_producao) : '') || '').trim()
 
-    // 1. Inserir a caixa serializada com peso bruto, tara, líquido, data produção e lote automático
+    // 1. Inserir a caixa serializada com peso bruto, tara, líquido, peças, data produção e lote automático
     const queries = [
       {
         sql: `INSERT INTO estoque_caixas (
                 ean_caixa, produto_id, palete_id, palete_origem_id, endereco, lote, data_producao, validade,
-                peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
-              ) VALUES (?, ?, ?, ?, 'REC', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
+                peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, origem_tipo, operador_cadastro_nome, status
+              ) VALUES (?, ?, ?, ?, 'REC', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
         args: [
           ean_caixa, produto_id, palete_id || null, palete_id || null,
           loteFinal, data_producao || null, validade || null,
           liquidoVal, brutoVal, tara_id || null, taraVal,
-          origem_tipo || 'RECEBIMENTO', operador_nome || 'Sistema'
+          pecasVal, origem_tipo || 'RECEBIMENTO', operador_nome || 'Sistema'
         ]
       },
       // 2. Aumentar o saldo agregado em REC preservando lote e validade
@@ -121,7 +125,7 @@ export async function receberCaixaSerializada({
               VALUES (?, 'RECEBIMENTO', ?, ?)`,
         args: [
           ean_caixa,
-          `Recebida (REC) • Lote ${loteFinal || '-'} • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liquidoVal.toFixed(2)}kg`,
+          `Recebida (REC) • Lote ${loteFinal || '-'} • ${pecasVal ? `${pecasVal} pç • ` : ''}Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liquidoVal.toFixed(2)}kg`,
           operador_nome || 'Sistema'
         ]
       }
@@ -141,6 +145,7 @@ export async function receberCaixaSerializada({
       peso_bruto_kg: brutoVal,
       tara_kg: taraVal,
       peso_kg: liquidoVal,
+      qtd_pecas: pecasVal,
     };
   } catch (err) {
     if (String(err.message || '').includes('UNIQUE constraint failed: estoque_caixas.ean_caixa')) {

@@ -23,6 +23,7 @@ function criarNovaCaixaVazia(taras) {
     uid: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     tara_id: padrao ? String(padrao.id) : '',
     peso_bruto: '',
+    qtd_pecas: '',
   }
 }
 
@@ -41,6 +42,7 @@ export function Desmembramento() {
   const [novasCaixas, setNovasCaixas] = useState([])
   const [salvando, setSalvando] = useState(false)
   const [modalDivergencia, setModalDivergencia] = useState(null)
+  const [motivoDiferencaPecas, setMotivoDiferencaPecas] = useState('')
 
   // Impressão Zebra 100x70mm após desmembramento ou histórico
   const [etiquetasModal, setEtiquetasModal] = useState({ open: false, itens: [], autoPrint: false, titulo: '' })
@@ -101,6 +103,7 @@ export function Desmembramento() {
     setScanInput('')
     setNovasCaixas([criarNovaCaixaVazia(taras), criarNovaCaixaVazia(taras)])
     setModalDivergencia(null)
+    setMotivoDiferencaPecas('')
     setTimeout(() => scanRef.current?.focus(), 100)
   }
 
@@ -126,7 +129,10 @@ export function Desmembramento() {
       const taraKg = taraObj ? Number(taraObj.peso_kg || 0) : 0
       const brutoNum = parseNumero(row.peso_bruto)
       const liqNum = Number.isFinite(brutoNum) ? calcularPesoLiquido(brutoNum, taraKg) : NaN
-      const valido = Number.isFinite(brutoNum) && brutoNum > 0 && Number.isFinite(liqNum) && liqNum > 0
+      const pecasNum = parseNumero(row.qtd_pecas)
+      const pecasInt = Number.isFinite(pecasNum) ? Math.trunc(pecasNum) : NaN
+      const pecasValido = Number.isFinite(pecasNum) && pecasInt > 0 && pecasInt === pecasNum
+      const valido = Number.isFinite(brutoNum) && brutoNum > 0 && Number.isFinite(liqNum) && liqNum > 0 && pecasValido
       return {
         ...row,
         idx,
@@ -135,6 +141,8 @@ export function Desmembramento() {
         tara_kg: taraKg,
         peso_bruto_kg: brutoNum,
         peso_liquido_kg: liqNum,
+        qtd_pecas_int: pecasValido ? pecasInt : null,
+        pecasValido,
         valido,
       }
     })
@@ -145,8 +153,11 @@ export function Desmembramento() {
     const somaBruto = caixasCalculadas.reduce((acc, c) => acc + (Number.isFinite(c.peso_bruto_kg) && c.peso_bruto_kg > 0 ? c.peso_bruto_kg : 0), 0)
     const somaLiq = caixasCalculadas.reduce((acc, c) => acc + (Number.isFinite(c.peso_liquido_kg) && c.peso_liquido_kg > 0 ? c.peso_liquido_kg : 0), 0)
     const diferenca = Number((somaLiq - origLiq).toFixed(3))
+    const origPecas = caixaOrigem?.qtd_pecas != null && Number(caixaOrigem.qtd_pecas) > 0 ? Math.trunc(Number(caixaOrigem.qtd_pecas)) : null
+    const somaPecas = caixasCalculadas.reduce((acc, c) => acc + (c.qtd_pecas_int || 0), 0)
+    const difPecas = origPecas != null ? somaPecas - origPecas : 0
     const todasValidas = caixasCalculadas.length >= 2 && caixasCalculadas.every(c => c.valido)
-    return { origLiq, somaBruto, somaLiq, diferenca, todasValidas }
+    return { origLiq, somaBruto, somaLiq, diferenca, origPecas, somaPecas, difPecas, todasValidas }
   }, [caixaOrigem, caixasCalculadas])
 
   const solicitarConfirmacao = () => {
@@ -155,17 +166,30 @@ export function Desmembramento() {
 
     const invalidIdx = caixasCalculadas.findIndex(c => !c.valido)
     if (invalidIdx !== -1) {
+      const cxInv = caixasCalculadas[invalidIdx]
+      if (!cxInv.pecasValido) {
+        return toastWarning(
+          `Nova Caixa #${invalidIdx + 1} incompleta`,
+          'Informe a Quantidade de Peças (número inteiro maior que zero).'
+        )
+      }
       return toastWarning(
         `Nova Caixa #${invalidIdx + 1} incompleta`,
         'Informe um Peso Bruto maior que a Tara selecionada para todas as caixas.'
       )
     }
 
-    if (Math.abs(resumoBalanco.diferenca) > 1.0) {
+    const difPesoSignificativa = Math.abs(resumoBalanco.diferenca) > 1.0
+    const difPecasSignificativa = resumoBalanco.origPecas != null && resumoBalanco.difPecas !== 0
+
+    if (difPesoSignificativa || difPecasSignificativa) {
       setModalDivergencia({
         origLiq: resumoBalanco.origLiq,
         somaLiq: resumoBalanco.somaLiq,
         diferenca: resumoBalanco.diferenca,
+        origPecas: resumoBalanco.origPecas,
+        somaPecas: resumoBalanco.somaPecas,
+        difPecas: resumoBalanco.difPecas,
       })
       return
     }
@@ -183,7 +207,9 @@ export function Desmembramento() {
           tara_id: c.tara_id,
           tara_kg: c.tara_kg,
           peso_bruto_kg: c.peso_bruto_kg,
+          qtd_pecas: c.qtd_pecas_int,
         })),
+        motivoDiferencaPecas: motivoDiferencaPecas.trim(),
         operador_id: operador?.id,
         operador_nome: operador?.nome || 'Operador',
       })
@@ -350,6 +376,12 @@ export function Desmembramento() {
                     {fmtKg2(caixaOrigem.peso_kg)}
                   </div>
                 </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>PEÇAS NA CAIXA ORIGINAL</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: '#facc15', fontFamily: 'var(--font-mono)' }}>
+                    {caixaOrigem.qtd_pecas != null ? `${caixaOrigem.qtd_pecas} pç` : 'Não informado'}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -418,10 +450,26 @@ export function Desmembramento() {
 
                       <div style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
                         gap: 12,
                         alignItems: 'end',
                       }}>
+                        <div>
+                          <label className="form-label" style={{ display: 'block', marginBottom: 5 }}>Qtd. de Peças *</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="form-input"
+                            style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                            placeholder="Ex: 4"
+                            value={cx.qtd_pecas ?? ''}
+                            onChange={e => {
+                              const digits = String(e.target.value || '').replace(/[^\d]/g, '')
+                              atualizarNovaCaixa(cx.uid, { qtd_pecas: digits })
+                            }}
+                          />
+                        </div>
+
                         <div>
                           <label className="form-label" style={{ display: 'block', marginBottom: 5 }}>Tara da Caixa *</label>
                           <select
@@ -507,12 +555,21 @@ export function Desmembramento() {
                     <strong style={{ fontSize: 16, fontFamily: 'var(--font-mono)', color: '#4ade80' }}>{fmtKg2(resumoBalanco.somaLiq)}</strong>
                   </div>
                   <div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>DIFERENÇA</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>DIFERENÇA DE PESO</div>
                     <strong style={{
                       fontSize: 16, fontFamily: 'var(--font-mono)',
                       color: Math.abs(resumoBalanco.diferenca) > 1.0 ? '#fbbf24' : 'var(--text-secondary)',
                     }}>
                       {resumoBalanco.diferenca >= 0 ? '+' : ''}{fmtKg2(resumoBalanco.diferenca)}
+                    </strong>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>PEÇAS (ORIG. / SOMA)</div>
+                    <strong style={{
+                      fontSize: 16, fontFamily: 'var(--font-mono)',
+                      color: resumoBalanco.origPecas != null && resumoBalanco.difPecas !== 0 ? '#fbbf24' : '#facc15',
+                    }}>
+                      {resumoBalanco.origPecas != null ? `${resumoBalanco.origPecas} pç` : '-'} / {resumoBalanco.somaPecas} pç
                     </strong>
                   </div>
                 </div>
@@ -579,9 +636,10 @@ export function Desmembramento() {
                         <span style={{ fontFamily: 'monospace' }}>{v.lote || '-'}</span> • Val {fmtDataBR(v.validade)}
                       </td>
                       <td style={{ padding: '9px 10px' }}>
-                        <strong>Líq: {fmtKg2(v.peso_liquido_kg)}</strong>
+                        <strong>Líq: {fmtKg2(v.peso_liquido_kg)}</strong>{v.qtd_pecas ? ` • ${v.qtd_pecas} pç` : ''}
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                           Bruto: {fmtKg2(v.peso_bruto_kg)} | Tara: {fmtKg3(v.tara_kg)}
+                          {Number(v.perda_pecas || 0) !== 0 ? ` | Dif. peças: ${v.perda_pecas > 0 ? '-' : '+'}${Math.abs(v.perda_pecas)} pç` : ''}
                         </div>
                       </td>
                       <td style={{ padding: '9px 10px', textAlign: 'right' }}>
@@ -602,22 +660,47 @@ export function Desmembramento() {
         </div>
       )}
 
-      {/* Modal de confirmação quando há divergência significativa entre original e soma */}
+      {/* Modal de confirmação quando há divergência significativa entre original e soma (peso ou peças) */}
       {modalDivergencia && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 460, padding: 24 }}>
+          <div className="modal-content" style={{ maxWidth: 490, padding: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
               <AlertTriangle size={28} color="#f59e0b" />
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Divergência de Peso no Desmembramento</h3>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Conferência de Divergência no Desmembramento</h3>
             </div>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>
-              O peso líquido somado das novas caixas ({fmtKg2(modalDivergencia.somaLiq)}) difere do peso líquido original ({fmtKg2(modalDivergencia.origLiq)}) em{' '}
-              <strong style={{ color: '#fbbf24' }}>{modalDivergencia.diferenca >= 0 ? '+' : ''}{fmtKg2(modalDivergencia.diferenca)}</strong>.
-              Deseja confirmar o desmembramento e gerar as etiquetas assim mesmo?
+            {Math.abs(modalDivergencia.diferenca) > 1.0 && (
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 10 }}>
+                O peso líquido somado das novas caixas ({fmtKg2(modalDivergencia.somaLiq)}) difere do peso líquido original ({fmtKg2(modalDivergencia.origLiq)}) em{' '}
+                <strong style={{ color: '#fbbf24' }}>{modalDivergencia.diferenca >= 0 ? '+' : ''}{fmtKg2(modalDivergencia.diferenca)}</strong>.
+              </p>
+            )}
+            {modalDivergencia.origPecas != null && modalDivergencia.difPecas !== 0 && (
+              <div style={{
+                padding: '10px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.1)',
+                border: '1px solid rgba(245,158,11,0.35)', marginBottom: 14, fontSize: 13,
+              }}>
+                <div>
+                  Quantidade de peças original: <strong>{modalDivergencia.origPecas} pç</strong> → Soma das novas caixas: <strong>{modalDivergencia.somaPecas} pç</strong>
+                  {' '}(<strong style={{ color: '#fbbf24' }}>{modalDivergencia.difPecas > 0 ? `+${modalDivergencia.difPecas}` : modalDivergencia.difPecas} pç</strong>)
+                </div>
+                <label className="form-label" style={{ display: 'block', marginTop: 10, marginBottom: 4 }}>
+                  Justificativa da diferença / perda de peças:
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Ex: recorte de apara, perda em limpeza, ajuste de contagem..."
+                  value={motivoDiferencaPecas}
+                  onChange={e => setMotivoDiferencaPecas(e.target.value)}
+                />
+              </div>
+            )}
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Deseja confirmar o desmembramento e gerar as etiquetas com estes valores?
             </p>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn--secondary" onClick={() => setModalDivergencia(null)}>
-                Revisar Pesos
+                Revisar Valores
               </button>
               <button type="button" className="btn btn--warning" onClick={executarDesmembramento}>
                 <Scale size={15} /> Sim, Confirmar Desmembramento

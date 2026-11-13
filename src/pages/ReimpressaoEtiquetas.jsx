@@ -204,7 +204,10 @@ export function ReimpressaoEtiquetas() {
                   fontSize: 12, fontWeight: 700,
                   color: STATUS_COR[caixaSelecionada.status] || 'var(--text-primary)',
                 }}>
-                  Status: {caixaSelecionada.status || 'DISPONIVEL'} • Endereço: {caixaSelecionada.endereco || '-'}
+                  Status: {caixaSelecionada.status === 'RESERVADA' ? 'RESERVADO' : (caixaSelecionada.status || 'DISPONIVEL')} • Endereço: {caixaSelecionada.endereco || '-'}
+                  {caixaSelecionada.status === 'RESERVADA' && caixaSelecionada.cliente_reservado_nome
+                    ? ` • ${caixaSelecionada.cliente_reservado_nome} (${caixaSelecionada.pedido_reservado_codigo || caixaSelecionada.romaneio_reservado_codigo || ''})`
+                    : ''}
                 </span>
               </div>
 
@@ -241,6 +244,12 @@ export function ReimpressaoEtiquetas() {
                   </div>
                 </div>
 
+                <div>
+                  <div className="text-xs text-muted uppercase font-bold">Qtd. de Peças</div>
+                  <div className="font-mono font-bold" style={{ fontSize: 15, color: '#38bdf8' }}>
+                    {caixaSelecionada.qtd_pecas != null ? `${caixaSelecionada.qtd_pecas} pç` : '-'}
+                  </div>
+                </div>
                 <div>
                   <div className="text-xs text-muted uppercase font-bold">Peso Bruto</div>
                   <div className="font-bold" style={{ fontSize: 15 }}>
@@ -383,6 +392,7 @@ export function ReimpressaoEtiquetas() {
                 <th>Lote</th>
                 <th>Data Prod.</th>
                 <th>Validade</th>
+                <th>Peças</th>
                 <th>Bruto</th>
                 <th>Tara</th>
                 <th>Líquido</th>
@@ -393,13 +403,13 @@ export function ReimpressaoEtiquetas() {
             <tbody>
               {carregandoLista ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: 'center', padding: 28 }} className="text-muted">
+                  <td colSpan={12} style={{ textAlign: 'center', padding: 28 }} className="text-muted">
                     Carregando caixas registradas...
                   </td>
                 </tr>
               ) : recentesFiltradas.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: 'center', padding: 28 }} className="text-muted">
+                  <td colSpan={12} style={{ textAlign: 'center', padding: 28 }} className="text-muted">
                     Nenhuma caixa encontrada com os filtros informados.
                   </td>
                 </tr>
@@ -436,13 +446,19 @@ export function ReimpressaoEtiquetas() {
                     <td className="font-mono font-bold">{item.lote || '-'}</td>
                     <td>{fmtDataBR(item.data_producao)}</td>
                     <td>{fmtDataBR(item.validade)}</td>
+                    <td className="font-mono font-bold">{item.qtd_pecas != null ? `${item.qtd_pecas} pç` : '-'}</td>
                     <td>{item.peso_bruto_kg != null ? fmtKg2(item.peso_bruto_kg) : '-'}</td>
                     <td>{item.tara_kg != null ? fmtKg3(item.tara_kg) : '-'}</td>
                     <td className="font-bold" style={{ color: '#4ade80' }}>{fmtKg2(item.peso_kg)}</td>
                     <td>
                       <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_COR[item.status] || 'var(--text-secondary)' }}>
-                        {item.status || 'DISPONIVEL'}
+                        {item.status === 'RESERVADA' ? 'RESERVADO' : (item.status || 'DISPONIVEL')}
                       </span>
+                      {item.status === 'RESERVADA' && item.cliente_reservado_nome && (
+                        <div className="text-xs text-muted" style={{ fontSize: 10 }}>
+                          {item.cliente_reservado_nome} {item.pedido_reservado_codigo ? `(${item.pedido_reservado_codigo})` : ''}
+                        </div>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <button

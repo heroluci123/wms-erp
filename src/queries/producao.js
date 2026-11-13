@@ -94,10 +94,11 @@ export async function criarOP(arg1, operador_id_legacy, operador_nome_legacy) {
 
     for (const item of itensPrevistos || []) {
       if (!item?.produto_id) continue
+      const unidade = item.unidade_prevista === 'CX' || (!item.peso_kg_previsto && item.qtd_caixas_prevista) ? 'CX' : 'KG'
       await tx.execute({
         sql: `
-          INSERT INTO op_itens_previstos (op_id, tipo, produto_id, qtd_caixas_prevista, peso_kg_previsto, observacao)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO op_itens_previstos (op_id, tipo, produto_id, qtd_caixas_prevista, peso_kg_previsto, unidade_prevista, observacao)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
         args: [
           opCriada.id,
@@ -105,6 +106,7 @@ export async function criarOP(arg1, operador_id_legacy, operador_nome_legacy) {
           Number(item.produto_id),
           item.qtd_caixas_prevista ? Number(item.qtd_caixas_prevista) : null,
           item.peso_kg_previsto ? Number(item.peso_kg_previsto) : null,
+          unidade,
           String(item.observacao || '').trim(),
         ],
       })
@@ -154,10 +156,11 @@ export async function atualizarOPConfig(op_id, { nome, data_producao, observacoe
 
     for (const item of itensPrevistos || []) {
       if (!item?.produto_id) continue
+      const unidade = item.unidade_prevista === 'CX' || (!item.peso_kg_previsto && item.qtd_caixas_prevista) ? 'CX' : 'KG'
       await tx.execute({
         sql: `
-          INSERT INTO op_itens_previstos (op_id, tipo, produto_id, qtd_caixas_prevista, peso_kg_previsto, observacao)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO op_itens_previstos (op_id, tipo, produto_id, qtd_caixas_prevista, peso_kg_previsto, unidade_prevista, observacao)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
         args: [
           op_id,
@@ -165,6 +168,7 @@ export async function atualizarOPConfig(op_id, { nome, data_producao, observacoe
           Number(item.produto_id),
           item.qtd_caixas_prevista ? Number(item.qtd_caixas_prevista) : null,
           item.peso_kg_previsto ? Number(item.peso_kg_previsto) : null,
+          unidade,
           String(item.observacao || '').trim(),
         ],
       })
@@ -261,6 +265,7 @@ export async function detalhesOP(op_id) {
           COALESCE(oi.data_producao, c.data_producao) AS data_producao,
           COALESCE(oi.peso_bruto_kg, c.peso_bruto_kg, oi.peso_kg + COALESCE(oi.tara_kg, c.tara_kg, 0)) AS peso_bruto_kg,
           COALESCE(oi.tara_kg, c.tara_kg, 0) AS tara_kg,
+          COALESCE(oi.qtd_pecas, c.qtd_pecas) AS qtd_pecas,
           p.descricao AS produto_descricao,
           p.codigo AS produto_codigo
         FROM op_insumos oi
@@ -281,6 +286,7 @@ export async function detalhesOP(op_id) {
           COALESCE(oret.data_producao, c.data_producao) AS data_producao,
           COALESCE(oret.peso_bruto_kg, c.peso_bruto_kg, oret.peso_kg + COALESCE(oret.tara_kg, c.tara_kg, 0)) AS peso_bruto_kg,
           COALESCE(oret.tara_kg, c.tara_kg, 0) AS tara_kg,
+          COALESCE(oret.qtd_pecas, c.qtd_pecas) AS qtd_pecas,
           t.nome AS tara_nome,
           p.descricao AS produto_descricao,
           p.codigo AS produto_codigo
@@ -386,10 +392,10 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
 
       queries.push({
         sql: `
-          INSERT INTO op_insumos (op_id, caixa_id, produto_id, peso_kg, peso_bruto_kg, tara_kg, data_producao, lote, operador_nome)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO op_insumos (op_id, caixa_id, produto_id, peso_kg, peso_bruto_kg, tara_kg, data_producao, lote, qtd_pecas, operador_nome)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        args: [op_id, c.id, c.produto_id, c.peso_kg, brutoCaixa, taraCaixa, c.data_producao || null, loteCaixa, operador_nome || 'Sistema'],
+        args: [op_id, c.id, c.produto_id, c.peso_kg, brutoCaixa, taraCaixa, c.data_producao || null, loteCaixa, c.qtd_pecas ?? null, operador_nome || 'Sistema'],
       })
 
       if (c.palete_id) {
@@ -426,15 +432,304 @@ export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
   }
 }
 
+/**
+ * Busca, valida (limite previsto + FEFO) e aloca atomicamente 1 caixa de entrada na OP
+ * em no máximo 2 round-trips de rede para resposta instantânea na linha de produção.
+ */
+export async function escanearEAlocarEntradaOP({
+  op_id,
+  ean,
+  forcarConfirmacao = false,
+  operador_id = null,
+  operador_nome = 'Operador',
+}) {
+  await assertPermissao(['producao_entrada', 'retorno_producao'])
+  await ensureRastreabilidadeSchema()
+
+  const clean = String(ean || '').trim()
+  if (!clean) {
+    return { success: false, code: 'VAZIO', error: 'Informe ou bipe o EAN da caixa de entrada.' }
+  }
+
+  // Round-trip 1 paralelo: caixa + OP + previstos + insumos já bipados nesta OP
+  const [caixaRes, opRes, prevRes, insRes] = await Promise.all([
+    db.execute({
+      sql: `
+        SELECT
+          ec.*,
+          p.codigo AS produto_codigo,
+          p.descricao AS produto_descricao,
+          pal.endereco_atual AS palete_endereco,
+          t.nome AS tara_nome
+        FROM estoque_caixas ec
+        JOIN produtos p ON p.id = ec.produto_id
+        LEFT JOIN paletes pal ON pal.id = ec.palete_id
+        LEFT JOIN taras t ON t.id = ec.tara_id
+        WHERE ec.ean_caixa = ?
+        LIMIT 1
+      `,
+      args: [clean],
+    }),
+    db.execute({ sql: `SELECT id, codigo, status FROM ordens_producao WHERE id = ?`, args: [op_id] }),
+    db.execute({
+      sql: `
+        SELECT id, produto_id, qtd_caixas_prevista, peso_kg_previsto, unidade_prevista
+        FROM op_itens_previstos
+        WHERE op_id = ? AND tipo = 'ENTRADA'
+      `,
+      args: [op_id],
+    }),
+    db.execute({
+      sql: `SELECT id, caixa_id, produto_id, peso_kg FROM op_insumos WHERE op_id = ?`,
+      args: [op_id],
+    }),
+  ])
+
+  const op = opRes.rows[0]
+  if (!op) {
+    return { success: false, code: 'OP_NAO_ENCONTRADA', error: 'Ordem de Produção não encontrada.' }
+  }
+  const opCodigo = op.codigo || 'PRODUCAO'
+  if (!['LIBERADA', 'ABERTA'].includes(op.status)) {
+    return {
+      success: false,
+      code: 'OP_FECHADA',
+      error: `OP ${opCodigo} está com status "${op.status}" e não aceita novas entradas.`,
+    }
+  }
+
+  const cRaw = caixaRes.rows[0]
+  if (!cRaw) {
+    return { success: false, code: 'NAO_ENCONTRADA', error: `Caixa com EAN "${clean}" não encontrada no estoque.` }
+  }
+
+  const jaNaOp = insRes.rows.some((r) => Number(r.caixa_id) === Number(cRaw.id))
+  if (jaNaOp) {
+    return {
+      success: false,
+      code: 'DUPLICADA',
+      error: `A caixa ${cRaw.ean_caixa} (${cRaw.produto_descricao}) já foi bipada nesta OP.`,
+    }
+  }
+
+  if (cRaw.status !== 'DISPONIVEL') {
+    const motivoExtra = cRaw.cliente_reservado_nome
+      ? ` — reservada para ${cRaw.cliente_reservado_nome} (${cRaw.pedido_reservado_codigo || ''})`
+      : ''
+    return {
+      success: false,
+      code: 'INDISPONIVEL',
+      error: `Caixa não está DISPONÍVEL para entrada na OP (Status atual: ${cRaw.status}${motivoExtra}).`,
+    }
+  }
+
+  const loteCaixa = cRaw.lote || (cRaw.data_producao ? gerarLotePorData(cRaw.data_producao) : '')
+  const taraCaixa = Number(cRaw.tara_kg || 0)
+  const brutoCaixa = cRaw.peso_bruto_kg != null
+    ? Number(cRaw.peso_bruto_kg)
+    : Number((Number(cRaw.peso_kg || 0) + taraCaixa).toFixed(3))
+
+  const caixaNormalizada = {
+    ...cRaw,
+    endereco: cRaw.endereco || cRaw.palete_endereco || 'REC',
+    lote: loteCaixa,
+    tara_kg: taraCaixa,
+    peso_bruto_kg: brutoCaixa,
+  }
+
+  const previstos = prevRes.rows || []
+  const prevMatch = previstos.find((p) => Number(p.produto_id) === Number(cRaw.produto_id)) || null
+  const foraPrevisto = previstos.length > 0 && !prevMatch
+
+  // Conferência inteligente de limite previsto em caixas (bloqueio imediato antes da transação)
+  const temCapCaixas = Boolean(
+    prevMatch &&
+    prevMatch.qtd_caixas_prevista != null &&
+    Number(prevMatch.qtd_caixas_prevista) > 0 &&
+    (prevMatch.unidade_prevista === 'CX' || !prevMatch.peso_kg_previsto)
+  )
+  if (temCapCaixas) {
+    const limiteCx = Math.trunc(Number(prevMatch.qtd_caixas_prevista))
+    const bipadasProd = insRes.rows.filter((r) => Number(r.produto_id) === Number(cRaw.produto_id)).length
+    if (bipadasProd >= limiteCx) {
+      return {
+        success: false,
+        code: 'LIMITE_ATINGIDO',
+        error: `Limite previsto atingido para ${cRaw.produto_descricao}: ${bipadasProd}/${limiteCx} caixa(s) já bipada(s). Não é possível bipar mais caixas deste item nesta OP.`,
+      }
+    }
+  }
+
+  // Checagem rápida FEFO apenas quando ainda não confirmado pelo operador
+  if (!forcarConfirmacao) {
+    let avisoFefo = null
+    if (cRaw.validade) {
+      const fefoRes = await db.execute({
+        sql: `
+          SELECT c.*, p.descricao AS produto_descricao
+          FROM estoque_caixas c
+          JOIN produtos p ON p.id = c.produto_id
+          WHERE c.produto_id = ?
+            AND c.status = 'DISPONIVEL'
+            AND c.validade IS NOT NULL
+            AND c.validade < ?
+          ORDER BY c.validade ASC
+          LIMIT 1
+        `,
+        args: [cRaw.produto_id, cRaw.validade],
+      })
+      if (fefoRes.rows[0]) {
+        avisoFefo = fefoRes.rows[0]
+      }
+    }
+
+    if (avisoFefo || foraPrevisto) {
+      return {
+        success: false,
+        requiresConfirmation: true,
+        caixa: caixaNormalizada,
+        avisoFefo,
+        foraPrevisto,
+      }
+    }
+  }
+
+  // Round-trip 2: Transação atômica com trava de limite e concorrência (status = 'DISPONIVEL')
+  let insumoId = null
+  const endOrig = cRaw.endereco || 'REC'
+
+  const tx = await db.transaction('write')
+  try {
+    if (temCapCaixas) {
+      const limiteCx = Math.trunc(Number(prevMatch.qtd_caixas_prevista))
+      const cntRes = await tx.execute({
+        sql: `SELECT COUNT(*) AS cnt FROM op_insumos WHERE op_id = ? AND produto_id = ?`,
+        args: [op_id, cRaw.produto_id],
+      })
+      const jaCount = Number(cntRes.rows[0]?.cnt || 0)
+      if (jaCount >= limiteCx) {
+        await tx.rollback()
+        return {
+          success: false,
+          code: 'LIMITE_ATINGIDO',
+          error: `Limite previsto atingido para ${cRaw.produto_descricao}: ${jaCount}/${limiteCx} caixa(s) já bipada(s).`,
+        }
+      }
+    }
+
+    const updRes = await tx.execute({
+      sql: `UPDATE estoque_caixas SET status = 'RESERVADA', endereco = ?, palete_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'DISPONIVEL'`,
+      args: [opCodigo, cRaw.id],
+    })
+    if (!updRes.rowsAffected) {
+      await tx.rollback()
+      return {
+        success: false,
+        code: 'CONCORRENCIA',
+        error: `A caixa ${cRaw.ean_caixa} já foi alocada ou movimentada simultaneamente.`,
+      }
+    }
+
+    const insOp = await tx.execute({
+      sql: `
+        INSERT INTO op_insumos (op_id, caixa_id, produto_id, peso_kg, peso_bruto_kg, tara_kg, data_producao, lote, qtd_pecas, operador_nome)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
+      `,
+      args: [
+        op_id,
+        cRaw.id,
+        cRaw.produto_id,
+        cRaw.peso_kg,
+        brutoCaixa,
+        taraCaixa,
+        cRaw.data_producao || null,
+        loteCaixa,
+        cRaw.qtd_pecas ?? null,
+        operador_nome || 'Sistema',
+      ],
+    })
+    insumoId = Number(insOp.rows[0]?.id || 0)
+
+    if (cRaw.palete_id) {
+      await tx.execute({
+        sql: `UPDATE paletes SET status = 'FECHADO' WHERE id = ? AND status = 'FINALIZADO'`,
+        args: [cRaw.palete_id],
+      })
+    }
+
+    await tx.execute({
+      sql: `
+        INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, 'TRANSFERENCIA')
+      `,
+      args: [cRaw.produto_id, endOrig, opCodigo, loteCaixa, cRaw.peso_kg, operador_id || null, operador_nome || 'Sistema'],
+    })
+
+    await tx.execute({
+      sql: `INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome, data_hora) VALUES (?, ?, 'ALOCADA_PRODUCAO', ?, ?, CURRENT_TIMESTAMP)`,
+      args: [
+        cRaw.id,
+        cRaw.ean_caixa,
+        `Entrada na OP ${opCodigo} • Lote ${loteCaixa || '-'} • ${cRaw.qtd_pecas ? `${cRaw.qtd_pecas} pç • ` : ''}Líq ${Number(cRaw.peso_kg || 0).toFixed(2)}kg`,
+        operador_nome || 'Sistema',
+      ],
+    })
+
+    if (op.status === 'LIBERADA') {
+      await tx.execute({
+        sql: `UPDATE ordens_producao SET status = 'ABERTA', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'LIBERADA'`,
+        args: [op_id],
+      })
+    }
+
+    await tx.commit()
+  } catch (err) {
+    try { await tx.rollback() } catch (_) {}
+    return { success: false, code: 'ERRO', error: err.message }
+  }
+
+  // Atualiza posição dos 1-2 endereços afetados
+  await recalcularPosicaoEnderecos([...new Set([endOrig, opCodigo])])
+
+  return {
+    success: true,
+    caixa: caixaNormalizada,
+    insumo: {
+      id: insumoId,
+      op_id: Number(op_id),
+      caixa_id: Number(cRaw.id),
+      produto_id: Number(cRaw.produto_id),
+      produto_codigo: cRaw.produto_codigo || '',
+      produto_descricao: cRaw.produto_descricao || '',
+      ean_caixa: cRaw.ean_caixa,
+      validade: cRaw.validade || null,
+      data_producao: cRaw.data_producao || null,
+      lote: loteCaixa,
+      peso_bruto_kg: brutoCaixa,
+      tara_kg: taraCaixa,
+      peso_kg: Number(cRaw.peso_kg || 0),
+      qtd_pecas: cRaw.qtd_pecas ?? null,
+      operador_nome: operador_nome || 'Sistema',
+    },
+  }
+}
+
 export async function adicionarRetorno(
   op_id,
-  { ean_caixa, produto_id, produto_codigo, peso_kg, peso_bruto_kg, tara_id, tara_kg = 0, data_producao, validade, lote },
+  { ean_caixa, produto_id, produto_codigo, peso_kg, peso_bruto_kg, tara_id, tara_kg = 0, qtd_pecas, data_producao, validade, lote },
   operador_id,
   operador_nome
 ) {
   await assertPermissao(['producao_saida', 'retorno_producao'])
   await ensureRastreabilidadeSchema()
   try {
+    const pecasNum = Number(qtd_pecas)
+    const pecasInt = Number.isFinite(pecasNum) ? Math.trunc(pecasNum) : NaN
+    if (!Number.isFinite(pecasNum) || pecasInt <= 0 || pecasInt !== pecasNum) {
+      return { success: false, error: 'Informe uma Quantidade de Peças inteira maior que zero para gerar a caixa de saída.' }
+    }
+
     const opRes = await db.execute({ sql: `SELECT * FROM ordens_producao WHERE id = ?`, args: [op_id] })
     const op = opRes.rows[0]
     if (!op) return { success: false, error: 'Ordem de Produção não encontrada.' }
@@ -486,13 +781,13 @@ export async function adicionarRetorno(
       sql: `
         INSERT INTO estoque_caixas (
           ean_caixa, produto_id, endereco, lote, data_producao, validade,
-          peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, op_id, operador_cadastro_nome, status
-        ) VALUES (?, ?, 'PRODUCAO', ?, ?, ?, ?, ?, ?, ?, 'PRODUCAO', ?, ?, 'DISPONIVEL')
+          peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, origem_tipo, op_id, operador_cadastro_nome, status
+        ) VALUES (?, ?, 'PRODUCAO', ?, ?, ?, ?, ?, ?, ?, ?, 'PRODUCAO', ?, ?, 'DISPONIVEL')
         RETURNING id
       `,
       args: [
         eanFinal, produto_id, loteFinal, dataProdFinal, validade || null,
-        liquidoVal, brutoVal, tara_id || null, taraVal, op_id, operador_nome || 'Sistema',
+        liquidoVal, brutoVal, tara_id || null, taraVal, pecasInt, op_id, operador_nome || 'Sistema',
       ],
     })
     const newCaixaId = Number(resCaixa.rows[0].id)
@@ -501,12 +796,12 @@ export async function adicionarRetorno(
       {
         sql: `
           INSERT INTO op_retornos (
-            op_id, caixa_id, produto_id, peso_kg, peso_bruto_kg, tara_id, tara_kg, data_producao, validade, lote, operador_nome
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            op_id, caixa_id, produto_id, peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, data_producao, validade, lote, operador_nome
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         args: [
           op_id, newCaixaId, produto_id, liquidoVal, brutoVal,
-          tara_id || null, taraVal, dataProdFinal, validade || null, loteFinal, operador_nome || 'Sistema',
+          tara_id || null, taraVal, pecasInt, dataProdFinal, validade || null, loteFinal, operador_nome || 'Sistema',
         ],
       },
       {
@@ -524,7 +819,7 @@ export async function adicionarRetorno(
         args: [
           newCaixaId,
           eanFinal,
-          `Gerada na OP ${op.codigo} • Lote ${loteFinal} • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liquidoVal.toFixed(2)}kg`,
+          `Gerada na OP ${op.codigo} • Lote ${loteFinal} • ${pecasInt} pç • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liquidoVal.toFixed(2)}kg`,
           operador_nome || 'Sistema',
         ],
       },
@@ -547,6 +842,7 @@ export async function adicionarRetorno(
         tara_kg: taraVal,
         peso_liquido_kg: liquidoVal,
         peso_kg: liquidoVal,
+        qtd_pecas: pecasInt,
         origem_tipo: 'PRODUCAO',
         op_codigo: op.codigo,
       },
@@ -884,6 +1180,7 @@ export async function listarDossiesProducao(filtros = {}) {
           oi.peso_kg,
           COALESCE(oi.peso_bruto_kg, c.peso_bruto_kg, oi.peso_kg + COALESCE(oi.tara_kg, c.tara_kg, 0)) AS peso_bruto_kg,
           COALESCE(oi.tara_kg, c.tara_kg, 0) AS tara_kg,
+          COALESCE(oi.qtd_pecas, c.qtd_pecas) AS qtd_pecas,
           COALESCE(oi.data_producao, c.data_producao) AS data_producao,
           oi.created_at,
           c.ean_caixa,
@@ -911,6 +1208,7 @@ export async function listarDossiesProducao(filtros = {}) {
           oret.peso_kg,
           COALESCE(oret.peso_bruto_kg, c.peso_bruto_kg, oret.peso_kg + COALESCE(oret.tara_kg, c.tara_kg, 0)) AS peso_bruto_kg,
           COALESCE(oret.tara_kg, c.tara_kg, 0) AS tara_kg,
+          COALESCE(oret.qtd_pecas, c.qtd_pecas) AS qtd_pecas,
           t.nome AS tara_nome,
           COALESCE(oret.data_producao, c.data_producao) AS data_producao,
           oret.created_at,

@@ -717,6 +717,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                     <th className="py-4">EAN</th>
                                     <th className="py-4">Lote</th>
                                     <th className="py-4">Validade</th>
+                                    <th className="py-4 text-right">Peças</th>
                                     <th className="py-4 text-right">Bruto</th>
                                     <th className="py-4 text-right">Líquido</th>
                                     <th className="py-4">Status</th>
@@ -732,6 +733,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                         <td className="py-6 font-mono text-muted">{ins.ean_caixa}</td>
                                         <td className="py-6 font-mono">{ins.lote || '-'}</td>
                                         <td className="py-6">{fmtDate(ins.validade)}</td>
+                                        <td className="py-6 text-right font-mono">{ins.qtd_pecas != null ? `${ins.qtd_pecas} pç` : '-'}</td>
                                         <td className="py-6 text-right font-mono text-muted">{fmtNum(bruto)}</td>
                                         <td className="py-6 text-right font-mono font-bold text-warning">{fmtNum(liq)}</td>
                                         <td className="py-6">
@@ -745,7 +747,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                 </tbody>
                                 <tfoot>
                                   <tr className="font-bold border-t border-border">
-                                    <td colSpan={4} className="pt-8 text-muted">Total Entrada ({op.total_entrada_caixas ?? op.insumos.length} cx):</td>
+                                    <td colSpan={5} className="pt-8 text-muted">Total Entrada ({op.total_entrada_caixas ?? op.insumos.length} cx):</td>
                                     <td className="pt-8 text-right font-mono text-muted">{fmtKg(op.total_entrada_bruto_kg ?? op.total_entrada_kg)}</td>
                                     <td className="pt-8 text-right font-mono text-warning text-sm">{fmtKg(op.total_entrada_kg)}</td>
                                     <td></td>
@@ -778,6 +780,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                     <th className="py-4">EAN Gerado</th>
                                     <th className="py-4">Lote</th>
                                     <th className="py-4">Prod / Val</th>
+                                    <th className="py-4 text-right">Peças</th>
                                     <th className="py-4 text-right">Tara</th>
                                     <th className="py-4 text-right">Bruto</th>
                                     <th className="py-4 text-right">Líquido</th>
@@ -799,6 +802,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                                           <div>P: {fmtDate(ret.data_producao || op.data_producao)}</div>
                                           <div className="text-muted">V: {fmtDate(ret.validade)}</div>
                                         </td>
+                                        <td className="py-6 text-right font-mono">{ret.qtd_pecas != null ? `${ret.qtd_pecas} pç` : '-'}</td>
                                         <td className="py-6 text-right font-mono text-muted">{fmtKg3(tara)}</td>
                                         <td className="py-6 text-right font-mono text-muted">{fmtNum(bruto)}</td>
                                         <td className="py-6 text-right font-mono font-bold text-success">{fmtNum(liq)}</td>
@@ -942,12 +946,13 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                   <tr>
                     <th style={{ width: '4%' }}>#</th>
                     <th style={{ width: '8%' }}>Código</th>
-                    <th style={{ width: '28%' }}>Descrição da Matéria-Prima</th>
-                    <th style={{ width: '20%' }}>EAN da Caixa Física</th>
+                    <th style={{ width: '25%' }}>Descrição da Matéria-Prima</th>
+                    <th style={{ width: '19%' }}>EAN da Caixa Física</th>
                     <th style={{ width: '8%' }}>Lote</th>
                     <th style={{ width: '9%' }}>Validade</th>
-                    <th style={{ width: '11%', textAlign: 'right' }}>Bruto (Kg)</th>
-                    <th style={{ width: '12%', textAlign: 'right' }}>Líquido (Kg)</th>
+                    <th style={{ width: '6%', textAlign: 'right' }}>Peças</th>
+                    <th style={{ width: '10%', textAlign: 'right' }}>Bruto (Kg)</th>
+                    <th style={{ width: '11%', textAlign: 'right' }}>Líquido (Kg)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -962,6 +967,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                         <td className="print-mono">{ins.ean_caixa}</td>
                         <td className="print-mono" style={{ textAlign: 'center' }}>{ins.lote || '-'}</td>
                         <td style={{ textAlign: 'center' }}>{fmtDate(ins.validade)}</td>
+                        <td className="print-mono" style={{ textAlign: 'right' }}>{ins.qtd_pecas != null ? `${ins.qtd_pecas} pç` : '-'}</td>
                         <td style={{ textAlign: 'right' }}>{fmtNum(bruto)} kg</td>
                         <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(liq)} kg</td>
                       </tr>
@@ -970,7 +976,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                 </tbody>
                 <tfoot>
                   <tr className="print-tfoot-row">
-                    <td colSpan={6} style={{ textAlign: 'right' }}><strong>TOTAL DE ENTRADAS ({op.total_entrada_caixas ?? (op.insumos ? op.insumos.length : 0)} cx):</strong></td>
+                    <td colSpan={7} style={{ textAlign: 'right' }}><strong>TOTAL DE ENTRADAS ({op.total_entrada_caixas ?? (op.insumos ? op.insumos.length : 0)} cx):</strong></td>
                     <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_entrada_bruto_kg ?? op.total_entrada_kg)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_entrada_kg)}</td>
                   </tr>
@@ -985,16 +991,17 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                 <thead>
                   <tr>
                     <th style={{ width: '3%' }}>#</th>
-                    <th style={{ width: '7%' }}>Cód.</th>
-                    <th style={{ width: '21%' }}>Produto Gerado</th>
-                    <th style={{ width: '16%' }}>EAN Gerado</th>
+                    <th style={{ width: '6%' }}>Cód.</th>
+                    <th style={{ width: '19%' }}>Produto Gerado</th>
+                    <th style={{ width: '15%' }}>EAN Gerado</th>
                     <th style={{ width: '7%' }}>Lote</th>
                     <th style={{ width: '8%' }}>Data Prod.</th>
                     <th style={{ width: '8%' }}>Validade</th>
+                    <th style={{ width: '6%', textAlign: 'right' }}>Peças</th>
                     <th style={{ width: '7%', textAlign: 'right' }}>Tara</th>
-                    <th style={{ width: '8%', textAlign: 'right' }}>Bruto</th>
-                    <th style={{ width: '8%', textAlign: 'right' }}>Líquido</th>
-                    <th style={{ width: '14%' }}>Situação</th>
+                    <th style={{ width: '7%', textAlign: 'right' }}>Bruto</th>
+                    <th style={{ width: '7%', textAlign: 'right' }}>Líquido</th>
+                    <th style={{ width: '13%' }}>Situação</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1012,6 +1019,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                         <td className="print-mono" style={{ textAlign: 'center' }}>{ret.lote || '-'}</td>
                         <td style={{ textAlign: 'center' }}>{fmtDate(ret.data_producao || op.data_producao)}</td>
                         <td style={{ textAlign: 'center' }}>{fmtDate(ret.validade)}</td>
+                        <td className="print-mono" style={{ textAlign: 'right' }}>{ret.qtd_pecas != null ? `${ret.qtd_pecas} pç` : '-'}</td>
                         <td style={{ textAlign: 'right' }}>{tara.toFixed(3).replace('.', ',')} kg</td>
                         <td style={{ textAlign: 'right' }}>{fmtNum(bruto)} kg</td>
                         <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(liq)} kg</td>
@@ -1028,7 +1036,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                 </tbody>
                 <tfoot>
                   <tr className="print-tfoot-row">
-                    <td colSpan={8} style={{ textAlign: 'right' }}><strong>TOTAL DE SAÍDAS ({op.total_saida_caixas ?? (op.retornos ? op.retornos.length : 0)} cx):</strong></td>
+                    <td colSpan={9} style={{ textAlign: 'right' }}><strong>TOTAL DE SAÍDAS ({op.total_saida_caixas ?? (op.retornos ? op.retornos.length : 0)} cx):</strong></td>
                     <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_saida_bruto_kg ?? op.total_saida_kg)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtKg(op.total_saida_kg)}</td>
                     <td></td>

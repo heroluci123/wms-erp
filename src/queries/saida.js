@@ -1,5 +1,6 @@
 import { db } from '../lib/db'
 import { recalcularPosicaoEnderecos } from './movimentacoes'
+import { ensureRastreabilidadeSchema } from './taras'
 import { assertPermissao } from '../lib/authGuard'
 
 async function gerarProximoCodigoRomaneio() {
@@ -179,6 +180,7 @@ export async function criarRomaneio({ cliente, previsao_entrega, operador_id, op
  */
 export async function detalhesRomaneio(romaneio_id) {
   await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
+  await ensureRastreabilidadeSchema()
   const romRes = await db.execute({
     sql: `
       SELECT
@@ -213,8 +215,18 @@ export async function detalhesRomaneio(romaneio_id) {
         ri.created_at,
         ec.ean_caixa,
         ec.lote,
+        ec.data_producao,
         ec.validade,
         ec.endereco,
+        ec.qtd_pecas,
+        ec.peso_bruto_kg,
+        ec.tara_kg,
+        ec.pedido_reservado_id,
+        ec.pedido_reservado_codigo,
+        ec.romaneio_reservado_id,
+        ec.romaneio_reservado_codigo,
+        ec.cliente_reservado_nome,
+        ec.reservado_em,
         p.codigo AS produto_codigo,
         p.descricao AS produto_descricao,
         p.tipo_produto,
@@ -317,20 +329,32 @@ export async function detalhesRomaneio(romaneio_id) {
 export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_nome, opcoes = {}) {
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
-    const romRes = await db.execute({ sql: `SELECT id, codigo, status, pedido_id FROM romaneios WHERE id = ?`, args: [romaneio_id] })
+    await ensureRastreabilidadeSchema()
+    const romRes = await db.execute({ sql: `SELECT id, codigo, status, pedido_id, cliente FROM romaneios WHERE id = ?`, args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     const romaneio = romRes.rows[0]
     if (romaneio.status !== 'MONTANDO') {
       return { success: false, error: 'Este romaneio não está aberto para separação.' }
     }
 
-    const cxCheck = await db.execute({ sql: 'SELECT ean_caixa, status, endereco, peso_kg, produto_id FROM estoque_caixas WHERE id = ?', args: [caixa.id] })
+    const cxCheck = await db.execute({
+      sql: `
+        SELECT ean_caixa, status, endereco, peso_kg, produto_id,
+               cliente_reservado_nome, pedido_reservado_codigo, romaneio_reservado_codigo
+        FROM estoque_caixas
+        WHERE id = ?
+      `,
+      args: [caixa.id]
+    })
     if (cxCheck.rows.length === 0) {
       return { success: false, error: 'Caixa não encontrada no estoque.' }
     }
     const cxAtual = cxCheck.rows[0]
     if (cxAtual.status !== 'DISPONIVEL') {
-      return { success: false, error: `Esta caixa está com status ${cxAtual.status} e não pode ser separada.` }
+      const donoReserva = cxAtual.cliente_reservado_nome
+        ? ` — reservada para ${cxAtual.cliente_reservado_nome} (${cxAtual.pedido_reservado_codigo || cxAtual.romaneio_reservado_codigo || ''})`
+        : ''
+      return { success: false, error: `Esta caixa está com status ${cxAtual.status}${donoReserva} e não pode ser separada.` }
     }
 
     const jaNoRomaneio = await db.execute({
@@ -339,6 +363,12 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
     })
     if (jaNoRomaneio.rows.length > 0) {
       return { success: false, error: 'Esta caixa já foi bipada neste romaneio.' }
+    }
+
+    let pedRow = null
+    if (romaneio.pedido_id) {
+      const pRes = await db.execute({ sql: 'SELECT codigo, cliente FROM pedidos WHERE id = ?', args: [romaneio.pedido_id] })
+      pedRow = pRes.rows[0] || null
     }
 
     // Validações vinculadas ao pedido (quando não confirmadas ainda)
@@ -383,14 +413,40 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
       }
     }
 
+    const clienteNomeExato = (pedRow?.cliente && String(pedRow.cliente).trim())
+      ? String(pedRow.cliente).trim()
+      : String(romaneio.cliente || '').trim()
+
+    const updReserva = await db.execute({
+      sql: `
+        UPDATE estoque_caixas
+        SET status = 'RESERVADA',
+            pedido_reservado_id = ?,
+            pedido_reservado_codigo = ?,
+            romaneio_reservado_id = ?,
+            romaneio_reservado_codigo = ?,
+            cliente_reservado_nome = ?,
+            reservado_em = COALESCE(reservado_em, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'DISPONIVEL'
+      `,
+      args: [
+        romaneio.pedido_id || null,
+        pedRow?.codigo || null,
+        romaneio.id,
+        romaneio.codigo || null,
+        clienteNomeExato || null,
+        caixa.id
+      ]
+    })
+
+    if (!updReserva.rowsAffected) {
+      return { success: false, error: 'Esta caixa foi reservada ou movimentada simultaneamente por outro operador.' }
+    }
+
     await db.execute({
       sql: `INSERT INTO romaneios_itens (romaneio_id, caixa_id, produto_id, peso_kg, conferido) VALUES (?, ?, ?, ?, 0)`,
       args: [romaneio_id, caixa.id, caixa.produto_id, caixa.peso_kg]
-    })
-
-    await db.execute({
-      sql: `UPDATE estoque_caixas SET status = 'RESERVADA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      args: [caixa.id]
     })
 
     await db.execute({
@@ -401,7 +457,7 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
       args: [
         caixa.id,
         cxAtual.ean_caixa || caixa.ean_caixa || '',
-        `Separada no romaneio ${romaneio.codigo} (origem: ${cxAtual.endereco || caixa.endereco || '-'} -> EXPEDICAO)`,
+        `Reservada no ${romaneio.codigo}${pedRow?.codigo ? ` / ${pedRow.codigo}` : ''}${clienteNomeExato ? ` (${clienteNomeExato})` : ''} (origem: ${cxAtual.endereco || caixa.endereco || '-'} -> EXPEDICAO)`,
         operador_nome || 'Sistema'
       ]
     })
@@ -436,6 +492,7 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
 export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, peso_kg, validade, endereco, operador_id = null, operador_nome = 'Sistema') {
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
+    await ensureRastreabilidadeSchema()
     const romRes = await db.execute({ sql: 'SELECT codigo, status FROM romaneios WHERE id = ?', args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     if (romRes.rows[0].status !== 'MONTANDO') {
@@ -447,7 +504,18 @@ export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, p
 
     await db.execute({ sql: `DELETE FROM romaneios_itens WHERE id = ?`, args: [item_id] })
     await db.execute({
-      sql: `UPDATE estoque_caixas SET status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      sql: `
+        UPDATE estoque_caixas
+        SET status = 'DISPONIVEL',
+            pedido_reservado_id = NULL,
+            pedido_reservado_codigo = NULL,
+            romaneio_reservado_id = NULL,
+            romaneio_reservado_codigo = NULL,
+            cliente_reservado_nome = NULL,
+            reservado_em = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
       args: [caixa_id]
     })
 
@@ -482,7 +550,8 @@ export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, p
 export async function finalizarMontagem(romaneio_id) {
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
-    const romRes = await db.execute({ sql: 'SELECT id, pedido_id, status FROM romaneios WHERE id = ?', args: [romaneio_id] })
+    await ensureRastreabilidadeSchema()
+    const romRes = await db.execute({ sql: 'SELECT id, codigo, cliente, pedido_id, status FROM romaneios WHERE id = ?', args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     const rom = romRes.rows[0]
 
@@ -494,6 +563,15 @@ export async function finalizarMontagem(romaneio_id) {
       return { success: false, error: 'Não é possível finalizar um romaneio vazio!' }
     }
 
+    let pedRow = null
+    if (rom.pedido_id) {
+      const pRes = await db.execute({ sql: 'SELECT codigo, cliente FROM pedidos WHERE id = ?', args: [rom.pedido_id] })
+      pedRow = pRes.rows[0] || null
+    }
+    const clienteNomeExato = (pedRow?.cliente && String(pedRow.cliente).trim())
+      ? String(pedRow.cliente).trim()
+      : String(rom.cliente || '').trim()
+
     await db.execute({
       sql: `UPDATE romaneios SET status = 'AGUARDANDO_EXPEDICAO', conferido_at = NULL, operador_conferencia_nome = NULL WHERE id = ?`,
       args: [romaneio_id]
@@ -502,6 +580,30 @@ export async function finalizarMontagem(romaneio_id) {
     await db.execute({
       sql: `UPDATE romaneios_itens SET conferido = 0, conferido_at = NULL, conferido_por = NULL WHERE romaneio_id = ?`,
       args: [romaneio_id]
+    })
+
+    await db.execute({
+      sql: `
+        UPDATE estoque_caixas
+        SET status = 'RESERVADA',
+            pedido_reservado_id = ?,
+            pedido_reservado_codigo = ?,
+            romaneio_reservado_id = ?,
+            romaneio_reservado_codigo = ?,
+            cliente_reservado_nome = ?,
+            reservado_em = COALESCE(reservado_em, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (SELECT caixa_id FROM romaneios_itens WHERE romaneio_id = ?)
+          AND status != 'EXPEDIDA'
+      `,
+      args: [
+        rom.pedido_id || null,
+        pedRow?.codigo || null,
+        rom.id,
+        rom.codigo || null,
+        clienteNomeExato || null,
+        romaneio_id
+      ]
     })
 
     if (rom.pedido_id) {
@@ -713,9 +815,21 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
       }
     }
 
+    await ensureRastreabilidadeSchema()
     for (const item of itensRes.rows) {
       await db.execute({
-        sql: `UPDATE estoque_caixas SET status = 'EXPEDIDA', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        sql: `
+          UPDATE estoque_caixas
+          SET status = 'EXPEDIDA',
+              pedido_reservado_id = NULL,
+              pedido_reservado_codigo = NULL,
+              romaneio_reservado_id = NULL,
+              romaneio_reservado_codigo = NULL,
+              cliente_reservado_nome = NULL,
+              reservado_em = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
         args: [item.caixa_id]
       })
 
@@ -781,6 +895,7 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
 export async function excluirRomaneio(romaneio_id) {
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
+    await ensureRastreabilidadeSchema()
     const romRes = await db.execute({ sql: 'SELECT id, status, pedido_id FROM romaneios WHERE id = ?', args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     const rom = romRes.rows[0]
@@ -802,7 +917,18 @@ export async function excluirRomaneio(romaneio_id) {
     for (const item of itensRes.rows) {
       if (item.endereco) enderecosAfetados.add(item.endereco)
       await db.execute({
-        sql: `UPDATE estoque_caixas SET status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        sql: `
+          UPDATE estoque_caixas
+          SET status = 'DISPONIVEL',
+              pedido_reservado_id = NULL,
+              pedido_reservado_codigo = NULL,
+              romaneio_reservado_id = NULL,
+              romaneio_reservado_codigo = NULL,
+              cliente_reservado_nome = NULL,
+              reservado_em = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
         args: [item.caixa_id]
       })
     }
@@ -829,5 +955,98 @@ export async function excluirRomaneio(romaneio_id) {
     return { success: true }
   } catch (err) {
     return { success: false, error: err.message }
+  }
+}
+
+/**
+ * Retorna os dados das etiquetas 100x70mm "RESERVADO" em lote para um romaneio ou pedido,
+ * preservando exatamente o cliente cadastrado no pedido e sem alterar o estoque ou o EAN da caixa.
+ */
+export async function listarEtiquetasReservaRomaneio(romaneio_id = null, { pedido_id = null } = {}) {
+  await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
+  await ensureRastreabilidadeSchema()
+
+  let targetRomId = romaneio_id
+  if (!targetRomId && pedido_id) {
+    const rLookup = await db.execute({
+      sql: `SELECT id FROM romaneios WHERE pedido_id = ? ORDER BY id DESC LIMIT 1`,
+      args: [pedido_id]
+    })
+    targetRomId = rLookup.rows[0]?.id || null
+  }
+  if (!targetRomId) {
+    return { success: false, error: 'Romaneio de separação não encontrado para emissão das etiquetas.' }
+  }
+
+  const romRes = await db.execute({
+    sql: `
+      SELECT
+        r.id,
+        r.codigo AS romaneio_codigo,
+        r.cliente AS romaneio_cliente,
+        r.pedido_id,
+        r.status,
+        ped.codigo AS pedido_codigo,
+        ped.titulo AS pedido_titulo,
+        ped.cliente AS pedido_cliente
+      FROM romaneios r
+      LEFT JOIN pedidos ped ON ped.id = r.pedido_id
+      WHERE r.id = ?
+    `,
+    args: [targetRomId]
+  })
+  const rom = romRes.rows[0]
+  if (!rom) {
+    return { success: false, error: 'Romaneio não encontrado.' }
+  }
+
+  const clienteExato = String(rom.pedido_cliente || '').trim() || String(rom.romaneio_cliente || '').trim()
+
+  const itensRes = await db.execute({
+    sql: `
+      SELECT
+        ri.id AS item_id,
+        ri.caixa_id,
+        ri.peso_kg,
+        ec.ean_caixa,
+        ec.lote,
+        ec.data_producao,
+        ec.validade,
+        ec.qtd_pecas,
+        ec.cliente_reservado_nome,
+        ec.pedido_reservado_codigo,
+        ec.romaneio_reservado_codigo,
+        p.codigo AS produto_codigo,
+        p.descricao AS produto_descricao
+      FROM romaneios_itens ri
+      JOIN estoque_caixas ec ON ec.id = ri.caixa_id
+      JOIN produtos p ON p.id = ri.produto_id
+      WHERE ri.romaneio_id = ?
+      ORDER BY ri.id ASC
+    `,
+    args: [rom.id]
+  })
+
+  const etiquetas = itensRes.rows.map((row) => ({
+    id: row.caixa_id,
+    caixa_id: row.caixa_id,
+    ean_caixa: row.ean_caixa,
+    cliente_nome: clienteExato || String(row.cliente_reservado_nome || '').trim(),
+    pedido_codigo: rom.pedido_codigo || row.pedido_reservado_codigo || '',
+    romaneio_codigo: rom.romaneio_codigo || row.romaneio_reservado_codigo || '',
+    produto_codigo: row.produto_codigo || '',
+    produto_descricao: row.produto_descricao || '',
+    qtd_pecas: row.qtd_pecas ?? null,
+    peso_kg: Number(row.peso_kg || 0),
+    lote: row.lote || '',
+    data_producao: row.data_producao || null,
+    validade: row.validade || null,
+  }))
+
+  return {
+    success: true,
+    romaneio: rom,
+    cliente_nome: clienteExato,
+    etiquetas,
   }
 }

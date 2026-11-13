@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { MapPin, RefreshCw, Package, FileDown } from 'lucide-react'
 import { db } from '../lib/db.js'
+import { ensureRastreabilidadeSchema } from '../queries/taras.js'
 import { format, differenceInDays } from 'date-fns'
 
 function downloadCSV(content) {
@@ -12,11 +13,13 @@ function downloadCSV(content) {
 }
 
 async function consultarEndereco(endereco) {
+  await ensureRastreabilidadeSchema()
   const addr = endereco.toUpperCase().trim()
   const { rows: caixas } = await db.execute({
     sql: `
       SELECT
-        ec.id, ec.ean_caixa, ec.peso_kg, ec.validade, ec.lote, ec.status,
+        ec.id, ec.ean_caixa, ec.peso_kg, ec.qtd_pecas, ec.validade, ec.lote, ec.status,
+        ec.pedido_reservado_codigo, ec.romaneio_reservado_codigo, ec.cliente_reservado_nome,
         p.codigo, p.descricao, p.status_curva, p.grupo, p.valor_unitario,
         pl.codigo as palete_codigo
       FROM estoque_caixas ec
@@ -32,7 +35,7 @@ async function consultarEndereco(endereco) {
   const { rows: pos } = await db.execute({
     sql: `
       SELECT
-        ep.id, NULL as ean_caixa, ep.qtd_kg as peso_kg, ep.validade, ep.lote, 'DISPONIVEL' as status,
+        ep.id, NULL as ean_caixa, ep.qtd_kg as peso_kg, NULL as qtd_pecas, ep.validade, ep.lote, 'DISPONIVEL' as status,
         p.codigo, p.descricao, p.status_curva, p.grupo, p.valor_unitario,
         NULL as palete_codigo, ep.qtd_caixas
       FROM estoque_posicao ep
@@ -92,9 +95,9 @@ export function ConsultaEndereco() {
 
   const exportarCSV = () => {
     if (caixas.length === 0) return
-    const header = "ENDERECO;EAN_CAIXA;CODIGO;DESCRICAO;GRUPO;VALIDADE;KG;PALETE;CURVA\n"
+    const header = "ENDERECO;EAN_CAIXA;CODIGO;DESCRICAO;GRUPO;VALIDADE;PECAS;KG;STATUS;CLIENTE_RESERVA;PEDIDO;PALETE;CURVA\n"
     const rows = caixas.map(i =>
-      `${enderecoConsultado};${i.ean_caixa || ''};${i.codigo};${i.descricao};${i.grupo || ''};${i.validade || ''};${String(i.peso_kg || 0).replace('.', ',')};${i.palete_codigo || ''};${i.status_curva || ''}`
+      `${enderecoConsultado};${i.ean_caixa || ''};${i.codigo};${i.descricao};${i.grupo || ''};${i.validade || ''};${i.qtd_pecas ?? ''};${String(i.peso_kg || 0).replace('.', ',')};${i.status || 'DISPONIVEL'};${i.cliente_reservado_nome || ''};${i.pedido_reservado_codigo || ''};${i.palete_codigo || ''};${i.status_curva || ''}`
     ).join("\n")
     downloadCSV(header + rows)
   }
@@ -251,6 +254,7 @@ export function ConsultaEndereco() {
                       <tr style={{ borderBottom: '1px solid var(--border)' }}>
                         <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-muted)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>EAN / SSCC</th>
                         <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-muted)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Lote</th>
+                        <th style={{ textAlign: 'right', padding: '6px 8px', color: 'var(--text-muted)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Peças</th>
                         <th style={{ textAlign: 'right', padding: '6px 8px', color: 'var(--text-muted)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Peso</th>
                         <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-muted)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Validade</th>
                         <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-muted)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Palete</th>
@@ -261,10 +265,20 @@ export function ConsultaEndereco() {
                         <tr key={cx.id} style={{ borderBottom: '1px solid var(--border)' }}>
                           <td style={{ padding: '7px 8px', fontFamily: 'monospace', fontSize: 11, color: 'var(--primary)' }}>
                             {cx.ean_caixa || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>s/EAN</span>}
-                            {cx.status === 'RESERVADA' && <span style={{ marginLeft: 6, fontSize: 9, padding: '2px 4px', background: 'var(--warning-muted)', color: 'var(--warning)', borderRadius: 4, fontWeight: 700 }} title="Caixa em Romaneio/Expedição">RESERVADA</span>}
+                            {cx.status === 'RESERVADA' && (
+                              <span
+                                style={{ marginLeft: 6, fontSize: 9, padding: '2px 5px', background: 'var(--warning-muted)', color: 'var(--warning)', borderRadius: 4, fontWeight: 700 }}
+                                title={cx.cliente_reservado_nome ? `Reservado p/ ${cx.cliente_reservado_nome} (${cx.pedido_reservado_codigo || cx.romaneio_reservado_codigo || ''})` : 'Caixa reservada'}
+                              >
+                                RESERVADO{cx.cliente_reservado_nome ? ` • ${cx.cliente_reservado_nome}` : ''}{cx.pedido_reservado_codigo ? ` (${cx.pedido_reservado_codigo})` : ''}
+                              </span>
+                            )}
                             {cx.status === 'BLOQUEADO' && <span style={{ marginLeft: 6, fontSize: 9, padding: '2px 4px', background: 'var(--danger-muted)', color: 'var(--danger)', borderRadius: 4, fontWeight: 700 }}>BLOQUEADA</span>}
                           </td>
                           <td style={{ padding: '7px 8px', color: 'var(--text-muted)' }}>{cx.lote || '—'}</td>
+                          <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                            {cx.qtd_pecas != null ? `${cx.qtd_pecas} pç` : '—'}
+                          </td>
                           <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 700 }}>{parseFloat(cx.peso_kg || 0).toFixed(2)} kg</td>
                           <td style={{ padding: '7px 8px' }}><BadgeValidade validade={cx.validade} /></td>
                           <td style={{ padding: '7px 8px', color: 'var(--text-muted)', fontSize: 11 }}>{cx.palete_codigo || '—'}</td>

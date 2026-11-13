@@ -241,19 +241,35 @@ export function ConsultaEstoque() {
               <div className="text-sm text-muted">Cód: {caixaInfo.produto_codigo} | EAN: {caixaInfo.ean_caixa}</div>
             </div>
             <div style={{ flex: '1 1 150px' }}>
-              <div className="text-xs text-muted mb-4 font-bold uppercase">Peso e Validade</div>
+              <div className="text-xs text-muted mb-4 font-bold uppercase">Peças, Peso e Validade</div>
               <div className="font-bold text-cyan text-xl">{caixaInfo.peso_kg.toFixed(2)} kg</div>
-              <div className="text-sm text-muted">Venc: {caixaInfo.validade ? new Date(caixaInfo.validade + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '-'}</div>
+              <div className="text-sm text-muted">
+                {caixaInfo.qtd_pecas != null ? `Peças: ${caixaInfo.qtd_pecas} pç | ` : ''}
+                Lote: {caixaInfo.lote || '-'} | Venc: {caixaInfo.validade ? new Date(caixaInfo.validade + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '-'}
+              </div>
             </div>
             <div style={{ flex: '1 1 150px' }}>
               <div className="text-xs text-muted mb-4 font-bold uppercase">Status Atual</div>
               <div className="font-bold" style={{ 
                 fontSize: 18,
-                color: caixaInfo.status === 'CONSUMIDA' ? 'var(--warning)' : caixaInfo.status === 'EXPEDIDA' ? 'var(--info)' : 'var(--success)'
+                color: caixaInfo.status === 'CONSUMIDA' ? 'var(--warning)' : caixaInfo.status === 'EXPEDIDA' ? 'var(--info)' : caixaInfo.status === 'RESERVADA' ? '#fbbf24' : 'var(--success)'
               }}>
-                {caixaInfo.status === 'CONSUMIDA' ? 'DESMEMBRADA' : caixaInfo.status === 'EXPEDIDA' ? 'EXPEDIDA' : caixaInfo.endereco}
+                {caixaInfo.status === 'CONSUMIDA'
+                  ? 'DESMEMBRADA'
+                  : caixaInfo.status === 'EXPEDIDA'
+                    ? 'EXPEDIDA'
+                    : caixaInfo.status === 'RESERVADA'
+                      ? `RESERVADO${caixaInfo.endereco ? ` (${caixaInfo.endereco})` : ''}`
+                      : caixaInfo.endereco}
               </div>
               {caixaInfo.status === 'DISPONIVEL' && <div className="text-sm text-muted">Em Estoque</div>}
+              {caixaInfo.status === 'RESERVADA' && caixaInfo.cliente_reservado_nome && (
+                <div className="text-sm font-bold" style={{ color: '#fbbf24' }}>
+                  {caixaInfo.cliente_reservado_nome}
+                  {caixaInfo.pedido_reservado_codigo ? ` • ${caixaInfo.pedido_reservado_codigo}` : ''}
+                  {caixaInfo.romaneio_reservado_codigo ? ` • ${caixaInfo.romaneio_reservado_codigo}` : ''}
+                </div>
+              )}
             </div>
           </div>
 
@@ -379,24 +395,36 @@ export function ConsultaEstoque() {
                               ) : (
                                 <div className="table-container">
                                   <table>
-                                    <thead>
-                                      <tr>
-                                        <th>EAN da Caixa</th>
-                                        <th>Peso</th>
-                                        <th>Validade</th>
-                                        <th>Data Entrada</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {caixasNoEndereco[end.endereco].map(cx => (
-                                        <tr key={cx.id}>
-                                          <td className="td-mono text-cyan">{cx.ean_caixa}</td>
-                                          <td className="font-bold">{cx.peso_kg?.toFixed(2)} kg</td>
-                                          <td>{cx.validade ? new Date(cx.validade + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '-'}</td>
-                                          <td className="text-muted text-sm">{new Date(cx.created_at).toLocaleString()}</td>
+                                      <thead>
+                                        <tr>
+                                          <th>EAN da Caixa</th>
+                                          <th>Peças</th>
+                                          <th>Peso</th>
+                                          <th>Validade</th>
+                                          <th>Status</th>
+                                          <th>Data Entrada</th>
                                         </tr>
-                                      ))}
-                                    </tbody>
+                                      </thead>
+                                      <tbody>
+                                        {caixasNoEndereco[end.endereco].map(cx => (
+                                          <tr key={cx.id}>
+                                            <td className="td-mono text-cyan">{cx.ean_caixa}</td>
+                                            <td className="td-mono font-bold">{cx.qtd_pecas != null ? `${cx.qtd_pecas} pç` : '-'}</td>
+                                            <td className="font-bold">{cx.peso_kg?.toFixed(2)} kg</td>
+                                            <td>{cx.validade ? new Date(cx.validade + 'T00:00:00').toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '-'}</td>
+                                            <td>
+                                              {cx.status === 'RESERVADA' ? (
+                                                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.16)', color: '#fbbf24' }}>
+                                                  RESERVADO{cx.cliente_reservado_nome ? ` • ${cx.cliente_reservado_nome}` : ''}
+                                                </span>
+                                              ) : (
+                                                <span className="text-xs text-muted">{cx.status || 'DISPONIVEL'}</span>
+                                              )}
+                                            </td>
+                                            <td className="text-muted text-sm">{new Date(cx.created_at).toLocaleString()}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
                                   </table>
                                 </div>
                               )}

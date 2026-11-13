@@ -17,6 +17,7 @@ export function ConverterSSCCModal({ isOpen, onClose, produto, eanGenerico, onCo
     validade: '',
     tara_id: '',
     peso_bruto: '',
+    qtd_pecas: '',
   })
   const [salvando, setSalvando] = useState(false)
   const pesoBrutoRef = useRef(null)
@@ -32,6 +33,7 @@ export function ConverterSSCCModal({ isOpen, onClose, produto, eanGenerico, onCo
         validade: '',
         tara_id: padrao ? String(padrao.id) : '',
         peso_bruto: '',
+        qtd_pecas: '',
       })
       setTimeout(() => pesoBrutoRef.current?.focus(), 150)
     }).catch(() => {})
@@ -46,6 +48,7 @@ export function ConverterSSCCModal({ isOpen, onClose, produto, eanGenerico, onCo
       taraId: taraAtual?.id,
       taraKg: taraAtual?.peso_kg ?? 0,
       pesoBruto: formPesagem.peso_bruto,
+      qtdPecas: formPesagem.qtd_pecas,
     })
     if (!valid.ok) return toastError('Dados inválidos', valid.erro)
 
@@ -61,6 +64,7 @@ export function ConverterSSCCModal({ isOpen, onClose, produto, eanGenerico, onCo
         peso_bruto_kg: valid.peso_bruto_kg,
         tara_id: valid.tara_id,
         tara_kg: valid.tara_kg,
+        qtd_pecas: valid.qtd_pecas,
         data_producao: valid.data_producao,
         lote: valid.lote,
         validade: valid.validade,
@@ -76,13 +80,14 @@ export function ConverterSSCCModal({ isOpen, onClose, produto, eanGenerico, onCo
 
       toastSuccess(
         'Caixa convertida e rastreada!',
-        `${produto.descricao} • Líq ${fmtKg2(valid.peso_liquido_kg)} • Lote ${valid.lote} • Val: ${fmtDataBR(valid.validade)}`
+        `${produto.descricao} • ${valid.qtd_pecas} pç • Líq ${fmtKg2(valid.peso_liquido_kg)} • Lote ${valid.lote} • Val: ${fmtDataBR(valid.validade)}`
       )
       onConvertido?.({
         ean_gerado: eanGerado,
         peso_kg: valid.peso_liquido_kg,
         peso_bruto_kg: valid.peso_bruto_kg,
         tara_kg: valid.tara_kg,
+        qtd_pecas: valid.qtd_pecas,
         data_producao: valid.data_producao,
         lote: valid.lote,
         validade: valid.validade,

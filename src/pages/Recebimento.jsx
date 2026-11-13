@@ -477,6 +477,7 @@ export function Recebimento() {
     validade: '',
     tara_id: '',
     peso_bruto: '',
+    qtd_pecas: '',
   })
   const [etiquetaPreview, setEtiquetaPreview] = useState(null)
   const pesoBrutoRef = useRef(null)
@@ -623,6 +624,7 @@ export function Recebimento() {
       taraId: taraAtual?.id,
       taraKg: taraAtual?.peso_kg ?? 0,
       pesoBruto: boxData.peso_bruto,
+      qtdPecas: boxData.qtd_pecas,
     })
     if (!valid.ok) return toastWarning('Dados da Caixa', valid.erro)
     if (valid.peso_bruto_kg > 1000) {
@@ -638,6 +640,7 @@ export function Recebimento() {
         peso_bruto_kg: valid.peso_bruto_kg,
         tara_id: valid.tara_id,
         tara_kg: valid.tara_kg,
+        qtd_pecas: valid.qtd_pecas,
         data_producao: valid.data_producao,
         lote: valid.lote,
         validade: valid.validade,
@@ -649,7 +652,7 @@ export function Recebimento() {
       if (res.success) {
         toastSuccess(
           'Caixa Adicionada',
-          `${produtoDetectado.descricao} • Líq ${fmtKg2(valid.peso_liquido_kg)} (Lote ${valid.lote}) no ${paleteAtivo.codigo}.`
+          `${produtoDetectado.descricao} • ${valid.qtd_pecas} pç • Líq ${fmtKg2(valid.peso_liquido_kg)} (Lote ${valid.lote}) no ${paleteAtivo.codigo}.`
         )
         setEanBipado('')
         setEanCaixaReal('')
@@ -660,6 +663,7 @@ export function Recebimento() {
           validade: prev.validade,
           tara_id: prev.tara_id || (taraAtual ? String(taraAtual.id) : ''),
           peso_bruto: '',
+          qtd_pecas: '',
         }))
         selecionarPalete(paleteAtivo)
         carregarPaletesAbertos()
@@ -851,7 +855,7 @@ export function Recebimento() {
                           <div className="text-right flex items-center gap-8">
                             <div>
                               <div className="font-bold text-cyan text-sm">
-                                Líq: {fmtKg2(c.peso_kg)}
+                                Líq: {fmtKg2(c.peso_kg)}{c.qtd_pecas ? ` • ${c.qtd_pecas} pç` : ''}
                               </div>
                               <div className="text-xs text-muted">
                                 {c.peso_bruto_kg != null ? `Bruto: ${fmtKg2(c.peso_bruto_kg)} | Tara: ${fmtKg3(c.tara_kg || 0)} • ` : ''}

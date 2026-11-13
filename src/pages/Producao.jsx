@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react'
 import {
   Factory, Plus, Check, Trash2, Unlock, BarChart2, ScanBarcode,
   AlertTriangle, Package, Printer, Edit3, ShieldAlert, ArrowDownToLine,
-  ArrowUpFromLine, RefreshCw, Play, FileText, Search, X, Lock
+  ArrowUpFromLine, RefreshCw, Play, FileText, Search, X, Lock, CheckCircle2, XCircle
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as producaoQueries from '../queries/producao.js'
@@ -12,6 +12,7 @@ import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared
 import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx'
 import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao.jsx'
 import { FolhaOrdemProducaoPrint } from '../components/shared/FolhaOrdemProducaoPrint.jsx'
+import { feedbackSom } from '../utils/feedbackSom.js'
 import {
   fmtDataBR,
   fmtDataHoraBR,
@@ -202,15 +203,15 @@ const mapPrevistoParaForm = (i, produtos = []) => {
   const prod = produtos.find(p => p.id === i.produto_id)
   const peso = i.peso_kg_previsto != null && Number(i.peso_kg_previsto) > 0 ? Number(i.peso_kg_previsto) : ''
   const cxs = i.qtd_caixas_prevista != null && Number(i.qtd_caixas_prevista) > 0 ? Number(i.qtd_caixas_prevista) : ''
-  const unidade = !peso && cxs ? 'CX' : 'KG'
+  const unidade = i.unidade_prevista === 'CX' || (!peso && cxs) ? 'CX' : 'KG'
   return {
     produto_id: i.produto_id,
     codigo: i.produto_codigo ?? prod?.codigo ?? '',
     descricao: i.produto_descricao ?? prod?.descricao ?? '',
     unidade,
-    quantidade_input: unidade === 'CX' ? String(cxs) : (peso !== '' ? String(peso) : ''),
+    quantidade_input: unidade === 'CX' ? (cxs !== '' ? String(cxs) : '') : (peso !== '' ? String(peso) : ''),
     peso_kg_previsto: peso !== '' ? String(peso) : '',
-    qtd_caixas_prevista: cxs !== '' ? String(cxs) : '',
+    qtd_caixas_prevista: unidade === 'CX' && cxs !== '' ? String(cxs) : '',
     saldo_kg: Number(prod?.saldo_kg || 0),
     saldo_caixas: Number(prod?.qtd_caixas || 0),
     peso_medio_cx: Number(prod?.peso_medio_cx || 0),
@@ -230,6 +231,10 @@ function OpItemPrevistoRow({
   const comSaldo = Number(item.saldo_kg || 0) > 0 || Number(item.saldo_caixas || 0) > 0
   const pesoPrevNum = Number(item.peso_kg_previsto || 0)
   const cxPrevNum = Number(item.qtd_caixas_prevista || 0)
+  const mediaCx = Number(item.peso_medio_cx || 0)
+  const cxEstimadasKg = item.unidade === 'KG' && pesoPrevNum > 0 && mediaCx > 0
+    ? Math.max(1, Math.round(pesoPrevNum / mediaCx))
+    : cxPrevNum
   const acimaDoSaldo = mostrarSaldo && (
     (item.unidade === 'KG' && pesoPrevNum > Number(item.saldo_kg || 0) && Number(item.saldo_kg || 0) >= 0 && pesoPrevNum > 0) ||
     (item.unidade === 'CX' && cxPrevNum > Number(item.saldo_caixas || 0) && cxPrevNum > 0)
@@ -375,14 +380,14 @@ function OpItemPrevistoRow({
         </div>
       </div>
 
-      {((item.unidade === 'KG' && pesoPrevNum > 0 && cxPrevNum > 0) ||
-        (item.unidade === 'CX' && cxPrevNum > 0 && (pesoPrevNum > 0 || !mostrarSaldo))) && (
+      {((item.unidade === 'KG' && pesoPrevNum > 0 && cxEstimadasKg > 0) ||
+        (item.unidade === 'CX' && cxPrevNum > 0)) && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 2 }}>
           {item.unidade === 'KG'
-            ? `Estimativa: ~${cxPrevNum} cx (com base na média de ${fmtKg2(item.peso_medio_cx)}/cx)`
+            ? `Estimativa visual: ~${cxEstimadasKg} cx (sem bloqueio por quantidade de caixas • média ${fmtKg2(item.peso_medio_cx)}/cx)`
             : pesoPrevNum > 0
-              ? `Peso estimado: ~${fmtKg2(pesoPrevNum)} (${cxPrevNum} cx × ${fmtKg2(item.peso_medio_cx)})`
-              : `Previsão de ${cxPrevNum} caixa(s) — peso apurado na balança durante a produção`
+              ? `Limite fixo: máx. ${cxPrevNum} caixa(s) • Peso estimado ~${fmtKg2(pesoPrevNum)} (${cxPrevNum} cx × ${fmtKg2(item.peso_medio_cx)})`
+              : `Limite fixo: máx. ${cxPrevNum} caixa(s) — peso apurado na balança durante a produção`
           }
         </div>
       )}
@@ -409,6 +414,7 @@ export function Producao() {
   const [scanEntrada, setScanEntrada] = useState('')
   const [buscandoEntrada, setBuscandoEntrada] = useState(false)
   const [confirmacaoEntrada, setConfirmacaoEntrada] = useState(null) // { caixa, avisoFefo, foraPrevisto }
+  const [feedbackEntrada, setFeedbackEntrada] = useState(null) // { tipo: 'sucesso' | 'erro' | 'alerta', titulo, msg }
   const entradaRef = useRef(null)
 
   // Formulário Saída da Produção
@@ -419,6 +425,7 @@ export function Producao() {
     validade: '',
     tara_id: '',
     peso_bruto: '',
+    qtd_pecas: '',
   })
   const [salvandoSaida, setSalvandoSaida] = useState(false)
   const pesoBrutoSaidaRef = useRef(null)
@@ -475,8 +482,17 @@ export function Producao() {
       const det = await producaoQueries.detalhesOP(opId)
       if (!det) return toastError('Erro', 'OP não encontrada.')
       setOpSelecionada(det)
+      setOpsAtivas(prev => prev.map(o => o.id === det.id ? {
+        ...o,
+        status: det.status,
+        qtd_insumos: (det.insumos || []).length,
+        peso_insumos: Number(det.peso_insumos || 0),
+        qtd_retornos: (det.retornos || []).length,
+        peso_retornos: Number(det.peso_retornos || 0),
+      } : o))
       if (!manterSubAba) {
         setSubAbaOp('entradas')
+        setFeedbackEntrada(null)
       }
 
       const padrao = resolverTaraSelecionada(taras, formSaida.tara_id)
@@ -485,6 +501,7 @@ export function Producao() {
         validade: prev.validade || '',
         tara_id: padrao ? String(padrao.id) : prev.tara_id,
         peso_bruto: '',
+        qtd_pecas: '',
       }))
 
       if (det.previstos_saida?.length > 0) {
@@ -579,14 +596,12 @@ export function Producao() {
         }
         const clean = String(rawVal || '').replace(/[^0-9.,]/g, '')
         const num = parseFloat(clean.replace(',', '.')) || 0
-        const cxsEst = num > 0 && Number(item.peso_medio_cx || 0) > 0
-          ? String(Math.max(1, Math.round(num / Number(item.peso_medio_cx))))
-          : ''
         return {
           ...item,
           quantidade_input: clean,
           peso_kg_previsto: num > 0 ? String(Number(num.toFixed(2))) : '',
-          qtd_caixas_prevista: cxsEst,
+          // No modo KG não persistimos limite fixo de caixas (apenas estimativa visual)
+          qtd_caixas_prevista: '',
         }
       }),
     }))
@@ -619,7 +634,7 @@ export function Producao() {
           unidade: 'KG',
           quantidade_input: String(kg),
           peso_kg_previsto: String(kg),
-          qtd_caixas_prevista: media > 0 ? String(Math.round(curNum)) : '',
+          qtd_caixas_prevista: '',
         }
       }),
     }))
@@ -634,14 +649,16 @@ export function Producao() {
       ...opForm.itensEntrada.map(i => ({
         tipo: 'ENTRADA',
         produto_id: i.produto_id,
+        unidade_prevista: i.unidade || 'KG',
         peso_kg_previsto: i.peso_kg_previsto ? Number(i.peso_kg_previsto) : null,
-        qtd_caixas_prevista: i.qtd_caixas_prevista ? Number(i.qtd_caixas_prevista) : null,
+        qtd_caixas_prevista: i.unidade === 'CX' && i.qtd_caixas_prevista ? Number(i.qtd_caixas_prevista) : null,
       })),
       ...opForm.itensSaida.map(i => ({
         tipo: 'SAIDA',
         produto_id: i.produto_id,
+        unidade_prevista: i.unidade || 'KG',
         peso_kg_previsto: i.peso_kg_previsto ? Number(i.peso_kg_previsto) : null,
-        qtd_caixas_prevista: i.qtd_caixas_prevista ? Number(i.qtd_caixas_prevista) : null,
+        qtd_caixas_prevista: i.unidade === 'CX' && i.qtd_caixas_prevista ? Number(i.qtd_caixas_prevista) : null,
       })),
     ]
 
@@ -687,35 +704,112 @@ export function Producao() {
   }
 
   // ── OPERADOR: Entrada na Produção (Bipar Caixa Matéria-Prima) ─────────────
+  const aplicarEntradaAlocadaNaTela = (res) => {
+    const novoInsumo = res.insumo
+    const pesoAdicionado = Number(novoInsumo.peso_kg || 0)
+
+    setOpSelecionada(prev => {
+      if (!prev) return prev
+      const insumosAtualizados = [novoInsumo, ...(prev.insumos || [])]
+      return {
+        ...prev,
+        status: prev.status === 'LIBERADA' ? 'ABERTA' : prev.status,
+        insumos: insumosAtualizados,
+        peso_insumos: Number(prev.peso_insumos || 0) + pesoAdicionado,
+      }
+    })
+    setOpsAtivas(prev => prev.map(o => o.id === opSelecionada.id ? {
+      ...o,
+      status: o.status === 'LIBERADA' ? 'ABERTA' : o.status,
+      qtd_insumos: Number(o.qtd_insumos || 0) + 1,
+      peso_insumos: Number(o.peso_insumos || 0) + pesoAdicionado,
+    } : o))
+
+    const prevItem = (opSelecionada.previstos_entrada || []).find(
+      p => Number(p.produto_id) === Number(novoInsumo.produto_id)
+    )
+    const qtdAtualProd = (opSelecionada.insumos || []).filter(
+      i => Number(i.produto_id) === Number(novoInsumo.produto_id)
+    ).length + 1
+    const isModoCx = prevItem && (prevItem.unidade_prevista === 'CX' || (!prevItem.peso_kg_previsto && Number(prevItem.qtd_caixas_prevista || 0) > 0))
+    const resumoMeta = isModoCx && Number(prevItem?.qtd_caixas_prevista || 0) > 0
+      ? ` • Progresso: ${qtdAtualProd}/${prevItem.qtd_caixas_prevista} cx`
+      : ''
+
+    feedbackSom.sucesso()
+    setFeedbackEntrada({
+      tipo: 'sucesso',
+      titulo: 'Entrada Confirmada!',
+      msg: `${novoInsumo.produto_descricao} • Líq ${fmtKg2(pesoAdicionado)}${novoInsumo.qtd_pecas ? ` • ${novoInsumo.qtd_pecas} pç` : ''}${resumoMeta}`,
+    })
+    toastSuccess('Entrada Registrada', `${novoInsumo.produto_descricao} (${fmtKg2(pesoAdicionado)}) alocada na ${opSelecionada.codigo}.`)
+    setScanEntrada('')
+    setTimeout(() => entradaRef.current?.focus(), 60)
+  }
+
   const handleBiparEntrada = async (e) => {
     e?.preventDefault()
-    if (!opSelecionada) return
+    if (!opSelecionada || buscandoEntrada) return
     const ean = scanEntrada.trim()
     if (!ean) return
 
+    const norm = ean.replace(/^0+/, '')
+    const jaLocal = (opSelecionada.insumos || []).some(
+      i => String(i.ean_caixa || '').trim().replace(/^0+/, '') === norm
+    )
+    if (jaLocal) {
+      feedbackSom.erro()
+      const msgDup = `A caixa ${ean} já foi bipada nesta OP.`
+      setFeedbackEntrada({ tipo: 'erro', titulo: 'Caixa já bipada', msg: msgDup })
+      toastError('Caixa duplicada', msgDup)
+      setScanEntrada('')
+      setTimeout(() => entradaRef.current?.focus(), 60)
+      return
+    }
+
     setBuscandoEntrada(true)
     try {
-      const res = await producaoQueries.buscarCaixaPorEanParaOP(ean)
-      if (!res.valid) {
-        toastError('Caixa indisponível', res.error)
+      const res = await producaoQueries.escanearEAlocarEntradaOP({
+        op_id: opSelecionada.id,
+        ean,
+        forcarConfirmacao: false,
+        operador_id: operador?.id,
+        operador_nome: operador?.nome || 'Operador',
+      })
+
+      if (res.requiresConfirmation) {
+        feedbackSom.alerta()
+        setConfirmacaoEntrada({
+          caixa: res.caixa,
+          avisoFefo: res.avisoFefo,
+          foraPrevisto: res.foraPrevisto,
+        })
+        setFeedbackEntrada({
+          tipo: 'alerta',
+          titulo: 'Confirmação necessária',
+          msg: `${res.caixa?.produto_descricao || ean}: verifique o alerta na janela de confirmação.`,
+        })
+        return
+      }
+
+      if (!res.success) {
+        feedbackSom.erro()
+        const titulo = res.code === 'LIMITE_ATINGIDO'
+          ? 'Quantidade Prevista Já Concluída'
+          : 'Entrada Bloqueada'
+        setFeedbackEntrada({ tipo: 'erro', titulo, msg: res.error })
+        toastError(titulo, res.error)
         setScanEntrada('')
-        setTimeout(() => entradaRef.current?.focus(), 80)
+        setTimeout(() => entradaRef.current?.focus(), 60)
         return
       }
 
-      const cx = res.caixa
-      const prevEntradaIds = (opSelecionada.previstos_entrada || []).map(p => Number(p.produto_id))
-      const foraPrevisto = prevEntradaIds.length > 0 && !prevEntradaIds.includes(Number(cx.produto_id))
-      const avisoFefo = await producaoQueries.verificarFEFO(cx.produto_id, cx.validade)
-
-      if (avisoFefo || foraPrevisto) {
-        setConfirmacaoEntrada({ caixa: cx, avisoFefo, foraPrevisto })
-        return
-      }
-
-      await confirmarAlocacaoEntrada(cx)
+      aplicarEntradaAlocadaNaTela(res)
     } catch (err) {
+      feedbackSom.erro()
+      setFeedbackEntrada({ tipo: 'erro', titulo: 'Erro na leitura', msg: err.message })
       toastError('Erro', err.message)
+      setTimeout(() => entradaRef.current?.focus(), 60)
     } finally {
       setBuscandoEntrada(false)
     }
@@ -723,21 +817,30 @@ export function Producao() {
 
   const confirmarAlocacaoEntrada = async (cx) => {
     setConfirmacaoEntrada(null)
+    setBuscandoEntrada(true)
     try {
-      const res = await producaoQueries.alocarInsumos(
-        opSelecionada.id,
-        [cx],
-        operador?.id,
-        operador?.nome || 'Operador'
-      )
-      if (!res.success) return toastError('Erro na Entrada', res.error)
-      toastSuccess('Entrada Registrada', `${cx.produto_descricao} (${fmtKg2(cx.peso_kg)}) alocada na ${opSelecionada.codigo}.`)
-      setScanEntrada('')
-      await abrirDetalhesOP(opSelecionada.id, true)
-      await carregarTudo()
-      setTimeout(() => entradaRef.current?.focus(), 100)
+      const res = await producaoQueries.escanearEAlocarEntradaOP({
+        op_id: opSelecionada.id,
+        ean: cx.ean_caixa,
+        forcarConfirmacao: true,
+        operador_id: operador?.id,
+        operador_nome: operador?.nome || 'Operador',
+      })
+      if (!res.success) {
+        feedbackSom.erro()
+        setFeedbackEntrada({ tipo: 'erro', titulo: 'Erro na Entrada', msg: res.error })
+        toastError('Erro na Entrada', res.error)
+        setScanEntrada('')
+        setTimeout(() => entradaRef.current?.focus(), 60)
+        return
+      }
+      aplicarEntradaAlocadaNaTela(res)
     } catch (err) {
+      feedbackSom.erro()
+      setFeedbackEntrada({ tipo: 'erro', titulo: 'Erro', msg: err.message })
       toastError('Erro', err.message)
+    } finally {
+      setBuscandoEntrada(false)
     }
   }
 
@@ -767,6 +870,8 @@ export function Producao() {
       taraId: taraAtual?.id,
       taraKg: taraAtual?.peso_kg ?? 0,
       pesoBruto: formSaida.peso_bruto,
+      qtdPecas: formSaida.qtd_pecas,
+      exigirQtdPecas: true,
     })
     if (!valid.ok) return toastWarning('Dados da Caixa', valid.erro)
 
@@ -782,6 +887,7 @@ export function Producao() {
           peso_bruto_kg: valid.peso_bruto_kg,
           tara_id: valid.tara_id,
           tara_kg: valid.tara_kg,
+          qtd_pecas: valid.qtd_pecas,
           data_producao: valid.data_producao,
           validade: valid.validade,
           lote: valid.lote,
@@ -791,18 +897,19 @@ export function Producao() {
       )
 
       if (!res.success) {
+        feedbackSom.erro()
         toastError('Erro ao gerar saída', res.error)
         return
       }
 
+      feedbackSom.sucesso()
       toastSuccess(
         'Caixa de Saída Gerada!',
-        `${res.caixa_gerada.produto_descricao} • Líq ${fmtKg2(res.caixa_gerada.peso_liquido_kg)} • EAN ${res.caixa_gerada.ean_caixa}`
+        `${res.caixa_gerada.produto_descricao} • ${res.caixa_gerada.qtd_pecas} pç • Líq ${fmtKg2(res.caixa_gerada.peso_liquido_kg)} • EAN ${res.caixa_gerada.ean_caixa}`
       )
 
-      setFormSaida(prev => ({ ...prev, peso_bruto: '' }))
+      setFormSaida(prev => ({ ...prev, peso_bruto: '', qtd_pecas: '' }))
       await abrirDetalhesOP(opSelecionada.id, true)
-      await carregarTudo()
 
       setEtiquetasModal({
         open: true,
@@ -894,8 +1001,8 @@ export function Producao() {
     const res = await producaoQueries.removerItemOP(opSelecionada.id, tipo, item.id, item.caixa_id)
     if (!res.success) return toastError('Erro', res.error)
     toastSuccess('Item removido', 'Registro estornado da OP.')
+    setFeedbackEntrada(null)
     await abrirDetalhesOP(opSelecionada.id, true)
-    await carregarTudo()
   }
 
   const abrirDossieCompleto = (opId) => {
@@ -1126,26 +1233,110 @@ export function Producao() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {opSelecionada.previstos_entrada?.length > 0 && (
                 <div className="card" style={{ padding: '14px 16px' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
-                    Matérias-Primas Previstas na OP
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Conferência de Matérias-Primas Previstas na OP
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      Itens em CX possuem trava automática de limite ao atingir a quantidade prevista
+                    </span>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {opSelecionada.previstos_entrada.map(pe => {
-                      const alocado = (opSelecionada.insumos || []).filter(i => i.produto_id === pe.produto_id).reduce((s, x) => s + Number(x.peso_kg || 0), 0)
-                      return (
-                        <div key={pe.id} style={{
-                          padding: '6px 12px', borderRadius: 8, background: 'var(--bg-1)', border: '1px solid var(--border)', fontSize: 12,
-                        }}>
-                          <strong>{pe.produto_codigo} — {pe.produto_descricao}</strong>
-                          <span style={{ color: '#fbbf24', marginLeft: 8, fontFamily: 'var(--font-mono)' }}>
-                            Alocado: {fmtKg2(alocado)}
-                            {(pe.peso_kg_previsto || pe.qtd_caixas_prevista) ? (
-                              <> / Prev:{pe.peso_kg_previsto ? ` ${fmtKg2(pe.peso_kg_previsto)}` : ''}{pe.qtd_caixas_prevista ? ` (${pe.qtd_caixas_prevista} cx)` : ''}</>
-                            ) : ''}
-                          </span>
-                        </div>
-                      )
-                    })}
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textAlign: 'left', fontSize: 11 }}>
+                          <th style={{ padding: '7px 10px' }}>Produto</th>
+                          <th style={{ padding: '7px 10px' }}>Qtd Prevista</th>
+                          <th style={{ padding: '7px 10px' }}>Qtd Bipada</th>
+                          <th style={{ padding: '7px 10px' }}>Restante</th>
+                          <th style={{ padding: '7px 10px' }}>Peças</th>
+                          <th style={{ padding: '7px 10px' }}>Peso Reg.</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'right' }}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {opSelecionada.previstos_entrada.map(pe => {
+                          const itensProd = (opSelecionada.insumos || []).filter(i => Number(i.produto_id) === Number(pe.produto_id))
+                          const bipadoCx = itensProd.length
+                          const bipadoKg = itensProd.reduce((s, x) => s + Number(x.peso_kg || 0), 0)
+                          const pecasTotal = itensProd.reduce((s, x) => s + Number(x.qtd_pecas || 0), 0)
+                          const prevCx = Number(pe.qtd_caixas_prevista || 0)
+                          const prevKg = Number(pe.peso_kg_previsto || 0)
+                          const isModoCx = pe.unidade_prevista === 'CX' || (!prevKg && prevCx > 0)
+
+                          let statusTxt = 'Pendente'
+                          let statusStyle = { bg: 'rgba(148,163,184,0.14)', color: '#94a3b8', border: 'rgba(148,163,184,0.3)' }
+                          if (isModoCx && prevCx > 0) {
+                            if (bipadoCx >= prevCx) {
+                              statusTxt = 'Concluído / Limite Atingido'
+                              statusStyle = { bg: 'rgba(34,197,94,0.16)', color: '#4ade80', border: 'rgba(34,197,94,0.4)' }
+                            } else if (bipadoCx > 0) {
+                              statusTxt = 'Em andamento'
+                              statusStyle = { bg: 'rgba(56,189,248,0.16)', color: '#38bdf8', border: 'rgba(56,189,248,0.4)' }
+                            }
+                          } else if (prevKg > 0) {
+                            if (bipadoKg >= prevKg - 0.001 && bipadoCx > 0) {
+                              statusTxt = 'Meta Atingida'
+                              statusStyle = { bg: 'rgba(34,197,94,0.16)', color: '#4ade80', border: 'rgba(34,197,94,0.4)' }
+                            } else if (bipadoCx > 0) {
+                              statusTxt = 'Em andamento'
+                              statusStyle = { bg: 'rgba(56,189,248,0.16)', color: '#38bdf8', border: 'rgba(56,189,248,0.4)' }
+                            }
+                          } else if (bipadoCx > 0) {
+                            statusTxt = 'Bipado'
+                            statusStyle = { bg: 'rgba(56,189,248,0.16)', color: '#38bdf8', border: 'rgba(56,189,248,0.4)' }
+                          }
+
+                          const restCx = isModoCx && prevCx > 0 ? Math.max(0, prevCx - bipadoCx) : null
+                          const restKg = !isModoCx && prevKg > 0 ? Math.max(0, prevKg - bipadoKg) : null
+
+                          return (
+                            <tr key={pe.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '8px 10px' }}>
+                                <strong>{pe.produto_descricao}</strong>
+                                <span style={{ marginLeft: 6, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                                  #{pe.produto_codigo || '-'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                                {isModoCx && prevCx > 0 ? (
+                                  <>
+                                    {prevCx} cx
+                                    {prevKg > 0 && <div style={{ fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 400 }}>~{fmtKg2(prevKg)}</div>}
+                                  </>
+                                ) : prevKg > 0 ? fmtKg2(prevKg) : 'Livre'}
+                              </td>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#fbbf24' }}>
+                                {bipadoCx} cx
+                              </td>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: restCx === 0 || restKg === 0 ? '#4ade80' : 'var(--text-primary)' }}>
+                                {restCx != null ? `${restCx} cx` : restKg != null ? fmtKg2(restKg) : '-'}
+                              </td>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)' }}>
+                                {pecasTotal > 0 ? `${pecasTotal} pç` : '-'}
+                              </td>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#fbbf24' }}>
+                                {fmtKg2(bipadoKg)}
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '3px 9px',
+                                  borderRadius: 99,
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  background: statusStyle.bg,
+                                  color: statusStyle.color,
+                                  border: `1px solid ${statusStyle.border}`,
+                                }}>
+                                  {statusTxt}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -1174,6 +1365,45 @@ export function Producao() {
                       {buscandoEntrada ? 'Verificando...' : 'Dar Entrada na OP'}
                     </button>
                   </form>
+
+                  {feedbackEntrada && (
+                    <div style={{
+                      marginTop: 12,
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      fontSize: 13,
+                      background: feedbackEntrada.tipo === 'sucesso'
+                        ? 'rgba(34,197,94,0.14)'
+                        : feedbackEntrada.tipo === 'alerta'
+                          ? 'rgba(245,158,11,0.14)'
+                          : 'rgba(239,68,68,0.16)',
+                      border: `1px solid ${
+                        feedbackEntrada.tipo === 'sucesso'
+                          ? 'rgba(34,197,94,0.45)'
+                          : feedbackEntrada.tipo === 'alerta'
+                            ? 'rgba(245,158,11,0.45)'
+                            : 'rgba(239,68,68,0.45)'
+                      }`,
+                      color: feedbackEntrada.tipo === 'sucesso'
+                        ? '#bbf7d0'
+                        : feedbackEntrada.tipo === 'alerta'
+                          ? '#fde68a'
+                          : '#fecaca',
+                    }}>
+                      {feedbackEntrada.tipo === 'sucesso'
+                        ? <CheckCircle2 size={18} color="#4ade80" style={{ flexShrink: 0 }} />
+                        : feedbackEntrada.tipo === 'alerta'
+                          ? <AlertTriangle size={18} color="#fbbf24" style={{ flexShrink: 0 }} />
+                          : <XCircle size={18} color="#f87171" style={{ flexShrink: 0 }} />
+                      }
+                      <div>
+                        <strong>{feedbackEntrada.titulo}:</strong> {feedbackEntrada.msg}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1192,6 +1422,7 @@ export function Producao() {
                           <th style={{ padding: '8px 10px' }}>EAN Caixa</th>
                           <th style={{ padding: '8px 10px' }}>Produto</th>
                           <th style={{ padding: '8px 10px' }}>Lote / Prod / Val</th>
+                          <th style={{ padding: '8px 10px' }}>Peças</th>
                           <th style={{ padding: '8px 10px' }}>Bruto</th>
                           <th style={{ padding: '8px 10px' }}>Tara</th>
                           <th style={{ padding: '8px 10px' }}>Peso Líquido</th>
@@ -1208,6 +1439,9 @@ export function Producao() {
                             </td>
                             <td style={{ padding: '8px 10px' }}>
                               <span style={{ fontFamily: 'monospace' }}>{item.lote || '-'}</span> • Prod {fmtDataBR(item.data_producao)} • Val {fmtDataBR(item.validade)}
+                            </td>
+                            <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                              {item.qtd_pecas != null ? `${item.qtd_pecas} pç` : '-'}
                             </td>
                             <td style={{ padding: '8px 10px' }}>{fmtKg2(item.peso_bruto_kg)}</td>
                             <td style={{ padding: '8px 10px' }}>{fmtKg3(item.tara_kg)}</td>
@@ -1332,6 +1566,7 @@ export function Producao() {
                           <th style={{ padding: '8px 10px' }}>Produto</th>
                           <th style={{ padding: '8px 10px' }}>Lote</th>
                           <th style={{ padding: '8px 10px' }}>Prod. / Validade</th>
+                          <th style={{ padding: '8px 10px' }}>Peças</th>
                           <th style={{ padding: '8px 10px' }}>Bruto / Tara</th>
                           <th style={{ padding: '8px 10px' }}>Peso Líquido</th>
                           <th style={{ padding: '8px 10px', textAlign: 'right' }}>Ações</th>
@@ -1349,6 +1584,9 @@ export function Producao() {
                             <td style={{ padding: '8px 10px' }}>
                               Prod: {fmtDataBR(ret.data_producao)}<br />
                               Val: <strong>{fmtDataBR(ret.validade)}</strong>
+                            </td>
+                            <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                              {ret.qtd_pecas != null ? `${ret.qtd_pecas} pç` : '-'}
                             </td>
                             <td style={{ padding: '8px 10px' }}>
                               Bruto: {fmtKg2(ret.peso_bruto_kg)}<br />

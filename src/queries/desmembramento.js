@@ -79,6 +79,7 @@ export async function validarCaixa(ean) {
 export async function desmembrarCaixas({
   caixaOrigem,
   novasCaixas,
+  motivoDiferencaPecas = '',
   operador_id,
   operador_nome,
 }) {
@@ -97,6 +98,8 @@ export async function desmembrarCaixas({
     const bruto = Number(Number(item.peso_bruto_kg).toFixed(3))
     const tara = Number(Number(item.tara_kg || 0).toFixed(3))
     const liquido = calcularPesoLiquido(bruto, tara)
+    const pecasNum = Number(item.qtd_pecas)
+    const pecasInt = Number.isFinite(pecasNum) ? Math.trunc(pecasNum) : NaN
     if (!Number.isFinite(bruto) || bruto <= 0) {
       return { success: false, error: `Nova Caixa #${i + 1}: informe um peso bruto válido.` }
     }
@@ -106,11 +109,18 @@ export async function desmembrarCaixas({
         error: `Nova Caixa #${i + 1}: peso bruto (${bruto.toFixed(2)} kg) deve ser maior que a tara (${tara.toFixed(3)} kg).`,
       }
     }
+    if (!Number.isFinite(pecasNum) || pecasInt <= 0 || pecasInt !== pecasNum) {
+      return {
+        success: false,
+        error: `Nova Caixa #${i + 1}: informe uma quantidade de peças inteira maior que zero.`,
+      }
+    }
     itensNormalizados.push({
       tara_id: item.tara_id ? Number(item.tara_id) : null,
       tara_kg: tara,
       peso_bruto_kg: bruto,
       peso_liquido_kg: liquido,
+      qtd_pecas: pecasInt,
     })
   }
 
@@ -146,11 +156,20 @@ export async function desmembrarCaixas({
     const dataProdFinal = orig.data_producao || null
     const validadeFinal = orig.validade || null
 
+    const somaPecasNovas = itensNormalizados.reduce((acc, it) => acc + it.qtd_pecas, 0)
+    const origPecas = orig.qtd_pecas != null && Number(orig.qtd_pecas) > 0 ? Math.trunc(Number(orig.qtd_pecas)) : null
+    const perdaPecas = origPecas != null ? origPecas - somaPecasNovas : 0
+    const motivoLimpo = String(motivoDiferencaPecas || '').trim()
+
     // 1. Consumir caixa original
     await tx.execute({
       sql: `UPDATE estoque_caixas SET status = 'CONSUMIDA', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'DISPONIVEL'`,
       args: [orig.id],
     })
+
+    const resumoPecasHist = origPecas != null
+      ? ` • Peças: orig ${origPecas} pç → soma ${somaPecasNovas} pç${perdaPecas !== 0 ? ` (dif ${perdaPecas > 0 ? '-' : '+'}${Math.abs(perdaPecas)} pç${motivoLimpo ? `: ${motivoLimpo}` : ''})` : ''}`
+      : ` • Total peças geradas: ${somaPecasNovas} pç`
 
     await tx.execute({
       sql: `
@@ -160,7 +179,7 @@ export async function desmembrarCaixas({
       args: [
         orig.id,
         orig.ean_caixa,
-        `Desmembrada (${codigoOperacao}) em ${itensNormalizados.length} caixas: ${novosEans.join(', ')}`,
+        `Desmembrada (${codigoOperacao}) em ${itensNormalizados.length} caixas: ${novosEans.join(', ')}${resumoPecasHist}`,
         operador_nome || 'Sistema',
       ],
     })
@@ -168,7 +187,7 @@ export async function desmembrarCaixas({
     await tx.execute({
       sql: `
         INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
-        VALUES (?, ?, 'DESMEMBRAMENTO', ?, 1, ?, ?, ?, 'DESMEMBRAMENTO')
+        VALUES (?, ?, 'DESMEMBRAMENTO', ?, 1, ?, ?, ?, 'TRANSFERENCIA')
       `,
       args: [orig.produto_id, enderecoFinal, loteFinal, orig.peso_kg, operador_id || null, operador_nome || 'Sistema'],
     })
@@ -182,9 +201,9 @@ export async function desmembrarCaixas({
         sql: `
           INSERT INTO estoque_caixas (
             ean_caixa, produto_id, palete_id, palete_origem_id, endereco,
-            lote, data_producao, validade, peso_kg, peso_bruto_kg, tara_id, tara_kg,
+            lote, data_producao, validade, peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas,
             origem_tipo, caixa_origem_id, ean_origem, operador_cadastro_nome, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DESMEMBRAMENTO', ?, ?, ?, 'DISPONIVEL')
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DESMEMBRAMENTO', ?, ?, ?, 'DISPONIVEL')
         `,
         args: [
           novoEan,
@@ -199,6 +218,7 @@ export async function desmembrarCaixas({
           novo.peso_bruto_kg,
           novo.tara_id,
           novo.tara_kg,
+          novo.qtd_pecas,
           orig.id,
           orig.ean_caixa,
           operador_nome || 'Sistema',
@@ -211,9 +231,9 @@ export async function desmembrarCaixas({
         sql: `
           INSERT INTO desmembramentos_vinculos (
             codigo_operacao, caixa_origem_id, ean_origem, caixa_destino_id, ean_destino,
-            produto_id, peso_liquido_kg, peso_bruto_kg, tara_kg, lote, data_producao, validade,
-            operador_id, operador_nome
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            produto_id, peso_liquido_kg, peso_bruto_kg, tara_kg, qtd_pecas, perda_pecas, motivo_diferenca_pecas,
+            lote, data_producao, validade, operador_id, operador_nome
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         args: [
           codigoOperacao,
@@ -225,6 +245,9 @@ export async function desmembrarCaixas({
           novo.peso_liquido_kg,
           novo.peso_bruto_kg,
           novo.tara_kg,
+          novo.qtd_pecas,
+          perdaPecas,
+          motivoLimpo,
           loteFinal,
           dataProdFinal,
           validadeFinal,
@@ -241,7 +264,7 @@ export async function desmembrarCaixas({
         args: [
           novaCaixaId,
           novoEan,
-          `Gerada de ${orig.ean_caixa} (${codigoOperacao}) • Lote ${loteFinal || '-'} • Bruto ${novo.peso_bruto_kg.toFixed(2)}kg | Tara ${novo.tara_kg.toFixed(3)}kg | Líq ${novo.peso_liquido_kg.toFixed(2)}kg`,
+          `Gerada de ${orig.ean_caixa} (${codigoOperacao}) • Lote ${loteFinal || '-'} • ${novo.qtd_pecas} pç • Bruto ${novo.peso_bruto_kg.toFixed(2)}kg | Tara ${novo.tara_kg.toFixed(3)}kg | Líq ${novo.peso_liquido_kg.toFixed(2)}kg`,
           operador_nome || 'Sistema',
         ],
       })
@@ -249,7 +272,7 @@ export async function desmembrarCaixas({
       await tx.execute({
         sql: `
           INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo)
-          VALUES (?, 'DESMEMBRAMENTO', ?, ?, 1, ?, ?, ?, 'DESMEMBRAMENTO')
+          VALUES (?, 'DESMEMBRAMENTO', ?, ?, 1, ?, ?, ?, 'TRANSFERENCIA')
         `,
         args: [
           orig.produto_id,
@@ -275,13 +298,14 @@ export async function desmembrarCaixas({
         tara_kg: novo.tara_kg,
         peso_liquido_kg: novo.peso_liquido_kg,
         peso_kg: novo.peso_liquido_kg,
+        qtd_pecas: novo.qtd_pecas,
         origem_tipo: 'DESMEMBRAMENTO',
       })
     }
 
     await tx.commit()
   } catch (err) {
-    await tx.rollback()
+    try { await tx.rollback() } catch { /* stream pode expirar após erro no servidor */ }
     return { success: false, error: err.message }
   }
 

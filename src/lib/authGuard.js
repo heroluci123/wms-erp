@@ -171,7 +171,7 @@ export async function validarSessaoServidor({ forceFresh = false } = {}) {
   }
 
   const now = Date.now()
-  if (!forceFresh && lastCheck.token === token && now - lastCheck.ts < 2500 && lastCheck.operador) {
+  if (!forceFresh && lastCheck.token === token && now - lastCheck.ts < 15000 && lastCheck.operador) {
     return lastCheck.operador
   }
 

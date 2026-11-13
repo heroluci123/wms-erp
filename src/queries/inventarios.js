@@ -123,7 +123,8 @@ export async function registrarContagem({
   tara_id = null,
   tara_kg = 0,
   data_producao_contada = null,
-  lote_contado = null
+  lote_contado = null,
+  qtd_pecas_contada = null
 }) {
   try {
     await assertPermissao(['inventario_coletor', 'inventario_gestao', 'inventario_carga_inicial']);
@@ -141,6 +142,7 @@ export async function registrarContagem({
     const valNorm = validade_informada ? validade_informada.toString().substring(0, 10) : (item.validade_contada || item.validade || null)
     const dataProdNorm = data_producao_contada ? data_producao_contada.toString().substring(0, 10) : (item.data_producao_contada || null)
     const loteFinal = lote_contado || (dataProdNorm ? gerarLotePorData(dataProdNorm) : item.lote || '')
+    const pecasContadas = qtd_pecas_contada != null && Number(qtd_pecas_contada) > 0 ? Math.trunc(Number(qtd_pecas_contada)) : null
 
     await db.execute({
       sql: `UPDATE inventario_itens 
@@ -152,6 +154,7 @@ export async function registrarContagem({
                 tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
                 data_producao_contada = COALESCE(?, data_producao_contada),
                 lote = CASE WHEN COALESCE(?, '') != '' THEN ? ELSE lote END,
+                qtd_pecas_contada = COALESCE(?, qtd_pecas_contada),
                 status_item = ?
             WHERE id = ?`,
       args: [
@@ -165,6 +168,7 @@ export async function registrarContagem({
         dataProdNorm,
         loteFinal,
         loteFinal,
+        pecasContadas,
         status_item,
         item_id
       ]
@@ -424,6 +428,7 @@ export async function conciliarCargaInicial({ inventario_id, operador_id, operad
       const liqVal = Number(item.qtd_contada_kg || 0)
       const taraVal = Number(item.tara_kg || 0)
       const brutoVal = item.peso_bruto_contado_kg != null ? Number(item.peso_bruto_contado_kg) : Number((liqVal + taraVal).toFixed(3))
+      const pecasVal = item.qtd_pecas_contada != null && Number(item.qtd_pecas_contada) > 0 ? Math.trunc(Number(item.qtd_pecas_contada)) : null
 
       const { rows: existe } = await tx.execute({
         sql: `SELECT id FROM estoque_caixas WHERE LTRIM(ean_caixa,'0') = LTRIM(?,'0')`,
@@ -433,12 +438,12 @@ export async function conciliarCargaInicial({ inventario_id, operador_id, operad
         const ins = await tx.execute({
           sql: `INSERT INTO estoque_caixas (
                   ean_caixa, produto_id, endereco, lote, data_producao, validade,
-                  peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVENTARIO', ?, 'DISPONIVEL')`,
+                  peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, origem_tipo, operador_cadastro_nome, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVENTARIO', ?, 'DISPONIVEL')`,
           args: [
             item.ean_caixa, item.produto_id, item.endereco, loteFinal,
             item.data_producao_contada || null, item.validade_contada || item.validade,
-            liqVal, brutoVal, item.tara_id || null, taraVal, operador_nome || 'Inventário'
+            liqVal, brutoVal, item.tara_id || null, taraVal, pecasVal, operador_nome || 'Inventário'
           ]
         })
         await tx.execute({
@@ -447,7 +452,7 @@ export async function conciliarCargaInicial({ inventario_id, operador_id, operad
           args: [
             Number(ins.lastInsertRowid),
             item.ean_caixa,
-            `Carga Inicial ${item.endereco} • Lote ${loteFinal || '-'} • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liqVal.toFixed(2)}kg`,
+            `Carga Inicial ${item.endereco} • Lote ${loteFinal || '-'} • ${pecasVal ? `${pecasVal} pç • ` : ''}Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liqVal.toFixed(2)}kg`,
             operador_nome || 'Inventário'
           ]
         })
@@ -463,13 +468,14 @@ export async function conciliarCargaInicial({ inventario_id, operador_id, operad
                     peso_bruto_kg = COALESCE(?, peso_bruto_kg),
                     tara_id = COALESCE(?, tara_id),
                     tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
+                    qtd_pecas = COALESCE(?, qtd_pecas),
                     validade = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?`,
           args: [
             item.endereco, loteFinal, item.data_producao_contada || null,
             liqVal, item.peso_bruto_contado_kg ?? null, item.tara_id ?? null, item.tara_kg ?? null, taraVal,
-            item.validade_contada || item.validade, existe[0].id
+            pecasVal, item.validade_contada || item.validade, existe[0].id
           ]
         })
       }
@@ -711,6 +717,7 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
           const loteItem = item.lote || (item.data_producao_contada ? gerarLotePorData(item.data_producao_contada) : '')
           const taraItem = Number(item.tara_kg || 0)
           const brutoItem = item.peso_bruto_contado_kg != null ? Number(item.peso_bruto_contado_kg) : Number((Number(kg) + taraItem).toFixed(3))
+          const pecasItem = item.qtd_pecas_contada != null && Number(item.qtd_pecas_contada) > 0 ? Math.trunc(Number(item.qtd_pecas_contada)) : null
           eansContados.add(item.ean_caixa.trim())
           caixasContadas.push({
             ean_caixa: item.ean_caixa.trim(),
@@ -721,7 +728,8 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
             peso_kg: kg,
             peso_bruto_kg: brutoItem,
             tara_id: item.tara_id || null,
-            tara_kg: taraItem
+            tara_kg: taraItem,
+            qtd_pecas: pecasItem
           })
         }
       }
@@ -763,24 +771,25 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
                       peso_bruto_kg = COALESCE(?, peso_bruto_kg),
                       tara_id = COALESCE(?, tara_id),
                       tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
+                      qtd_pecas = COALESCE(?, qtd_pecas),
                       status = 'DISPONIVEL',
                       updated_at = CURRENT_TIMESTAMP
                   WHERE id = ?`,
             args: [
               endereco, cx.lote, cx.data_producao, cx.validade, cx.peso_kg,
-              cx.peso_bruto_kg, cx.tara_id, cx.tara_kg, cx.tara_kg, existe[0].id
+              cx.peso_bruto_kg, cx.tara_id, cx.tara_kg, cx.tara_kg, cx.qtd_pecas ?? null, existe[0].id
             ]
           })
         } else {
           await tx.execute({
             sql: `INSERT INTO estoque_caixas (
                     ean_caixa, produto_id, endereco, lote, data_producao, validade,
-                    peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVENTARIO', ?, 'DISPONIVEL')`,
+                    peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, origem_tipo, operador_cadastro_nome, status
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVENTARIO', ?, 'DISPONIVEL')`,
             args: [
               cx.ean_caixa, cx.produto_id, endereco, cx.lote, cx.data_producao,
               cx.validade, cx.peso_kg, cx.peso_bruto_kg, cx.tara_id, cx.tara_kg,
-              operador_nome || 'Inventário'
+              cx.qtd_pecas ?? null, operador_nome || 'Inventário'
             ]
           })
         }
@@ -932,7 +941,8 @@ export async function adicionarItemSurpresa({
   data_producao_contada = null,
   tara_id = null,
   tara_kg = 0,
-  peso_bruto_contado_kg = null
+  peso_bruto_contado_kg = null,
+  qtd_pecas_contada = null
 }) {
   await assertPermissao(['inventario_coletor', 'inventario_gestao', 'inventario_carga_inicial']);
   await ensureRastreabilidadeSchema()
@@ -946,6 +956,7 @@ export async function adicionarItemSurpresa({
   const validadeNorm = validade ? validade.toString().substring(0, 10) : null
   const dataProdNorm = data_producao_contada ? data_producao_contada.toString().substring(0, 10) : null
   const loteFinal = lote || (dataProdNorm ? gerarLotePorData(dataProdNorm) : '')
+  const pecasContadas = qtd_pecas_contada != null && Number(qtd_pecas_contada) > 0 ? Math.trunc(Number(qtd_pecas_contada)) : null
 
   const { rows: existenteRows } = await db.execute({
     sql: `
@@ -960,10 +971,10 @@ export async function adicionarItemSurpresa({
     sql: `
     INSERT INTO inventario_itens (
       inventario_id, ean_caixa, endereco, produto_id, lote, validade, validade_contada,
-      data_producao_contada, tara_id, tara_kg, peso_bruto_contado_kg,
+      data_producao_contada, tara_id, tara_kg, peso_bruto_contado_kg, qtd_pecas_contada,
       qtd_sistema_caixas, qtd_sistema_kg, status_item
     )
-    VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, 0, 'Pendente')
+    VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, 0, 'Pendente')
   `,
     args: [
       inventario_id,
@@ -975,7 +986,8 @@ export async function adicionarItemSurpresa({
       dataProdNorm,
       tara_id || null,
       Number(tara_kg || 0),
-      peso_bruto_contado_kg ?? null
+      peso_bruto_contado_kg ?? null,
+      pecasContadas
     ]
   })
   return { success: true, item_id: res.lastInsertRowid.toString(), status_item: 'Pendente', contagem_atual: 1 }

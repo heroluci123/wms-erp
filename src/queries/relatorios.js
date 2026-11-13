@@ -79,8 +79,9 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
       sql: `
         SELECT
           c.id, c.ean_caixa, c.endereco, c.lote, c.data_producao, c.validade,
-          c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.origem_tipo,
+          c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.qtd_pecas, c.origem_tipo,
           c.status as status_caixa, c.palete_id, c.created_at, c.updated_at,
+          c.pedido_reservado_codigo, c.romaneio_reservado_codigo, c.cliente_reservado_nome,
           p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
           p.status_curva, p.valor_unitario, p.unidade, p.grupo,
           COALESCE(pl.codigo, '') as palete_codigo,
@@ -121,7 +122,7 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
           r.created_at as romaneio_criado_em, r.expedido_at as romaneio_expedido_em,
           r.operador_nome as operador_montagem, r.operador_expedicao_nome as operador_expedicao,
           ri.id as item_id, ri.caixa_id, ri.produto_id, ri.peso_kg,
-          c.ean_caixa, c.lote, c.data_producao, c.validade, c.peso_bruto_kg, c.tara_kg,
+          c.ean_caixa, c.lote, c.data_producao, c.validade, c.peso_bruto_kg, c.tara_kg, c.qtd_pecas,
           c.endereco as endereco_atual_ou_origem,
           c.status as caixa_status_atual,
           p.codigo as produto_codigo, p.descricao as produto_descricao,
@@ -141,7 +142,7 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
       sql: `
         SELECT
           c.id, c.ean_caixa, c.endereco, c.lote, c.data_producao, c.validade,
-          c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.origem_tipo,
+          c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.qtd_pecas, c.origem_tipo,
           c.status as status_caixa, c.created_at, c.updated_at,
           p.id as produto_id, p.codigo as produto_codigo, p.descricao as produto_descricao,
           p.grupo, p.tipo_produto, p.valor_unitario,

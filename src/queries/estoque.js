@@ -50,10 +50,16 @@ export async function listarGeral() {
 // Exclui apenas EXPEDIDA (saiu do galpão) e CONSUMIDA (desmembrada/produção)
 export async function listarGeralCaixas() {
   await assertPermissao(PERM_EST_OP, { write: false, bloquearCliente: true });
+  await ensureRastreabilidadeSchema();
   const res = await db.execute({
     sql: `
       SELECT
-        c.id, c.ean_caixa, c.endereco, c.validade, c.peso_kg, c.status, c.palete_id, c.updated_at,
+        c.id, c.ean_caixa, c.endereco, c.validade, c.lote, c.data_producao,
+        c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.qtd_pecas,
+        c.status, c.palete_id, c.updated_at,
+        c.pedido_reservado_id, c.pedido_reservado_codigo,
+        c.romaneio_reservado_id, c.romaneio_reservado_codigo,
+        c.cliente_reservado_nome, c.reservado_em,
         p.id as produto_id, p.codigo, p.descricao, p.tipo_produto,
         p.status_curva, p.valor_unitario, p.unidade, p.grupo,
         pl.codigo as palete_codigo,
@@ -126,6 +132,9 @@ export async function inserirCaixasCargaInicial(caixas) {
       const brutoVal = c.peso_bruto_kg !== undefined && c.peso_bruto_kg !== null
         ? Number(Number(c.peso_bruto_kg).toFixed(3))
         : Number((liqVal + taraVal).toFixed(3));
+      const pecasVal = c.qtd_pecas !== undefined && c.qtd_pecas !== null && Number(c.qtd_pecas) > 0
+        ? Math.trunc(Number(c.qtd_pecas))
+        : null;
 
       const { rows } = await tx.execute({
         sql: `SELECT id FROM estoque_caixas WHERE LTRIM(ean_caixa, '0') = LTRIM(?, '0')`,
@@ -135,13 +144,13 @@ export async function inserirCaixasCargaInicial(caixas) {
         const insRes = await tx.execute({
           sql: `INSERT INTO estoque_caixas (
                   ean_caixa, produto_id, endereco, lote, data_producao, validade,
-                  peso_kg, peso_bruto_kg, tara_id, tara_kg, origem_tipo, operador_cadastro_nome, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
+                  peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, origem_tipo, operador_cadastro_nome, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DISPONIVEL')`,
           args: [
             c.ean_caixa, c.produto_id, c.endereco,
             loteFinal, c.data_producao || null, c.validade || null,
             liqVal, brutoVal, c.tara_id || null, taraVal,
-            c.origem_tipo || 'INVENTARIO', c.operador_cadastro_nome || 'Inventário'
+            pecasVal, c.origem_tipo || 'INVENTARIO', c.operador_cadastro_nome || 'Inventário'
           ]
         });
         await tx.execute({
@@ -150,7 +159,7 @@ export async function inserirCaixasCargaInicial(caixas) {
           args: [
             Number(insRes.lastInsertRowid),
             c.ean_caixa,
-            `Inventário em ${c.endereco} • Lote ${loteFinal || '-'} • Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liqVal.toFixed(2)}kg`,
+            `Inventário em ${c.endereco} • Lote ${loteFinal || '-'} • ${pecasVal ? `${pecasVal} pç • ` : ''}Bruto ${brutoVal.toFixed(2)}kg | Tara ${taraVal.toFixed(3)}kg | Líq ${liqVal.toFixed(2)}kg`,
             c.operador_cadastro_nome || 'Inventário'
           ]
         });
@@ -165,6 +174,7 @@ export async function inserirCaixasCargaInicial(caixas) {
                     peso_bruto_kg = COALESCE(?, peso_bruto_kg),
                     tara_id = COALESCE(?, tara_id),
                     tara_kg = CASE WHEN ? IS NOT NULL THEN ? ELSE tara_kg END,
+                    qtd_pecas = COALESCE(?, qtd_pecas),
                     status = 'DISPONIVEL',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?`,
@@ -178,6 +188,7 @@ export async function inserirCaixasCargaInicial(caixas) {
             c.tara_id ?? null,
             c.tara_kg ?? null,
             taraVal,
+            pecasVal,
             rows[0].id
           ]
         });

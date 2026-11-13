@@ -57,6 +57,7 @@ export function InventarioOperador() {
     validade: '',
     tara_id: '',
     peso_bruto: '',
+    qtd_pecas: '',
   })
   const invPesoBrutoRef = useRef(null)
 
@@ -164,6 +165,7 @@ export function InventarioOperador() {
       validade: keepDates ? prev.validade : '',
       tara_id: padrao ? String(padrao.id) : '',
       peso_bruto: '',
+      qtd_pecas: '',
     }))
   }
 
@@ -267,7 +269,7 @@ export function InventarioOperador() {
       // Busca a caixa no estoque
       const { db } = await import('../lib/db.js')
       const resEstoque = await db.execute({
-        sql: `SELECT peso_kg, peso_bruto_kg, tara_id, tara_kg, lote, data_producao, validade, ean_caixa, endereco, status FROM estoque_caixas WHERE ean_caixa = ? LIMIT 1`,
+        sql: `SELECT peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, lote, data_producao, validade, ean_caixa, endereco, status FROM estoque_caixas WHERE ean_caixa = ? LIMIT 1`,
         args: [eanBipado]
       })
       const caixaNoEstoque = resEstoque.rows.length > 0 ? resEstoque.rows[0] : null
@@ -350,6 +352,7 @@ export function InventarioOperador() {
         tara_id: caixaNoEstoque.tara_id || null,
         tara_kg: caixaNoEstoque.tara_kg || 0,
         peso_bruto_contado_kg: caixaNoEstoque.peso_bruto_kg ?? null,
+        qtd_pecas_contada: caixaNoEstoque.qtd_pecas ?? null,
       })
       if (!res.success) { toastError('Erro', res.error); return }
       item_id = res.item_id
@@ -371,6 +374,7 @@ export function InventarioOperador() {
       tara_id: caixaNoEstoque.tara_id || null,
       tara_kg: Number(caixaNoEstoque.tara_kg || 0),
       peso_bruto_kg: caixaNoEstoque.peso_bruto_kg ?? null,
+      qtd_pecas: caixaNoEstoque.qtd_pecas ?? null,
       caixas: 1,
       kg: caixaNoEstoque.peso_kg || 0
     }])
@@ -518,6 +522,7 @@ export function InventarioOperador() {
     let taraId = null
     let taraKg = 0
     let pesoBrutoKg = null
+    let qtdPecas = null
 
     if (ssccModoConfirmacao && ssccDadosCaixa) {
       val = ssccDadosCaixa.validade || ''
@@ -527,6 +532,7 @@ export function InventarioOperador() {
       taraId = ssccDadosCaixa.tara_id || null
       taraKg = Number(ssccDadosCaixa.tara_kg || 0)
       pesoBrutoKg = ssccDadosCaixa.peso_bruto_kg ?? Number((kg + taraKg).toFixed(3))
+      qtdPecas = ssccDadosCaixa.qtd_pecas ?? null
     } else {
       const taraAtual = resolverTaraSelecionada(taras, formPesagem.tara_id)
       const valid = validarPesagemTara({
@@ -535,6 +541,7 @@ export function InventarioOperador() {
         taraId: taraAtual?.id,
         taraKg: taraAtual?.peso_kg ?? 0,
         pesoBruto: formPesagem.peso_bruto,
+        qtdPecas: formPesagem.qtd_pecas,
       })
       if (!valid.ok) {
         toastWarning('Dados da Caixa', valid.erro)
@@ -547,6 +554,7 @@ export function InventarioOperador() {
       taraId = valid.tara_id
       taraKg = valid.tara_kg
       pesoBrutoKg = valid.peso_bruto_kg
+      qtdPecas = valid.qtd_pecas
     }
 
     const chave = `${itemAtual.codigo}__${val}`
@@ -592,6 +600,7 @@ export function InventarioOperador() {
         tara_id: taraId,
         tara_kg: taraKg,
         peso_bruto_contado_kg: pesoBrutoKg,
+        qtd_pecas_contada: qtdPecas,
       })
       if (!res.success) return toastError('Erro', res.error)
       item_id = res.item_id
@@ -602,11 +611,11 @@ export function InventarioOperador() {
       chave, item_id, produto_id: itemAtual.produto_id,
       codigo: itemAtual.codigo, descricao: itemAtual.descricao,
       validade: val, data_producao: dataProducao, lote,
-      tara_id: taraId, tara_kg: taraKg, peso_bruto_kg: pesoBrutoKg,
+      tara_id: taraId, tara_kg: taraKg, peso_bruto_kg: pesoBrutoKg, qtd_pecas: qtdPecas,
       caixas: cx, kg: kg
     }])
 
-    toastSuccess('Registrado', `Volume salvo • Líq ${fmtKg2(kg)} ${lote ? `• Lote ${lote}` : ''}`)
+    toastSuccess('Registrado', `Volume salvo • ${qtdPecas ? `${qtdPecas} pç • ` : ''}Líq ${fmtKg2(kg)} ${lote ? `• Lote ${lote}` : ''}`)
     resetFormPesagem(true)
     voltarParaProduto()
   }
@@ -633,6 +642,7 @@ export function InventarioOperador() {
             tara_kg: c.tara_kg,
             data_producao: c.data_producao,
             lote: c.lote,
+            qtd_pecas: c.qtd_pecas ?? null,
           })
         }
       })
@@ -653,10 +663,11 @@ export function InventarioOperador() {
           tara_kg: c.tara_kg ?? 0,
           data_producao_contada: c.data_producao ?? null,
           lote_contado: c.lote ?? null,
+          qtd_pecas_contada: c.qtd_pecas ?? null,
         }))
       )
 
-      // Registrar caixas SSCC no estoque com peso bruto, tara, líquido e lote automático
+      // Registrar caixas SSCC no estoque com peso bruto, tara, líquido, peças e lote automático
       const caixasSSCC = contagemLocal
         .filter(c => c.codigo && c.codigo.length >= 8)
         .map(c => ({
@@ -670,6 +681,7 @@ export function InventarioOperador() {
           peso_bruto_kg: c.peso_bruto_kg ?? null,
           tara_id: c.tara_id ?? null,
           tara_kg: c.tara_kg ?? 0,
+          qtd_pecas: c.qtd_pecas ?? null,
           origem_tipo: 'INVENTARIO',
           operador_cadastro_nome: operador?.nome || 'Inventário',
         }))
@@ -1161,6 +1173,12 @@ export function InventarioOperador() {
                           <div className="text-xs text-muted mb-2">Peso Cadastrado</div>
                           <div className="font-bold text-cyan" style={{ fontSize: 22 }}>{ssccDadosCaixa.peso_kg} kg</div>
                         </div>
+                        {ssccDadosCaixa.qtd_pecas != null && (
+                          <div>
+                            <div className="text-xs text-muted mb-2">Peças</div>
+                            <div className="font-bold" style={{ fontSize: 20, color: '#facc15' }}>{ssccDadosCaixa.qtd_pecas} pç</div>
+                          </div>
+                        )}
                         {ssccDadosCaixa.validade && (
                           <div>
                             <div className="text-xs text-muted mb-2">Validade</div>
@@ -1189,6 +1207,7 @@ export function InventarioOperador() {
                               validade: ssccDadosCaixa?.validade || '',
                               tara_id: padrao ? String(padrao.id) : '',
                               peso_bruto: bruto ? String(bruto) : '',
+                              qtd_pecas: ssccDadosCaixa?.qtd_pecas ? String(ssccDadosCaixa.qtd_pecas) : '',
                             })
                             setSsccModoConfirmacao(false)
                             setTimeout(() => invPesoBrutoRef.current?.focus(), 100)

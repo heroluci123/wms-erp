@@ -524,7 +524,18 @@ export const pedidosQueries = {
       for (const item of itensRes.rows) {
         if (item.endereco) enderecosAfetados.add(item.endereco)
         await db.execute({
-          sql: "UPDATE estoque_caixas SET status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          sql: `
+            UPDATE estoque_caixas
+            SET status = 'DISPONIVEL',
+                pedido_reservado_id = NULL,
+                pedido_reservado_codigo = NULL,
+                romaneio_reservado_id = NULL,
+                romaneio_reservado_codigo = NULL,
+                cliente_reservado_nome = NULL,
+                reservado_em = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
           args: [item.caixa_id]
         })
         await db.execute({

@@ -983,6 +983,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                             <th>End. Origem</th>
                             <th>Lote</th>
                             <th>Validade</th>
+                            <th style={{ textAlign: 'center', width: 70 }}>Peças</th>
                             <th style={{ textAlign: 'center', width: 70 }}>Qtd</th>
                             <th style={{ textAlign: 'right', width: 120 }}>Peso (Kg)</th>
                           </tr>
@@ -997,6 +998,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                               <td className="font-mono">{it.endereco_atual_ou_origem || '-'}</td>
                               <td className="font-mono">{it.lote || '-'}</td>
                               <td>{fmtDateBR(it.validade)}</td>
+                              <td style={{ textAlign: 'center' }} className="font-mono">{it.qtd_pecas != null ? `${it.qtd_pecas} pç` : '-'}</td>
                               <td style={{ textAlign: 'center' }} className="font-mono">1 cx</td>
                               <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtNum(it.peso_kg)} kg</td>
                             </tr>
@@ -1004,7 +1006,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                         </tbody>
                         <tfoot>
                           <tr style={{ background: 'rgba(16,185,129,0.08)', fontWeight: 800 }}>
-                            <td colSpan={7} style={{ textAlign: 'right' }} className="uppercase text-xs">
+                            <td colSpan={8} style={{ textAlign: 'right' }} className="uppercase text-xs">
                               Peso Total Consolidado do Romaneio {rom.codigo}:
                             </td>
                             <td style={{ textAlign: 'center' }} className="font-mono text-success">{rom.qtd_caixas} cx</td>
@@ -1167,7 +1169,8 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                       <th>EAN da Caixa</th>
                       <th style={{ width: 90 }}>Lote</th>
                       <th style={{ width: 100 }}>Validade</th>
-                      <th style={{ width: 100 }}>Status</th>
+                      <th style={{ width: 70, textAlign: 'right' }}>Peças</th>
+                      <th style={{ width: 140 }}>Status</th>
                       <th style={{ textAlign: 'right', width: 115 }}>Peso (Kg)</th>
                     </tr>
                   </thead>
@@ -1181,10 +1184,24 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                         <td className="font-mono text-muted">{c.ean_caixa}</td>
                         <td className="font-mono">{c.lote || '-'}</td>
                         <td>{fmtDateBR(c.validade)}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono">{c.qtd_pecas != null ? `${c.qtd_pecas} pç` : '-'}</td>
                         <td>
-                          <span className="px-6 py-1 rounded bg-success/15 text-success font-bold text-[10px]">
-                            {c.status_caixa || 'DISPONIVEL'}
-                          </span>
+                          {c.status_caixa === 'RESERVADA' ? (
+                            <div>
+                              <span className="px-6 py-1 rounded bg-warning/15 text-warning font-bold text-[10px]">
+                                RESERVADO
+                              </span>
+                              {c.cliente_reservado_nome && (
+                                <div className="text-[10px] text-warning font-bold mt-2">
+                                  {c.cliente_reservado_nome} {c.pedido_reservado_codigo ? `(${c.pedido_reservado_codigo})` : ''}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="px-6 py-1 rounded bg-success/15 text-success font-bold text-[10px]">
+                              {c.status_caixa || 'DISPONIVEL'}
+                            </span>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtNum(c.peso_kg)} kg</td>
                       </tr>
@@ -1192,7 +1209,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                   </tbody>
                   <tfoot>
                     <tr style={{ background: 'var(--bg-2)', fontWeight: 800 }}>
-                      <td colSpan={7} style={{ textAlign: 'right' }}>TOTAL DE CAIXAS FÍSICAS EM ESTOQUE:</td>
+                      <td colSpan={8} style={{ textAlign: 'right' }}>TOTAL DE CAIXAS FÍSICAS EM ESTOQUE:</td>
                       <td className="font-mono">{totais.estoqueCaixas} cx</td>
                       <td style={{ textAlign: 'right' }} className="font-mono text-success">{fmtKg(totais.estoqueKg)}</td>
                     </tr>
@@ -1297,12 +1314,13 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                   <thead>
                     <tr>
                       <th style={{ width: '5%', textAlign: 'center' }}>#</th>
-                      <th style={{ width: '9%' }}>Código</th>
-                      <th style={{ width: '32%' }}>Descrição do Produto Vinculado</th>
-                      <th style={{ width: '21%' }}>EAN da Caixa Física</th>
-                      <th style={{ width: '12%', textAlign: 'center' }}>End. Origem</th>
+                      <th style={{ width: '8%' }}>Código</th>
+                      <th style={{ width: '30%' }}>Descrição do Produto Vinculado</th>
+                      <th style={{ width: '19%' }}>EAN da Caixa Física</th>
+                      <th style={{ width: '11%', textAlign: 'center' }}>End. Origem</th>
                       <th style={{ width: '9%', textAlign: 'center' }}>Validade</th>
-                      <th style={{ width: '12%', textAlign: 'right' }}>Peso (Kg)</th>
+                      <th style={{ width: '7%', textAlign: 'center' }}>Peças</th>
+                      <th style={{ width: '11%', textAlign: 'right' }}>Peso (Kg)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1314,13 +1332,14 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                         <td className="pw-mono">{it.ean_caixa}</td>
                         <td className="pw-mono" style={{ textAlign: 'center' }}>{it.endereco_atual_ou_origem || '-'}</td>
                         <td style={{ textAlign: 'center' }}>{fmtDateBR(it.validade)}</td>
+                        <td className="pw-mono" style={{ textAlign: 'center' }}>{it.qtd_pecas != null ? `${it.qtd_pecas} pç` : '-'}</td>
                         <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(it.peso_kg)} kg</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="pw-tfoot-rom">
-                      <td colSpan={5} style={{ textAlign: 'right' }}>
+                      <td colSpan={6} style={{ textAlign: 'right' }}>
                         PESO TOTAL CONSOLIDADO DO ROMANEIO {rom.codigo} ({(rom.cliente || '').trim()}):
                       </td>
                       <td style={{ textAlign: 'center' }}>{rom.qtd_caixas} caixas</td>
@@ -1471,13 +1490,15 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
               <thead>
                 <tr>
                   <th style={{ width: '4%', textAlign: 'center' }}>#</th>
-                  <th style={{ width: '13%' }}>Endereço</th>
-                  <th style={{ width: '8%' }}>Código</th>
-                  <th style={{ width: '31%' }}>Descrição do Produto</th>
-                  <th style={{ width: '20%' }}>EAN da Caixa</th>
+                  <th style={{ width: '11%' }}>Endereço</th>
+                  <th style={{ width: '7%' }}>Código</th>
+                  <th style={{ width: '27%' }}>Descrição do Produto</th>
+                  <th style={{ width: '18%' }}>EAN da Caixa</th>
                   <th style={{ width: '7%', textAlign: 'center' }}>Lote</th>
                   <th style={{ width: '8%', textAlign: 'center' }}>Validade</th>
-                  <th style={{ width: '9%', textAlign: 'right' }}>Peso (Kg)</th>
+                  <th style={{ width: '5%', textAlign: 'center' }}>Peças</th>
+                  <th style={{ width: '5%', textAlign: 'center' }}>Status</th>
+                  <th style={{ width: '8%', textAlign: 'right' }}>Peso (Kg)</th>
                 </tr>
               </thead>
               <tbody>
@@ -1490,13 +1511,19 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                     <td className="pw-mono">{c.ean_caixa}</td>
                     <td className="pw-mono" style={{ textAlign: 'center' }}>{c.lote || '-'}</td>
                     <td style={{ textAlign: 'center' }}>{fmtDateBR(c.validade)}</td>
+                    <td className="pw-mono" style={{ textAlign: 'center' }}>{c.qtd_pecas != null ? `${c.qtd_pecas} pç` : '-'}</td>
+                    <td style={{ textAlign: 'center', fontSize: '9px' }}>
+                      {c.status_caixa === 'RESERVADA'
+                        ? `RES.${c.cliente_reservado_nome ? ` (${String(c.cliente_reservado_nome).slice(0, 14)})` : ''}`
+                        : (c.status_caixa || 'DISP.')}
+                    </td>
                     <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{fmtNum(c.peso_kg)} kg</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="pw-tfoot-general">
-                  <td colSpan={6} style={{ textAlign: 'right' }}>TOTAL GERAL EM ESTOQUE FÍSICO (CAIXA A CAIXA):</td>
+                  <td colSpan={8} style={{ textAlign: 'right' }}>TOTAL GERAL EM ESTOQUE FÍSICO (CAIXA A CAIXA):</td>
                   <td style={{ textAlign: 'center' }}>{totais.estoqueCaixas} cx</td>
                   <td style={{ textAlign: 'right' }}>{fmtKg(totais.estoqueKg)}</td>
                 </tr>

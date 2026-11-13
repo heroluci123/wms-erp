@@ -146,14 +146,29 @@ export function Rastreabilidade() {
                       <div className="text-xs text-muted font-bold uppercase">Status Atual</div>
                       <div className="font-bold" style={{
                         fontSize: 16,
-                        color: caixaInfo.status === 'CONSUMIDA' ? 'var(--warning)' : caixaInfo.status === 'EXPEDIDA' ? 'var(--info)' : 'var(--success)'
+                        color: caixaInfo.status === 'CONSUMIDA'
+                          ? 'var(--warning)'
+                          : caixaInfo.status === 'EXPEDIDA'
+                            ? 'var(--info)'
+                            : caixaInfo.status === 'RESERVADA'
+                              ? '#fbbf24'
+                              : 'var(--success)'
                       }}>
                         {caixaInfo.status === 'CONSUMIDA'
                           ? (filhos.length > 0 ? 'DESMEMBRADA' : 'CONSUMIDA EM PRODUÇÃO / OP')
                           : caixaInfo.status === 'EXPEDIDA'
                             ? 'EXPEDIDA'
-                            : caixaInfo.endereco}
+                            : caixaInfo.status === 'RESERVADA'
+                              ? `RESERVADO${caixaInfo.endereco ? ` (${caixaInfo.endereco})` : ''}`
+                              : caixaInfo.endereco}
                       </div>
+                      {caixaInfo.status === 'RESERVADA' && (caixaInfo.cliente_reservado_nome || caixaInfo.pedido_reservado_codigo || caixaInfo.romaneio_reservado_codigo) && (
+                        <div className="text-xs font-bold" style={{ color: '#fbbf24', marginTop: 2 }}>
+                          {caixaInfo.cliente_reservado_nome ? `Cliente: ${caixaInfo.cliente_reservado_nome}` : ''}
+                          {caixaInfo.pedido_reservado_codigo ? ` • ${caixaInfo.pedido_reservado_codigo}` : ''}
+                          {caixaInfo.romaneio_reservado_codigo ? ` • ${caixaInfo.romaneio_reservado_codigo}` : ''}
+                        </div>
+                      )}
                       {caixaInfo.palete_codigo && (
                         <div className="text-xs font-bold" style={{ color: 'var(--primary)' }}>
                           Palete: {caixaInfo.palete_codigo}
@@ -189,6 +204,12 @@ export function Rastreabilidade() {
                   <div>
                     <div className="text-xs text-muted font-bold uppercase">Validade</div>
                     <div className="font-bold">{fmtDataBR(caixaInfo.validade)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted font-bold uppercase">Qtd. Peças</div>
+                    <div className="font-mono font-bold" style={{ fontSize: 15, color: 'var(--text-primary)' }}>
+                      {caixaInfo.qtd_pecas != null ? `${caixaInfo.qtd_pecas} pç` : '-'}
+                    </div>
                   </div>
                   <div>
                     <div className="text-xs text-muted font-bold uppercase">Peso Bruto</div>
@@ -252,11 +273,16 @@ export function Rastreabilidade() {
                                 <ArrowUpRight size={14} color="#2dd4bf" />
                               </div>
                               <div className="text-xs text-muted" style={{ marginTop: 4 }}>
-                                Bruto: {fmtKg2(f.peso_bruto_kg)} • Tara: {fmtKg3(f.tara_kg)} • Líq: <strong>{fmtKg2(f.peso_liquido_kg)}</strong>
+                                {f.qtd_pecas != null ? `${f.qtd_pecas} pç • ` : ''}Bruto: {fmtKg2(f.peso_bruto_kg)} • Tara: {fmtKg3(f.tara_kg)} • Líq: <strong>{fmtKg2(f.peso_liquido_kg)}</strong>
                               </div>
                               <div className="text-xs text-muted">
                                 Lote: {f.lote || '-'} • Val: {fmtDataBR(f.validade)} • {f.destino_status || 'DISPONIVEL'}
                               </div>
+                              {(Number(f.perda_pecas || 0) > 0 || f.motivo_diferenca_pecas) && (
+                                <div className="text-xs" style={{ color: '#fbbf24', marginTop: 2 }}>
+                                  Diferença peças: {f.perda_pecas || 0} pç {f.motivo_diferenca_pecas ? `(${f.motivo_diferenca_pecas})` : ''}
+                                </div>
+                              )}
                             </button>
                           ))}
                         </div>

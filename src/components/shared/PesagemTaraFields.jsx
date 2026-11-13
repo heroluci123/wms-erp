@@ -21,6 +21,8 @@ export default function PesagemTaraFields({
   validadeBloqueada = false,
   dataProducaoBloqueada = false,
   ocultarDatas = false,
+  mostrarQtdPecas = true,
+  qtdPecasObrigatorio = true,
   compact = false,
   pesoBrutoRef = null,
   onEnterPesoBruto = null,
@@ -39,6 +41,8 @@ export default function PesagemTaraFields({
     if (!Number.isFinite(brutoNum)) return NaN
     return calcularPesoLiquido(brutoNum, taraKgAtual)
   }, [brutoNum, taraKgAtual])
+  const pecasNum = parseNumero(value.qtd_pecas)
+  const pecasVal = Number.isFinite(pecasNum) && pecasNum > 0 ? Math.trunc(pecasNum) : null
 
   const emitChange = (patch) => {
     const next = {
@@ -51,6 +55,8 @@ export default function PesagemTaraFields({
     const nextBruto = parseNumero(next.peso_bruto)
     const nextLiquido = Number.isFinite(nextBruto) ? calcularPesoLiquido(nextBruto, nextTaraKg) : NaN
     const nextLote = gerarLotePorData(next.data_producao)
+    const nextPecasRaw = parseNumero(next.qtd_pecas)
+    const nextPecas = Number.isFinite(nextPecasRaw) && nextPecasRaw > 0 ? Math.trunc(nextPecasRaw) : null
 
     onChange?.(next, {
       tara: nextTara,
@@ -58,6 +64,7 @@ export default function PesagemTaraFields({
       peso_bruto_kg: nextBruto,
       peso_liquido_kg: nextLiquido,
       lote: nextLote,
+      qtd_pecas: nextPecas,
     })
   }
 
@@ -133,6 +140,39 @@ export default function PesagemTaraFields({
                 opacity: validadeBloqueada ? 0.78 : 1,
                 cursor: validadeBloqueada ? 'not-allowed' : 'text',
               }}
+            />
+          </div>
+        )}
+
+        {mostrarQtdPecas && (
+          <div>
+            <label style={{
+              display: 'block', fontSize: 12, fontWeight: 600,
+              color: 'var(--text-secondary)', marginBottom: 5,
+            }}>
+              Qtd. de Peças {qtdPecasObrigatorio ? '*' : ''}
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              className="form-input"
+              placeholder="Ex: 6"
+              value={value.qtd_pecas ?? ''}
+              onChange={e => {
+                const digitsOnly = String(e.target.value || '').replace(/[^\d]/g, '')
+                emitChange({ qtd_pecas: digitsOnly })
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (Number.isFinite(pesoLiquido) && pesoLiquido > 0 && onEnterPesoBruto) {
+                    onEnterPesoBruto()
+                  } else if (pesoBrutoRef?.current) {
+                    pesoBrutoRef.current.focus()
+                  }
+                }
+              }}
+              style={{ width: '100%', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
             />
           </div>
         )}
@@ -215,6 +255,11 @@ export default function PesagemTaraFields({
           {loteGerado && (
             <span style={{ color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>
               <strong>Lote Auto:</strong> {loteGerado}
+            </span>
+          )}
+          {mostrarQtdPecas && (
+            <span style={{ color: pecasVal ? '#facc15' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              <strong>Peças:</strong> {pecasVal ? `${pecasVal} pç` : '--'}
             </span>
           )}
         </div>

@@ -16,13 +16,15 @@ import {
   ClipboardList,
   ShieldAlert,
   CheckSquare,
-  Search
+  Search,
+  Tag
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
 import * as producaoQueries from '../queries/producao.js'
 import * as saidaQueries from '../queries/saida.js'
 import { RomaneioEmbarquePrint } from '../components/shared/RomaneioEmbarquePrint'
+import { EtiquetaReservaZebraModal } from '../components/shared/EtiquetaZebraPrint'
 
 const fmtKg = (v) => `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
 const fmtData = (d) => {
@@ -81,8 +83,41 @@ export function Saida() {
   const [dataFim, setDataFim] = useState('')
   const [previsaoFiltro, setPrevisaoFiltro] = useState('')
 
-  // Modal de impressão do Romaneio de Embarque
+  // Modal de impressão do Romaneio de Embarque & Etiquetas RESERVADO em lote
   const [printRomaneio, setPrintRomaneio] = useState(null)
+  const [autoPrintReserva, setAutoPrintReserva] = useState(() => {
+    try { return localStorage.getItem('wms_autoprint_reserva') !== '0' } catch { return true }
+  })
+  const [etiquetasReservaModal, setEtiquetasReservaModal] = useState({
+    open: false,
+    etiquetas: [],
+    autoPrint: false,
+    titulo: '',
+    subtitulo: '',
+  })
+
+  const toggleAutoPrintReserva = (checked) => {
+    setAutoPrintReserva(checked)
+    try { localStorage.setItem('wms_autoprint_reserva', checked ? '1' : '0') } catch (_) {}
+  }
+
+  const handleAbrirEtiquetasReserva = async (romaneioId, autoPrint = false) => {
+    try {
+      const res = await saidaQueries.listarEtiquetasReservaRomaneio(romaneioId)
+      if (!res.success || !res.etiquetas?.length) {
+        return toastWarning(res.error || 'Nenhuma caixa encontrada para emitir etiquetas RESERVADO.')
+      }
+      setEtiquetasReservaModal({
+        open: true,
+        etiquetas: res.etiquetas,
+        autoPrint,
+        titulo: `Etiquetas RESERVADO (100×70mm) — ${res.romaneio?.romaneio_codigo || ''}`,
+        subtitulo: `Cliente: ${res.cliente_nome || '-'}${res.romaneio?.pedido_codigo ? ` • Pedido ${res.romaneio.pedido_codigo}` : ''}`,
+      })
+    } catch (err) {
+      toastError('Erro ao gerar etiquetas RESERVADO: ' + err.message)
+    }
+  }
 
   const carregarFilaSeparacao = async () => {
     setLoading(true)
@@ -298,10 +333,22 @@ export function Saida() {
     try {
       const res = await saidaQueries.finalizarMontagem(romaneioAtual.id)
       if (!res.success) return toastError(res.error)
-      const detFinalizado = await saidaQueries.detalhesRomaneio(romaneioAtual.id)
+      const [detFinalizado, resEtq] = await Promise.all([
+        saidaQueries.detalhesRomaneio(romaneioAtual.id),
+        autoPrintReserva ? saidaQueries.listarEtiquetasReservaRomaneio(romaneioAtual.id) : Promise.resolve(null),
+      ])
       setUltimoFinalizado(detFinalizado)
       setRomaneioAtual(null)
-      toastSuccess(`Separação ${detFinalizado.codigo} finalizada! Enviada para Conferência & Expedição e liberada para impressão do Romaneio.`)
+      toastSuccess(`Separação ${detFinalizado.codigo} finalizada! Caixas marcadas como RESERVADA (${detFinalizado.itens?.length || 0} cx).`)
+      if (autoPrintReserva && resEtq?.success && resEtq.etiquetas?.length > 0) {
+        setEtiquetasReservaModal({
+          open: true,
+          etiquetas: resEtq.etiquetas,
+          autoPrint: true,
+          titulo: `Etiquetas RESERVADO (100×70mm) — ${resEtq.romaneio?.romaneio_codigo || detFinalizado.codigo}`,
+          subtitulo: `Cliente: ${resEtq.cliente_nome || '-'}${resEtq.romaneio?.pedido_codigo ? ` • Pedido ${resEtq.romaneio.pedido_codigo}` : ''}`,
+        })
+      }
       await carregarFilaSeparacao()
     } catch (err) {
       toastError(err.message)
@@ -523,7 +570,14 @@ export function Saida() {
                   {ultimoFinalizado.itens?.length || 0} cx | {fmtKg((ultimoFinalizado.itens || []).reduce((s, i) => s + Number(i.peso_kg || 0), 0))})
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn--warning"
+                  onClick={() => handleAbrirEtiquetasReserva(ultimoFinalizado.id, true)}
+                >
+                  <Tag size={16} /> Imprimir Etiquetas Reservado ({ultimoFinalizado.itens?.length || 0} cx)
+                </button>
                 <button
                   type="button"
                   className="btn btn--primary"
@@ -728,7 +782,37 @@ export function Saida() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '12px',
+                    padding: '6px 10px',
+                    borderRadius: '8px',
+                    background: 'rgba(15, 23, 42, 0.55)',
+                    border: '1px solid var(--border)',
+                    cursor: 'pointer',
+                    color: autoPrintReserva ? '#fbbf24' : 'var(--text-secondary)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoPrintReserva}
+                    onChange={(e) => toggleAutoPrintReserva(e.target.checked)}
+                  />
+                  <span>Imprimir etiquetas RESERVADO ao finalizar</span>
+                </label>
+                {romaneioAtual.itens?.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn--warning"
+                    onClick={() => handleAbrirEtiquetasReserva(romaneioAtual.id, false)}
+                  >
+                    <Tag size={15} /> Etiquetas Reservado ({romaneioAtual.itens.length} cx)
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn--secondary"
@@ -1002,6 +1086,13 @@ export function Saida() {
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
+                    className="btn btn--warning"
+                    onClick={() => handleAbrirEtiquetasReserva(romaneioConfAtual.id, false)}
+                  >
+                    <Tag size={16} /> Etiquetas Reservado ({romaneioConfAtual.conferenciasSummary?.totalCaixas || romaneioConfAtual.itens?.length || 0})
+                  </button>
+                  <button
+                    type="button"
                     className="btn btn--secondary"
                     onClick={() => handleAbrirRomaneioImpressao(romaneioConfAtual.id)}
                   >
@@ -1251,6 +1342,14 @@ export function Saida() {
                               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                                 <button
                                   type="button"
+                                  className="btn btn--secondary btn--sm"
+                                  title="Visualizar/Reimprimir Etiquetas Reservado (100x70mm)"
+                                  onClick={() => handleAbrirEtiquetasReserva(rom.id, false)}
+                                >
+                                  <Tag size={14} /> Etiquetas
+                                </button>
+                                <button
+                                  type="button"
                                   className="btn btn--primary btn--sm"
                                   onClick={() => handleAbrirRomaneioImpressao(rom.id)}
                                 >
@@ -1423,6 +1522,23 @@ export function Saida() {
       {printRomaneio && (
         <RomaneioEmbarquePrint romaneio={printRomaneio} onClose={() => setPrintRomaneio(null)} />
       )}
+
+      <EtiquetaReservaZebraModal
+        isOpen={etiquetasReservaModal.open}
+        etiquetas={etiquetasReservaModal.etiquetas}
+        autoPrint={etiquetasReservaModal.autoPrint}
+        titulo={etiquetasReservaModal.titulo}
+        subtitulo={etiquetasReservaModal.subtitulo}
+        onClose={() =>
+          setEtiquetasReservaModal({
+            open: false,
+            etiquetas: [],
+            autoPrint: false,
+            titulo: '',
+            subtitulo: '',
+          })
+        }
+      />
     </div>
   )
 }

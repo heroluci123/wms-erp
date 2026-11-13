@@ -71,13 +71,17 @@ export function EstoqueEnderecos() {
           validade: cx.validade,
           palete_codigo: cx.palete_codigo,
           ean_caixa: cx.ean_caixa,
+          qtd_pecas: cx.qtd_pecas,
           peso_kg: cx.peso_kg,
           qtd_caixas: 1,
           valor_unitario: cx.valor_unitario,
           produto_id: cx.produto_id,
           tipo_armazenamento: cx.tipo_armazenamento || posMatch?.tipo_armazenamento || 'SECO',
           updated_at: cx.updated_at,
-          status_caixa: cx.status  // DISPONIVEL | RESERVADA | BLOQUEADO
+          status_caixa: cx.status,  // DISPONIVEL | RESERVADA | BLOQUEADO
+          cliente_reservado_nome: cx.cliente_reservado_nome,
+          pedido_reservado_codigo: cx.pedido_reservado_codigo,
+          romaneio_reservado_codigo: cx.romaneio_reservado_codigo,
         })
         // Marcar a COMBINAÇÃO produto+endereço como coberta (não apenas uma linha específica).
         // Isso garante que todas as linhas de estoque_posicao desse produto neste endereço
@@ -306,6 +310,7 @@ export function EstoqueEnderecos() {
                   <th>EAN Caixa</th>
                   <th>Últ. Mov.</th>
                   <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Peças</th>
                   <th style={{ textAlign: 'right' }}>Caixas</th>
                   <th style={{ textAlign: 'right' }}>KG</th>
                   {isExecutivo && <th style={{ textAlign: 'right' }}>Valor Total</th>}
@@ -313,9 +318,9 @@ export function EstoqueEnderecos() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={isExecutivo ? 14 : 13} className="text-center text-muted py-24">Carregando...</td></tr>
+                  <tr><td colSpan={isExecutivo ? 15 : 14} className="text-center text-muted py-24">Carregando...</td></tr>
                 ) : estoqueFiltrado.length === 0 ? (
-                  <tr><td colSpan={isExecutivo ? 14 : 13} className="text-center text-muted py-24">Nenhuma caixa encontrada.</td></tr>
+                  <tr><td colSpan={isExecutivo ? 15 : 14} className="text-center text-muted py-24">Nenhuma caixa encontrada.</td></tr>
                 ) : (
                   estoqueFiltrado.map((item) => (
                     <tr key={item.id}>
@@ -341,15 +346,25 @@ export function EstoqueEnderecos() {
                           const s = item.status_caixa
                           const cfg = {
                             DISPONIVEL: { label: 'Disponível', color: 'var(--success)', bg: 'rgba(16,185,129,0.12)' },
-                            RESERVADA:  { label: 'Reservada',  color: 'var(--primary)', bg: 'rgba(99,102,241,0.15)' },
+                            RESERVADA:  { label: 'RESERVADO',  color: '#fbbf24',        bg: 'rgba(245,158,11,0.16)' },
                             BLOQUEADO:  { label: 'Bloqueada',  color: 'var(--danger)',  bg: 'rgba(239,68,68,0.12)' },
                           }[s] || { label: s || '—', color: 'var(--text-muted)', bg: 'transparent' }
                           return (
-                            <span style={{ fontSize: 9, fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 6px', borderRadius: 5 }}>
-                              {cfg.label}
-                            </span>
+                            <div>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 6px', borderRadius: 5 }}>
+                                {cfg.label}
+                              </span>
+                              {s === 'RESERVADA' && item.cliente_reservado_nome && (
+                                <div style={{ fontSize: 9.5, color: '#fbbf24', marginTop: 2, fontWeight: 600 }}>
+                                  {item.cliente_reservado_nome}{item.pedido_reservado_codigo ? ` (${item.pedido_reservado_codigo})` : ''}
+                                </div>
+                              )}
+                            </div>
                           )
                         })()}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                        {item.qtd_pecas != null ? `${item.qtd_pecas} pç` : '—'}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--cyan)' }}>{item.qtd_caixas}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-secondary)' }}>{parseFloat(item.peso_kg || 0).toFixed(3)}</td>

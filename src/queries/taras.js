@@ -116,14 +116,25 @@ export async function ensureRastreabilidadeSchema(force = false) {
     await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN ean_origem TEXT DEFAULT NULL`)
     await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN op_id INTEGER DEFAULT NULL`)
     await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN operador_cadastro_nome TEXT DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN qtd_pecas INTEGER DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN pedido_reservado_id INTEGER DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN pedido_reservado_codigo TEXT DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN romaneio_reservado_id INTEGER DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN romaneio_reservado_codigo TEXT DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN cliente_reservado_nome TEXT DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE estoque_caixas ADD COLUMN reservado_em DATETIME DEFAULT NULL`)
     await tryDDL(`CREATE INDEX IF NOT EXISTS idx_estoque_caixas_op ON estoque_caixas(op_id)`)
     await tryDDL(`CREATE INDEX IF NOT EXISTS idx_estoque_caixas_ean_origem ON estoque_caixas(ean_origem)`)
+    await tryDDL(`CREATE INDEX IF NOT EXISTS idx_estoque_caixas_ean ON estoque_caixas(ean_caixa)`)
+    await tryDDL(`CREATE INDEX IF NOT EXISTS idx_estoque_caixas_status_prod ON estoque_caixas(status, produto_id)`)
+    await tryDDL(`CREATE INDEX IF NOT EXISTS idx_estoque_caixas_pedido_res ON estoque_caixas(pedido_reservado_id)`)
 
-    // 6. Novas colunas em op_insumos e op_retornos
+    // 6. Novas colunas em op_insumos, op_retornos e op_itens_previstos
     await tryDDL(`ALTER TABLE op_insumos ADD COLUMN peso_bruto_kg REAL DEFAULT NULL`)
     await tryDDL(`ALTER TABLE op_insumos ADD COLUMN tara_kg REAL DEFAULT 0`)
     await tryDDL(`ALTER TABLE op_insumos ADD COLUMN data_producao DATE DEFAULT NULL`)
     await tryDDL(`ALTER TABLE op_insumos ADD COLUMN lote TEXT DEFAULT ''`)
+    await tryDDL(`ALTER TABLE op_insumos ADD COLUMN qtd_pecas INTEGER DEFAULT NULL`)
 
     await tryDDL(`ALTER TABLE op_retornos ADD COLUMN peso_bruto_kg REAL DEFAULT NULL`)
     await tryDDL(`ALTER TABLE op_retornos ADD COLUMN tara_id INTEGER DEFAULT NULL`)
@@ -131,8 +142,15 @@ export async function ensureRastreabilidadeSchema(force = false) {
     await tryDDL(`ALTER TABLE op_retornos ADD COLUMN data_producao DATE DEFAULT NULL`)
     await tryDDL(`ALTER TABLE op_retornos ADD COLUMN validade DATE DEFAULT NULL`)
     await tryDDL(`ALTER TABLE op_retornos ADD COLUMN lote TEXT DEFAULT ''`)
+    await tryDDL(`ALTER TABLE op_retornos ADD COLUMN qtd_pecas INTEGER DEFAULT NULL`)
 
-    // 7. Novas colunas em ordens_producao
+    await tryDDL(`ALTER TABLE op_itens_previstos ADD COLUMN unidade_prevista TEXT DEFAULT 'KG'`)
+
+    // 7. Novas colunas em desmembramentos_vinculos e ordens_producao
+    await tryDDL(`ALTER TABLE desmembramentos_vinculos ADD COLUMN qtd_pecas INTEGER DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE desmembramentos_vinculos ADD COLUMN perda_pecas INTEGER DEFAULT 0`)
+    await tryDDL(`ALTER TABLE desmembramentos_vinculos ADD COLUMN motivo_diferenca_pecas TEXT DEFAULT ''`)
+
     await tryDDL(`ALTER TABLE ordens_producao ADD COLUMN observacoes TEXT DEFAULT ''`)
     await tryDDL(`ALTER TABLE ordens_producao ADD COLUMN criado_por_id INTEGER DEFAULT NULL`)
     await tryDDL(`ALTER TABLE ordens_producao ADD COLUMN criado_por_nome TEXT DEFAULT NULL`)
@@ -143,6 +161,7 @@ export async function ensureRastreabilidadeSchema(force = false) {
     await tryDDL(`ALTER TABLE inventario_itens ADD COLUMN tara_id INTEGER DEFAULT NULL`)
     await tryDDL(`ALTER TABLE inventario_itens ADD COLUMN tara_kg REAL DEFAULT 0`)
     await tryDDL(`ALTER TABLE inventario_itens ADD COLUMN data_producao_contada DATE DEFAULT NULL`)
+    await tryDDL(`ALTER TABLE inventario_itens ADD COLUMN qtd_pecas_contada INTEGER DEFAULT NULL`)
   })().catch((err) => {
     _schemaReadyPromise = null
     throw err
@@ -342,9 +361,15 @@ export const tarasQueries = {
           ec.peso_bruto_kg,
           ec.tara_kg,
           ec.peso_kg,
+          ec.qtd_pecas,
           ec.origem_tipo,
           ec.ean_origem,
           ec.status,
+          ec.pedido_reservado_id,
+          ec.pedido_reservado_codigo,
+          ec.romaneio_reservado_id,
+          ec.romaneio_reservado_codigo,
+          ec.cliente_reservado_nome,
           ec.created_at,
           p.codigo AS produto_codigo,
           p.descricao AS produto_descricao,

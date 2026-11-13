@@ -71,7 +71,7 @@ export function calcularPesoLiquido(pesoBruto, taraKg = 0) {
 }
 
 /**
- * Valida o conjunto completo de pesagem obrigatória por Tara e gera lote DDMMYY.
+ * Valida o conjunto completo de pesagem obrigatória por Tara e Quantidade de Peças e gera lote DDMMYY.
  */
 export function validarPesagemTara({
   dataProducao,
@@ -79,9 +79,11 @@ export function validarPesagemTara({
   taraId,
   taraKg,
   pesoBruto,
+  qtdPecas,
   exigirDataProducao = true,
   exigirValidade = true,
   exigirTara = true,
+  exigirQtdPecas = true,
 }) {
   const dataProdIso = normalizarDataIso(dataProducao)
   if (exigirDataProducao && !dataProdIso) {
@@ -117,6 +119,13 @@ export function validarPesagemTara({
     }
   }
 
+  const pecasNum = parseNumero(qtdPecas)
+  const pecasInt = Number.isFinite(pecasNum) ? Math.trunc(pecasNum) : NaN
+  if (exigirQtdPecas && (!Number.isFinite(pecasNum) || pecasInt <= 0 || pecasInt !== pecasNum)) {
+    return { ok: false, erro: 'Informe a Quantidade de Peças (número inteiro maior que zero).' }
+  }
+  const qtdPecasFinal = Number.isFinite(pecasInt) && pecasInt > 0 ? pecasInt : null
+
   const lote = gerarLotePorData(dataProdIso)
 
   return {
@@ -129,6 +138,7 @@ export function validarPesagemTara({
     tara_kg: taraFinal,
     peso_bruto_kg: brutoFinal,
     peso_liquido_kg: liquidoFinal,
+    qtd_pecas: qtdPecasFinal,
   }
 }
 
