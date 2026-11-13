@@ -304,13 +304,31 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
             line-height: 1.25 !important;
           }
 
+          .print-wms-executive,
+          .print-wms-executive * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
+
           .pw-header {
             display: flex !important;
             justify-content: space-between !important;
-            align-items: flex-start !important;
-            border-bottom: 2.5px solid #0f172a !important;
-            padding-bottom: 6px !important;
-            margin-bottom: 8px !important;
+            align-items: center !important;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%) !important;
+            color: #ffffff !important;
+            border-bottom: 3.5px solid #0ea5e9 !important;
+            border-radius: 6px !important;
+            padding: 10px 14px !important;
+            margin-bottom: 10px !important;
+          }
+
+          .pw-header div {
+            color: #f8fafc !important;
+          }
+
+          .pw-header > div > div:nth-child(2) {
+            color: #bae6fd !important;
           }
 
           .pw-brand-title {
@@ -346,13 +364,48 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
           .pw-kpi-strip {
             display: grid !important;
             grid-template-columns: repeat(4, 1fr) !important;
-            gap: 6px !important;
-            margin-bottom: 12px !important;
-            background: #f8fafc !important;
-            border: 1px solid #cbd5e1 !important;
-            padding: 6px 8px !important;
-            border-radius: 4px !important;
+            gap: 8px !important;
+            margin-bottom: 14px !important;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
           }
+
+          .pw-kpi-strip > * {
+            border-radius: 6px !important;
+            padding: 7px 10px !important;
+            border: 1px solid #cbd5e1 !important;
+            border-top: 3.5px solid #1e3a8a !important;
+            background: #f8fafc !important;
+          }
+
+          .pw-kpi-strip > *:nth-child(1) {
+            background: #ecfdf5 !important;
+            border-color: #a7f3d0 !important;
+            border-top-color: #059669 !important;
+          }
+          .pw-kpi-strip > *:nth-child(1) * { color: #065f46 !important; }
+
+          .pw-kpi-strip > *:nth-child(2) {
+            background: #eff6ff !important;
+            border-color: #bfdbfe !important;
+            border-top-color: #2563eb !important;
+          }
+          .pw-kpi-strip > *:nth-child(2) * { color: #1e3a8a !important; }
+
+          .pw-kpi-strip > *:nth-child(3) {
+            background: #f5f3ff !important;
+            border-color: #ddd6fe !important;
+            border-top-color: #7c3aed !important;
+          }
+          .pw-kpi-strip > *:nth-child(3) * { color: #4c1d95 !important; }
+
+          .pw-kpi-strip > *:nth-child(4) {
+            background: #ecfeff !important;
+            border-color: #a5f3fc !important;
+            border-top-color: #0891b2 !important;
+          }
+          .pw-kpi-strip > *:nth-child(4) * { color: #155e75 !important; }
 
           .pw-kpi-box {
             border-right: 1px solid #e2e8f0 !important;
@@ -382,24 +435,79 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
           }
 
           .pw-major-section {
-            margin-bottom: 14px !important;
+            margin-top: 14px !important;
+            margin-bottom: 18px !important;
+            padding: 8px 9px 10px !important;
+            border: 1.5px solid #a7f3d0 !important;
+            border-radius: 7px !important;
+            background: #ffffff !important;
           }
 
           .pw-major-header {
-            background: #0f172a !important;
+            background: linear-gradient(90deg, #065f46 0%, #059669 100%) !important;
             color: #ffffff !important;
-            padding: 5px 10px !important;
+            padding: 6px 11px !important;
             font-size: 10px !important;
             font-weight: 800 !important;
             text-transform: uppercase !important;
-            letter-spacing: 0.3px !important;
+            letter-spacing: 0.35px !important;
             display: flex !important;
             justify-content: space-between !important;
             align-items: center !important;
             gap: 12px !important;
             white-space: nowrap !important;
-            border-radius: 3px !important;
-            margin-bottom: 8px !important;
+            border-radius: 4px !important;
+            border-left: 4px solid #34d399 !important;
+            margin-bottom: 9px !important;
+          }
+
+          .pw-major-header * {
+            color: #ffffff !important;
+          }
+
+          /* Módulo 2 — Entradas (Azul Royal) */
+          .pw-major-section ~ .pw-major-section {
+            border-color: #bfdbfe !important;
+          }
+          .pw-major-section ~ .pw-major-section .pw-major-header {
+            background: linear-gradient(90deg, #1e3a8a 0%, #2563eb 100%) !important;
+            border-left-color: #60a5fa !important;
+          }
+          .pw-major-section ~ .pw-major-section table thead th {
+            background: #eff6ff !important;
+            color: #1e3a8a !important;
+            border-bottom: 1.5px solid #93c5fd !important;
+          }
+          .pw-major-section ~ .pw-major-section table tbody tr:nth-child(even) td {
+            background: #f8fafc !important;
+          }
+
+          /* Módulo 3 — Estoque Consolidado por Produto (Roxo / Índigo) */
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section {
+            border-color: #ddd6fe !important;
+          }
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-major-header {
+            background: linear-gradient(90deg, #4c1d95 0%, #7c3aed 100%) !important;
+            border-left-color: #a78bfa !important;
+          }
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section table thead th {
+            background: #f5f3ff !important;
+            color: #4c1d95 !important;
+            border-bottom: 1.5px solid #c4b5fd !important;
+          }
+
+          /* Módulo 4 — Estoque Analítico Caixa a Caixa (Ciano / Petróleo) */
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section {
+            border-color: #a5f3fc !important;
+          }
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-major-header {
+            background: linear-gradient(90deg, #155e75 0%, #0891b2 100%) !important;
+            border-left-color: #22d3ee !important;
+          }
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section table thead th {
+            background: #ecfeff !important;
+            color: #155e75 !important;
+            border-bottom: 1.5px solid #67e8f9 !important;
           }
 
           .pw-table tfoot {
@@ -489,21 +597,61 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
           }
 
           .pw-tfoot-rom td {
-            background: #dcfce7 !important;
+            background: #d1fae5 !important;
             color: #065f46 !important;
             border-top: 1.5px solid #059669 !important;
-            padding: 4.5px 6px !important;
+            padding: 5px 6px !important;
             font-size: 9px !important;
             font-weight: 900 !important;
           }
 
           .pw-tfoot-general td {
-            background: #e2e8f0 !important;
-            color: #0f172a !important;
-            border-top: 1.5px solid #0f172a !important;
-            padding: 5px 6px !important;
+            background: #dbeafe !important;
+            color: #1e3a8a !important;
+            border-top: 1.5px solid #2563eb !important;
+            padding: 5.5px 6px !important;
             font-size: 9px !important;
             font-weight: 900 !important;
+          }
+
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-tfoot-general td {
+            background: #ede9fe !important;
+            color: #4c1d95 !important;
+            border-top-color: #7c3aed !important;
+          }
+
+          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-tfoot-general td {
+            background: #cffafe !important;
+            color: #155e75 !important;
+            border-top-color: #0891b2 !important;
+          }
+
+          .pw-rom-card {
+            border: 1px solid #99f6e4 !important;
+            border-left: 3.5px solid #059669 !important;
+            border-radius: 5px !important;
+            margin-bottom: 10px !important;
+            overflow: hidden !important;
+          }
+
+          .pw-rom-card table thead th {
+            background: #ecfdf5 !important;
+            color: #065f46 !important;
+            border-bottom: 1.5px solid #6ee7b7 !important;
+          }
+
+          .pw-rom-card table tbody tr:nth-child(even) td {
+            background: #f8fafc !important;
+          }
+
+          .pw-rom-card > div:first-child {
+            background: #ecfdf5 !important;
+            border-bottom: 1.5px solid #6ee7b7 !important;
+            padding: 5px 8px !important;
+          }
+
+          .pw-rom-card > div:first-child * {
+            color: #065f46 !important;
           }
 
           .pw-sub-title {

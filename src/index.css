@@ -490,6 +490,18 @@ select.form-input option {
   color: var(--text-primary);
 }
 
+/* Remove setinhas nativas (spinners) dos inputs numéricos em todos os navegadores */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .form-hint { font-size: 11px; color: var(--text-muted); }
 
 /* ─── Search Box wrapper (ícone + input) ────────────────────────────────────── */

@@ -188,6 +188,51 @@ export async function liberarOP(op_id) {
   return { success: true }
 }
 
+export async function listarProdutosComSaldoOP() {
+  await assertPermissao(
+    ['producao_criar_op', 'retorno_producao', 'producao_entrada', 'producao_saida'],
+    { write: false, bloquearCliente: true }
+  )
+  await ensureRastreabilidadeSchema()
+
+  const res = await db.execute(`
+    SELECT
+      p.*,
+      COALESCE(ec.saldo_kg, 0) AS saldo_kg,
+      COALESCE(ec.qtd_caixas, 0) AS qtd_caixas,
+      COALESCE(ec.peso_medio_disp, hist.peso_medio_hist, 0) AS peso_medio_cx
+    FROM produtos p
+    LEFT JOIN (
+      SELECT
+        produto_id,
+        COALESCE(SUM(peso_kg), 0) AS saldo_kg,
+        COUNT(*) AS qtd_caixas,
+        AVG(peso_kg) AS peso_medio_disp
+      FROM estoque_caixas
+      WHERE status = 'DISPONIVEL'
+      GROUP BY produto_id
+    ) ec ON ec.produto_id = p.id
+    LEFT JOIN (
+      SELECT
+        produto_id,
+        AVG(peso_kg) AS peso_medio_hist
+      FROM estoque_caixas
+      WHERE peso_kg > 0
+      GROUP BY produto_id
+    ) hist ON hist.produto_id = p.id
+    ORDER BY
+      CASE WHEN COALESCE(ec.saldo_kg, 0) > 0 OR COALESCE(ec.qtd_caixas, 0) > 0 THEN 0 ELSE 1 END ASC,
+      p.descricao ASC
+  `)
+
+  return res.rows.map(r => ({
+    ...r,
+    saldo_kg: Number(r.saldo_kg || 0),
+    qtd_caixas: Number(r.qtd_caixas || 0),
+    peso_medio_cx: Number(r.peso_medio_cx || 0),
+  }))
+}
+
 export async function detalhesOP(op_id) {
   await assertPermissao(['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op', 'relatorios_producao'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()

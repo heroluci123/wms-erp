@@ -39,20 +39,57 @@ function OpStatusBadge({ status }) {
   )
 }
 
-function SeletorProdutoInline({ produtos, placeholder, onSelect }) {
+const normBuscaProd = (str) =>
+  String(str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+const temSaldoPositivoProd = (p) =>
+  Number(p?.saldo_kg || 0) > 0 || Number(p?.qtd_caixas || 0) > 0
+
+function SeletorProdutoInline({
+  produtos,
+  placeholder,
+  onSelect,
+  mostrarSaldo = false,
+  priorizarComSaldo = false,
+}) {
   const [busca, setBusca] = useState('')
   const [aberto, setAberto] = useState(false)
+  const [idxFocado, setIdxFocado] = useState(0)
 
   const filtrados = useMemo(() => {
-    const q = busca.trim().toLowerCase()
-    if (!q) return produtos.slice(0, 12)
-    return produtos
-      .filter(p =>
-        String(p.codigo || '').toLowerCase().includes(q) ||
-        String(p.descricao || '').toLowerCase().includes(q)
-      )
-      .slice(0, 20)
-  }, [busca, produtos])
+    const q = normBuscaProd(busca.trim())
+    const base = !q
+      ? [...produtos]
+      : produtos.filter(p =>
+          normBuscaProd(p.codigo).includes(q) ||
+          normBuscaProd(p.ean).includes(q) ||
+          normBuscaProd(p.descricao).includes(q)
+        )
+
+    base.sort((a, b) => {
+      if (priorizarComSaldo) {
+        const aSaldo = temSaldoPositivoProd(a) ? 0 : 1
+        const bSaldo = temSaldoPositivoProd(b) ? 0 : 1
+        if (aSaldo !== bSaldo) return aSaldo - bSaldo
+      }
+      if (q) {
+        const aCodExato = normBuscaProd(a.codigo) === q ? 0 : 1
+        const bCodExato = normBuscaProd(b.codigo) === q ? 0 : 1
+        if (aCodExato !== bCodExato) return aCodExato - bCodExato
+      }
+      return String(a.descricao || '').localeCompare(String(b.descricao || ''), 'pt-BR')
+    })
+
+    return base.slice(0, q ? 24 : 14)
+  }, [busca, produtos, priorizarComSaldo])
+
+  const selecionarItem = (p) => {
+    if (!p) return
+    onSelect(p)
+    setBusca('')
+    setAberto(false)
+    setIdxFocado(0)
+  }
 
   return (
     <div style={{ position: 'relative' }}>
@@ -62,9 +99,24 @@ function SeletorProdutoInline({ produtos, placeholder, onSelect }) {
           type="text"
           placeholder={placeholder || 'Digite código ou nome do produto...'}
           value={busca}
-          onFocus={() => setAberto(true)}
+          onFocus={() => { setAberto(true); setIdxFocado(0) }}
           onBlur={() => setTimeout(() => setAberto(false), 180)}
-          onChange={e => { setBusca(e.target.value); setAberto(true) }}
+          onChange={e => { setBusca(e.target.value); setAberto(true); setIdxFocado(0) }}
+          onKeyDown={e => {
+            if (!aberto || filtrados.length === 0) return
+            if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              setIdxFocado(i => Math.min(i + 1, filtrados.length - 1))
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              setIdxFocado(i => Math.max(i - 1, 0))
+            } else if (e.key === 'Enter') {
+              e.preventDefault()
+              selecionarItem(filtrados[idxFocado] || filtrados[0])
+            } else if (e.key === 'Escape') {
+              setAberto(false)
+            }
+          }}
         />
         {busca && (
           <button type="button" onClick={() => setBusca('')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
@@ -76,29 +128,261 @@ function SeletorProdutoInline({ produtos, placeholder, onSelect }) {
       {aberto && filtrados.length > 0 && (
         <div style={{
           position: 'absolute', left: 0, right: 0, top: 'calc(100% + 4px)', zIndex: 50,
-          background: 'var(--bg-2)', border: '1px solid var(--border-light)', borderRadius: 8,
-          maxHeight: 230, overflowY: 'auto', boxShadow: '0 14px 32px rgba(0,0,0,0.55)',
+          background: '#0f172a', border: '1px solid #334155', borderRadius: 10,
+          maxHeight: 260, overflowY: 'auto', boxShadow: '0 16px 36px rgba(0,0,0,0.65)',
         }}>
-          {filtrados.map(p => (
-            <button
-              key={p.id}
-              type="button"
-              onMouseDown={(e) => {
-                e.preventDefault()
-                onSelect(p)
-                setBusca('')
-                setAberto(false)
-              }}
+          {filtrados.map((p, idx) => {
+            const comSaldo = temSaldoPositivoProd(p)
+            const ativo = idx === idxFocado
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onMouseEnter={() => setIdxFocado(idx)}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  selecionarItem(p)
+                }}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '9px 12px',
+                  background: ativo ? 'rgba(59, 130, 246, 0.16)' : 'transparent',
+                  border: 'none',
+                  borderBottom: '1px solid rgba(148, 163, 184, 0.12)',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <span style={{
+                    background: 'rgba(59, 130, 246, 0.16)',
+                    color: '#60a5fa',
+                    padding: '2px 7px',
+                    borderRadius: 5,
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  }}>
+                    {p.codigo || '-'}
+                  </span>
+                  <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.descricao}
+                  </span>
+                </span>
+                {mostrarSaldo ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)', fontSize: 12, flexShrink: 0 }}>
+                    <strong style={{ color: comSaldo ? '#4ade80' : '#94a3b8' }}>
+                      {fmtKg2(p.saldo_kg || 0)}
+                    </strong>
+                    <span style={{ color: '#94a3b8', fontSize: 11 }}>
+                      ({Number(p.qtd_caixas || 0)} cx)
+                    </span>
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{p.tipo_produto || ''}</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const mapPrevistoParaForm = (i, produtos = []) => {
+  const prod = produtos.find(p => p.id === i.produto_id)
+  const peso = i.peso_kg_previsto != null && Number(i.peso_kg_previsto) > 0 ? Number(i.peso_kg_previsto) : ''
+  const cxs = i.qtd_caixas_prevista != null && Number(i.qtd_caixas_prevista) > 0 ? Number(i.qtd_caixas_prevista) : ''
+  const unidade = !peso && cxs ? 'CX' : 'KG'
+  return {
+    produto_id: i.produto_id,
+    codigo: i.produto_codigo ?? prod?.codigo ?? '',
+    descricao: i.produto_descricao ?? prod?.descricao ?? '',
+    unidade,
+    quantidade_input: unidade === 'CX' ? String(cxs) : (peso !== '' ? String(peso) : ''),
+    peso_kg_previsto: peso !== '' ? String(peso) : '',
+    qtd_caixas_prevista: cxs !== '' ? String(cxs) : '',
+    saldo_kg: Number(prod?.saldo_kg || 0),
+    saldo_caixas: Number(prod?.qtd_caixas || 0),
+    peso_medio_cx: Number(prod?.peso_medio_cx || 0),
+  }
+}
+
+function OpItemPrevistoRow({
+  item,
+  tipo,
+  mostrarSaldo = false,
+  onToggleUnidade,
+  onChangeQtd,
+  onRemover,
+}) {
+  const isEntrada = tipo === 'ENTRADA'
+  const accentColor = isEntrada ? '#f59e0b' : '#22c55e'
+  const comSaldo = Number(item.saldo_kg || 0) > 0 || Number(item.saldo_caixas || 0) > 0
+  const pesoPrevNum = Number(item.peso_kg_previsto || 0)
+  const cxPrevNum = Number(item.qtd_caixas_prevista || 0)
+  const acimaDoSaldo = mostrarSaldo && (
+    (item.unidade === 'KG' && pesoPrevNum > Number(item.saldo_kg || 0) && Number(item.saldo_kg || 0) >= 0 && pesoPrevNum > 0) ||
+    (item.unidade === 'CX' && cxPrevNum > Number(item.saldo_caixas || 0) && cxPrevNum > 0)
+  )
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        background: 'var(--bg-2)',
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid var(--border)',
+        borderLeft: `3px solid ${accentColor}`,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+            <span style={{
+              background: 'rgba(59, 130, 246, 0.16)',
+              color: '#60a5fa',
+              padding: '2px 7px',
+              borderRadius: 5,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              fontWeight: 700,
+            }}>
+              {item.codigo || '-'}
+            </span>
+            <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{item.descricao}</strong>
+          </div>
+
+          {mostrarSaldo && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4, fontSize: 11 }}>
+              <span style={{ color: comSaldo ? '#4ade80' : '#94a3b8', fontWeight: 600 }}>
+                Saldo: {fmtKg2(item.saldo_kg || 0)} ({Number(item.saldo_caixas || 0)} cx)
+              </span>
+              {Number(item.peso_medio_cx || 0) > 0 && (
+                <span style={{ color: 'var(--text-muted)' }}>
+                  • Média {fmtKg2(item.peso_medio_cx)}/cx
+                </span>
+              )}
+              {acimaDoSaldo && (
+                <span style={{ color: '#fbbf24', fontWeight: 700 }}>
+                  • Acima do saldo
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <div
+            role="group"
+            aria-label="Unidade prevista"
+            style={{
+              display: 'inline-flex',
+              background: '#0b1220',
+              border: '1px solid var(--border)',
+              borderRadius: 7,
+              padding: 2,
+              gap: 2,
+            }}
+          >
+            {['KG', 'CX'].map(u => {
+              const ativo = item.unidade === u
+              return (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => onToggleUnidade(u)}
+                  style={{
+                    padding: '4px 9px',
+                    borderRadius: 5,
+                    border: 'none',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: '0.03em',
+                    cursor: 'pointer',
+                    background: ativo ? (isEntrada ? '#d97706' : '#16a34a') : 'transparent',
+                    color: ativo ? '#ffffff' : 'var(--text-muted)',
+                  }}
+                >
+                  {u}
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={{ position: 'relative', width: 106 }}>
+            <input
+              type="text"
+              inputMode={item.unidade === 'CX' ? 'numeric' : 'decimal'}
+              className="form-input"
               style={{
-                width: '100%', textAlign: 'left', padding: '9px 12px',
-                background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)',
-                color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13,
+                width: '100%',
+                padding: '6px 28px 6px 10px',
+                fontSize: 13,
+                fontWeight: 700,
+                fontFamily: 'var(--font-mono)',
+                textAlign: 'right',
               }}
-            >
-              <span><strong>{p.codigo || '-'}</strong> — {p.descricao}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{p.tipo_produto || ''}</span>
-            </button>
-          ))}
+              placeholder="0"
+              value={item.quantidade_input}
+              onChange={e => onChangeQtd(e.target.value)}
+            />
+            <span style={{
+              position: 'absolute',
+              right: 8,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--text-muted)',
+              pointerEvents: 'none',
+            }}>
+              {item.unidade === 'CX' ? 'cx' : 'kg'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm text-danger"
+            onClick={onRemover}
+            title="Remover item"
+            style={{
+              width: 32,
+              height: 32,
+              padding: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 7,
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              background: 'rgba(239, 68, 68, 0.08)',
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+
+      {((item.unidade === 'KG' && pesoPrevNum > 0 && cxPrevNum > 0) ||
+        (item.unidade === 'CX' && cxPrevNum > 0 && (pesoPrevNum > 0 || !mostrarSaldo))) && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 2 }}>
+          {item.unidade === 'KG'
+            ? `Estimativa: ~${cxPrevNum} cx (com base na média de ${fmtKg2(item.peso_medio_cx)}/cx)`
+            : pesoPrevNum > 0
+              ? `Peso estimado: ~${fmtKg2(pesoPrevNum)} (${cxPrevNum} cx × ${fmtKg2(item.peso_medio_cx)})`
+              : `Previsão de ${cxPrevNum} caixa(s) — peso apurado na balança durante a produção`
+          }
         </div>
       )}
     </div>
@@ -162,7 +446,7 @@ export function Producao() {
       const [ativas, fechadas, prods, listaTaras] = await Promise.all([
         producaoQueries.listarOPs('ATIVAS'),
         producaoQueries.listarOPs('FECHADA'),
-        produtosQueries.listar(),
+        producaoQueries.listarProdutosComSaldoOP(),
         tarasQueries.listar(true),
       ])
       setOpsAtivas(isAdm ? ativas : ativas.filter(o => ['LIBERADA', 'ABERTA'].includes(o.status)))
@@ -237,20 +521,8 @@ export function Producao() {
       data_producao: det.data_producao || hojeIsoLocal(),
       observacoes: det.observacoes || '',
       liberarAgora: det.status !== 'RASCUNHO',
-      itensEntrada: (det.previstos_entrada || []).map(i => ({
-        produto_id: i.produto_id,
-        codigo: i.produto_codigo,
-        descricao: i.produto_descricao,
-        peso_kg_previsto: i.peso_kg_previsto ?? '',
-        qtd_caixas_prevista: i.qtd_caixas_prevista ?? '',
-      })),
-      itensSaida: (det.previstos_saida || []).map(i => ({
-        produto_id: i.produto_id,
-        codigo: i.produto_codigo,
-        descricao: i.produto_descricao,
-        peso_kg_previsto: i.peso_kg_previsto ?? '',
-        qtd_caixas_prevista: i.qtd_caixas_prevista ?? '',
-      })),
+      itensEntrada: (det.previstos_entrada || []).map(i => mapPrevistoParaForm(i, produtos)),
+      itensSaida: (det.previstos_saida || []).map(i => mapPrevistoParaForm(i, produtos)),
     })
     setOpSelecionada(null)
     setAbaPrincipal('config')
@@ -271,12 +543,83 @@ export function Producao() {
             produto_id: prod.id,
             codigo: prod.codigo || '',
             descricao: prod.descricao,
+            unidade: 'KG',
+            quantidade_input: '',
             peso_kg_previsto: '',
             qtd_caixas_prevista: '',
+            saldo_kg: Number(prod.saldo_kg || 0),
+            saldo_caixas: Number(prod.qtd_caixas || 0),
+            peso_medio_cx: Number(prod.peso_medio_cx || 0),
           },
         ],
       }
     })
+  }
+
+  const alterarQtdItemPrevisto = (tipoLista, idx, rawVal) => {
+    setOpForm(f => ({
+      ...f,
+      [tipoLista]: f[tipoLista].map((item, j) => {
+        if (j !== idx) return item
+        if (item.unidade === 'CX') {
+          const clean = String(rawVal || '').replace(/[^\d]/g, '')
+          const cxs = parseInt(clean, 10) || 0
+          const pesoEst = cxs > 0 && Number(item.peso_medio_cx || 0) > 0
+            ? String(Number((cxs * Number(item.peso_medio_cx)).toFixed(2)))
+            : ''
+          return {
+            ...item,
+            quantidade_input: clean,
+            qtd_caixas_prevista: cxs > 0 ? String(cxs) : '',
+            peso_kg_previsto: pesoEst,
+          }
+        }
+        const clean = String(rawVal || '').replace(/[^0-9.,]/g, '')
+        const num = parseFloat(clean.replace(',', '.')) || 0
+        const cxsEst = num > 0 && Number(item.peso_medio_cx || 0) > 0
+          ? String(Math.max(1, Math.round(num / Number(item.peso_medio_cx))))
+          : ''
+        return {
+          ...item,
+          quantidade_input: clean,
+          peso_kg_previsto: num > 0 ? String(Number(num.toFixed(2))) : '',
+          qtd_caixas_prevista: cxsEst,
+        }
+      }),
+    }))
+  }
+
+  const alternarUnidadeItemPrevisto = (tipoLista, idx, nextUnidade) => {
+    setOpForm(f => ({
+      ...f,
+      [tipoLista]: f[tipoLista].map((item, j) => {
+        if (j !== idx || item.unidade === nextUnidade) return item
+        const media = Number(item.peso_medio_cx || 0)
+        const curNum = parseFloat(String(item.quantidade_input || '').replace(',', '.')) || 0
+        if (curNum <= 0) {
+          return { ...item, unidade: nextUnidade, quantidade_input: '', peso_kg_previsto: '', qtd_caixas_prevista: '' }
+        }
+        if (nextUnidade === 'CX') {
+          const cxs = media > 0 ? Math.max(1, Math.round(curNum / media)) : Math.max(1, Math.round(curNum))
+          const pesoEst = media > 0 ? String(Number((cxs * media).toFixed(2))) : ''
+          return {
+            ...item,
+            unidade: 'CX',
+            quantidade_input: String(cxs),
+            qtd_caixas_prevista: String(cxs),
+            peso_kg_previsto: pesoEst,
+          }
+        }
+        const kg = media > 0 ? Number((curNum * media).toFixed(2)) : Number(curNum.toFixed(2))
+        return {
+          ...item,
+          unidade: 'KG',
+          quantidade_input: String(kg),
+          peso_kg_previsto: String(kg),
+          qtd_caixas_prevista: media > 0 ? String(Math.round(curNum)) : '',
+        }
+      }),
+    }))
   }
 
   const salvarOpConfigurada = async (e) => {
@@ -758,7 +1101,10 @@ export function Producao() {
                         }}>
                           <strong>{pe.produto_codigo} — {pe.produto_descricao}</strong>
                           <span style={{ color: '#fbbf24', marginLeft: 8, fontFamily: 'var(--font-mono)' }}>
-                            Alocado: {fmtKg2(alocado)} {pe.peso_kg_previsto ? `/ Prev: ${fmtKg2(pe.peso_kg_previsto)}` : ''}
+                            Alocado: {fmtKg2(alocado)}
+                            {(pe.peso_kg_previsto || pe.qtd_caixas_prevista) ? (
+                              <> / Prev:{pe.peso_kg_previsto ? ` ${fmtKg2(pe.peso_kg_previsto)}` : ''}{pe.qtd_caixas_prevista ? ` (${pe.qtd_caixas_prevista} cx)` : ''}</>
+                            ) : ''}
                           </span>
                         </div>
                       )
@@ -886,7 +1232,9 @@ export function Producao() {
                       {produtosSaidaDisponiveis.map(p => (
                         <option key={p.id} value={p.id}>
                           {p.codigo ? `[${p.codigo}] ` : ''}{p.descricao}
-                          {p.peso_kg_previsto ? ` (Prev: ${fmtKg2(p.peso_kg_previsto)})` : ''}
+                          {(p.peso_kg_previsto || p.qtd_caixas_prevista)
+                            ? ` (Prev:${p.peso_kg_previsto ? ` ${fmtKg2(p.peso_kg_previsto)}` : ''}${p.qtd_caixas_prevista ? ` ${p.peso_kg_previsto ? '• ' : ' '}${p.qtd_caixas_prevista} cx` : ''})`
+                            : ''}
                         </option>
                       ))}
                     </select>
@@ -1106,14 +1454,19 @@ export function Producao() {
           </div>
 
           {/* Grid Lado a Lado: Itens Entrada e Itens Saída */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16 }}>
             {/* ENTRADAS PREVISTAS */}
             <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
-              <h4 style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 700, color: '#fbbf24' }}>
-                Itens Previstos de ENTRADA (Matéria-Prima)
-              </h4>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+                <h4 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#fbbf24' }}>
+                  Itens Previstos de ENTRADA (Matéria-Prima)
+                </h4>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Com saldo em estoque primeiro</span>
+              </div>
               <SeletorProdutoInline
                 produtos={produtos}
+                mostrarSaldo
+                priorizarComSaldo
                 placeholder="Buscar produto de entrada por código ou nome..."
                 onSelect={(p) => adicionarItemPrevisto('itensEntrada', p)}
               />
@@ -1124,33 +1477,15 @@ export function Producao() {
                   </div>
                 ) : (
                   opForm.itensEntrada.map((item, idx) => (
-                    <div key={item.produto_id} style={{
-                      display: 'grid', gridTemplateColumns: '1fr 90px auto', gap: 8, alignItems: 'center',
-                      background: 'var(--bg-2)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12,
-                    }}>
-                      <div>
-                        <strong>{item.codigo} — {item.descricao}</strong>
-                      </div>
-                      <input
-                        type="number"
-                        step="0.01"
-                        className="form-input"
-                        style={{ padding: '6px 8px', fontSize: 12 }}
-                        placeholder="Kg prev."
-                        value={item.peso_kg_previsto}
-                        onChange={e => setOpForm(f => ({
-                          ...f,
-                          itensEntrada: f.itensEntrada.map((x, j) => j === idx ? { ...x, peso_kg_previsto: e.target.value } : x),
-                        }))}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--sm text-danger"
-                        onClick={() => setOpForm(f => ({ ...f, itensEntrada: f.itensEntrada.filter((_, j) => j !== idx) }))}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+                    <OpItemPrevistoRow
+                      key={item.produto_id}
+                      item={item}
+                      tipo="ENTRADA"
+                      mostrarSaldo
+                      onToggleUnidade={(u) => alternarUnidadeItemPrevisto('itensEntrada', idx, u)}
+                      onChangeQtd={(val) => alterarQtdItemPrevisto('itensEntrada', idx, val)}
+                      onRemover={() => setOpForm(f => ({ ...f, itensEntrada: f.itensEntrada.filter((_, j) => j !== idx) }))}
+                    />
                   ))
                 )}
               </div>
@@ -1163,6 +1498,8 @@ export function Producao() {
               </h4>
               <SeletorProdutoInline
                 produtos={produtos}
+                mostrarSaldo={false}
+                priorizarComSaldo={false}
                 placeholder="Buscar produto de saída por código ou nome..."
                 onSelect={(p) => adicionarItemPrevisto('itensSaida', p)}
               />
@@ -1173,33 +1510,15 @@ export function Producao() {
                   </div>
                 ) : (
                   opForm.itensSaida.map((item, idx) => (
-                    <div key={item.produto_id} style={{
-                      display: 'grid', gridTemplateColumns: '1fr 90px auto', gap: 8, alignItems: 'center',
-                      background: 'var(--bg-2)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12,
-                    }}>
-                      <div>
-                        <strong>{item.codigo} — {item.descricao}</strong>
-                      </div>
-                      <input
-                        type="number"
-                        step="0.01"
-                        className="form-input"
-                        style={{ padding: '6px 8px', fontSize: 12 }}
-                        placeholder="Kg prev."
-                        value={item.peso_kg_previsto}
-                        onChange={e => setOpForm(f => ({
-                          ...f,
-                          itensSaida: f.itensSaida.map((x, j) => j === idx ? { ...x, peso_kg_previsto: e.target.value } : x),
-                        }))}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--sm text-danger"
-                        onClick={() => setOpForm(f => ({ ...f, itensSaida: f.itensSaida.filter((_, j) => j !== idx) }))}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+                    <OpItemPrevistoRow
+                      key={item.produto_id}
+                      item={item}
+                      tipo="SAIDA"
+                      mostrarSaldo={false}
+                      onToggleUnidade={(u) => alternarUnidadeItemPrevisto('itensSaida', idx, u)}
+                      onChangeQtd={(val) => alterarQtdItemPrevisto('itensSaida', idx, val)}
+                      onRemover={() => setOpForm(f => ({ ...f, itensSaida: f.itensSaida.filter((_, j) => j !== idx) }))}
+                    />
                   ))
                 )}
               </div>
