@@ -1,6 +1,9 @@
 import { db } from '../lib/db.js';
 import { ensureRastreabilidadeSchema } from './taras.js';
 import { gerarLotePorData } from '../utils/rastreabilidade.js';
+import { assertPermissao } from '../lib/authGuard.js';
+
+const PERM_INV_READ = ['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial', 'relatorios_estoque'];
 
 /** Queries de Inventário — Cíclico, Geral (Wall-to-Wall), Carga Inicial e Ciclos */
 
@@ -10,6 +13,7 @@ import { gerarLotePorData } from '../utils/rastreabilidade.js';
 
 /** Retorna lista de endereços bloqueados (em inventário aberto) */
 export async function enderecosBloqueados() {
+  await assertPermissao(['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial', 'movimentacao', 'desmembramento', 'recebimento', 'retorno_producao', 'saida', 'expedicao'], { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
     SELECT DISTINCT ii.endereco
@@ -22,6 +26,7 @@ export async function enderecosBloqueados() {
 
 /** Verifica se um endereço está bloqueado */
 export async function verificarEnderecoBloqueado(endereco) {
+  await assertPermissao(['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial', 'movimentacao', 'desmembramento', 'recebimento', 'retorno_producao', 'saida', 'expedicao'], { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
     SELECT i.id, i.tipo, i.nome, i.tipo_filtro, i.identificador_filtro
@@ -38,17 +43,20 @@ export async function verificarEnderecoBloqueado(endereco) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function ciclos_listar() {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({ sql: `SELECT * FROM inventario_ciclos ORDER BY data_criacao DESC`, args: [] })
   return rows
 }
 
 export async function ciclos_buscarAtivo() {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({ sql: `SELECT * FROM inventario_ciclos WHERE status = 'Ativo' LIMIT 1`, args: [] })
   return rows[0]
 }
 
 export async function ciclos_criar({ nome, target_pct = 99.9 }) {
   try {
+    await assertPermissao('inventario_gestao');
     const { rows: ativoRows } = await db.execute({ sql: `SELECT id FROM inventario_ciclos WHERE status = 'Ativo' LIMIT 1`, args: [] })
     const ativo = ativoRows[0]
     if (ativo) return { success: false, error: 'Já existe um ciclo ativo. Encerre-o antes de criar um novo.' }
@@ -60,6 +68,7 @@ export async function ciclos_criar({ nome, target_pct = 99.9 }) {
 }
 
 export async function ciclos_encerrar({ ciclo_id, forcar = false }) {
+  await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
     // 1. Verificar se há inventários ativos para este ciclo
@@ -117,6 +126,7 @@ export async function registrarContagem({
   lote_contado = null
 }) {
   try {
+    await assertPermissao(['inventario_coletor', 'inventario_gestao', 'inventario_carga_inicial']);
     await ensureRastreabilidadeSchema()
     const { rows } = await db.execute({
       sql: `SELECT * FROM inventario_itens WHERE id = ?`,
@@ -185,6 +195,7 @@ export async function registrarContagem({
 
 export async function recontarItem(item_id) {
   try {
+    await assertPermissao('inventario_gestao');
     await db.execute({ sql: `UPDATE inventario_itens SET qtd_contada_caixas = NULL, qtd_contada_kg = NULL, status_item = 'Pendente', contagem_atual = contagem_atual + 1 WHERE id = ?`, args: [item_id] })
     return { success: true }
   } catch (err) { return { success: false, error: err.message } }
@@ -194,6 +205,7 @@ export async function recontarItem(item_id) {
 // O coletor vai carregar todos os itens deste endereço na próxima vez que bipá-lo
 export async function recontarEndereco(inventario_id, endereco) {
   try {
+    await assertPermissao('inventario_gestao');
     await db.execute({
       sql: `UPDATE inventario_itens 
             SET qtd_contada_caixas = NULL, qtd_contada_kg = NULL, 
@@ -211,6 +223,7 @@ export async function recontarEndereco(inventario_id, endereco) {
 }
 
 export async function validarEstoqueSemAjuste(item_id, operador_id, operador_nome) {
+  await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
     const { rows: itemRows } = await tx.execute({ sql: `SELECT * FROM inventario_itens WHERE id = ?`, args: [item_id] })
@@ -254,6 +267,7 @@ export async function validarEstoqueSemAjuste(item_id, operador_id, operador_nom
 }
 
 export async function ciclos_dashboard(ciclo_id) {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   // Todos os inventários finalizados do ciclo
   const { rows: inventariosFinalizados } = await db.execute({
     sql: `
@@ -340,6 +354,7 @@ export async function ciclos_dashboard(ciclo_id) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function listar() {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
     SELECT
@@ -363,6 +378,7 @@ export async function listar() {
 
 // Busca um inventário pelo ID
 export async function buscar(inventario_id) {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `SELECT * FROM inventarios WHERE id = ?`,
     args: [inventario_id]
@@ -372,6 +388,7 @@ export async function buscar(inventario_id) {
 
 // Lista todos os itens de um inventário com dados do produto
 export async function listarItens(inventario_id) {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
     SELECT
@@ -389,6 +406,7 @@ export async function listarItens(inventario_id) {
 
 // Conciliação para Carga Inicial
 export async function conciliarCargaInicial({ inventario_id, operador_id, operador_nome }) {
+  await assertPermissao('inventario_carga_inicial');
   await ensureRastreabilidadeSchema()
   const tx = await db.transaction('write')
   try {
@@ -482,6 +500,7 @@ export async function getProdutoVazio() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function criar({ tipo_filtro, identificador_filtro }) {
+  await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
     const { rows: ativoRows } = await tx.execute({
@@ -560,6 +579,7 @@ export async function criar({ tipo_filtro, identificador_filtro }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function criarGeral({ nome, zonas = [] }) {
+  await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
     const result = await tx.execute({
@@ -605,6 +625,7 @@ export async function criarGeral({ nome, zonas = [] }) {
 }
 
 export async function listarZonas(inventario_id) {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows: zonas } = await db.execute({ sql: `SELECT * FROM inventario_zonas WHERE inventario_id = ? ORDER BY id`, args: [inventario_id] })
   const result = []
   for (const z of zonas) {
@@ -630,6 +651,7 @@ export async function listarZonas(inventario_id) {
 
 export async function criarCargaInicial() {
   try {
+    await assertPermissao('inventario_carga_inicial');
     const { rows: existeRows } = await db.execute({ sql: `SELECT id FROM inventarios WHERE tipo = 'CargaInicial' AND status NOT IN ('Finalizado OK','Cancelado') LIMIT 1`, args: [] })
     const existe = existeRows[0]
     if (existe) return { success: false, error: 'Já existe uma carga inicial em andamento.' }
@@ -650,6 +672,7 @@ export async function criarCargaInicial() {
 }
 
 export async function conciliar({ inventario_id, operador_id, operador_nome }) {
+  await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
     const { rows: invRows } = await tx.execute({ sql: `SELECT * FROM inventarios WHERE id = ?`, args: [inventario_id] })
@@ -844,12 +867,14 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
 }
 
 export async function cancelar(id) {
+  await assertPermissao('inventario_gestao');
   await db.execute({ sql: `UPDATE inventarios SET status = 'Cancelado', data_finalizacao = CURRENT_TIMESTAMP WHERE id = ?`, args: [id] })
   return { success: true }
 }
 
 export async function cancelarItem(item_id) {
   try {
+    await assertPermissao('inventario_gestao');
     const { rows: itemRows } = await db.execute({ sql: `SELECT inventario_id FROM inventario_itens WHERE id = ?`, args: [item_id] })
     const item = itemRows[0]
     if (!item) return { success: false, error: 'Item não encontrado.' }
@@ -871,6 +896,7 @@ export async function cancelarItem(item_id) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function calcularIRA(inventario_id) {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows: itens } = await db.execute({
     sql: `
     SELECT
@@ -908,6 +934,7 @@ export async function adicionarItemSurpresa({
   tara_kg = 0,
   peso_bruto_contado_kg = null
 }) {
+  await assertPermissao(['inventario_coletor', 'inventario_gestao', 'inventario_carga_inicial']);
   await ensureRastreabilidadeSchema()
   // Se o endereço recebeu um item surpresa, ele não está mais vazio.
   const { rows: dummyProdRows } = await db.execute({ sql: `SELECT id FROM produtos WHERE codigo = 'VAZIO'`, args: [] })
@@ -959,6 +986,7 @@ export async function adicionarItemSurpresa({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function listarAjustesLog({ ciclo_id, inventario_id } = {}) {
+  await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   let sql = `
     SELECT al.*, p.codigo, p.descricao, p.tipo_produto
     FROM inventario_ajustes_log al

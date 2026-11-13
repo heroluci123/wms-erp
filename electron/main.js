@@ -82,7 +82,8 @@ async function syncFromRemote() {
     }
 
     const tables = [
-      'produtos', 'operadores', 'locais', 'taras', 'estoque_posicao', 'movimentacoes_log', 
+      'produtos', 'operadores', 'perfis_acesso', 'sessoes_usuarios', 'auditoria_acessos',
+      'locais', 'taras', 'estoque_posicao', 'movimentacoes_log', 
       'inventarios', 'inventario_itens', 'produtos_eans', 'ordens_producao', 'op_itens_previstos',
       'paletes', 'estoque_caixas', 'op_insumos', 'op_retornos', 'desmembramentos_vinculos'
     ]

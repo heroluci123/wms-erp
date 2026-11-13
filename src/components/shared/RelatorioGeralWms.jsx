@@ -6,6 +6,8 @@ import {
 import { subDays, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import * as relatoriosQueries from '../../queries/relatorios';
 import { exportRelatorioWmsExcel } from '../../utils/exportRelatorioWmsExcel';
+import { useAppStore } from '../../store/appStore';
+import { isCliente } from '../../utils/permissoes';
 
 const fmtKg = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg';
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -40,7 +42,9 @@ const PRESETS = [
   { label: 'Este ano', getRange: () => [startOfYear(new Date()).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10)] },
 ];
 
-export function RelatorioGeralWms() {
+export function RelatorioGeralWms({ somenteCliente = false }) {
+  const { operador } = useAppStore();
+  const modoCliente = somenteCliente || isCliente(operador);
   const [presetAtivo, setPresetAtivo] = useState(3); // Padrão: Este mês
   const [dataInicio, setDataInicio] = useState(() => startOfMonth(new Date()).toISOString().slice(0, 10));
   const [dataFim, setDataFim] = useState(() => endOfMonth(new Date()).toISOString().slice(0, 10));
@@ -785,7 +789,9 @@ export function RelatorioGeralWms() {
                           </div>
                           <div className="text-xs text-muted flex items-center gap-12 mt-2">
                             <span>📅 Expedido em: <strong>{fmtDateTimeBR(rom.expedido_at || rom.created_at)}</strong></span>
-                            <span>👤 Operador: <strong>{rom.operador_expedicao_nome || rom.operador_nome || 'Administrador'}</strong></span>
+                            {!modoCliente && (
+                              <span>👤 Operador: <strong>{rom.operador_expedicao_nome || rom.operador_nome || 'Administrador'}</strong></span>
+                            )}
                             <span>Status: <strong>{rom.status}</strong></span>
                           </div>
                         </div>
@@ -1119,7 +1125,9 @@ export function RelatorioGeralWms() {
                 <div className="pw-rom-meta">
                   <span><strong>Data/Hora Expedição:</strong> {fmtDateTimeBR(rom.expedido_at || rom.created_at)}</span>
                   <span><strong>Status:</strong> {rom.status}</span>
-                  <span><strong>Operador Resp.:</strong> {rom.operador_expedicao_nome || rom.operador_nome || 'Administrador'}</span>
+                  {!modoCliente && (
+                    <span><strong>Operador Resp.:</strong> {rom.operador_expedicao_nome || rom.operador_nome || 'Administrador'}</span>
+                  )}
                   <span><strong>Produtos Distintos:</strong> {rom.resumo_produtos ? rom.resumo_produtos.length : 0}</span>
                 </div>
 

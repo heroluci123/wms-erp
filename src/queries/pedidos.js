@@ -1,5 +1,6 @@
 import { db } from '../lib/db'
 import { recalcularPosicaoEnderecos } from './movimentacoes'
+import { assertPermissao } from '../lib/authGuard'
 
 async function gerarProximoCodigoPedido() {
   const res = await db.execute("SELECT codigo FROM pedidos ORDER BY id DESC LIMIT 1")
@@ -60,6 +61,7 @@ function consolidarItensPedido(itens = []) {
 export const pedidosQueries = {
   /** Lista clientes cadastrados (BEEF CONTAINER LIMITADA vem marcada como padrão) */
   async listarClientes() {
+    await assertPermissao(['pedidos', 'pedidos_consultar', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     const res = await db.execute(`
       SELECT *
       FROM clientes
@@ -71,6 +73,7 @@ export const pedidosQueries = {
 
   /** Cadastra um novo cliente para uso futuro em pedidos */
   async criarCliente(dados) {
+    await assertPermissao('pedidos')
     const razao = (dados.razao_social || '').trim()
     const fantasia = (dados.nome_fantasia || razao).trim()
     if (!razao) throw new Error('Informe a Razão Social do cliente.')
@@ -113,6 +116,7 @@ export const pedidosQueries = {
 
   /** Lista todos os produtos com saldo serializado disponível para separação */
   async listarSaldosProdutosParaPedido() {
+    await assertPermissao(['pedidos', 'pedidos_consultar', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     const res = await db.execute(`
       SELECT
         p.id,
@@ -152,6 +156,7 @@ export const pedidosQueries = {
 
   /** Lista pedidos com totais solicitados, separados, conferidos e romaneio vinculado */
   async listarPedidos(filtros = {}) {
+    await assertPermissao(['pedidos_consultar', 'pedidos', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     let where = '1=1'
     const args = []
 
@@ -205,6 +210,7 @@ export const pedidosQueries = {
 
   /** Retorna pedido completo com itens, comparação solicitado vs separado e romaneio vinculado */
   async obterPedido(id) {
+    await assertPermissao(['pedidos_consultar', 'pedidos', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     const pedRes = await db.execute({
       sql: `
         SELECT ped.*,
@@ -333,6 +339,7 @@ export const pedidosQueries = {
 
   /** Cria novo pedido com itens */
   async criarPedido({ titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], operador, liberar = true }) {
+    await assertPermissao('pedidos')
     const tituloTrim = (titulo || '').trim()
     if (!tituloTrim) throw new Error('Informe o título do pedido (ex: Carga Quinta-feira).')
     if (!Array.isArray(itens) || itens.length === 0) throw new Error('Adicione pelo menos um item ao pedido.')
@@ -403,6 +410,7 @@ export const pedidosQueries = {
 
   /** Atualiza pedido em status RASCUNHO ou LIBERADO */
   async atualizarPedido({ id, titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], liberar }) {
+    await assertPermissao('pedidos')
     const check = await db.execute({ sql: 'SELECT id, status, cliente_id FROM pedidos WHERE id = ?', args: [id] })
     if (check.rows.length === 0) throw new Error('Pedido não encontrado.')
     const atual = check.rows[0]
@@ -469,6 +477,7 @@ export const pedidosQueries = {
 
   /** Libera um pedido RASCUNHO para separação */
   async liberarPedido(id) {
+    await assertPermissao('pedidos')
     const check = await db.execute({ sql: 'SELECT status FROM pedidos WHERE id = ?', args: [id] })
     if (check.rows.length === 0) throw new Error('Pedido não encontrado.')
     if (check.rows[0].status !== 'RASCUNHO') {
@@ -488,6 +497,7 @@ export const pedidosQueries = {
 
   /** Cancela um pedido antes da expedição e devolve eventuais caixas reservadas para DISPONIVEL */
   async cancelarPedido(id, operador) {
+    await assertPermissao('pedidos')
     const pedRes = await db.execute({ sql: 'SELECT id, codigo, status FROM pedidos WHERE id = ?', args: [id] })
     if (pedRes.rows.length === 0) throw new Error('Pedido não encontrado.')
     const ped = pedRes.rows[0]

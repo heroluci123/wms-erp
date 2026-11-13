@@ -1,11 +1,15 @@
 import { db } from '../lib/db.js';
 import { ensureRastreabilidadeSchema } from './taras.js';
 import { gerarLotePorData } from '../utils/rastreabilidade.js';
+import { assertPermissao } from '../lib/authGuard.js';
+
+const PERM_EST_OP = ['consulta_estoque', 'estoque_enderecos', 'movimentacao', 'recebimento', 'inventario_coletor', 'inventario_gestao', 'saida', 'expedicao', 'pedidos', 'retorno_producao', 'desmembramento', 'rastreabilidade', 'reimpressao'];
 
 /** Queries de Estoque e Posições */
 
 // Listagem geral com JOIN em produtos, excluindo registros zerados
 export async function listarGeral() {
+  await assertPermissao(['consulta_estoque', 'estoque_enderecos', 'relatorios_estoque', 'dashboard_executivo', 'movimentacao', 'pedidos', 'saida'], { write: false, bloquearCliente: false });
   const res = await db.execute(`
     SELECT
       ep.id, ep.endereco, ep.lote, ep.validade,
@@ -45,6 +49,7 @@ export async function listarGeral() {
 // DISPONIVEL (livre), RESERVADA (em romaneio/OP), BLOQUEADO
 // Exclui apenas EXPEDIDA (saiu do galpão) e CONSUMIDA (desmembrada/produção)
 export async function listarGeralCaixas() {
+  await assertPermissao(PERM_EST_OP, { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT
@@ -70,6 +75,7 @@ export async function listarGeralCaixas() {
 
 // Verifica se uma caixa já existe no estoque pelo EAN
 export async function buscarCaixaPorEan(ean_caixa) {
+  await assertPermissao(PERM_EST_OP, { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `SELECT id, ean_caixa, status, endereco, palete_id FROM estoque_caixas WHERE ean_caixa = ?`,
     args: [ean_caixa]
@@ -79,6 +85,7 @@ export async function buscarCaixaPorEan(ean_caixa) {
 
 // Busca saldo de um produto em um endereço específico (apenas lotes com saldo > 0)
 export async function buscarPorEnderecoProduto(endereco, produto_id) {
+  await assertPermissao(PERM_EST_OP, { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT
@@ -97,6 +104,7 @@ export async function buscarPorEnderecoProduto(endereco, produto_id) {
 
 // Remove uma caixa do estoque
 export async function removerCaixa(id) {
+  await assertPermissao(['deletar_historico', 'inventario_gestao', 'movimentacao']);
   await db.execute({
     sql: `DELETE FROM estoque_caixas WHERE id = ?`,
     args: [id]
@@ -106,6 +114,7 @@ export async function removerCaixa(id) {
 
 // Cria ou atualiza caixas no estoque_caixas durante o Inventário / Carga Inicial
 export async function inserirCaixasCargaInicial(caixas) {
+  await assertPermissao(['inventario_carga_inicial', 'inventario_coletor', 'inventario_gestao']);
   if (!caixas || caixas.length === 0) return { success: true };
   await ensureRastreabilidadeSchema();
   const tx = await db.transaction('write');
@@ -184,6 +193,7 @@ export async function inserirCaixasCargaInicial(caixas) {
 
 // Tudo em um endereço
 export async function buscarPorEndereco(endereco) {
+  await assertPermissao(PERM_EST_OP, { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT
@@ -201,6 +211,7 @@ export async function buscarPorEndereco(endereco) {
 
 // Sugestão de Putaway: endereços onde o produto já tem saldo (excluindo REC e EXPEDICAO)
 export async function sugestaoPutaway(produto_id, lote) {
+  await assertPermissao(PERM_EST_OP, { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT endereco, lote, qtd_caixas, qtd_kg, validade
@@ -220,6 +231,7 @@ export async function sugestaoPutaway(produto_id, lote) {
 // Verificação FEFO: existem lotes mais antigos do mesmo produto?
 // Retorna lotes com validade MENOR que a bipada (mais antigos que deveriam sair primeiro)
 export async function verificarFEFO(produto_id, validade_bipada) {
+  await assertPermissao(PERM_EST_OP, { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT ep.endereco, ep.lote, ep.validade, ep.qtd_caixas, ep.qtd_kg
@@ -238,6 +250,7 @@ export async function verificarFEFO(produto_id, validade_bipada) {
 
 // Listar área de expedição
 export async function listarExpedicao() {
+  await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'consulta_estoque', 'estoque_enderecos'], { write: false, bloquearCliente: true });
   const res = await db.execute(`
     SELECT
       ep.id, ep.lote, ep.validade, ep.qtd_caixas, ep.qtd_kg, ep.updated_at,
@@ -253,6 +266,7 @@ export async function listarExpedicao() {
 
 // KPIs para o Dashboard
 export async function calcularKPIs(filtros = {}) {
+  await assertPermissao(['dashboard_executivo', 'consulta_estoque', 'relatorios_estoque', 'estoque_enderecos'], { write: false, bloquearCliente: true });
   const filterSQL = (filtros.incluirInsumos === true) ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
 
   const hoje = new Date()

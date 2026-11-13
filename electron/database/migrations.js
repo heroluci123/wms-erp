@@ -602,6 +602,57 @@ async function runMigrations(db) {
   await tryExecute("ALTER TABLE inventario_itens ADD COLUMN tara_id INTEGER DEFAULT NULL;")
   await tryExecute("ALTER TABLE inventario_itens ADD COLUMN tara_kg REAL DEFAULT 0;")
   await tryExecute("ALTER TABLE inventario_itens ADD COLUMN data_producao_contada DATE DEFAULT NULL;")
+
+  // ── Autenticação Segura, Sessões, Perfis por Setor e Auditoria de Acessos ──
+  await tryExecute("ALTER TABLE operadores ADD COLUMN login TEXT;")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN senha_hash TEXT;")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN nivel TEXT DEFAULT 'OPERACIONAL';")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN setor TEXT DEFAULT 'Produção';")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN deve_trocar_senha INTEGER DEFAULT 0;")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN ultimo_acesso DATETIME;")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN criado_por_nome TEXT;")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN atualizado_por_nome TEXT;")
+  await tryExecute("ALTER TABLE operadores ADD COLUMN updated_at DATETIME;")
+  await tryExecute("CREATE UNIQUE INDEX IF NOT EXISTS idx_operadores_login_unique ON operadores(LOWER(login)) WHERE login IS NOT NULL AND login != '';")
+
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS perfis_acesso (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo TEXT NOT NULL UNIQUE,
+      nome TEXT NOT NULL,
+      nivel TEXT NOT NULL DEFAULT 'OPERACIONAL',
+      setor_padrao TEXT DEFAULT 'Produção',
+      descricao TEXT DEFAULT '',
+      permissoes_json TEXT NOT NULL DEFAULT '{}',
+      sistema_fixo INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS sessoes_usuarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      operador_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      ativo INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ultimo_ping DATETIME DEFAULT CURRENT_TIMESTAMP,
+      encerrada_em DATETIME
+    );
+  `)
+  await tryExecute(`
+    CREATE TABLE IF NOT EXISTS auditoria_acessos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_user_id INTEGER,
+      target_user_nome TEXT,
+      acao TEXT NOT NULL,
+      detalhes_antes TEXT,
+      detalhes_depois TEXT,
+      executor_id INTEGER,
+      executor_nome TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
 }
 
 module.exports = { runMigrations }

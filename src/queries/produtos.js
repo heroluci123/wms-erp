@@ -1,7 +1,11 @@
 import { db } from '../lib/db.js';
+import { assertPermissao } from '../lib/authGuard.js';
+
+const PERM_PROD_READ = ['produtos', 'consulta_estoque', 'recebimento', 'inventario_coletor', 'inventario_gestao', 'retorno_producao', 'desmembramento', 'pedidos', 'pedidos_consultar', 'saida', 'ean_etiquetas', 'reimpressao', 'rastreabilidade'];
 
 /** Queries de Produtos */
 export async function listar() {
+  await assertPermissao(PERM_PROD_READ, { write: false, bloquearCliente: false });
   const res = await db.execute(`
     SELECT p.id, p.codigo, p.ean, p.descricao, p.valor_unitario, p.tipo_produto, p.status_curva, p.unidade, p.grupo, p.created_at, p.classificacao,
            GROUP_CONCAT(pai.id) as pais_ids, GROUP_CONCAT(pai.descricao, ', ') as pai_descricao,
@@ -148,6 +152,7 @@ export async function buscarPorCodigoComInfo(codigo) {
 
 export async function salvarRegraEan(produto_id, codigo_barras, tipo_regra = 'EXATO') {
   try {
+    await assertPermissao(['ean_etiquetas', 'produtos', 'recebimento', 'inventario_coletor']);
     await db.execute({
       sql: `INSERT INTO produtos_eans (produto_id, codigo_barras, tipo_regra) VALUES (?, ?, ?)`,
       args: [produto_id, codigo_barras.trim(), tipo_regra]
@@ -171,6 +176,7 @@ export async function listarRegras(produto_id) {
 
 export async function removerRegraEan(id) {
   try {
+    await assertPermissao(['ean_etiquetas', 'produtos']);
     await db.execute({ sql: `DELETE FROM produtos_eans WHERE id = ?`, args: [id] })
     return { success: true }
   } catch (err) {
@@ -179,6 +185,7 @@ export async function removerRegraEan(id) {
 }
 
 export async function criar({ codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
+  await assertPermissao('produtos');
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
@@ -215,6 +222,7 @@ export async function criar({ codigo, descricao, valor_unitario, tipo_produto, s
 }
 
 export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
+  await assertPermissao('produtos');
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
@@ -251,6 +259,7 @@ export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_pr
 }
 
 export async function deletar(id) {
+  await assertPermissao('produtos');
   // Verificar se tem estoque ativo
   const res = await db.execute({
     sql: `SELECT SUM(qtd_caixas) as total FROM estoque_posicao WHERE produto_id = ?`,
@@ -275,6 +284,7 @@ export async function deletar(id) {
 }
 
 export async function buscarHistoricoCaixa(ean) {
+  await assertPermissao(['rastreabilidade', 'consulta_estoque', 'movimentacao_historico', 'desmembramento', 'reimpressao'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT
@@ -296,6 +306,7 @@ export async function buscarHistoricoCaixa(ean) {
 }
 
 export async function buscarCaixaPorEan(ean) {
+  await assertPermissao(['rastreabilidade', 'consulta_estoque', 'movimentacao', 'recebimento', 'desmembramento', 'reimpressao', 'saida', 'expedicao'], { write: false, bloquearCliente: true });
   try {
     const { ensureRastreabilidadeSchema } = await import('./taras.js')
     await ensureRastreabilidadeSchema()

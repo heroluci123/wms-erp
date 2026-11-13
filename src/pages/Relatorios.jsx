@@ -5,7 +5,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import * as relatoriosQueries from '../queries/relatorios'
 import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao'
 import RelatorioGeralWms from '../components/shared/RelatorioGeralWms'
-import { FileSpreadsheet } from 'lucide-react'
+import { FileSpreadsheet, ShieldAlert } from 'lucide-react'
+import { useAppStore } from '../store/appStore'
+import { isCliente, temPermissao } from '../utils/permissoes'
 
 const fmtKg = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg'
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -137,7 +139,12 @@ const OPRow = ({ op }) => {
 
 // ─── Componente Principal ────────────────────────────────────────────────────
 export function Relatorios() {
-  const [activeTab, setActiveTab] = useState('executivo')
+  const { operador } = useAppStore()
+  const cliente = isCliente(operador)
+  const podeRelEstoque = temPermissao(operador, 'relatorios_estoque') || (!cliente && temPermissao(operador, 'produtos'))
+  const podeRelProducao = temPermissao(operador, 'relatorios_producao') || (!cliente && temPermissao(operador, 'produtos'))
+
+  const [activeTab, setActiveTab] = useState(() => (podeRelEstoque ? 'executivo' : podeRelProducao ? 'ops' : 'executivo'))
   const [presetAtivo, setPresetAtivo] = useState(2)
 
   // Datas de edição (o que o usuário digita)
@@ -163,12 +170,13 @@ export function Relatorios() {
 
   // ── recebe datas como parâmetro → sem stale closure ──────────────────────
   const carregarRelatorios = async (inicio, fim) => {
+    if (cliente || (!podeRelEstoque && !podeRelProducao)) return
     setLoading(true)
     try {
       const [bal, arv, ops] = await Promise.all([
-        relatoriosQueries.getBalanco(inicio, fim),
-        relatoriosQueries.getArvoreProducao(),
-        relatoriosQueries.getOrdensProducao(inicio, fim),
+        podeRelEstoque ? relatoriosQueries.getBalanco(inicio, fim) : Promise.resolve([]),
+        podeRelProducao ? relatoriosQueries.getArvoreProducao() : Promise.resolve({ produtos: [], arvore: [] }),
+        podeRelProducao ? relatoriosQueries.getOrdensProducao(inicio, fim) : Promise.resolve([]),
       ])
       setBalanco(bal)
       setArvoreData(arv)
@@ -180,10 +188,18 @@ export function Relatorios() {
     }
   }
 
+  useEffect(() => {
+    if (cliente && (activeTab === 'balanco' || activeTab === 'arvore')) {
+      setActiveTab(podeRelEstoque ? 'executivo' : podeRelProducao ? 'ops' : 'executivo')
+    } else if (activeTab === 'executivo' && !podeRelEstoque && podeRelProducao) {
+      setActiveTab('ops')
+    }
+  }, [cliente, activeTab, podeRelEstoque, podeRelProducao])
+
   // Dispara sempre que periodoAtivo mudar (inclusive no mount)
   useEffect(() => {
     carregarRelatorios(periodoAtivo.inicio, periodoAtivo.fim)
-  }, [periodoAtivo])
+  }, [periodoAtivo, cliente, podeRelEstoque, podeRelProducao])
 
   // Presets: atualiza input + aplica a query imediatamente
   const aplicarPreset = (index) => {
@@ -359,30 +375,46 @@ export function Relatorios() {
       </div>
 
       {/* ─── Tabs ────────────────────────────────────────────────────────────── */}
-      <div className="flex gap-8 mb-24 flex-wrap no-print">
-        <button className={`btn ${activeTab === 'executivo' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('executivo')}>
-          <FileSpreadsheet size={18} /> Relatório Geral: Estoque, Entradas e Saídas (PDF & Excel)
-        </button>
-        <button className={`btn ${activeTab === 'balanco' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('balanco')}>
-          <TrendingUp size={18} /> Balanço de Entradas e Saídas
-        </button>
-        <button className={`btn ${activeTab === 'ops' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('ops')}>
-          <Factory size={18} /> Transformação & Rendimento (OPs)
-        </button>
-        <button className={`btn ${activeTab === 'arvore' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('arvore')}>
-          <Layers size={18} /> Árvore de Produção (BOM)
-        </button>
-      </div>
+      {!podeRelEstoque && !podeRelProducao ? (
+        <div className="card p-32 text-center border border-danger/30 bg-danger/5">
+          <ShieldAlert size={36} className="text-danger mx-auto mb-12" />
+          <div className="font-bold text-lg mb-4">Acesso restrito</div>
+          <p className="text-sm text-muted">Seu usuário não possui permissão para visualizar relatórios gerenciais.</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex gap-8 mb-24 flex-wrap no-print">
+            {podeRelEstoque && (
+              <button className={`btn ${activeTab === 'executivo' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('executivo')}>
+                <FileSpreadsheet size={18} /> Relatório Geral: Estoque, Entradas e Saídas (PDF & Excel)
+              </button>
+            )}
+            {!cliente && podeRelEstoque && (
+              <button className={`btn ${activeTab === 'balanco' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('balanco')}>
+                <TrendingUp size={18} /> Balanço de Entradas e Saídas
+              </button>
+            )}
+            {podeRelProducao && (
+              <button className={`btn ${activeTab === 'ops' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('ops')}>
+                <Factory size={18} /> {cliente ? 'Produção Finalizada & Rendimento' : 'Transformação & Rendimento (OPs)'}
+              </button>
+            )}
+            {!cliente && podeRelProducao && (
+              <button className={`btn ${activeTab === 'arvore' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('arvore')}>
+                <Layers size={18} /> Árvore de Produção (BOM)
+              </button>
+            )}
+          </div>
 
-      <div className="card p-24">
-        {activeTab === 'executivo' ? (
-          <RelatorioGeralWms />
-        ) : loading ? (
-          <div className="text-center p-32 text-muted">Carregando...</div>
-        ) : (
-          <>
-            {/* ── ABA BALANÇO ──────────────────────────────────────────────── */}
-            {activeTab === 'balanco' && (
+          <div className="card p-24">
+            {activeTab === 'executivo' && podeRelEstoque ? (
+              <RelatorioGeralWms somenteCliente={cliente} />
+            ) : loading ? (
+              <div className="text-center p-32 text-muted">Carregando...</div>
+            ) : (
+              <>
+                {/* ── ABA BALANÇO ──────────────────────────────────────────────── */}
+                {!cliente && podeRelEstoque && activeTab === 'balanco' && (
               <div>
                 {filtroPeriodoJSX}
                 <div className="flex justify-between items-center mb-24 flex-wrap gap-16">
@@ -479,12 +511,15 @@ export function Relatorios() {
             )}
 
             {/* ── ABA TRANSFORMAÇÃO & RENDIMENTO (OPs) ────────────────────── */}
-            {activeTab === 'ops' && (
-              <RelatorioDossieProducao titulo="Dossiê de Transformação & Rendimento (OPs)" />
+            {podeRelProducao && activeTab === 'ops' && (
+              <RelatorioDossieProducao
+                titulo={cliente ? "Relatórios de Produção (Finalizada)" : "Dossiê de Transformação & Rendimento (OPs)"}
+                somenteClienteFinalizado={cliente}
+              />
             )}
 
             {/* ── ABA ÁRVORE ───────────────────────────────────────────────── */}
-            {activeTab === 'arvore' && (
+            {!cliente && podeRelProducao && activeTab === 'arvore' && (
               <div>
                 <div className="flex justify-between items-center mb-24">
                   <div>
@@ -504,9 +539,11 @@ export function Relatorios() {
                 </div>
               </div>
             )}
-          </>
-        )}
-      </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

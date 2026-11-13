@@ -1,5 +1,6 @@
 import { db } from '../lib/db'
 import { montarEan16Interno } from '../utils/rastreabilidade'
+import { assertPermissao } from '../lib/authGuard'
 
 let _schemaReadyPromise = null
 
@@ -155,6 +156,7 @@ export const tarasQueries = {
    * Lista taras cadastradas (por padrão apenas ativas para formulários operacionais).
    */
   async listar(apenasAtivas = true) {
+    await assertPermissao(['taras', 'recebimento', 'inventario_coletor', 'inventario_gestao', 'desmembramento', 'retorno_producao', 'producao_saida'], { write: false, bloquearCliente: true })
     await ensureRastreabilidadeSchema()
     const where = apenasAtivas ? 'WHERE ativo = 1' : ''
     const res = await db.execute(`
@@ -167,6 +169,7 @@ export const tarasQueries = {
   },
 
   async criar({ nome, peso_kg, padrao = false }) {
+    await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     const peso = Number(Number(peso_kg).toFixed(3))
     if (!nome?.trim()) throw new Error('Informe o nome descritivo da tara.')
@@ -187,6 +190,7 @@ export const tarasQueries = {
   },
 
   async atualizar(id, { nome, peso_kg, ativo, padrao }) {
+    await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     const peso = Number(Number(peso_kg).toFixed(3))
     if (!nome?.trim()) throw new Error('Informe o nome descritivo da tara.')
@@ -217,6 +221,7 @@ export const tarasQueries = {
   },
 
   async alternarAtivo(id, ativoAtual) {
+    await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     const novoAtivo = Number(ativoAtual) === 1 ? 0 : 1
     await db.execute({
@@ -227,6 +232,7 @@ export const tarasQueries = {
   },
 
   async definirPadrao(id) {
+    await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     await db.execute('UPDATE taras SET padrao = 0')
     await db.execute({
@@ -239,6 +245,7 @@ export const tarasQueries = {
    * Reserva e gera `quantidade` EANs únicos internos de 16 dígitos para a empresa (CODE128).
    */
   async gerarProximosEansInternos(quantidade = 1, codigoProduto = '') {
+    await assertPermissao(['desmembramento', 'producao_saida', 'retorno_producao', 'reimpressao', 'recebimento'])
     await ensureRastreabilidadeSchema()
     const qtd = Math.max(1, Number(quantidade) || 1)
     const gerados = []
@@ -287,6 +294,7 @@ export const tarasQueries = {
    * Busca caixa completa para reimpressão de etiqueta preservando o EAN original.
    */
   async buscarCaixaParaReimpressao(ean) {
+    await assertPermissao(['reimpressao', 'desmembramento', 'retorno_producao', 'producao_saida', 'ean_etiquetas', 'rastreabilidade'], { write: false, bloquearCliente: true })
     await ensureRastreabilidadeSchema()
     const clean = String(ean || '').trim()
     if (!clean) throw new Error('Informe ou bipe o EAN da caixa.')
@@ -318,6 +326,7 @@ export const tarasQueries = {
   },
 
   async listarCaixasRecentesParaEtiqueta(filtro = '', limite = 40) {
+    await assertPermissao(['reimpressao', 'desmembramento', 'retorno_producao', 'producao_saida', 'ean_etiquetas', 'rastreabilidade'], { write: false, bloquearCliente: true })
     await ensureRastreabilidadeSchema()
     const q = `%${String(filtro || '').trim()}%`
     const res = await db.execute({
@@ -361,6 +370,7 @@ export const tarasQueries = {
   },
 
   async registrarReimpressaoHistorico({ caixa_id, ean_caixa, origem_tipo, operador_nome }) {
+    await assertPermissao(['reimpressao', 'desmembramento', 'producao_saida', 'retorno_producao'])
     await ensureRastreabilidadeSchema()
     await db.execute({
       sql: `

@@ -1,5 +1,6 @@
 import { db } from '../lib/db'
 import { recalcularPosicaoEnderecos } from './movimentacoes'
+import { assertPermissao } from '../lib/authGuard'
 
 async function gerarProximoCodigoRomaneio() {
   const seqRes = await db.execute("SELECT codigo FROM romaneios ORDER BY id DESC LIMIT 1")
@@ -15,6 +16,7 @@ async function gerarProximoCodigoRomaneio() {
  * Lista romaneios de saída filtrando por status, datas e vínculo com pedido
  */
 export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataFim = null, previsaoEntrega = null) {
+  await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
   let sql = `
     SELECT
       r.*,
@@ -73,6 +75,7 @@ export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataF
  * Lista pedidos liberados ou em separação disponíveis para o operador separar
  */
 export async function listarPedidosParaSeparacao() {
+  await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
   const res = await db.execute(`
     SELECT
       ped.*,
@@ -102,6 +105,7 @@ export async function listarPedidosParaSeparacao() {
  * Inicia ou retoma a separação de um pedido, criando/abrindo seu romaneio vinculado
  */
 export async function iniciarOuAbrirSeparacaoPedido(pedido_id, operador_id, operador_nome) {
+  await assertPermissao(['saida', 'expedicao', 'pedidos'])
   const pedRes = await db.execute({ sql: 'SELECT * FROM pedidos WHERE id = ?', args: [pedido_id] })
   if (pedRes.rows.length === 0) {
     return { success: false, error: 'Pedido não encontrado.' }
@@ -152,6 +156,7 @@ export async function iniciarOuAbrirSeparacaoPedido(pedido_id, operador_id, oper
  */
 export async function criarRomaneio({ cliente, previsao_entrega, operador_id, operador_nome, pedido_id = null }) {
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const codigo = await gerarProximoCodigoRomaneio()
     const res = await db.execute({
       sql: `
@@ -173,6 +178,7 @@ export async function criarRomaneio({ cliente, previsao_entrega, operador_id, op
  * Busca todos os detalhes do romaneio, suas caixas bipadas, conferência e checklist do pedido
  */
 export async function detalhesRomaneio(romaneio_id) {
+  await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
   const romRes = await db.execute({
     sql: `
       SELECT
@@ -310,6 +316,7 @@ export async function detalhesRomaneio(romaneio_id) {
  */
 export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_nome, opcoes = {}) {
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const romRes = await db.execute({ sql: `SELECT id, codigo, status, pedido_id FROM romaneios WHERE id = ?`, args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     const romaneio = romRes.rows[0]
@@ -428,6 +435,7 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
  */
 export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, peso_kg, validade, endereco, operador_id = null, operador_nome = 'Sistema') {
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const romRes = await db.execute({ sql: 'SELECT codigo, status FROM romaneios WHERE id = ?', args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     if (romRes.rows[0].status !== 'MONTANDO') {
@@ -473,6 +481,7 @@ export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, p
  */
 export async function finalizarMontagem(romaneio_id) {
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const romRes = await db.execute({ sql: 'SELECT id, pedido_id, status FROM romaneios WHERE id = ?', args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     const rom = romRes.rows[0]
@@ -521,6 +530,7 @@ export const finalizarSeparacao = finalizarMontagem
  */
 export async function reabrirRomaneio(romaneio_id) {
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const romRes = await db.execute({ sql: 'SELECT id, pedido_id, status FROM romaneios WHERE id = ?', args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     const rom = romRes.rows[0]
@@ -552,6 +562,7 @@ export async function reabrirRomaneio(romaneio_id) {
  */
 export async function conferirCaixaRomaneio(romaneio_id, codigoBipado, operador_id, operador_nome) {
   try {
+    await assertPermissao(['expedicao', 'saida'])
     const codigoLimpo = String(codigoBipado || '').trim()
     if (!codigoLimpo) return { success: false, error: 'Informe ou bipe o código da caixa.' }
 
@@ -670,6 +681,7 @@ export async function conferirCaixaRomaneio(romaneio_id, codigoBipado, operador_
  */
 export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
   try {
+    await assertPermissao(['expedicao', 'saida'])
     const romRes = await db.execute({
       sql: `SELECT id, codigo, cliente, status, pedido_id FROM romaneios WHERE id = ?`,
       args: [romaneio_id]
@@ -768,6 +780,7 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
  */
 export async function excluirRomaneio(romaneio_id) {
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const romRes = await db.execute({ sql: 'SELECT id, status, pedido_id FROM romaneios WHERE id = ?', args: [romaneio_id] })
     if (romRes.rows.length === 0) return { success: false, error: 'Romaneio não encontrado.' }
     const rom = romRes.rows[0]

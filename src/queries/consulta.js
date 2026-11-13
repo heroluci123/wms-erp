@@ -1,4 +1,7 @@
 import { db } from '../lib/db.js';
+import { assertPermissao } from '../lib/authGuard.js';
+
+const PERM_CONSULTA_READ = ['consulta_estoque', 'estoque_enderecos', 'consulta_endereco', 'rastreabilidade', 'produtos', 'relatorios_estoque'];
 
 /**
  * Busca as métricas de resumo de um produto
@@ -6,6 +9,7 @@ import { db } from '../lib/db.js';
  * @returns { saldoCaixas, saldoKg, entradasCaixas, saidasCaixas }
  */
 export async function buscarResumoProduto(produto_id) {
+  await assertPermissao(PERM_CONSULTA_READ, { write: false, bloquearCliente: false });
   const cxsRes = await db.execute({
     sql: `SELECT COUNT(*) as saldoCaixas, SUM(peso_kg) as saldoKg FROM estoque_caixas WHERE produto_id = ? AND status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO') AND (endereco IS NULL OR (endereco != 'EXPEDICAO' AND endereco != 'PERDIDO'))`,
     args: [produto_id]
@@ -44,6 +48,7 @@ export async function buscarResumoProduto(produto_id) {
  * @param {string} produto_id 
  */
 export async function buscarEnderecosPorProduto(produto_id) {
+  await assertPermissao(PERM_CONSULTA_READ, { write: false, bloquearCliente: false });
   const cxsRes = await db.execute({
     sql: `
       SELECT endereco, COUNT(*) as qtd_caixas, SUM(peso_kg) as qtd_kg
@@ -75,6 +80,7 @@ export async function buscarEnderecosPorProduto(produto_id) {
  * @param {string} endereco 
  */
 export async function buscarCaixasPorEnderecoEProduto(produto_id, endereco) {
+  await assertPermissao(['consulta_estoque', 'estoque_enderecos', 'consulta_endereco', 'rastreabilidade', 'movimentacao_historico', 'movimentacao'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT *
@@ -93,6 +99,7 @@ export async function buscarCaixasPorEnderecoEProduto(produto_id, endereco) {
  * @param {number} limite 
  */
 export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
+  await assertPermissao(['consulta_estoque', 'estoque_enderecos', 'rastreabilidade', 'movimentacao_historico'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT *
@@ -107,6 +114,7 @@ export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
 }
 
 export async function buscarEstoqueConsolidado(produto_id = null) {
+  await assertPermissao(PERM_CONSULTA_READ, { write: false, bloquearCliente: false });
   let where = "c.status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')";
   const args = [];
   

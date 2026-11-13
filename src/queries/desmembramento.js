@@ -3,8 +3,10 @@ import { ensureRastreabilidadeSchema, tarasQueries } from './taras'
 import { recalcularPosicaoEnderecos } from './movimentacoes'
 import { verificarEnderecoBloqueado } from './inventarios'
 import { calcularPesoLiquido, gerarLotePorData } from '../utils/rastreabilidade'
+import { assertPermissao } from '../lib/authGuard'
 
 export async function validarCaixa(ean) {
+  await assertPermissao('desmembramento', { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const clean = String(ean || '').trim()
   if (!clean) return { valid: false, error: 'Informe ou bipe o EAN da caixa original.' }
@@ -80,6 +82,7 @@ export async function desmembrarCaixas({
   operador_id,
   operador_nome,
 }) {
+  await assertPermissao('desmembramento')
   await ensureRastreabilidadeSchema()
   if (!caixaOrigem?.id) {
     return { success: false, error: 'Caixa original inválida ou não selecionada.' }
@@ -293,6 +296,7 @@ export async function desmembrarCaixas({
 }
 
 export async function listarDesmembramentosRecentes(limite = 30) {
+  await assertPermissao(['desmembramento', 'reimpressao', 'rastreabilidade'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const { rows } = await db.execute({
     sql: `

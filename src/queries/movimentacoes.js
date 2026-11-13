@@ -2,6 +2,7 @@ import { db } from '../lib/db.js';
 import * as inventariosQueries from './inventarios.js';
 import { ensureRastreabilidadeSchema } from './taras.js';
 import { gerarLotePorData } from '../utils/rastreabilidade.js';
+import { assertPermissao } from '../lib/authGuard.js';
 
 /**
  * Recalcula estoque_posicao para um ou mais endereços a partir do estoque_caixas (fonte de verdade).
@@ -41,6 +42,7 @@ export async function recalcularPosicaoEnderecos(enderecos) {
 // ── LPN (Paletes) e SSCC (Caixas Serializadas) ──
 
 export async function criarPalete() {
+  await assertPermissao(['recebimento', 'movimentacao']);
   // Gera um código único estilo PLT-XXXX
   const resMax = await db.execute("SELECT MAX(id) as max_id FROM paletes");
   const num = ((resMax.rows[0].max_id || 0) + 1).toString().padStart(4, '0');
@@ -74,6 +76,7 @@ export async function receberCaixaSerializada({
   operador_nome
 }) {
   try {
+    await assertPermissao('recebimento');
     await ensureRastreabilidadeSchema()
     const taraVal = Number(tara_kg || 0)
     const liquidoVal = peso_kg !== undefined && peso_kg !== null
@@ -149,6 +152,7 @@ export async function receberCaixaSerializada({
 
 export async function removerCaixaSerializada(caixa_id, operador_id, operador_nome) {
   try {
+    await assertPermissao(['recebimento', 'deletar_historico']);
     const res = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE id = ?`, args: [caixa_id] });
     if (res.rows.length === 0) return { success: false, error: 'Caixa não encontrada.' };
     const caixa = res.rows[0];
@@ -176,6 +180,7 @@ export async function removerCaixaSerializada(caixa_id, operador_id, operador_no
 
 export async function concluirPalete(palete_id) {
   try {
+    await assertPermissao('recebimento');
     const resCount = await db.execute({
       sql: `SELECT count(*) as qtd FROM estoque_caixas WHERE palete_id = ? AND status = 'DISPONIVEL'`,
       args: [palete_id]
@@ -211,6 +216,7 @@ export async function concluirPalete(palete_id) {
 
 export async function reabrirPalete(palete_id) {
   try {
+    await assertPermissao('recebimento');
     await db.execute({
       sql: `UPDATE paletes SET status = 'EM_MONTAGEM', endereco_atual = 'REC' WHERE id = ?`,
       args: [palete_id]
@@ -223,6 +229,7 @@ export async function reabrirPalete(palete_id) {
 
 
 export async function listarCaixasDoPalete(palete_id) {
+  await assertPermissao(['recebimento', 'recebimento_consultar', 'movimentacao', 'movimentacao_consultar', 'consulta_estoque'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo 
@@ -237,6 +244,7 @@ export async function listarCaixasDoPalete(palete_id) {
 }
 
 export async function listarPaletesAbertos() {
+  await assertPermissao(['recebimento', 'recebimento_consultar', 'movimentacao'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT p.*, count(c.id) as qtd_caixas, sum(c.peso_kg) as peso_total
@@ -251,6 +259,7 @@ export async function listarPaletesAbertos() {
 }
 
 export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {}) {
+  await assertPermissao(['recebimento_consultar', 'recebimento', 'movimentacao_consultar', 'movimentacao_historico', 'movimentacao'], { write: false, bloquearCliente: true });
   let where = '1=1';
   const args = [];
 
@@ -289,6 +298,7 @@ export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {
 }
 
 export async function listarTodasCaixasDoPalete(palete_id) {
+  await assertPermissao(['recebimento_consultar', 'recebimento', 'movimentacao_consultar', 'movimentacao', 'consulta_estoque'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT c.*, p.descricao as produto_descricao, p.codigo as produto_codigo, p.tipo_produto,
@@ -313,6 +323,7 @@ export async function listarTodasCaixasDoPalete(palete_id) {
  * Retorna o tipo de entidade lida: PALETE, CAIXA, ou PRODUTO_GENERICO
  */
 export async function identificarCodigoMovimentacao(codigo) {
+  await assertPermissao(['movimentacao', 'movimentacao_consultar', 'consulta_endereco', 'consulta_estoque', 'inventario_coletor'], { write: false, bloquearCliente: true });
   // 1. Tentar como Palete
   if (codigo.startsWith('PLT-')) {
     const resPalete = await db.execute({ sql: `SELECT * FROM paletes WHERE codigo = ?`, args: [codigo] });
@@ -361,6 +372,7 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
   }
 
   try {
+    await assertPermissao('movimentacao');
     const p = (await db.execute({ sql: `SELECT * FROM paletes WHERE id = ?`, args: [palete_id] })).rows[0];
     if (!p) return { success: false, error: 'Palete não encontrado.' };
     const origem = p.endereco_atual;
@@ -421,6 +433,7 @@ export async function transferirEnderecoInteiro({ origem, destino, operador_id, 
   }
 
   try {
+    await assertPermissao('movimentacao');
     const paletes = (await db.execute({ sql: `SELECT * FROM paletes WHERE endereco_atual = ?`, args: [origem] })).rows;
     const caixas = (await db.execute({ 
       sql: `SELECT * FROM estoque_caixas WHERE (endereco = ? OR palete_id IN (SELECT id FROM paletes WHERE endereco_atual = ?)) AND status = 'DISPONIVEL'`, 
@@ -486,6 +499,7 @@ export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, o
   }
 
   try {
+    await assertPermissao('movimentacao');
     const placeholders = caixas_ids.map(() => '?').join(',');
     const caixas = (await db.execute({ sql: `SELECT c.*, p.endereco_atual as palete_endereco FROM estoque_caixas c LEFT JOIN paletes p ON c.palete_id = p.id WHERE c.id IN (${placeholders})`, args: caixas_ids })).rows;
 
@@ -576,6 +590,7 @@ export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_k
   }
 
   try {
+    await assertPermissao('movimentacao');
     // Verificar bloqueio de inventário nos endereços
     const bloqOrigem = await inventariosQueries.verificarEnderecoBloqueado(origem)
     if (bloqOrigem) return { success: false, error: `Endereço ${origem} está bloqueado por inventário em andamento.`, bloqueado: true }
@@ -619,6 +634,7 @@ export async function transferir({ produto_id, lote, validade, qtd_caixas, qtd_k
  */
 export async function receber({ produto_id, lote, validade, qtd_caixas, qtd_kg, operador_id, operador_nome }) {
   try {
+    await assertPermissao('recebimento');
     await db.batch([
       {
         sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, 'REC', ?, ?, ?, ?) ON CONFLICT(produto_id, endereco, lote, validade) DO UPDATE SET qtd_caixas = qtd_caixas + excluded.qtd_caixas, qtd_kg = qtd_kg + excluded.qtd_kg, updated_at = CURRENT_TIMESTAMP`,
@@ -641,6 +657,7 @@ export async function receber({ produto_id, lote, validade, qtd_caixas, qtd_kg, 
  */
 export async function confirmarDespacho(produto_id, lote, validade, operador_id) {
   try {
+    await assertPermissao(['expedicao', 'saida']);
     const resSaldo = await db.execute({
       sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
       args: [produto_id, lote || '', validade || '']
@@ -671,6 +688,7 @@ export async function confirmarDespacho(produto_id, lote, validade, operador_id)
  * Listar log de movimentações com filtros opcionais
  */
 export async function listarLog({ limit = 100, tipo, produto_id, data_inicio, data_fim, incluirInsumos } = {}) {
+  await assertPermissao(['movimentacao_historico', 'movimentacao_consultar', 'movimentacao', 'dashboard_executivo'], { write: false, bloquearCliente: true });
   let query = `
     SELECT
       ml.id, ml.tipo, ml.endereco_origem, ml.endereco_destino,
@@ -699,6 +717,7 @@ export async function listarLog({ limit = 100, tipo, produto_id, data_inicio, da
 }
 
 export async function listarExpedicao() {
+  await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'consulta_estoque', 'estoque_enderecos'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT
@@ -723,6 +742,7 @@ export async function estornarExpedicao({ produto_id, lote, destino, operador_id
   if (bloqDestino) return { success: false, error: `Endereço de destino ${destino} está bloqueado por inventário.`, bloqueado: true }
 
   try {
+    await assertPermissao(['expedicao', 'saida', 'movimentacao']);
     const resSaldo = await db.execute({
       sql: `SELECT qtd_caixas, qtd_kg, validade FROM estoque_posicao WHERE produto_id = ? AND endereco = 'EXPEDICAO' AND lote = ?`,
       args: [produto_id, lote || '']
@@ -766,6 +786,7 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
   if (bloqOrigem) return { success: false, error: `Endereço de origem ${origem} está bloqueado por inventário.`, bloqueado: true }
 
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos']);
     const resOrigem = await db.execute({
       sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
       args: [produto_id, origem, lote || '', validade || '']
@@ -798,6 +819,7 @@ export async function enviarParaExpedicao({ produto_id, lote, validade, qtd_caix
 }
 
 export async function abrirOrdemProducao({ produto_id, lote, validade, qtd_caixas, qtd_kg, origem, operador_id, operador_nome }) {
+  await assertPermissao(['producao_criar_op', 'producao_entrada', 'retorno_producao']);
   if (!origem || origem === 'REC' || origem === 'EXPEDICAO') {
     return { success: false, error: 'Endereço de origem inválido para envio à produção.' }
   }
@@ -807,6 +829,7 @@ export async function abrirOrdemProducao({ produto_id, lote, validade, qtd_caixa
   if (bloqOrigem) return { success: false, error: `Endereço de origem ${origem} está bloqueado por inventário.`, bloqueado: true }
 
   try {
+    await assertPermissao(['saida', 'expedicao', 'pedidos']);
     const resOrigem = await db.execute({
       sql: `SELECT qtd_caixas, qtd_kg FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND lote = ? AND IFNULL(validade, '') = IFNULL(?, '')`,
       args: [produto_id, origem, lote || '', validade || '']
@@ -839,6 +862,7 @@ export async function abrirOrdemProducao({ produto_id, lote, validade, qtd_caixa
 
 export async function abrirOrdemProducaoSSCC({ caixa_id, peso_enviado_kg, operador_id, operador_nome, ean_caixa_resto }) {
   try {
+    await assertPermissao(['producao_criar_op', 'producao_entrada', 'retorno_producao']);
     const { rows } = await db.execute({
       sql: `SELECT c.*, p.descricao as produto_descricao
             FROM estoque_caixas c JOIN produtos p ON c.produto_id = p.id
@@ -915,6 +939,7 @@ export async function abrirOrdemProducaoSSCC({ caixa_id, peso_enviado_kg, operad
 }
 
 export async function listarOrdensProducao(status = 'ABERTA') {
+  await assertPermissao(['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
       SELECT o.*, p.descricao as produto_descricao, p.codigo as produto_codigo, op.nome as operador_nome
@@ -931,6 +956,7 @@ export async function listarOrdensProducao(status = 'ABERTA') {
 
 export async function fecharOrdemProducao({ ordem_id, peso_retornado }) {
   try {
+    await assertPermissao(['producao_criar_op', 'producao_saida', 'retorno_producao']);
     const resOrdem = await db.execute({
       sql: `SELECT peso_enviado FROM ordens_producao WHERE id = ?`,
       args: [ordem_id]
@@ -952,6 +978,7 @@ export async function fecharOrdemProducao({ ordem_id, peso_retornado }) {
 }
 
 export async function relatorioExecutivo(filtros = {}) {
+  await assertPermissao(['dashboard_executivo', 'relatorios_estoque', 'relatorios_producao'], { write: false, bloquearCliente: true });
   const isEstritoInsumo = filtros.incluirInsumos === true
   const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
 
@@ -1060,6 +1087,7 @@ export async function relatorioExecutivo(filtros = {}) {
 
 export async function deletarLog(id) {
   try {
+    await assertPermissao('deletar_historico');
     const res = await db.execute({
       sql: 'DELETE FROM movimentacoes_log WHERE id = ?',
       args: [id]
@@ -1091,6 +1119,7 @@ export async function deletarLog(id) {
  */
 export async function saidaPorCaixaSSCC({ caixa_id, peso_saida_kg, num_pedido, cliente, operador_id, operador_nome, ean_caixa_resto }) {
   try {
+    await assertPermissao(['saida', 'expedicao']);
     // Buscar dados completos da caixa
     const { rows } = await db.execute({
       sql: `SELECT c.*, p.descricao as produto_descricao
@@ -1195,6 +1224,7 @@ export async function saidaPorCaixaSSCC({ caixa_id, peso_saida_kg, num_pedido, c
  * Busca registros do log filtrando por tipo TRANSFERENCIA, com opções de filtro por endereço ou produto
  */
 export async function listarHistoricoTransferencias({ filtroEndereco = '', filtroProduto = '', dataInicio = '', dataFim = '', limit = 200 } = {}) {
+  await assertPermissao(['movimentacao_historico', 'movimentacao_consultar', 'movimentacao', 'consulta_estoque'], { write: false, bloquearCliente: true });
   let where = `WHERE ml.tipo = 'TRANSFERENCIA'`
   const args = []
 

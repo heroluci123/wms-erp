@@ -1,8 +1,11 @@
 import { db } from '../lib/db.js';
 import { listarDossiesProducao } from './producao.js';
 import { ensureRastreabilidadeSchema } from './taras.js';
+import { assertPermissao } from '../lib/authGuard.js';
+import { isCliente } from '../utils/permissoes.js';
 
 export async function getBalanco(dataInicio, dataFim) {
+  await assertPermissao(['relatorios_producao', 'relatorios_estoque', 'dashboard_executivo'], { write: false, bloquearCliente: false });
   const res = await db.execute({
     sql: `
       SELECT p.id as produto_id, p.descricao, p.classificacao, p.produto_pai_id,
@@ -21,6 +24,7 @@ export async function getBalanco(dataInicio, dataFim) {
 }
 
 export async function getArvoreProducao() {
+  await assertPermissao(['relatorios_producao', 'dashboard_executivo', 'produtos'], { write: false, bloquearCliente: true });
   const produtosRes = await db.execute(`
     SELECT id, descricao, classificacao
     FROM produtos 
@@ -39,6 +43,7 @@ export async function getOrdensProducao(dataInicio, dataFim) {
 }
 
 export async function getOPSubprodutos(lote) {
+  await assertPermissao(['relatorios_producao', 'retorno_producao', 'rastreabilidade'], { write: false, bloquearCliente: false });
   const res = await db.execute({
     sql: `
       SELECT 
@@ -65,6 +70,8 @@ export async function getOPSubprodutos(lote) {
  * (Saídas por Romaneio, Entradas do Período, Estoque Consolidado por Produto e Estoque por Caixa)
  */
 export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
+  const executor = await assertPermissao(['relatorios_estoque', 'relatorios_producao', 'dashboard_executivo'], { write: false, bloquearCliente: false });
+  const modoCliente = isCliente(executor);
   await ensureRastreabilidadeSchema();
   const [estRes, romRes, saiRes, entRes] = await Promise.all([
     // 1. Estoque Atual (Caixa a Caixa)
@@ -159,11 +166,33 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
   ]);
 
   const estoqueAtual = estRes.rows || [];
-  const saidasItens = saiRes.rows || [];
-  const entradasCaixas = entRes.rows || [];
+  const saidasItensRaw = saiRes.rows || [];
+  const entradasCaixasRaw = entRes.rows || [];
+
+  const stripOperadorItem = (item) =>
+    modoCliente
+      ? {
+          ...item,
+          operador_montagem: null,
+          operador_expedicao: null,
+          operador_nome: null,
+          operador_expedicao_nome: null,
+          operador_entrada: null,
+        }
+      : item;
+
+  // Para CLIENTE, oculta romaneios em separação ativa e qualquer nome de operador
+  const romaneiosFiltrados = (romRes.rows || []).filter(
+    (rom) => !modoCliente || String(rom.status || '').toUpperCase() === 'EXPEDIDO'
+  );
+  const romIdsPermitidos = new Set(romaneiosFiltrados.map((r) => Number(r.id)));
+  const saidasItens = saidasItensRaw
+    .filter((it) => !modoCliente || romIdsPermitidos.has(Number(it.romaneio_id)))
+    .map(stripOperadorItem);
+  const entradasCaixas = entradasCaixasRaw.map(stripOperadorItem);
 
   // Enriquecer cada Romaneio com seus próprios itens, resumo por produto e totais individuais
-  const romaneios = (romRes.rows || []).map(rom => {
+  const romaneios = romaneiosFiltrados.map(rom => {
     const itens = saidasItens.filter(it => Number(it.romaneio_id) === Number(rom.id));
     const pesoTotal = itens.reduce((acc, it) => acc + Number(it.peso_kg || 0), 0);
     const prodMap = new Map();
@@ -183,7 +212,7 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
       p.peso_kg += Number(it.peso_kg || 0);
     });
     return {
-      ...rom,
+      ...stripOperadorItem(rom),
       qtd_caixas: itens.length,
       peso_total: Number(pesoTotal.toFixed(2)),
       itens,

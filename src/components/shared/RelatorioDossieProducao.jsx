@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import * as producaoQueries from '../../queries/producao';
 import { exportProducaoExcel } from '../../utils/exportProducaoExcel';
+import { useAppStore } from '../../store/appStore';
+import { isCliente } from '../../utils/permissoes';
 
 const fmtKg = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg';
 const fmtKg3 = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' kg';
@@ -18,7 +20,9 @@ const fmtDate = (d) => {
   return d;
 };
 
-export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação & Rendimento", enderecoFixo = null, opIdInicial = null }) {
+export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação & Rendimento", enderecoFixo = null, opIdInicial = null, somenteClienteFinalizado = false }) {
+  const { operador } = useAppStore();
+  const modoCliente = somenteClienteFinalizado || isCliente(operador);
   const [loading, setLoading] = useState(false);
   const [exportando, setExportando] = useState(false);
   const [dossies, setDossies] = useState([]);
@@ -44,10 +48,11 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
   }, [opIdInicial]);
 
   useEffect(() => {
+    if (modoCliente) return;
     producaoQueries.listarOPs('TODAS')
       .then((ops) => setOpsDisponiveis(ops || []))
       .catch(() => {});
-  }, []);
+  }, [modoCliente]);
 
   const carregarDados = async () => {
     setLoading(true);
@@ -61,6 +66,14 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
         opId: filtroOpId !== 'TODOS' ? Number(filtroOpId) : null,
       });
       setDossies(lista);
+      if (modoCliente && Array.isArray(lista)) {
+        setOpsDisponiveis((prev) => prev.length > 0 ? prev : lista.map((o) => ({
+          id: o.id,
+          numero_op: o.numero_op,
+          data_producao: o.data_producao,
+          status: o.status,
+        })));
+      }
       if (lista.length > 0) {
         const autoOpen = { [lista[0].id]: true };
         if (filtroOpId !== 'TODOS') {
@@ -650,7 +663,9 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                         </div>
                         <div className="text-xs text-muted mt-4 flex items-center gap-12 flex-wrap">
                           <span>📅 Abertura/Prod.: <strong>{fmtDate(op.data_producao)}</strong></span>
-                          <span>👤 Criador: <strong>{op.criado_por_nome || op.operador_nome || 'Administrador'}</strong></span>
+                          {!modoCliente && (
+                            <span>👤 Criador: <strong>{op.criado_por_nome || op.operador_nome || 'Administrador'}</strong></span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -912,7 +927,9 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
                 <div><span>Cliente / Destino:</span> <strong>{op.cliente || 'PAVAN'}</strong></div>
                 <div><span>Local / Endereço:</span> <strong>{op.endereco || 'PRODUÇÃO'}</strong></div>
                 <div><span>Data Abertura/Prod.:</span> <strong>{fmtDate(op.data_producao)}</strong></div>
-                <div><span>Criador:</span> <strong>{op.criado_por_nome || op.operador_nome || 'Administrador'}</strong></div>
+                {!modoCliente && (
+                  <div><span>Criador:</span> <strong>{op.criado_por_nome || op.operador_nome || 'Administrador'}</strong></div>
+                )}
                 <div><span>Rendimento da OP:</span> <strong className="print-rend-highlight">{rend}%</strong></div>
               </div>
 

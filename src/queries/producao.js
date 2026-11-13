@@ -2,8 +2,11 @@ import { db } from '../lib/db.js'
 import { ensureRastreabilidadeSchema, tarasQueries } from './taras.js'
 import { recalcularPosicaoEnderecos } from './movimentacoes.js'
 import { calcularPesoLiquido, gerarLotePorData, hojeIsoLocal } from '../utils/rastreabilidade.js'
+import { assertPermissao } from '../lib/authGuard.js'
+import { isCliente } from '../utils/permissoes.js'
 
 export async function listarOPs(status = 'TODAS') {
+  await assertPermissao(['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op', 'relatorios_producao', 'reimpressao'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   let query = `
     SELECT 
@@ -37,6 +40,7 @@ export async function listarOPs(status = 'TODAS') {
 }
 
 export async function criarOP(arg1, operador_id_legacy, operador_nome_legacy) {
+  await assertPermissao('producao_criar_op')
   await ensureRastreabilidadeSchema()
 
   const payload = typeof arg1 === 'object' && arg1 !== null
@@ -115,6 +119,7 @@ export async function criarOP(arg1, operador_id_legacy, operador_nome_legacy) {
 }
 
 export async function atualizarOPConfig(op_id, { nome, data_producao, observacoes = '', status, itensPrevistos = [] }) {
+  await assertPermissao('producao_criar_op')
   await ensureRastreabilidadeSchema()
   const tx = await db.transaction('write')
   try {
@@ -174,6 +179,7 @@ export async function atualizarOPConfig(op_id, { nome, data_producao, observacoe
 }
 
 export async function liberarOP(op_id) {
+  await assertPermissao('producao_criar_op')
   await ensureRastreabilidadeSchema()
   await db.execute({
     sql: `UPDATE ordens_producao SET status = 'LIBERADA', liberada_em = COALESCE(liberada_em, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -183,6 +189,7 @@ export async function liberarOP(op_id) {
 }
 
 export async function detalhesOP(op_id) {
+  await assertPermissao(['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op', 'relatorios_producao'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const opRes = await db.execute({ sql: `SELECT * FROM ordens_producao WHERE id = ?`, args: [op_id] })
   if (opRes.rows.length === 0) return null
@@ -260,6 +267,7 @@ export async function detalhesOP(op_id) {
 }
 
 export async function buscarCaixaPorEanParaOP(ean) {
+  await assertPermissao(['producao_entrada', 'retorno_producao'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const clean = String(ean || '').trim()
   if (!clean) return { valid: false, error: 'Informe ou bipe o EAN da caixa.' }
@@ -301,6 +309,7 @@ export async function buscarCaixaPorEanParaOP(ean) {
 }
 
 export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
+  await assertPermissao(['producao_entrada', 'retorno_producao'])
   await ensureRastreabilidadeSchema()
   try {
     const opRes = await db.execute({ sql: `SELECT codigo, status FROM ordens_producao WHERE id = ?`, args: [op_id] })
@@ -378,6 +387,7 @@ export async function adicionarRetorno(
   operador_id,
   operador_nome
 ) {
+  await assertPermissao(['producao_saida', 'retorno_producao'])
   await ensureRastreabilidadeSchema()
   try {
     const opRes = await db.execute({ sql: `SELECT * FROM ordens_producao WHERE id = ?`, args: [op_id] })
@@ -506,6 +516,11 @@ export async function adicionarRetorno(
 
 export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
   try {
+    await assertPermissao(
+      tipo === 'INSUMO'
+        ? ['producao_entrada', 'producao_criar_op', 'retorno_producao']
+        : ['producao_saida', 'producao_criar_op', 'retorno_producao']
+    )
     const queries = []
     const caixaRes = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE id = ?`, args: [caixa_id] })
     if (caixaRes.rows.length === 0) return { success: false, error: 'Caixa não encontrada' }
@@ -541,6 +556,7 @@ export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
 }
 
 export async function verificarFEFO(produto_id, validadeAtual) {
+  await assertPermissao(['producao_entrada', 'retorno_producao', 'producao_criar_op'], { write: false, bloquearCliente: true })
   if (!validadeAtual) return null
 
   const res = await db.execute({
@@ -567,6 +583,7 @@ export async function verificarFEFO(produto_id, validadeAtual) {
 
 export async function finalizarOP(op_id) {
   try {
+    await assertPermissao('producao_criar_op')
     const queries = []
     const opRes = await db.execute({ sql: `SELECT codigo FROM ordens_producao WHERE id = ?`, args: [op_id] })
     const opCod = opRes.rows[0]?.codigo || ''
@@ -662,6 +679,7 @@ export async function finalizarOP(op_id) {
 
 export async function cancelarOP(op_id) {
   try {
+    await assertPermissao('producao_criar_op')
     const opStats = await db.execute({
       sql: `
         SELECT
@@ -683,6 +701,7 @@ export async function cancelarOP(op_id) {
 
 export async function reabrirOP(op_id) {
   try {
+    await assertPermissao('producao_criar_op')
     const opRes = await db.execute({ sql: `SELECT codigo FROM ordens_producao WHERE id = ?`, args: [op_id] })
     const opCod = opRes.rows[0]?.codigo || ''
 
@@ -708,6 +727,8 @@ export async function reabrirOP(op_id) {
 // ─── RELATÓRIOS ───────────────────────────────────────────────────────────────
 
 export async function relatorioOPsPeriodo(dataInicio, dataFim) {
+  const executor = await assertPermissao(['relatorios_producao', 'retorno_producao', 'producao_criar_op'], { write: false, bloquearCliente: false })
+  const modoCliente = isCliente(executor)
   const opsRes = await db.execute({
     sql: `
       SELECT 
@@ -721,10 +742,13 @@ export async function relatorioOPsPeriodo(dataInicio, dataFim) {
     `,
     args: [dataInicio, dataFim],
   })
-  return opsRes.rows
+  return modoCliente
+    ? opsRes.rows.map((r) => ({ ...r, operador_nome: null, criado_por_nome: null }))
+    : opsRes.rows
 }
 
 export async function relatorioProdutoAcabadoPeriodo(dataInicio, dataFim) {
+  await assertPermissao(['relatorios_producao', 'retorno_producao', 'producao_criar_op'], { write: false, bloquearCliente: false })
   const res = await db.execute({
     sql: `
       SELECT 
@@ -748,6 +772,8 @@ export async function relatorioProdutoAcabadoPeriodo(dataInicio, dataFim) {
 }
 
 export async function listarDossiesProducao(filtros = {}) {
+  const executor = await assertPermissao(['relatorios_producao', 'retorno_producao', 'producao_criar_op'], { write: false, bloquearCliente: false })
+  const modoCliente = isCliente(executor)
   await ensureRastreabilidadeSchema()
   const { dataInicio, dataFim, cliente, endereco, busca, opId } = filtros
 
@@ -771,6 +797,10 @@ export async function listarDossiesProducao(filtros = {}) {
     WHERE 1=1
   `
   const args = []
+
+  if (modoCliente) {
+    sql += ` AND op.status = 'FECHADA'`
+  }
 
   if (opId) {
     sql += ` AND op.id = ?`
@@ -906,6 +936,8 @@ export async function listarDossiesProducao(filtros = {}) {
 
     return {
       ...op,
+      operador_nome: modoCliente ? null : op.operador_nome,
+      criado_por_nome: modoCliente ? null : op.criado_por_nome,
       insumos,
       retornos,
       previstos_entrada: previstos.filter(x => x.tipo === 'ENTRADA'),
