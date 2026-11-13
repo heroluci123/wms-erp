@@ -11,6 +11,7 @@ import { tarasQueries } from '../queries/taras.js'
 import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared/PesagemTaraFields.jsx'
 import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx'
 import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao.jsx'
+import { FolhaOrdemProducaoPrint } from '../components/shared/FolhaOrdemProducaoPrint.jsx'
 import {
   fmtDataBR,
   fmtDataHoraBR,
@@ -439,6 +440,8 @@ export function Producao() {
 
   // Dossiê direto de 1 OP selecionada
   const [dossieOpIdFiltro, setDossieOpIdFiltro] = useState(null)
+  // Folha da Ordem de Produção (Impressão Paisagem com Observações, Entradas e Saídas)
+  const [folhaOpPrint, setFolhaOpPrint] = useState(null)
 
   const carregarTudo = async () => {
     setLoading(true)
@@ -874,6 +877,18 @@ export function Producao() {
     if (opSelecionada?.id === op.id) await abrirDetalhesOP(op.id, true)
   }
 
+  const handleImprimirFolhaOP = async (opOuId) => {
+    try {
+      const det = typeof opOuId === 'object' && opOuId !== null && Array.isArray(opOuId.previstos_entrada)
+        ? opOuId
+        : await producaoQueries.detalhesOP(typeof opOuId === 'object' ? opOuId.id : opOuId)
+      if (!det) return toastError('Erro', 'Ordem de Produção não encontrada.')
+      setFolhaOpPrint(det)
+    } catch (err) {
+      toastError('Erro ao carregar folha da OP', err.message)
+    }
+  }
+
   const handleRemoverItem = async (tipo, item) => {
     if (!window.confirm(`Remover ${tipo === 'INSUMO' ? 'esta entrada' : 'esta saída'} da ${opSelecionada.codigo}?`)) return
     const res = await producaoQueries.removerItemOP(opSelecionada.id, tipo, item.id, item.caixa_id)
@@ -1001,13 +1016,35 @@ export function Producao() {
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
                   Data de Produção (OP): <strong>{fmtDataBR(opSelecionada.data_producao)}</strong> •
                   Criada por: <strong>{opSelecionada.criado_por_nome || opSelecionada.operador_nome || 'Administrador'}</strong>
-                  {opSelecionada.observacoes ? ` • Obs: ${opSelecionada.observacoes}` : ''}
                 </div>
+                {opSelecionada.observacoes?.trim() && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: '7px 11px',
+                    borderRadius: 7,
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                    borderLeft: '4px solid #f59e0b',
+                    color: '#fde68a',
+                    fontSize: 12,
+                    whiteSpace: 'pre-wrap',
+                  }}>
+                    <strong>Observações:</strong> {opSelecionada.observacoes}
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => handleImprimirFolhaOP(opSelecionada)}
+                  title="Imprimir Folha da OP com Observações, Entradas e Saídas"
+                >
+                  <Printer size={14} /> Imprimir Folha OP
+                </button>
                 <button type="button" className="btn btn--secondary btn--sm" onClick={() => abrirDossieCompleto(opSelecionada.id)}>
-                  <FileText size={14} /> Dossiê / Imprimir
+                  <FileText size={14} /> Dossiê (Rendimento)
                 </button>
                 {isAdm && opSelecionada.status !== 'FECHADA' && (
                   <>
@@ -1368,6 +1405,27 @@ export function Producao() {
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   Data Prod: <strong>{fmtDataBR(op.data_producao)}</strong> • Criada por {op.criado_por_nome || op.operador_nome || '-'}
                 </div>
+                {(Number(op.qtd_prev_entrada || 0) > 0 || Number(op.qtd_prev_saida || 0) > 0) && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Previsto: <strong style={{ color: '#fbbf24' }}>{op.qtd_prev_entrada || 0} entrada(s)</strong> •{' '}
+                    <strong style={{ color: '#4ade80' }}>{op.qtd_prev_saida || 0} saída(s)</strong>
+                  </div>
+                )}
+                {op.observacoes?.trim() && (
+                  <div style={{
+                    fontSize: 11.5,
+                    color: '#fde68a',
+                    background: 'rgba(245, 158, 11, 0.1)',
+                    borderLeft: '3px solid #f59e0b',
+                    padding: '5px 8px',
+                    borderRadius: 4,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }} title={op.observacoes}>
+                    <strong>Obs:</strong> {op.observacoes}
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, background: 'var(--bg-1)', padding: 10, borderRadius: 8, fontSize: 12 }}>
                   <div>
                     <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 10 }}>ENTRADAS ({op.qtd_insumos || 0} cx)</span>
@@ -1388,6 +1446,14 @@ export function Producao() {
                       Abrir OP para Operação →
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => handleImprimirFolhaOP(op.id)}
+                    title="Imprimir Folha da OP (Observações, Entradas e Saídas)"
+                  >
+                    <Printer size={14} /> Imprimir
+                  </button>
                   {isAdm && (
                     <button type="button" className="btn btn--secondary btn--sm" onClick={async () => { const d = await producaoQueries.detalhesOP(op.id); if (d) iniciarEdicaoOpAdm(d) }} title="Editar configuração da OP">
                       <Edit3 size={14} />
@@ -1578,6 +1644,9 @@ export function Producao() {
                           <button type="button" className="btn btn--primary btn--sm" onClick={() => abrirDetalhesOP(op.id)}>
                             Detalhes
                           </button>
+                          <button type="button" className="btn btn--secondary btn--sm" onClick={() => handleImprimirFolhaOP(op.id)} title="Imprimir Folha da OP (Observações, Entradas e Saídas)">
+                            <Printer size={13} /> Folha OP
+                          </button>
                           <button type="button" className="btn btn--secondary btn--sm" onClick={() => abrirDossieCompleto(op.id)}>
                             <FileText size={13} /> Dossiê
                           </button>
@@ -1645,6 +1714,13 @@ export function Producao() {
           setEtiquetasModal({ open: false, itens: [], autoPrint: false, titulo: '' })
           setTimeout(() => pesoBrutoSaidaRef.current?.focus(), 80)
         }}
+      />
+
+      {/* MODAL DE IMPRESSÃO DA FOLHA DA ORDEM DE PRODUÇÃO (PAISAGEM A4) */}
+      <FolhaOrdemProducaoPrint
+        op={folhaOpPrint}
+        onClose={() => setFolhaOpPrint(null)}
+        autoPrint
       />
     </div>
   )
