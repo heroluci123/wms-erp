@@ -37,13 +37,14 @@ export function ModalDialog({ isOpen, type = 'alert', title, message, onConfirm,
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
         zIndex: 9999,
-        backgroundColor: 'rgba(0,0,0,0.7)'
+        backgroundColor: 'rgba(5, 9, 18, 0.82)',
+        backdropFilter: 'blur(5px)'
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
         className="card border border-border rounded-lg shadow-2xl w-full max-w-[480px]"
-        style={{ backgroundColor: 'var(--bg)', padding: 0 }}
+        style={{ backgroundColor: 'var(--bg-2)', padding: 0 }}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-20 border-b border-border">

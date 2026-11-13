@@ -300,7 +300,7 @@ export function PortalCliente() {
                     }}
                   />
                   <input
-                    className="input"
+                    className="form-input"
                     value={busca}
                     onChange={(e) => setBusca(e.target.value)}
                     placeholder="Buscar por código ou produto..."
@@ -308,10 +308,10 @@ export function PortalCliente() {
                   />
                 </div>
                 <select
-                  className="input"
+                  className="form-input"
                   value={grupoFiltro}
                   onChange={(e) => setGrupoFiltro(e.target.value)}
-                  style={{ minWidth: 180 }}
+                  style={{ minWidth: 180, width: 'auto' }}
                 >
                   {grupos.map((g) => (
                     <option key={g} value={g}>

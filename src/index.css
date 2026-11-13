@@ -2,6 +2,7 @@
 
 /* ─── Design Tokens ──────────────────────────────────────────────────────────── */
 :root {
+  color-scheme: dark;
   /* Paleta principal: Azul Profundo + Acentos Ciano */
   --bg-0:         #070b14;
   --bg-1:         #0d1424;
@@ -479,6 +480,16 @@ tbody td {
   cursor: not-allowed;
 }
 
+select.form-input {
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+select.form-input option {
+  background-color: var(--bg-2);
+  color: var(--text-primary);
+}
+
 .form-hint { font-size: 11px; color: var(--text-muted); }
 
 /* ─── Search Box wrapper (ícone + input) ────────────────────────────────────── */
@@ -574,6 +585,26 @@ tbody td {
 .btn--lg { padding: 14px 24px; font-size: 15px; border-radius: var(--radius-lg); }
 .btn--sm { padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm); }
 .btn--icon { padding: 8px; border-radius: var(--radius-sm); }
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-icon:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
 
 .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Check,
   CheckSquare,
   ChevronDown,
   ChevronRight,
@@ -48,6 +49,43 @@ const fmtDateTime = (str) => {
   const dt = new Date(/[Zz]$/.test(clean) ? clean : clean + 'Z')
   if (Number.isNaN(dt.getTime())) return str
   return dt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+}
+
+function CustomCheckbox({ checked, disabled = false, onChange }) {
+  return (
+    <span
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 18,
+        height: 18,
+        borderRadius: 5,
+        border: checked ? '1.5px solid #3b82f6' : '1.5px solid #3b4f73',
+        background: checked ? '#2563eb' : '#0b1220',
+        boxShadow: checked ? '0 0 0 2px rgba(59, 130, 246, 0.22)' : 'none',
+        flexShrink: 0,
+        transition: 'all 0.15s ease',
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={!!checked}
+        disabled={disabled}
+        onChange={onChange}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          opacity: 0,
+          margin: 0,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      />
+      {checked && <Check size={12} strokeWidth={3} color="#ffffff" />}
+    </span>
+  )
 }
 
 function AccordionMatrizPermissoes({
@@ -102,7 +140,7 @@ function AccordionMatrizPermissoes({
           gap: 8,
         }}
       >
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
           {ehMaster
             ? 'Nível MASTER possui acesso irrestrito automático a todos os setores.'
             : ehCliente
@@ -113,7 +151,7 @@ function AccordionMatrizPermissoes({
           <button
             type="button"
             className="btn btn--ghost"
-            style={{ padding: '4px 10px', fontSize: 12 }}
+            style={{ padding: '5px 12px', fontSize: 12, background: '#131d32' }}
             onClick={() => expandirTodos(true)}
           >
             Expandir Todos
@@ -121,7 +159,7 @@ function AccordionMatrizPermissoes({
           <button
             type="button"
             className="btn btn--ghost"
-            style={{ padding: '4px 10px', fontSize: 12 }}
+            style={{ padding: '5px 12px', fontSize: 12, background: '#131d32' }}
             onClick={() => expandirTodos(false)}
           >
             Recolher Todos
@@ -145,10 +183,10 @@ function AccordionMatrizPermissoes({
           <div
             key={setor.id}
             style={{
-              border: '1px solid var(--border)',
-              borderRadius: 10,
+              border: '1px solid #263654',
+              borderRadius: 12,
               overflow: 'hidden',
-              background: 'rgba(15, 23, 42, 0.45)',
+              background: '#111a2e',
             }}
           >
             <div
@@ -166,16 +204,16 @@ function AccordionMatrizPermissoes({
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 12,
-                padding: '12px 14px',
+                padding: '12px 16px',
                 cursor: 'pointer',
-                background: aberto ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
-                borderBottom: aberto ? '1px solid var(--border)' : 'none',
+                background: aberto ? '#17243d' : '#131d32',
+                borderBottom: aberto ? '1px solid #263654' : 'none',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                {aberto ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
+                {aberto ? <ChevronDown size={17} color="#60a5fa" /> : <ChevronRight size={17} color="#8fa4cc" />}
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span>{setor.nome}</span>
                     <span
                       className={`badge ${liberadas > 0 ? 'badge--success' : 'badge--neutral'}`}
@@ -184,7 +222,7 @@ function AccordionMatrizPermissoes({
                       {liberadas} / {total} liberadas
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
                     {setor.descricao}
                   </div>
                 </div>
@@ -195,7 +233,7 @@ function AccordionMatrizPermissoes({
                   <button
                     type="button"
                     className="btn btn--ghost"
-                    style={{ padding: '4px 10px', fontSize: 11, color: '#38bdf8' }}
+                    style={{ padding: '5px 10px', fontSize: 11, color: '#38bdf8', background: '#0e1729', borderColor: '#294066' }}
                     onClick={(e) => handleSelecionarSetor(e, setor.id, true)}
                   >
                     <CheckSquare size={13} />
@@ -204,7 +242,7 @@ function AccordionMatrizPermissoes({
                   <button
                     type="button"
                     className="btn btn--ghost"
-                    style={{ padding: '4px 10px', fontSize: 11, color: '#94a3b8' }}
+                    style={{ padding: '5px 10px', fontSize: 11, color: '#94a3b8', background: '#0e1729', borderColor: '#263654' }}
                     onClick={(e) => handleSelecionarSetor(e, setor.id, false)}
                   >
                     <Square size={13} />
@@ -217,9 +255,10 @@ function AccordionMatrizPermissoes({
             {aberto && (
               <div
                 style={{
-                  padding: 12,
+                  padding: 14,
+                  background: '#0d1526',
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))',
                   gap: 10,
                 }}
               >
@@ -239,27 +278,26 @@ function AccordionMatrizPermissoes({
                         display: 'flex',
                         alignItems: 'flex-start',
                         gap: 10,
-                        padding: '10px 12px',
-                        borderRadius: 8,
+                        padding: '11px 12px',
+                        borderRadius: 10,
                         border: checked
-                          ? '1px solid rgba(59, 130, 246, 0.45)'
-                          : '1px solid var(--border)',
-                        background: checked
-                          ? 'rgba(37, 99, 235, 0.12)'
-                          : 'rgba(15, 23, 42, 0.35)',
-                        opacity: bloqueadaCliente ? 0.5 : 1,
+                          ? '1.5px solid #3b82f6'
+                          : '1px solid #24334d',
+                        background: checked ? '#162547' : '#111a2e',
+                        opacity: bloqueadaCliente ? 0.52 : 1,
                         cursor: disabled ? 'not-allowed' : 'pointer',
+                        transition: 'border-color 0.15s, background 0.15s',
                       }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => handleTogglePermissao(perm.key)}
-                        style={{ marginTop: 3, accentColor: '#3b82f6' }}
-                      />
+                      <div style={{ paddingTop: 1 }}>
+                        <CustomCheckbox
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => handleTogglePermissao(perm.key)}
+                        />
+                      </div>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span>{perm.label}</span>
                           {bloqueadaCliente && (
                             <span className="badge badge--danger" style={{ fontSize: 10 }}>
@@ -267,7 +305,7 @@ function AccordionMatrizPermissoes({
                             </span>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.35 }}>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 3, lineHeight: 1.4 }}>
                           {perm.desc}
                         </div>
                       </div>
@@ -851,19 +889,19 @@ export function Operadores() {
                 }}
               />
               <input
-                className="input"
+                className="form-input"
                 value={buscaUsuario}
                 onChange={(e) => setBuscaUsuario(e.target.value)}
                 placeholder="Buscar por nome, login, setor ou perfil..."
-                style={{ width: '100%', paddingLeft: 36 }}
+                style={{ width: '100%', padding: '10px 14px 10px 36px' }}
               />
             </div>
 
             <select
-              className="input"
+              className="form-input"
               value={filtroSetor}
               onChange={(e) => setFiltroSetor(e.target.value)}
-              style={{ minWidth: 180 }}
+              style={{ minWidth: 190, width: 'auto', padding: '10px 12px' }}
             >
               {setoresPresentes.map((s) => (
                 <option key={s} value={s}>
@@ -873,10 +911,10 @@ export function Operadores() {
             </select>
 
             <select
-              className="input"
+              className="form-input"
               value={filtroStatus}
               onChange={(e) => setFiltroStatus(e.target.value)}
-              style={{ minWidth: 150 }}
+              style={{ minWidth: 165, width: 'auto', padding: '10px 12px' }}
             >
               <option value="TODOS">Todos os Status</option>
               <option value="ATIVOS">Apenas Ativos</option>
@@ -1132,11 +1170,11 @@ export function Operadores() {
                 }}
               />
               <input
-                className="input"
+                className="form-input"
                 value={buscaAuditoria}
                 onChange={(e) => setBuscaAuditoria(e.target.value)}
                 placeholder="Filtrar auditoria por usuário, ação ou detalhes..."
-                style={{ width: '100%', paddingLeft: 36 }}
+                style={{ width: '100%', padding: '10px 14px 10px 36px' }}
               />
             </div>
           </div>
@@ -1200,24 +1238,28 @@ export function Operadores() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.72)',
+            background: 'rgba(5, 9, 18, 0.86)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
             zIndex: 9990,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: 18,
+            padding: 20,
           }}
         >
           <div
-            className="card"
             style={{
               width: '100%',
-              maxWidth: 940,
+              maxWidth: 980,
               maxHeight: '92vh',
               overflowY: 'auto',
               padding: 0,
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
+              background: '#0d1424',
+              border: '1px solid #33486e',
+              borderRadius: 16,
+              boxShadow: '0 28px 72px rgba(0, 0, 0, 0.88)',
+              color: 'var(--text-primary)',
             }}
           >
             <div
@@ -1225,100 +1267,142 @@ export function Operadores() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '16px 22px',
-                borderBottom: '1px solid var(--border)',
+                padding: '18px 24px',
+                borderBottom: '1px solid #253654',
                 position: 'sticky',
                 top: 0,
-                background: 'var(--bg)',
-                zIndex: 2,
+                background: '#131d32',
+                zIndex: 5,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <ShieldCheck size={20} color="#3b82f6" />
-                <h2 style={{ margin: 0, fontSize: 18 }}>
-                  {editandoUsuario ? `Editar Usuário — ${editandoUsuario.nome}` : 'Novo Usuário'}
-                </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: 'rgba(59, 130, 246, 0.16)',
+                    border: '1px solid rgba(59, 130, 246, 0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <ShieldCheck size={20} color="#60a5fa" />
+                </div>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#f8fafc' }}>
+                    {editandoUsuario ? `Editar Usuário — ${editandoUsuario.nome}` : 'Novo Usuário'}
+                  </h2>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                    Configure login, setor de atuação, perfil e permissões granulares.
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
                 className="btn-icon"
                 onClick={() => setModalUsuarioAberto(false)}
+                title="Fechar"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSalvarUsuario} style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-                <div className="form-group">
-                  <label className="label">Nome Completo *</label>
-                  <input
-                    className="input"
-                    required
-                    value={formUsuario.nome}
-                    onChange={(e) => setFormUsuario({ ...formUsuario, nome: e.target.value })}
-                    placeholder="Ex: Maria Oliveira"
-                  />
+            <form onSubmit={handleSalvarUsuario} style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div
+                style={{
+                  padding: 18,
+                  borderRadius: 12,
+                  background: '#131d32',
+                  border: '1px solid #253654',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 14,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.02em' }}>
+                  1. Dados de Identificação & Acesso
                 </div>
 
-                <div className="form-group">
-                  <label className="label">Nome de Usuário (Login) *</label>
-                  <input
-                    className="input font-mono"
-                    required
-                    value={formUsuario.login}
-                    onChange={(e) => setFormUsuario({ ...formUsuario, login: e.target.value })}
-                    placeholder="Ex: maria.oliveira"
-                  />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+                  <div className="form-group">
+                    <label className="form-label">Nome Completo *</label>
+                    <input
+                      className="form-input"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      required
+                      value={formUsuario.nome}
+                      onChange={(e) => setFormUsuario({ ...formUsuario, nome: e.target.value })}
+                      placeholder="Ex: Maria Oliveira"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Nome de Usuário (Login) *</label>
+                    <input
+                      className="form-input font-mono"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      required
+                      value={formUsuario.login}
+                      onChange={(e) => setFormUsuario({ ...formUsuario, login: e.target.value })}
+                      placeholder="Ex: maria.oliveira"
+                    />
+                  </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="label">Setor de Atuação</label>
-                  <select
-                    className="input"
-                    value={formUsuario.setor}
-                    disabled={formUsuario.nivel === 'CLIENTE'}
-                    onChange={(e) => setFormUsuario({ ...formUsuario, setor: e.target.value })}
-                  >
-                    {SETORES_EMPRESA.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="label">Perfil Predefinido</label>
-                  <select
-                    className="input"
-                    value={formUsuario.perfil}
-                    disabled={isMaster(editandoUsuario)}
-                    onChange={(e) => handleSelecionarPerfilNoUsuario(e.target.value)}
-                  >
-                    {perfis
-                      .filter((p) => souMaster || p.nivel !== 'MASTER')
-                      .map((p) => (
-                        <option key={p.codigo} value={p.codigo}>
-                          {p.nome} ({p.nivel})
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                  <div className="form-group">
+                    <label className="form-label">Setor de Atuação</label>
+                    <select
+                      className="form-input"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      value={formUsuario.setor}
+                      disabled={formUsuario.nivel === 'CLIENTE'}
+                      onChange={(e) => setFormUsuario({ ...formUsuario, setor: e.target.value })}
+                    >
+                      {SETORES_EMPRESA.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
                         </option>
                       ))}
-                  </select>
-                </div>
+                    </select>
+                  </div>
 
-                <div className="form-group">
-                  <label className="label">Nível de Acesso</label>
-                  <select
-                    className="input"
-                    value={formUsuario.nivel}
-                    disabled={isMaster(editandoUsuario)}
-                    onChange={(e) => handleMudarNivelUsuario(e.target.value)}
-                  >
-                    <option value="OPERACIONAL">OPERACIONAL</option>
-                    <option value="CLIENTE">CLIENTE (Somente Consulta Isolada)</option>
-                    <option value="ADMINISTRADOR">ADMINISTRADOR</option>
-                    {souMaster && <option value="MASTER">MASTER (Acesso Irrestrito)</option>}
-                  </select>
+                  <div className="form-group">
+                    <label className="form-label">Perfil Predefinido</label>
+                    <select
+                      className="form-input"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      value={formUsuario.perfil}
+                      disabled={isMaster(editandoUsuario)}
+                      onChange={(e) => handleSelecionarPerfilNoUsuario(e.target.value)}
+                    >
+                      {perfis
+                        .filter((p) => souMaster || p.nivel !== 'MASTER')
+                        .map((p) => (
+                          <option key={p.codigo} value={p.codigo}>
+                            {p.nome} ({p.nivel})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Nível de Acesso</label>
+                    <select
+                      className="form-input"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      value={formUsuario.nivel}
+                      disabled={isMaster(editandoUsuario)}
+                      onChange={(e) => handleMudarNivelUsuario(e.target.value)}
+                    >
+                      <option value="OPERACIONAL">OPERACIONAL</option>
+                      <option value="CLIENTE">CLIENTE (Somente Consulta Isolada)</option>
+                      <option value="ADMINISTRADOR">ADMINISTRADOR</option>
+                      {souMaster && <option value="MASTER">MASTER (Acesso Irrestrito)</option>}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -1326,24 +1410,24 @@ export function Operadores() {
               {!editandoUsuario && (
                 <div
                   style={{
-                    padding: 16,
-                    borderRadius: 10,
-                    background: 'rgba(59, 130, 246, 0.08)',
-                    border: '1px solid rgba(59, 130, 246, 0.28)',
+                    padding: 18,
+                    borderRadius: 12,
+                    background: '#111d38',
+                    border: '1px solid rgba(59, 130, 246, 0.38)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 10,
+                    gap: 12,
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <label className="label" style={{ margin: 0 }}>
-                      Senha Inicial (gerada automaticamente — editável antes de salvar)
+                    <label className="form-label" style={{ margin: 0, color: '#93c5fd' }}>
+                      2. Senha Inicial (gerada automaticamente — editável antes de salvar)
                     </label>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
                         type="button"
                         className="btn btn--ghost"
-                        style={{ padding: '4px 10px', fontSize: 12 }}
+                        style={{ padding: '5px 11px', fontSize: 12, background: '#0b1220', borderColor: '#2d4368' }}
                         onClick={() =>
                           setFormUsuario({ ...formUsuario, senha: gerarSenhaInicial(8) })
                         }
@@ -1354,7 +1438,7 @@ export function Operadores() {
                       <button
                         type="button"
                         className="btn btn--ghost"
-                        style={{ padding: '4px 10px', fontSize: 12 }}
+                        style={{ padding: '5px 11px', fontSize: 12, background: '#0b1220', borderColor: '#2d4368' }}
                         onClick={() => copiarTexto(formUsuario.senha)}
                       >
                         <Copy size={13} />
@@ -1363,19 +1447,20 @@ export function Operadores() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
                       <input
-                        className="input font-mono"
+                        className="form-input font-mono"
                         type={mostrarSenhaModal ? 'text' : 'password'}
                         required
                         value={formUsuario.senha}
                         onChange={(e) => setFormUsuario({ ...formUsuario, senha: e.target.value })}
-                        style={{ width: '100%', paddingRight: 40 }}
+                        style={{ width: '100%', padding: '10px 42px 10px 13px', background: '#0b1220' }}
                       />
                       <button
                         type="button"
                         onClick={() => setMostrarSenhaModal((v) => !v)}
+                        title={mostrarSenhaModal ? 'Ocultar senha' : 'Visualizar senha'}
                         style={{
                           position: 'absolute',
                           right: 10,
@@ -1383,23 +1468,38 @@ export function Operadores() {
                           transform: 'translateY(-50%)',
                           background: 'transparent',
                           border: 'none',
-                          color: 'var(--text-muted)',
+                          color: 'var(--text-secondary)',
                           cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 4,
                         }}
                       >
                         {mostrarSenhaModal ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
                     </div>
 
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        fontSize: 13,
+                        color: '#e2e8f0',
+                        cursor: 'pointer',
+                        padding: '9px 12px',
+                        borderRadius: 10,
+                        background: '#0b1220',
+                        border: '1px solid #263858',
+                      }}
+                    >
+                      <CustomCheckbox
                         checked={!!formUsuario.deve_trocar_senha}
                         onChange={(e) =>
                           setFormUsuario({ ...formUsuario, deve_trocar_senha: e.target.checked })
                         }
                       />
-                      Exigir troca da senha no 1º acesso
+                      <span>Exigir troca da senha no 1º acesso</span>
                     </label>
                   </div>
                 </div>
@@ -1407,8 +1507,8 @@ export function Operadores() {
 
               {/* Matriz de Permissões por Setor (Accordions) */}
               <div>
-                <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700 }}>
-                  Permissões Individuais por Setor
+                <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700, color: '#f1f5f9' }}>
+                  {editandoUsuario ? '2. Permissões Individuais por Setor' : '3. Permissões Individuais por Setor'}
                 </h3>
                 <AccordionMatrizPermissoes
                   permissoes={formUsuario.permissoes}
@@ -1424,8 +1524,13 @@ export function Operadores() {
                   display: 'flex',
                   justifyContent: 'flex-end',
                   gap: 10,
-                  paddingTop: 14,
-                  borderTop: '1px solid var(--border)',
+                  padding: '16px 24px',
+                  margin: '4px -24px -24px',
+                  background: '#131d32',
+                  borderTop: '1px solid #253654',
+                  position: 'sticky',
+                  bottom: 0,
+                  zIndex: 4,
                 }}
               >
                 <button
@@ -1456,7 +1561,9 @@ export function Operadores() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.72)',
+            background: 'rgba(5, 9, 18, 0.86)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
             zIndex: 9995,
             display: 'flex',
             alignItems: 'center',
@@ -1464,9 +1571,29 @@ export function Operadores() {
             padding: 18,
           }}
         >
-          <div className="card" style={{ width: '100%', maxWidth: 460 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 460,
+              padding: 0,
+              background: '#0d1424',
+              border: '1px solid #33486e',
+              borderRadius: 16,
+              overflow: 'hidden',
+              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.88)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px 20px',
+                background: '#131d32',
+                borderBottom: '1px solid #253654',
+              }}
+            >
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, color: '#f8fafc' }}>
                 <KeyRound size={18} color="#f59e0b" />
                 Redefinir Senha
               </h3>
@@ -1475,19 +1602,19 @@ export function Operadores() {
               </button>
             </div>
 
-            <form onSubmit={handleConfirmarRedefinirSenha} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                Usuário: <strong>{usuarioSenhaAlvo.nome}</strong> (<code>{usuarioSenhaAlvo.login}</code>)
+            <form onSubmit={handleConfirmarRedefinirSenha} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Usuário: <strong style={{ color: '#f8fafc' }}>{usuarioSenhaAlvo.nome}</strong> (<code>{usuarioSenhaAlvo.login}</code>)
               </div>
 
               <div className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <label className="label" style={{ margin: 0 }}>Nova Senha</label>
+                  <label className="form-label" style={{ margin: 0 }}>Nova Senha</label>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button
                       type="button"
                       className="btn btn--ghost"
-                      style={{ padding: '2px 8px', fontSize: 11 }}
+                      style={{ padding: '4px 10px', fontSize: 11, background: '#131d32' }}
                       onClick={() => setNovaSenhaReset(gerarSenhaInicial(8))}
                     >
                       <RefreshCw size={12} /> Gerar
@@ -1495,7 +1622,7 @@ export function Operadores() {
                     <button
                       type="button"
                       className="btn btn--ghost"
-                      style={{ padding: '2px 8px', fontSize: 11 }}
+                      style={{ padding: '4px 10px', fontSize: 11, background: '#131d32' }}
                       onClick={() => copiarTexto(novaSenhaReset)}
                     >
                       <Copy size={12} /> Copiar
@@ -1504,11 +1631,11 @@ export function Operadores() {
                 </div>
                 <div style={{ position: 'relative' }}>
                   <input
-                    className="input font-mono"
+                    className="form-input font-mono"
                     type={mostrarSenhaReset ? 'text' : 'password'}
                     value={novaSenhaReset}
                     onChange={(e) => setNovaSenhaReset(e.target.value)}
-                    style={{ width: '100%', paddingRight: 40 }}
+                    style={{ width: '100%', padding: '10px 42px 10px 13px', background: '#131d32' }}
                   />
                   <button
                     type="button"
@@ -1520,8 +1647,11 @@ export function Operadores() {
                       transform: 'translateY(-50%)',
                       background: 'transparent',
                       border: 'none',
-                      color: 'var(--text-muted)',
+                      color: 'var(--text-secondary)',
                       cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: 4,
                     }}
                   >
                     {mostrarSenhaReset ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -1529,13 +1659,25 @@ export function Operadores() {
                 </div>
               </div>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 13,
+                  color: '#e2e8f0',
+                  cursor: 'pointer',
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  background: '#131d32',
+                  border: '1px solid #253654',
+                }}
+              >
+                <CustomCheckbox
                   checked={exigirTrocaReset}
                   onChange={(e) => setExigirTrocaReset(e.target.checked)}
                 />
-                Exigir troca da senha no próximo login
+                <span>Exigir troca da senha no próximo login</span>
               </label>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
@@ -1566,7 +1708,9 @@ export function Operadores() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.72)',
+            background: 'rgba(5, 9, 18, 0.86)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
             zIndex: 9992,
             display: 'flex',
             alignItems: 'center',
@@ -1575,15 +1719,16 @@ export function Operadores() {
           }}
         >
           <div
-            className="card"
             style={{
               width: '100%',
-              maxWidth: 900,
+              maxWidth: 920,
               maxHeight: '90vh',
               overflowY: 'auto',
               padding: 0,
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
+              background: '#0d1424',
+              border: '1px solid #33486e',
+              borderRadius: 16,
+              boxShadow: '0 28px 72px rgba(0, 0, 0, 0.88)',
             }}
           >
             <div
@@ -1591,11 +1736,15 @@ export function Operadores() {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                padding: '16px 22px',
-                borderBottom: '1px solid var(--border)',
+                padding: '18px 24px',
+                borderBottom: '1px solid #253654',
+                background: '#131d32',
+                position: 'sticky',
+                top: 0,
+                zIndex: 5,
               }}
             >
-              <h3 style={{ margin: 0 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#f8fafc' }}>
                 {editandoPerfil ? `Editar Perfil — ${editandoPerfil.nome}` : 'Novo Perfil por Setor'}
               </h3>
               <button type="button" className="btn-icon" onClick={() => setModalPerfilAberto(false)}>
@@ -1603,59 +1752,75 @@ export function Operadores() {
               </button>
             </div>
 
-            <form onSubmit={handleSalvarPerfil} style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+            <form onSubmit={handleSalvarPerfil} style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div
+                style={{
+                  padding: 16,
+                  borderRadius: 12,
+                  background: '#131d32',
+                  border: '1px solid #253654',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Nome do Perfil *</label>
+                    <input
+                      className="form-input"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      required
+                      value={formPerfil.nome}
+                      onChange={(e) => setFormPerfil({ ...formPerfil, nome: e.target.value })}
+                      placeholder="Ex: Conferente Expedição"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Setor Padrão</label>
+                    <select
+                      className="form-input"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      value={formPerfil.setor_padrao}
+                      onChange={(e) => setFormPerfil({ ...formPerfil, setor_padrao: e.target.value })}
+                    >
+                      {SETORES_EMPRESA.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Nível Base</label>
+                    <select
+                      className="form-input"
+                      style={{ padding: '10px 13px', background: '#0b1220' }}
+                      value={formPerfil.nivel}
+                      onChange={(e) => {
+                        const nv = e.target.value
+                        setFormPerfil((prev) => ({
+                          ...prev,
+                          nivel: nv,
+                          permissoes: sanitizarPermissoes(prev.permissoes, nv, prev.codigo),
+                        }))
+                      }}
+                    >
+                      <option value="OPERACIONAL">OPERACIONAL</option>
+                      <option value="CLIENTE">CLIENTE</option>
+                      <option value="ADMINISTRADOR">ADMINISTRADOR</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div className="form-group">
-                  <label className="label">Nome do Perfil *</label>
+                  <label className="form-label">Descrição</label>
                   <input
-                    className="input"
-                    required
-                    value={formPerfil.nome}
-                    onChange={(e) => setFormPerfil({ ...formPerfil, nome: e.target.value })}
-                    placeholder="Ex: Conferente Expedição"
+                    className="form-input"
+                    style={{ padding: '10px 13px', background: '#0b1220' }}
+                    value={formPerfil.descricao}
+                    onChange={(e) => setFormPerfil({ ...formPerfil, descricao: e.target.value })}
+                    placeholder="Descreva a finalidade deste perfil..."
                   />
                 </div>
-                <div className="form-group">
-                  <label className="label">Setor Padrão</label>
-                  <select
-                    className="input"
-                    value={formPerfil.setor_padrao}
-                    onChange={(e) => setFormPerfil({ ...formPerfil, setor_padrao: e.target.value })}
-                  >
-                    {SETORES_EMPRESA.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="label">Nível Base</label>
-                  <select
-                    className="input"
-                    value={formPerfil.nivel}
-                    onChange={(e) => {
-                      const nv = e.target.value
-                      setFormPerfil((prev) => ({
-                        ...prev,
-                        nivel: nv,
-                        permissoes: sanitizarPermissoes(prev.permissoes, nv, prev.codigo),
-                      }))
-                    }}
-                  >
-                    <option value="OPERACIONAL">OPERACIONAL</option>
-                    <option value="CLIENTE">CLIENTE</option>
-                    <option value="ADMINISTRADOR">ADMINISTRADOR</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="label">Descrição</label>
-                <input
-                  className="input"
-                  value={formPerfil.descricao}
-                  onChange={(e) => setFormPerfil({ ...formPerfil, descricao: e.target.value })}
-                  placeholder="Descreva a finalidade deste perfil..."
-                />
               </div>
 
               <AccordionMatrizPermissoes
@@ -1664,7 +1829,20 @@ export function Operadores() {
                 onChange={(nextPerms) => setFormPerfil((prev) => ({ ...prev, permissoes: nextPerms }))}
               />
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 10,
+                  borderTop: '1px solid #253654',
+                  padding: '16px 24px',
+                  margin: '4px -24px -24px',
+                  background: '#131d32',
+                  position: 'sticky',
+                  bottom: 0,
+                  zIndex: 4,
+                }}
+              >
                 <button
                   type="button"
                   className="btn btn--ghost"

@@ -146,11 +146,25 @@ function TopBar() {
       {modalSenha && (
         <div
           className="flex items-center justify-center p-24 fade-in"
-          style={{ position: 'fixed', inset: 0, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.75)' }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(5, 9, 18, 0.84)',
+            backdropFilter: 'blur(6px)',
+          }}
           onClick={(e) => { if (e.target === e.currentTarget && !salvandoSenha) setModalSenha(false) }}
         >
-          <div className="card border border-border rounded-lg shadow-2xl w-full max-w-[420px]" style={{ padding: 0 }}>
-            <div className="flex items-center justify-between p-16 border-b border-border">
+          <div
+            className="card border border-border rounded-lg shadow-2xl w-full max-w-[420px]"
+            style={{
+              padding: 0,
+              background: 'var(--bg-1)',
+              border: '1px solid var(--border-light)',
+              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.85)',
+            }}
+          >
+            <div className="flex items-center justify-between p-16 border-b border-border" style={{ background: 'var(--bg-2)' }}>
               <div className="flex items-center gap-8">
                 <Lock size={18} className="text-primary" />
                 <h3 className="text-base font-bold">Alterar Minha Senha</h3>
@@ -179,8 +193,19 @@ function TopBar() {
                   />
                   <button
                     type="button"
-                    className="btn-icon"
-                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}
+                    style={{
+                      position: 'absolute',
+                      right: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: 4,
+                    }}
                     onClick={() => setMostrarSenhas((v) => !v)}
                     tabIndex={-1}
                   >
