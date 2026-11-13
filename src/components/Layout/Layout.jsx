@@ -290,7 +290,6 @@ function Sidebar() {
     'desmembramento',
     'reimpressao',
     'pedidos',
-    'pedidos_consultar',
     'saida',
     'expedicao',
   ])
@@ -362,7 +361,7 @@ function Sidebar() {
           <Printer size={18} /> Reimpressão Etiquetas
         </NavLink>
       )}
-      {temAlgumaPermissao(operador, ['pedidos', 'pedidos_consultar']) && (
+      {temPermissao(operador, 'pedidos') && (
         <NavLink to="/pedidos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ClipboardList size={18} /> Pedidos
         </NavLink>

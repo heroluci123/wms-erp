@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, RefreshCcw, CheckCircle, AlertTriangle, X, Layers, ChevronDown, ChevronRight, MapPin, Filter } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import { StatusItemBadge, InventarioStatusBadge } from '../components/shared/Badge'
 import { format } from 'date-fns'
 import * as inventariosQueries from '../queries/inventarios.js';
@@ -44,7 +45,7 @@ export function InventarioConciliacao() {
   useEffect(() => { carregar() }, [carregar])
 
   const handleConciliar = async () => {
-    if (operador?.perfil !== 'gestor') return toastError('Acesso Negado', 'Apenas gestores podem conciliar.')
+    if (!temPermissao(operador, 'inventario_gestao')) return toastError('Acesso Negado', 'Você não possui permissão para conciliar inventários.')
     setLoadingConciliar(true)
     try {
       const isCargaInicial = inventario?.tipo === 'CargaInicial'

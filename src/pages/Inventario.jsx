@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { CheckSquare, Plus, BarChart2, RefreshCw, AlertTriangle, Target, TrendingDown, TrendingUp, Clock, Layers, DatabaseZap, ChevronRight, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import { InventarioStatusBadge } from '../components/shared/Badge'
 import { format } from 'date-fns'
 import * as inventariosQueries from '../queries/inventarios.js';
@@ -228,8 +229,12 @@ export function Inventario() {
   const { toastSuccess, toastError, operador } = useAppStore()
   const navigate = useNavigate()
 
-  const isGestor = operador?.perfil === 'gestor'
-  const isAdm = operador?.is_adm === 1
+  const podeColetor = temPermissao(operador, 'inventario_coletor')
+  const podeGestao = temPermissao(operador, 'inventario_gestao')
+  const podeDivergencias = temPermissao(operador, 'inventario_divergencias')
+  const podeCargaInicial = temPermissao(operador, 'inventario_carga_inicial')
+  const podeGestaoOuCarga = podeGestao || podeDivergencias || podeCargaInicial
+  const podeCarga = podeCargaInicial || podeGestao || Number(operador?.is_adm) === 1
 
   const [aba, setAba] = useState('ciclico') // ciclico | geral | carga | ciclos | log
   const [inventarios, setInventarios] = useState([])
@@ -274,17 +279,19 @@ export function Inventario() {
   }, [toastError])
 
   useEffect(() => {
-    if (operador?.permissoes?.inventario_coletor && !operador?.permissoes?.inventario_gestao) {
+    if (podeColetor && !podeGestaoOuCarga) {
       navigate('/inventario/coletor', { replace: true })
       return
     }
-    if (operador?.permissoes?.inventario_gestao) {
+    if (podeGestaoOuCarga) {
+      if (!podeGestao && !podeDivergencias && podeCargaInicial) {
+        setAba('carga')
+      }
       carregar()
     } else {
-      toastError('Acesso Negado', 'Você não possui permissão para acessar o inventário.')
-      navigate('/')
+      navigate('/', { replace: true })
     }
-  }, [operador, navigate, carregar, toastError])
+  }, [podeColetor, podeGestaoOuCarga, podeGestao, podeDivergencias, podeCargaInicial, navigate, carregar])
 
   const carregarLog = useCallback(async () => {
     try {
@@ -361,11 +368,15 @@ export function Inventario() {
   const invsByTipo = (tipo) => inventarios.filter(i => (tipo === 'Ciclico' ? (!i.tipo || i.tipo === 'Ciclico') : i.tipo === tipo))
 
   const ABAS = [
-    { id: 'ciclico', label: 'Cíclico (Rotativo)', icon: <RefreshCw size={15}/> },
-    { id: 'geral', label: 'Geral (Wall-to-Wall)', icon: <Layers size={15}/> },
-    { id: 'ciclos', label: 'Ciclos', icon: <Target size={15}/> },
-    { id: 'log', label: 'Log de Ajustes', icon: <BarChart2 size={15}/> },
-    ...(isAdm ? [{ id: 'carga', label: 'Carga Inicial', icon: <DatabaseZap size={15}/> }] : []),
+    ...(podeGestao || podeDivergencias
+      ? [
+          { id: 'ciclico', label: 'Cíclico (Rotativo)', icon: <RefreshCw size={15}/> },
+          { id: 'geral', label: 'Geral (Wall-to-Wall)', icon: <Layers size={15}/> },
+          { id: 'ciclos', label: 'Ciclos', icon: <Target size={15}/> },
+          { id: 'log', label: 'Log de Ajustes', icon: <BarChart2 size={15}/> },
+        ]
+      : []),
+    ...(podeCarga ? [{ id: 'carga', label: 'Carga Inicial', icon: <DatabaseZap size={15}/> }] : []),
   ]
 
   return (
@@ -378,9 +389,11 @@ export function Inventario() {
           <p className="page-header__subtitle">Inventário cíclico, geral Wall-to-Wall, ciclos e auditoria</p>
         </div>
         <div className="flex gap-8">
-          <button className="btn btn--ghost btn--sm" onClick={() => navigate('/inventario/coletor')}>
-            <BarChart2 size={16}/> Modo Coletor
-          </button>
+          {podeColetor && (
+            <button className="btn btn--ghost btn--sm" onClick={() => navigate('/inventario/coletor')}>
+              <BarChart2 size={16}/> Modo Coletor
+            </button>
+          )}
           <button className="btn btn--secondary btn--sm" onClick={carregar}><RefreshCw size={15}/></button>
         </div>
       </div>
@@ -559,8 +572,8 @@ export function Inventario() {
         </div>
       )}
 
-      {/* ── ABA: CARGA INICIAL (ADM only) ───────────────────────────────────── */}
-      {aba === 'carga' && isAdm && (
+      {/* ── ABA: CARGA INICIAL (ADM / permissão carga inicial) ──────────────── */}
+      {aba === 'carga' && podeCarga && (
         <div className="form-grid form-grid--2 items-start">
           <div className="card" style={{ borderColor: 'var(--warning)', borderWidth: 2, borderStyle: 'solid' }}>
             <div className="flex items-center gap-12 mb-16">

@@ -5,6 +5,7 @@ import {
   ArrowUpFromLine, RefreshCw, Play, FileText, Search, X, Lock, CheckCircle2, XCircle
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import * as producaoQueries from '../queries/producao.js'
 import * as produtosQueries from '../queries/produtos.js'
 import { tarasQueries } from '../queries/taras.js'
@@ -397,7 +398,7 @@ function OpItemPrevistoRow({
 
 export function Producao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
-  const isAdm = Number(operador?.is_adm) === 1
+  const isAdm = temPermissao(operador, 'producao_criar_op')
 
   const [abaPrincipal, setAbaPrincipal] = useState('ativas') // 'ativas' | 'config' | 'fechadas' | 'relatorios'
   const [opsAtivas, setOpsAtivas] = useState([])

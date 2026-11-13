@@ -330,9 +330,10 @@ export function Operadores() {
     temPermissao(usuarioAtual, 'operadores')
   const podeGerenciarPerfis =
     isMaster(usuarioAtual) || temPermissao(usuarioAtual, 'perfis_gerenciar')
+  const podeAcessarModulo = podeGerenciarUsuarios || podeGerenciarPerfis
   const souMaster = isMaster(usuarioAtual)
 
-  const [abaAtiva, setAbaAtiva] = useState('usuarios')
+  const [abaAtiva, setAbaAtiva] = useState(() => (podeGerenciarUsuarios ? 'usuarios' : 'perfis'))
   const [loading, setLoading] = useState(false)
   const [usuarios, setUsuarios] = useState([])
   const [perfis, setPerfis] = useState(PERFIS_SISTEMA_BASE)
@@ -394,13 +395,13 @@ export function Operadores() {
   })
 
   const carregarTudo = async () => {
-    if (!podeGerenciarUsuarios) return
+    if (!podeAcessarModulo) return
     setLoading(true)
     try {
       const [listaUsers, listaPerfis, listaAud] = await Promise.all([
-        operadoresQueries.listar(),
+        podeGerenciarUsuarios ? operadoresQueries.listar() : Promise.resolve([]),
         operadoresQueries.listarPerfis().catch(() => PERFIS_SISTEMA_BASE),
-        operadoresQueries.listarAuditoria(150).catch(() => []),
+        podeGerenciarUsuarios ? operadoresQueries.listarAuditoria(150).catch(() => []) : Promise.resolve([]),
       ])
       setUsuarios(listaUsers || [])
       setPerfis(listaPerfis?.length ? listaPerfis : PERFIS_SISTEMA_BASE)
@@ -413,8 +414,11 @@ export function Operadores() {
   }
 
   useEffect(() => {
+    if (!podeGerenciarUsuarios && podeGerenciarPerfis && abaAtiva !== 'perfis') {
+      setAbaAtiva('perfis')
+    }
     carregarTudo()
-  }, [podeGerenciarUsuarios])
+  }, [podeGerenciarUsuarios, podeGerenciarPerfis])
 
   const setoresPresentes = useMemo(() => {
     const s = new Set(SETORES_EMPRESA)
@@ -752,7 +756,7 @@ export function Operadores() {
     })
   }
 
-  if (!podeGerenciarUsuarios) {
+  if (!podeAcessarModulo) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: 48 }}>
         <ShieldAlert size={40} color="#ef4444" style={{ marginBottom: 12 }} />
@@ -826,27 +830,31 @@ export function Operadores() {
             <RefreshCw size={16} />
             Atualizar
           </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={abrirModalNovoUsuario}
-          >
-            <UserPlus size={16} />
-            Novo Usuário
-          </button>
+          {podeGerenciarUsuarios && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={abrirModalNovoUsuario}
+            >
+              <UserPlus size={16} />
+              Novo Usuário
+            </button>
+          )}
         </div>
       </div>
 
       {/* Abas */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className={`btn ${abaAtiva === 'usuarios' ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => setAbaAtiva('usuarios')}
-        >
-          <Users size={16} />
-          Usuários ({usuarios.length})
-        </button>
+        {podeGerenciarUsuarios && (
+          <button
+            type="button"
+            className={`btn ${abaAtiva === 'usuarios' ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => setAbaAtiva('usuarios')}
+          >
+            <Users size={16} />
+            Usuários ({usuarios.length})
+          </button>
+        )}
         <button
           type="button"
           className={`btn ${abaAtiva === 'perfis' ? 'btn--primary' : 'btn--ghost'}`}
@@ -855,14 +863,16 @@ export function Operadores() {
           <Layers size={16} />
           Perfis Predefinidos ({perfis.length})
         </button>
-        <button
-          type="button"
-          className={`btn ${abaAtiva === 'auditoria' ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => setAbaAtiva('auditoria')}
-        >
-          <History size={16} />
-          Auditoria de Acessos
-        </button>
+        {podeGerenciarUsuarios && (
+          <button
+            type="button"
+            className={`btn ${abaAtiva === 'auditoria' ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => setAbaAtiva('auditoria')}
+          >
+            <History size={16} />
+            Auditoria de Acessos
+          </button>
+        )}
       </div>
 
       {/* ABA 1: USUÁRIOS */}

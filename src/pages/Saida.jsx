@@ -20,6 +20,7 @@ import {
   Tag
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
 import * as producaoQueries from '../queries/producao.js'
 import * as saidaQueries from '../queries/saida.js'
@@ -43,9 +44,7 @@ const fmtDataHora = (d) => {
 
 export function Saida() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
-  const podeExpedir = Boolean(
-    operador && (operador.permissoes?.expedicao || Number(operador.is_adm) === 1 || operador.perfil === 'gestor')
-  )
+  const podeExpedir = temPermissao(operador, 'expedicao')
 
   const [aba, setAba] = useState('SEPARACAO') // 'SEPARACAO' | 'EXPEDICAO' | 'HISTORICO'
   const [loading, setLoading] = useState(false)

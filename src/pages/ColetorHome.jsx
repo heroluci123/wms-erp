@@ -52,7 +52,7 @@ export function ColetorHome() {
       icon: <ClipboardList size={44} />,
       rota: '/pedidos',
       cor: '#8b5cf6',
-      permissoes: ['pedidos', 'pedidos_consultar'],
+      permissoes: ['pedidos'],
     },
     {
       label: 'Inventário',

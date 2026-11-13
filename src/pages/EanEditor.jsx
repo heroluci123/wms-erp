@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Barcode, Search, CheckCircle, AlertTriangle, RefreshCw, Edit2, X, Check, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { temPermissao, temAlgumaPermissao } from '../utils/permissoes'
 import { db } from '../lib/db.js'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
 
@@ -109,13 +110,13 @@ export function EanEditor() {
   }
 
   // Verifica permissão
-  const temPermissao = operador?.permissoes?.produtos || operador?.permissoes?.operadores
-  if (!temPermissao) {
+  const podeEditarEan = temPermissao(operador, 'ean_etiquetas')
+  if (!podeEditarEan) {
     return (
       <div className="card p-32 text-center">
         <AlertTriangle size={32} className="text-warning mb-12" style={{ margin: '0 auto 12px' }} />
         <div className="font-bold mb-4">Acesso Restrito</div>
-        <div className="text-muted text-sm">Esta tela requer permissão de <strong>Consulta & Produtos</strong> ou <strong>Operadores</strong>.</div>
+        <div className="text-muted text-sm">Esta tela requer permissão para <strong>Consultar e editar etiquetas / EANs</strong>.</div>
       </div>
     )
   }
@@ -254,14 +255,16 @@ export function EanEditor() {
                     >
                       <Edit2 size={15} />
                     </button>
-                    <button
-                      className="btn btn--ghost btn--icon text-danger"
-                      onClick={() => handleDelete(cx.id)}
-                      title="Excluir Caixa INT"
-                      style={{ padding:'8px 12px' }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                    {temAlgumaPermissao(operador, ['recebimento', 'deletar_historico']) && (
+                      <button
+                        className="btn btn--ghost btn--icon text-danger"
+                        onClick={() => handleDelete(cx.id)}
+                        title="Excluir Caixa INT"
+                        style={{ padding:'8px 12px' }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
                   </>
                 )}
               </div>

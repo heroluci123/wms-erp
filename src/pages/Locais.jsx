@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { MapPin, Search, Plus, Edit2, Trash2, FileDown } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import * as locaisQueries from '../queries/locais.js';
 
 export function Locais() {
@@ -24,7 +25,7 @@ export function Locais() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (operador?.perfil !== 'gestor') return toastError('Acesso Negado', 'Ação restrita a gestores.')
+    if (!temPermissao(operador, 'locais')) return toastError('Acesso Negado', 'Você não possui permissão para gerenciar locais.')
     
     try {
       const payload = { ...formData, capacidade_max_caixas: parseFloat(formData.capacidade_max_caixas) || 0 }
@@ -45,7 +46,7 @@ export function Locais() {
   }
 
   const handleDelete = async (id) => {
-    if (operador?.perfil !== 'gestor') return toastError('Acesso Negado', 'Ação restrita a gestores.')
+    if (!temPermissao(operador, 'locais')) return toastError('Acesso Negado', 'Você não possui permissão para gerenciar locais.')
     if (!window.confirm('Tem certeza que deseja desativar este local?')) return
     
     try {

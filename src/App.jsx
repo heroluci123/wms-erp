@@ -92,7 +92,7 @@ function App() {
           <Route path="desmembramento" element={<RequirePermissao permissoes={['desmembramento']} element={<Desmembramento />} />} />
           <Route path="reimpressao" element={<RequirePermissao permissoes={['reimpressao']} element={<ReimpressaoEtiquetas />} />} />
           <Route path="taras" element={<RequirePermissao permissoes={['taras']} element={<Taras />} />} />
-          <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos', 'pedidos_consultar']} element={<Pedidos />} />} />
+          <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos']} element={<Pedidos />} />} />
           <Route path="saida" element={<RequirePermissao permissoes={['saida', 'expedicao']} element={<Saida />} />} />
 
           <Route path="inventario" element={<RequirePermissao permissoes={['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial']} element={<Inventario />} />} />

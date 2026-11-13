@@ -22,6 +22,7 @@ import {
 import { pedidosQueries } from '../queries/pedidos'
 import * as saidaQueries from '../queries/saida'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import { FolhaPedidoPrint } from '../components/shared/FolhaPedidoPrint'
 import { RomaneioEmbarquePrint } from '../components/shared/RomaneioEmbarquePrint'
 import { EtiquetaReservaZebraModal } from '../components/shared/EtiquetaZebraPrint'
@@ -80,10 +81,7 @@ const fmtDataHora = (d) => {
 
 export function Pedidos() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
-  const podeGerenciarPedidos = Boolean(
-    operador &&
-      (Number(operador.is_adm) === 1 || operador.perfil === 'gestor' || operador.permissoes?.pedidos)
-  )
+  const podeGerenciarPedidos = temPermissao(operador, 'pedidos')
 
   const [aba, setAba] = useState('GERENCIADOR') // 'GERENCIADOR' | 'FORM'
   const [loading, setLoading] = useState(false)
