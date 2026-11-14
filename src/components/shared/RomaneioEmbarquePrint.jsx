@@ -1,5 +1,5 @@
 import React from 'react'
-import { PrintDocumentModal, fmtKg, fmtNum, fmtData, fmtDataHora } from './PrintDocumentModal'
+import { PrintDocumentModal, fmtKg, fmtData, fmtDataHora } from './PrintDocumentModal'
 
 export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
   if (!romaneio) return null
@@ -38,7 +38,6 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
       descricao: pi.produto_descricao,
       kgPedido,
       kgSeparado,
-      difKg: kgSeparado - kgPedido,
       caixas: sep?.qtd_caixas || 0,
       conferidas: sep?.qtd_conferidas || 0,
       extra: false
@@ -52,7 +51,6 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
         descricao: r.produto_descricao,
         kgPedido: 0,
         kgSeparado: Number(r.total_kg || 0),
-        difKg: Number(r.total_kg || 0),
         caixas: r.qtd_caixas || 0,
         conferidas: r.qtd_conferidas || 0,
         extra: temPedido
@@ -153,11 +151,10 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
         <thead>
           <tr>
             <th style={{ width: '10%' }}>Cód.</th>
-            <th style={{ width: temPedido ? '42%' : '62%' }}>Produto</th>
-            {temPedido && <th style={{ width: '14%', textAlign: 'right' }}>Kg Pedido</th>}
-            <th style={{ width: temPedido ? '15%' : '16%', textAlign: 'right' }}>Kg Embarque</th>
-            {temPedido && <th style={{ width: '11%', textAlign: 'right' }}>Diferença</th>}
-            <th style={{ width: temPedido ? '8%' : '12%', textAlign: 'center' }}>Caixas</th>
+            <th style={{ width: temPedido ? '48%' : '62%' }}>Produto</th>
+            {temPedido && <th style={{ width: '15%', textAlign: 'right' }}>Kg Pedido</th>}
+            <th style={{ width: '16%', textAlign: 'right' }}>Kg Embarque</th>
+            <th style={{ width: temPedido ? '11%' : '12%', textAlign: 'center' }}>Caixas</th>
           </tr>
         </thead>
         <tbody>
@@ -182,11 +179,6 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
               </td>
               {temPedido && <td style={{ textAlign: 'right' }}>{r.kgPedido > 0 ? fmtKg(r.kgPedido) : '-'}</td>}
               <td style={{ textAlign: 'right', fontWeight: 800 }}>{fmtKg(r.kgSeparado)}</td>
-              {temPedido && (
-                <td style={{ textAlign: 'right', color: r.difKg < 0 ? '#b91c1c' : '#15803d', fontWeight: 700 }}>
-                  {r.kgPedido > 0 ? `${r.difKg >= 0 ? '+' : ''}${fmtNum(r.difKg)} kg` : '-'}
-                </td>
-              )}
               <td style={{ textAlign: 'center', fontWeight: 700 }}>{r.caixas}</td>
             </tr>
           ))}
@@ -196,11 +188,6 @@ export function RomaneioEmbarquePrint({ romaneio, onClose, autoPrint = true }) {
             <td colSpan={2} style={{ textAlign: 'right' }}>TOTAIS:</td>
             {temPedido && <td style={{ textAlign: 'right' }}>{fmtKg(totalPedidoKg)}</td>}
             <td style={{ textAlign: 'right' }}>{fmtKg(totalPeso)}</td>
-            {temPedido && (
-              <td style={{ textAlign: 'right' }}>
-                {`${totalPeso - totalPedidoKg >= 0 ? '+' : ''}${fmtNum(totalPeso - totalPedidoKg)} kg`}
-              </td>
-            )}
             <td style={{ textAlign: 'center' }}>{totalCaixas} cx</td>
           </tr>
         </tfoot>
