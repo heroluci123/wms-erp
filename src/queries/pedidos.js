@@ -695,11 +695,14 @@ export const pedidosQueries = {
     })
   },
 
-  /** Gera Ordem de Produção automática para os itens sem saldo do pedido */
-  async gerarOpAutomatica(id) {
+  /** Gera Ordem de Produção automática (ou carrega preview para abrir na tela de OP) */
+  async gerarOpAutomatica(id, { preview_only = false } = {}) {
     if (!isApiEnabled()) {
       throw new Error('Geração automática de OP por pedido requer o Backend PostgreSQL ativo (VITE_API_URL).')
     }
-    return apiRequest(`/api/pedidos/${id}/gerar-op`, { method: 'POST' })
+    return apiRequest(`/api/pedidos/${id}/gerar-op`, {
+      method: 'POST',
+      body: preview_only ? { preview_only: true } : {},
+    })
   },
 }

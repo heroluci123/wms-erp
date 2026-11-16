@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Factory, Plus, Check, Trash2, Unlock, BarChart2, ScanBarcode,
   AlertTriangle, Package, Printer, Edit3, ShieldAlert, ArrowDownToLine,
@@ -397,6 +398,8 @@ function OpItemPrevistoRow({
 }
 
 export function Producao() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   const isAdm = temPermissao(operador, 'producao_criar_op')
 
@@ -477,6 +480,29 @@ export function Producao() {
   }
 
   useEffect(() => { carregarTudo() }, [isAdm])
+
+  useEffect(() => {
+    const prefill = location.state?.abrirNovaOpPrefill
+    if (!prefill || !isAdm || produtos.length === 0) return
+    setEditOpId(null)
+    setOpSelecionada(null)
+    setOpForm({
+      nome: prefill.nome || '',
+      data_producao: prefill.data_producao || hojeIsoLocal(),
+      observacoes: prefill.observacoes || '',
+      liberarAgora: true,
+      itensEntrada: (prefill.previstos_entrada || []).map((i) => mapPrevistoParaForm(i, produtos)),
+      itensSaida: (prefill.previstos_saida || []).map((i) => mapPrevistoParaForm(i, produtos)),
+    })
+    setAbaPrincipal('config')
+    if (!prefill.previstos_entrada || prefill.previstos_entrada.length === 0) {
+      toastWarning(
+        'Selecione a Matéria-Prima de entrada',
+        'Nenhum vínculo automático na Árvore para esses cortes. Inclua a Matéria-Prima obrigatória para abrir a OP.',
+      )
+    }
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.state, isAdm, produtos, location.pathname, navigate, toastWarning])
 
   const abrirDetalhesOP = async (opId, manterSubAba = false) => {
     try {
@@ -645,6 +671,12 @@ export function Producao() {
     e.preventDefault()
     if (!isAdm) return toastError('Acesso restrito', 'Apenas Administradores podem criar ou alterar OPs.')
     if (!opForm.nome.trim()) return toastWarning('Campo obrigatório', 'Informe o título/descrição da Ordem de Produção.')
+    if (opForm.itensEntrada.length === 0) {
+      return toastWarning(
+        'Matéria-Prima obrigatória',
+        'Não é permitido abrir ou salvar OP sem ao menos 1 Matéria-Prima prevista de ENTRADA.',
+      )
+    }
 
     const itensPrevistos = [
       ...opForm.itensEntrada.map(i => ({
@@ -1801,8 +1833,17 @@ export function Producao() {
               />
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {opForm.itensEntrada.length === 0 ? (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 4px' }}>
-                    Opcional: adicione os produtos que entrarão na produção.
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: '#fde68a',
+                      background: 'rgba(245, 158, 11, 0.1)',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      borderRadius: 6,
+                      padding: '10px 12px',
+                    }}
+                  >
+                    <strong>Obrigatório:</strong> selecione ao menos 1 Matéria-Prima de entrada antes de salvar/abrir a OP.
                   </div>
                 ) : (
                   opForm.itensEntrada.map((item, idx) => (

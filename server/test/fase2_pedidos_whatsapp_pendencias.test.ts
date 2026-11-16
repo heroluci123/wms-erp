@@ -507,6 +507,60 @@ test('Fase 2: WhatsApp parser, Inbox -> Pedido, Parcelas, Clonar, Gerar OP e Cen
     assert.equal(pedAuto.criado_por_nome, 'Luciano')
     assert.ok(String(pedAuto.setor_solicitante || '').length > 0)
 
+    // 7C. Preview de OP sem gravar no banco + Bloqueio de OP sem MP ENTRADA + Re-trava ao editar pedido já LIBERADO
+    const resOpSemMp = await app.inject({
+      method: 'POST',
+      url: '/api/ops',
+      headers,
+      payload: {
+        nome: 'OP Sem MP Invalida',
+        itensPrevistos: [{ tipo: 'SAIDA', produto_id: itemOssobuco.produto_id, peso_kg_previsto: 5 }],
+      },
+    })
+    assert.equal(resOpSemMp.statusCode, 400, `POST /api/ops sem ENTRADA deveria falhar 400: ${resOpSemMp.body}`)
+
+    const resOpsAntesPreview = await app.inject({ method: 'GET', url: '/api/ops', headers })
+    const opsAntesCount = (resOpsAntesPreview.json().data || []).length
+
+    const resOpPreview = await app.inject({
+      method: 'POST',
+      url: `/api/pedidos/${cloneBody.id}/gerar-op`,
+      headers,
+      payload: { preview_only: true },
+    })
+    assert.ok(
+      resOpPreview.statusCode === 200 || resOpPreview.statusCode === 201,
+      `preview_only falhou (${resOpPreview.statusCode}): ${resOpPreview.body}`,
+    )
+    const previewBody = resOpPreview.json()
+    assert.equal(previewBody.preview_only, true)
+    assert.ok(Array.isArray(previewBody.previstos_saida) && previewBody.previstos_saida.length >= 1)
+    assert.ok(Array.isArray(previewBody.previstos_entrada) && previewBody.previstos_entrada.length >= 1)
+
+    const resOpsPosPreview = await app.inject({ method: 'GET', url: '/api/ops', headers })
+    assert.equal((resOpsPosPreview.json().data || []).length, opsAntesCount, 'preview_only nao pode gravar OP no banco')
+
+    // Pedido já LIBERADO (apos liberar cadeado) ao ter item aumentado volta a disparar trava_estoque
+    const resReEditLock = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedidoId}`,
+      headers,
+      payload: {
+        titulo: pedPosPut.titulo || 'Galê Osteria — Campinas',
+        cliente_id: clienteId,
+        forma_pagamento_id: fp1421Id,
+        liberar: true,
+        itens: pedPosPut.itens.map((it: any, idx: number) => ({
+          produto_id: it.produto_id,
+          qtd_kg_solicitada: Number(it.qtd_kg_solicitada ?? 1) + (idx === 0 ? 15 : 0),
+          preco_unitario: Number(it.preco_unitario || 0),
+        })),
+      },
+    })
+    assert.equal(resReEditLock.statusCode, 200, `Re-edicao pedido liberado falhou: ${resReEditLock.body}`)
+    assert.equal(resReEditLock.json().trava_estoque, true, 'Editar pedido ja LIBERADO aumentando qtd sem estoque deve disparar trava_estoque')
+    assert.equal(resReEditLock.json().status, 'BLOQUEADO_ESTOQUE')
+
     // 8. RBAC: usuario CLIENTE bloqueado (403)
     const resCliUser = await app.inject({
       method: 'POST',

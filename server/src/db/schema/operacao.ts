@@ -33,8 +33,10 @@ export const mapasProducao = pgTable(
       .notNull()
       .references(() => filiais.id, { onDelete: 'cascade' }),
     codigo: text('codigo').notNull(),
+    titulo: text('titulo').notNull().default(''),
+    tipo: text('tipo').notNull().default('PRINCIPAL'), // PRINCIPAL | COMPLEMENTAR
     dataMapa: date('data_mapa').notNull(),
-    status: text('status').notNull().default('ABERTO'), // ABERTO | FINALIZADO | CONCLUIDO
+    status: text('status').notNull().default('ABERTO'), // ABERTO | EM_PRODUCAO | FINALIZADO | CONCLUIDO
     observacoes: text('observacoes').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -56,13 +58,67 @@ export const mapasProducaoItens = pgTable(
       .references(() => produtos.id),
     materiaPrimaId: uuid('materia_prima_id').references(() => produtos.id),
     clienteId: uuid('cliente_id').references(() => clientes.id),
+    pedidoId: uuid('pedido_id'),
+    pedidoItemId: uuid('pedido_item_id'),
+    pedidoCodigo: text('pedido_codigo').notNull().default(''),
+    previsaoEntrega: date('previsao_entrega'),
+    grupoMapa: text('grupo_mapa').notNull().default(''),
     especificacao: text('especificacao').notNull().default(''),
     conservacao: text('conservacao').notNull().default('RESFRIADO'),
+    observacao: text('observacao').notNull().default(''),
     qtdPrevistaKg: numeric('qtd_prevista_kg', { precision: 14, scale: 3 }).notNull().default('0'),
     qtdMpKg: numeric('qtd_mp_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    qtdRealizadaKg: numeric('qtd_realizada_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    concluido: integer('concluido').notNull().default(0),
     ordem: integer('ordem').notNull().default(0),
   },
   (t) => [index('idx_mpi_mapa').on(t.mapaId)]
+)
+
+export const mapaEspecificacoesPadrao = pgTable(
+  'mapa_especificacoes_padrao',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    clienteId: uuid('cliente_id').references(() => clientes.id, { onDelete: 'cascade' }),
+    produtoId: uuid('produto_id')
+      .notNull()
+      .references(() => produtos.id, { onDelete: 'cascade' }),
+    materiaPrimaId: uuid('materia_prima_id').references(() => produtos.id, { onDelete: 'set null' }),
+    especificacao: text('especificacao').notNull().default(''),
+    conservacao: text('conservacao').notNull().default('RESFRIADO'),
+    grupoMapa: text('grupo_mapa').notNull().default(''),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_mapa_espec_tenant_prod').on(t.tenantId, t.produtoId)]
+)
+
+export const mapaProgramacaoSemanal = pgTable(
+  'mapa_programacao_semanal',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    diaSemana: integer('dia_semana').notNull(), // 1=Seg .. 6=Sab
+    produtoId: uuid('produto_id')
+      .notNull()
+      .references(() => produtos.id, { onDelete: 'cascade' }),
+    clienteId: uuid('cliente_id').references(() => clientes.id, { onDelete: 'set null' }),
+    materiaPrimaId: uuid('materia_prima_id').references(() => produtos.id, { onDelete: 'set null' }),
+    especificacao: text('especificacao').notNull().default(''),
+    conservacao: text('conservacao').notNull().default('RESFRIADO'),
+    grupoMapa: text('grupo_mapa').notNull().default(''),
+    qtdMetaKg: numeric('qtd_meta_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    observacao: text('observacao').notNull().default(''),
+    ativo: integer('ativo').notNull().default(1),
+  },
+  (t) => [index('idx_mapa_prog_sem').on(t.tenantId, t.filialId, t.diaSemana)]
 )
 
 export const ordensProducao = pgTable(

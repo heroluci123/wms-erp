@@ -1,50 +1,138 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Factory,
-  GitBranch,
-  RefreshCw,
-  Plus,
+  ArrowLeft,
+  Calendar,
+  Check,
   CheckCircle2,
-  Trash2,
+  ClipboardList,
   Download,
-  Sparkles,
-  Play,
+  Edit3,
+  FileText,
+  GitBranch,
   Layers,
+  Play,
+  Plus,
+  Printer,
+  RefreshCw,
+  Search,
+  Settings,
+  Sparkles,
+  Trash2,
+  X,
+  Zap,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { temPermissao } from '../utils/permissoes'
 import { isApiEnabled } from '../lib/apiClient'
 import { mapaProducaoQueries } from '../queries/mapaProducao'
+import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos.js'
 import { hojeIsoLocal } from '../utils/rastreabilidade.js'
 
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg`
 
+const fmtDataBr = (iso) => {
+  if (!iso) return '-'
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso)
+}
+
+const DIAS_SEMANA = [
+  { id: 1, label: 'Segunda-feira' },
+  { id: 2, label: 'Terça-feira' },
+  { id: 3, label: 'Quarta-feira' },
+  { id: 4, label: 'Quinta-feira' },
+  { id: 5, label: 'Sexta-feira' },
+  { id: 6, label: 'Sábado' },
+]
+
+const STATUS_MAPA_BADGE = {
+  ABERTO: { label: 'ABERTO', cls: 'badge--info' },
+  EM_PRODUCAO: { label: 'EM PRODUÇÃO', cls: 'badge--warning' },
+  FINALIZADO: { label: 'FINALIZADO', cls: 'badge--success' },
+  CONCLUIDO: { label: 'CONCLUÍDO', cls: 'badge--success' },
+}
+
 export function MapaProducao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   const podeEscrever = temPermissao(operador, 'mapa_producao') || temPermissao(operador, 'producao_criar_op')
   const apiAtiva = isApiEnabled()
 
-  const [aba, setAba] = useState('DEMANDA') // 'DEMANDA' | 'MAPAS' | 'ARVORE'
+  const [abaTop, setAbaTop] = useState('MAPAS') // 'MAPAS' | 'ARVORE'
+  const [filtroLista, setFiltroLista] = useState('ABERTOS') // 'ABERTOS' | 'HISTORICO'
   const [loading, setLoading] = useState(false)
 
   // Catálogos
   const [produtos, setProdutos] = useState([])
-
-  // Demanda / Mapa Diário
-  const [dataMapa, setDataMapa] = useState(() => hojeIsoLocal())
-  const [dataInicio, setDataInicio] = useState('')
-  const [dataFim, setDataFim] = useState('')
-  const [grupoFiltro, setGrupoFiltro] = useState('')
-  const [incluirRascunho, setIncluirRascunho] = useState(false)
-  const [agruparModo, setAgruparModo] = useState('MP')
-  const [observacoesMapa, setObservacoesMapa] = useState('')
-  const [linhasMapa, setLinhasMapa] = useState([])
-
-  // Mapas salvos
+  const [clientes, setClientes] = useState([])
   const [mapas, setMapas] = useState([])
-  const [mapaDetalhe, setMapaDetalhe] = useState(null)
+  const [mapaAtivo, setMapaAtivo] = useState(null)
+  const [obsEdit, setObsEdit] = useState('')
+  const [agruparModo, setAgruparModo] = useState('MP')
+
+  // Modal Criar Novo Mapa
+  const [modalNovoOpen, setModalNovoOpen] = useState(false)
+  const [novoTipo, setNovoTipo] = useState('PRINCIPAL')
+  const [novaData, setNovaData] = useState(() => hojeIsoLocal())
+  const [novoTitulo, setNovoTitulo] = useState('')
+
+  // Modal Puxar dos Pedidos ("Selecionar Itens dos Pedidos")
+  const [modalPedidosOpen, setModalPedidosOpen] = useState(false)
+  const [pedBusca, setPedBusca] = useState('')
+  const [pedDataFiltro, setPedDataFiltro] = useState('')
+  const [pedidosDisp, setPedidosDisp] = useState({ datasDisponiveis: [], gruposProduto: [] })
+  const [loadingPedidosDisp, setLoadingPedidosDisp] = useState(false)
+  const [selecionadosPedidos, setSelecionadosPedidos] = useState({}) // { [pedido_item_id]: itemObj }
+
+  // Modal + Linha Manual
+  const [modalLinhaOpen, setModalLinhaOpen] = useState(false)
+  const [linhaForm, setLinhaForm] = useState({
+    produto_id: '',
+    cliente_id: '',
+    materia_prima_id: '',
+    especificacao: '',
+    conservacao: 'RESFRIADO',
+    grupo_mapa: '',
+    qtd_prevista_kg: '',
+    observacao: '',
+  })
+
+  // Modal Carregar Programação Semanal
+  const [modalSemanalOpen, setModalSemanalOpen] = useState(false)
+  const [diaSemanalSel, setDiaSemanalSel] = useState(() => {
+    const d = new Date().getDay()
+    return d >= 1 && d <= 6 ? d : 1
+  })
+  const [semanalLista, setSemanalLista] = useState([])
+  const [mostrarFormSemanal, setMostrarFormSemanal] = useState(false)
+  const [semForm, setSemForm] = useState({
+    produto_id: '',
+    cliente_id: '',
+    materia_prima_id: '',
+    especificacao: '',
+    conservacao: 'RESFRIADO',
+    qtd_meta_kg: '',
+    observacao: '',
+  })
+
+  // Modal Especificações Automáticas
+  const [modalEspecOpen, setModalEspecOpen] = useState(false)
+  const [especsLista, setEspecsLista] = useState([])
+  const [especForm, setEspecForm] = useState({
+    produto_id: '',
+    cliente_id: '',
+    materia_prima_id: '',
+    especificacao: '',
+    conservacao: 'RESFRIADO',
+    grupo_mapa: '',
+  })
+
+  // Modal Impressão do Mapa
+  const [mapaPrint, setMapaPrint] = useState(null)
+
+  // Rascunho de edição inline por linha ({ [itemId]: { ... } })
+  const [edicaoItemMap, setEdicaoItemMap] = useState({})
 
   // Árvore Auto-Aprendiz
   const [arvore, setArvore] = useState([])
@@ -54,163 +142,436 @@ export function MapaProducao() {
   const [novoRendPct, setNovoRendPct] = useState('70')
   const [rendEditMap, setRendEditMap] = useState({})
 
-  // Item manual extra no mapa
-  const [extraProdId, setExtraProdId] = useState('')
-  const [extraQtdKg, setExtraQtdKg] = useState('')
-
-  const carregarTudo = useCallback(async () => {
+  const carregarListagens = useCallback(async () => {
     if (!apiAtiva) return
     setLoading(true)
     try {
-      const [prods, dem, listMapas, listArv] = await Promise.all([
+      const [prods, clis, listMapas, listArv] = await Promise.all([
         produtosQueries.listar().catch(() => []),
-        mapaProducaoQueries.buscarDemandaPedidos({
-          data_inicio: dataInicio,
-          data_fim: dataFim,
-          grupo: grupoFiltro,
-          incluir_rascunho: incluirRascunho,
-        }),
+        cadastrosQueries.listarClientes().catch(() => []),
         mapaProducaoQueries.listarMapas().catch(() => []),
         mapaProducaoQueries.listarArvore().catch(() => []),
       ])
       setProdutos(prods || [])
+      setClientes(clis || [])
       setMapas(listMapas || [])
       setArvore(listArv || [])
-      setLinhasMapa(
-        (dem?.cortes || []).map((c) => ({
-          ...c,
-          incluir: c.deficit_produzir_kg > 0,
-          qtd_produzir_kg: c.deficit_produzir_kg > 0 ? c.deficit_produzir_kg : c.qtd_pedida_kg,
-        })),
-      )
     } catch (err) {
       toastError('Erro', err.message || 'Falha ao carregar Mapa de Produção.')
     } finally {
       setLoading(false)
     }
-  }, [apiAtiva, dataInicio, dataFim, grupoFiltro, incluirRascunho, toastError])
+  }, [apiAtiva, toastError])
 
   useEffect(() => {
-    carregarTudo()
-  }, [carregarTudo])
+    carregarListagens()
+  }, [carregarListagens])
+
+  const abrirMapa = useCallback(
+    async (mapaId) => {
+      try {
+        const det = await mapaProducaoQueries.obterMapa(mapaId)
+        setMapaAtivo(det)
+        setObsEdit(det?.observacoes || '')
+        setEdicaoItemMap({})
+      } catch (err) {
+        toastError('Erro', err.message)
+      }
+    },
+    [toastError],
+  )
 
   const mpsLista = useMemo(
-    () =>
-      produtos.filter(
-        (p) => p.classificacao === 'MATERIA_PRIMA' || p.tipo_produto === 'Materia Prima',
-      ),
+    () => produtos.filter((p) => p.classificacao === 'MATERIA_PRIMA' || p.tipo_produto === 'Materia Prima'),
     [produtos],
   )
 
   const subprodutosLista = useMemo(
-    () =>
-      produtos.filter(
-        (p) => p.classificacao !== 'MATERIA_PRIMA' && p.tipo_produto !== 'Materia Prima',
-      ),
+    () => produtos.filter((p) => p.classificacao !== 'MATERIA_PRIMA' && p.tipo_produto !== 'Materia Prima'),
     [produtos],
   )
 
   const gruposDisponiveis = useMemo(
-    () => Array.from(new Set(produtos.map((p) => p.grupo).filter(Boolean))).sort(),
+    () => Array.from(new Set(produtos.map((p) => p.grupo).filter(Boolean).map((g) => String(g).toUpperCase()))).sort(),
     [produtos],
   )
 
-  const pendentesArvore = useMemo(
-    () => arvore.filter((a) => Number(a.confirmado) === 0),
-    [arvore],
+  const mapasFiltrados = useMemo(() => {
+    return mapas.filter((m) =>
+      filtroLista === 'ABERTOS'
+        ? ['ABERTO', 'EM_PRODUCAO'].includes(m.status)
+        : ['FINALIZADO', 'CONCLUIDO'].includes(m.status),
+    )
+  }, [mapas, filtroLista])
+
+  // Itens agrupados por grupo visual dentro do Mapa aberto
+  const gruposNoMapa = useMemo(() => {
+    const itens = mapaAtivo?.itens || []
+    const grpMap = new Map()
+    for (const it of itens) {
+      const g = String(it.grupo_mapa || it.grupo || 'GERAL').toUpperCase()
+      const arr = grpMap.get(g) || []
+      arr.push(it)
+      grpMap.set(g, arr)
+    }
+    return Array.from(grpMap.entries())
+  }, [mapaAtivo])
+
+  const qtdSemEspecNoMapa = useMemo(
+    () => (mapaAtivo?.itens || []).filter((it) => !String(it.especificacao || '').trim()).length,
+    [mapaAtivo],
   )
 
-  const arvoreFiltrada = useMemo(
-    () => (apenasPendentes ? pendentesArvore : arvore),
-    [arvore, pendentesArvore, apenasPendentes],
-  )
-
-  const handleAddLinhaExtra = () => {
-    if (!extraProdId) return toastWarning('Corte', 'Selecione o corte para adicionar.')
-    const qtd = Number(String(extraQtdKg).replace(',', '.'))
-    if (!Number.isFinite(qtd) || qtd <= 0) return toastWarning('Quantidade', 'Informe peso maior que zero.')
-    const prod = produtos.find((p) => p.id === extraProdId)
-    if (!prod) return
-
-    const vinc = arvore.find((a) => a.filho_id === prod.id)
-    const rend = vinc ? Number(vinc.rendimento_aprendido_pct || vinc.rendimento_esperado_pct || 100) : 100
-    const mpKg = Number((qtd / ((rend > 5 ? rend : 100) / 100)).toFixed(3))
-
-    setLinhasMapa((prev) => [
-      ...prev,
-      {
-        produto_id: prod.id,
-        produto_codigo: prod.codigo,
-        produto_descricao: prod.descricao,
-        grupo: prod.grupo || '',
-        materia_prima_id: vinc?.pai_id || null,
-        materia_prima_descricao: vinc?.pai_descricao || null,
-        rendimento_usado_pct: rend,
-        qtd_pedida_kg: 0,
-        saldo_disponivel_kg: 0,
-        saldo_em_op_kg: 0,
-        deficit_produzir_kg: qtd,
-        qtd_produzir_kg: qtd,
-        qtd_mp_necessaria_kg: mpKg,
-        especificacao: 'Programação manual',
-        conservacao: 'RESFRIADO',
-        clientes: [],
-        incluir: true,
-      },
-    ])
-    setExtraProdId('')
-    setExtraQtdKg('')
+  // ── Criar / Reabrir Mapa ───────────────────────────────────────────────────
+  const abrirModalNovoMapa = (tipoDefault = 'PRINCIPAL') => {
+    setNovoTipo(tipoDefault)
+    setNovaData(mapaAtivo?.data_mapa || hojeIsoLocal())
+    setNovoTitulo('')
+    setModalNovoOpen(true)
   }
 
-  const handleSalvarEGerarOps = async (gerarOps = true) => {
-    const selecionadas = linhasMapa.filter((l) => l.incluir && Number(l.qtd_produzir_kg) > 0)
-    if (selecionadas.length === 0) {
-      return toastWarning('Seleção', 'Marque ao menos um corte com peso maior que zero.')
-    }
+  const handleCriarMapaModal = async (e) => {
+    e.preventDefault()
     try {
-      const resMapa = await mapaProducaoQueries.criarMapa({
-        data_mapa: dataMapa,
-        observacoes: observacoesMapa,
-        itens: selecionadas.map((l, idx) => ({
-          produto_id: l.produto_id,
-          materia_prima_id: l.materia_prima_id || null,
-          cliente_id: l.clientes?.length === 1 ? l.clientes[0].cliente_id : null,
-          especificacao: l.especificacao || '',
-          conservacao: l.conservacao || 'RESFRIADO',
-          qtd_prevista_kg: Number(l.qtd_produzir_kg),
-          qtd_mp_kg: Number(l.qtd_mp_necessaria_kg || l.qtd_produzir_kg),
-          ordem: idx + 1,
-        })),
+      const res = await mapaProducaoQueries.criarMapa({
+        tipo: novoTipo,
+        data_mapa: novaData || hojeIsoLocal(),
+        titulo: novoTitulo.trim() || undefined,
       })
+      setModalNovoOpen(false)
+      if (res.reopened) {
+        toastSuccess('Mapa Reaberto', `${res.titulo} já estava aberto para esta data e foi carregado.`)
+      } else {
+        toastSuccess('Mapa Criado', `${res.titulo || res.codigo} criado com sucesso!`)
+      }
+      await carregarListagens()
+      await abrirMapa(res.id)
+    } catch (err) {
+      toastError('Erro ao criar mapa', err.message)
+    }
+  }
 
-      if (gerarOps) {
-        const resOps = await mapaProducaoQueries.gerarOpsDoMapa(resMapa.id, { agrupar_por: agruparModo })
-        toastSuccess(
-          'Mapa + OPs Geradas ✅',
-          `${resMapa.codigo} criado e ${resOps.ops?.length || 0} OP(s) liberada(s) para a produção!`,
+  const handleExcluirMapa = async (m) => {
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Excluir Mapa de Produção',
+      message: `Deseja excluir "${m.titulo}" (${m.codigo})? As OPs já finalizadas não são apagadas.`,
+      type: 'error',
+      confirmLabel: 'Excluir Mapa',
+    })
+    if (!ok) return
+    try {
+      await mapaProducaoQueries.excluirMapa(m.id)
+      toastSuccess('Excluído', `${m.codigo} removido.`)
+      if (mapaAtivo?.id === m.id) setMapaAtivo(null)
+      carregarListagens()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  // ── Puxar Itens dos Pedidos (seleção a dedo com data de entrega) ───────────
+  const carregarItensPedidosModal = useCallback(
+    async (dataFiltroOverride = pedDataFiltro, buscaOverride = pedBusca) => {
+      if (!mapaAtivo?.id) return
+      setLoadingPedidosDisp(true)
+      try {
+        const res = await mapaProducaoQueries.listarItensPedidosDisponiveis({
+          previsao_entrega: dataFiltroOverride,
+          q: buscaOverride,
+          mapa_id: mapaAtivo.id,
+        })
+        setPedidosDisp({
+          datasDisponiveis: res?.datasDisponiveis || [],
+          gruposProduto: res?.gruposProduto || [],
+        })
+      } catch (err) {
+        toastError('Erro ao carregar itens de pedidos', err.message)
+      } finally {
+        setLoadingPedidosDisp(false)
+      }
+    },
+    [mapaAtivo?.id, pedDataFiltro, pedBusca, toastError],
+  )
+
+  const abrirModalPuxarPedidos = () => {
+    setPedBusca('')
+    setPedDataFiltro('')
+    setSelecionadosPedidos({})
+    setModalPedidosOpen(true)
+  }
+
+  useEffect(() => {
+    if (modalPedidosOpen && mapaAtivo?.id) {
+      carregarItensPedidosModal(pedDataFiltro, pedBusca)
+    }
+  }, [modalPedidosOpen, pedDataFiltro, pedBusca, mapaAtivo?.id, carregarItensPedidosModal])
+
+  const todosItensVisiveisModal = useMemo(() => {
+    const lista = []
+    for (const grp of pedidosDisp.gruposProduto || []) {
+      for (const it of grp.itens || []) {
+        lista.push(it)
+      }
+    }
+    return lista
+  }, [pedidosDisp])
+
+  const toggleSelecionadoPedidoItem = (it) => {
+    setSelecionadosPedidos((prev) => {
+      const next = { ...prev }
+      if (next[it.pedido_item_id]) delete next[it.pedido_item_id]
+      else next[it.pedido_item_id] = it
+      return next
+    })
+  }
+
+  const selecionarTodosModal = () => {
+    const next = {}
+    for (const it of todosItensVisiveisModal) {
+      if (!it.no_mapa_atual) next[it.pedido_item_id] = it
+    }
+    setSelecionadosPedidos(next)
+  }
+
+  const handleConfirmarPuxarPedidos = async () => {
+    const escolhidos = Object.values(selecionadosPedidos)
+    if (escolhidos.length === 0) return toastWarning('Seleção', 'Marque ao menos 1 item dos pedidos.')
+    try {
+      const payload = escolhidos.map((it) => ({
+        produto_id: it.produto_id,
+        cliente_id: it.cliente_id || null,
+        pedido_id: it.pedido_id,
+        pedido_item_id: it.pedido_item_id,
+        pedido_codigo: it.pedido_codigo,
+        previsao_entrega: it.previsao_entrega || null,
+        materia_prima_id: it.materia_prima_auto_id || null,
+        especificacao: it.especificacao_auto || '',
+        conservacao: it.conservacao_auto || 'RESFRIADO',
+        grupo_mapa: it.grupo_auto || '',
+        qtd_prevista_kg: Number(it.qtd_kg_solicitada || 0),
+      }))
+      const res = await mapaProducaoQueries.adicionarItensMapa(mapaAtivo.id, payload)
+      setModalPedidosOpen(false)
+      await abrirMapa(mapaAtivo.id)
+      carregarListagens()
+      if (res.itens_sem_especificacao > 0) {
+        toastWarning(
+          `${res.adicionados} item(ns) incluído(s) (${res.itens_sem_especificacao} sem especificação)`,
+          'Preencha a especificação na linha (ela será memorizada para o cliente!) ou cadastre em Especificações.',
         )
       } else {
-        toastSuccess('Mapa Salvo', `${resMapa.codigo} salvo com ${resMapa.qtd_itens} itens.`)
+        toastSuccess('Itens Adicionados ✅', `${res.adicionados} item(ns) incluído(s) com especificação automática.`)
       }
-      carregarTudo()
-      setAba('MAPAS')
     } catch (err) {
-      toastError('Erro ao gerar Mapa/OPs', err.message)
+      toastError('Erro ao incluir itens', err.message)
     }
   }
 
-  const handleGerarOpsExistente = async (mapaId) => {
+  // ── Inline Editing & Auto-Learning ─────────────────────────────────────────
+  const getValItem = (it, campo) => {
+    const draft = edicaoItemMap[it.id]
+    if (draft && campo in draft) return draft[campo]
+    return it[campo] ?? ''
+  }
+
+  const setValItemLocal = (itemId, campo, valor) => {
+    setEdicaoItemMap((prev) => ({
+      ...prev,
+      [itemId]: { ...(prev[itemId] || {}), [campo]: valor },
+    }))
+  }
+
+  const salvarCampoItem = async (it, patch) => {
     try {
-      const res = await mapaProducaoQueries.gerarOpsDoMapa(mapaId, { agrupar_por: agruparModo })
-      toastSuccess('OPs Liberadas', `${res.ops?.length || 0} Ordem(ns) de Produção criada(s) no WMS!`)
-      carregarTudo()
-      if (mapaDetalhe?.id === mapaId) {
-        setMapaDetalhe(await mapaProducaoQueries.obterMapa(mapaId))
+      await mapaProducaoQueries.atualizarItemMapa(mapaAtivo.id, it.id, patch)
+      await abrirMapa(mapaAtivo.id)
+    } catch (err) {
+      toastError('Erro ao salvar linha', err.message)
+    }
+  }
+
+  const handleRemoverLinha = async (itemId) => {
+    try {
+      await mapaProducaoQueries.removerItemMapa(mapaAtivo.id, itemId)
+      await abrirMapa(mapaAtivo.id)
+      carregarListagens()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  // ── Linha Manual ───────────────────────────────────────────────────────────
+  const handleSalvarLinhaManual = async (e) => {
+    e.preventDefault()
+    if (!linhaForm.produto_id) return toastWarning('Produto', 'Selecione o produto/corte.')
+    const qtd = Number(String(linhaForm.qtd_prevista_kg).replace(',', '.'))
+    if (!Number.isFinite(qtd) || qtd <= 0) return toastWarning('Peso', 'Informe o previsto (kg) maior que zero.')
+    try {
+      await mapaProducaoQueries.adicionarItensMapa(mapaAtivo.id, [
+        {
+          produto_id: linhaForm.produto_id,
+          cliente_id: linhaForm.cliente_id || null,
+          materia_prima_id: linhaForm.materia_prima_id || null,
+          especificacao: linhaForm.especificacao,
+          conservacao: linhaForm.conservacao,
+          grupo_mapa: linhaForm.grupo_mapa,
+          qtd_prevista_kg: qtd,
+          observacao: linhaForm.observacao,
+        },
+      ])
+      setModalLinhaOpen(false)
+      setLinhaForm({
+        produto_id: '',
+        cliente_id: '',
+        materia_prima_id: '',
+        especificacao: '',
+        conservacao: 'RESFRIADO',
+        grupo_mapa: '',
+        qtd_prevista_kg: '',
+        observacao: '',
+      })
+      toastSuccess('Linha adicionada ao Mapa')
+      await abrirMapa(mapaAtivo.id)
+      carregarListagens()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  // ── Programação Semanal ────────────────────────────────────────────────────
+  const carregarSemanal = useCallback(
+    async (dia = diaSemanalSel) => {
+      try {
+        const lista = await mapaProducaoQueries.listarProgramacaoSemanal({ dia_semana: dia })
+        setSemanalLista(lista || [])
+      } catch (err) {
+        toastError('Erro', err.message)
+      }
+    },
+    [diaSemanalSel, toastError],
+  )
+
+  useEffect(() => {
+    if (modalSemanalOpen) carregarSemanal(diaSemanalSel)
+  }, [modalSemanalOpen, diaSemanalSel, carregarSemanal])
+
+  const handleImportarSemanal = async () => {
+    try {
+      const res = await mapaProducaoQueries.importarSemanalMapa(mapaAtivo.id, diaSemanalSel)
+      setModalSemanalOpen(false)
+      toastSuccess('Programação Semanal Importada', `${res.importados} item(ns) adicionado(s) ao mapa.`)
+      await abrirMapa(mapaAtivo.id)
+      carregarListagens()
+    } catch (err) {
+      toastWarning(err.message)
+    }
+  }
+
+  const handleSalvarItemSemanal = async (e) => {
+    e.preventDefault()
+    if (!semForm.produto_id || !semForm.qtd_meta_kg) return toastWarning('Campos', 'Informe produto e meta kg.')
+    try {
+      await mapaProducaoQueries.salvarProgramacaoSemanal({
+        dia_semana: diaSemanalSel,
+        produto_id: semForm.produto_id,
+        cliente_id: semForm.cliente_id || null,
+        materia_prima_id: semForm.materia_prima_id || null,
+        especificacao: semForm.especificacao,
+        conservacao: semForm.conservacao,
+        qtd_meta_kg: Number(String(semForm.qtd_meta_kg).replace(',', '.')),
+        observacao: semForm.observacao,
+      })
+      setSemForm({
+        produto_id: '',
+        cliente_id: '',
+        materia_prima_id: '',
+        especificacao: '',
+        conservacao: 'RESFRIADO',
+        qtd_meta_kg: '',
+        observacao: '',
+      })
+      carregarSemanal(diaSemanalSel)
+      toastSuccess('Programação semanal atualizada')
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  // ── Especificações Automáticas ─────────────────────────────────────────────
+  const carregarEspecs = useCallback(async () => {
+    try {
+      const lista = await mapaProducaoQueries.listarEspecificacoesMapa()
+      setEspecsLista(lista || [])
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }, [toastError])
+
+  useEffect(() => {
+    if (modalEspecOpen) carregarEspecs()
+  }, [modalEspecOpen, carregarEspecs])
+
+  const handleSalvarSpec = async (e) => {
+    e.preventDefault()
+    if (!especForm.produto_id) return toastWarning('Produto', 'Selecione o produto.')
+    try {
+      await mapaProducaoQueries.salvarEspecificacaoMapa(especForm)
+      setEspecForm({
+        produto_id: '',
+        cliente_id: '',
+        materia_prima_id: '',
+        especificacao: '',
+        conservacao: 'RESFRIADO',
+        grupo_mapa: '',
+      })
+      await carregarEspecs()
+      toastSuccess('Especificação Salva', 'Será aplicada automaticamente sempre que puxar esse corte/cliente.')
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handlePuxarEspecificacoesMapa = async () => {
+    try {
+      const res = await mapaProducaoQueries.aplicarEspecificacoesMapa(mapaAtivo.id)
+      await abrirMapa(mapaAtivo.id)
+      if (res.atualizados > 0) {
+        toastSuccess('Especificações Aplicadas', `${res.atualizados} linha(s) preenchida(s) automaticamente!`)
+      } else {
+        setModalEspecOpen(true)
+        toastWarning('Nenhuma especificação padrão encontrada', 'Cadastre abaixo para automatizar futuras importações.')
       }
     } catch (err) {
       toastError('Erro', err.message)
     }
   }
+
+  // ── Status & Gerar OPs ─────────────────────────────────────────────────────
+  const handleStatusMapa = async (novoStatus) => {
+    try {
+      await mapaProducaoQueries.atualizarMapa(mapaAtivo.id, { status: novoStatus })
+      toastSuccess('Status Atualizado', `Mapa marcado como ${novoStatus}.`)
+      await abrirMapa(mapaAtivo.id)
+      carregarListagens()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleGerarOps = async () => {
+    try {
+      const res = await mapaProducaoQueries.gerarOpsDoMapa(mapaAtivo.id, { agrupar_por: agruparModo })
+      toastSuccess('OPs Liberadas ✅', `${res.ops?.length || 0} Ordem(ns) de Produção enviada(s) para Produção!`)
+      await abrirMapa(mapaAtivo.id)
+      carregarListagens()
+    } catch (err) {
+      toastWarning('Atenção ao gerar OP', err.message)
+    }
+  }
+
+  // ── Árvore Auto-Aprendiz handlers ──────────────────────────────────────────
+  const pendentesArvore = useMemo(() => arvore.filter((a) => Number(a.confirmado) === 0), [arvore])
+  const arvoreFiltrada = useMemo(() => (apenasPendentes ? pendentesArvore : arvore), [arvore, pendentesArvore, apenasPendentes])
 
   const handleSalvarVinculoManual = async (e) => {
     e.preventDefault()
@@ -223,7 +584,7 @@ export function MapaProducao() {
       })
       toastSuccess('Vínculo Salvo', 'Árvore de produtos atualizada com sucesso!')
       setNovoFilhoId('')
-      carregarTudo()
+      carregarListagens()
     } catch (err) {
       toastError('Erro', err.message)
     }
@@ -236,7 +597,7 @@ export function MapaProducao() {
         rendimento_esperado_pct: customRend != null ? Number(customRend) : null,
       })
       toastSuccess('Rendimento Confirmado ✅', `${item.pai_descricao} → ${item.filho_descricao} oficializado na árvore.`)
-      carregarTudo()
+      carregarListagens()
     } catch (err) {
       toastError('Erro', err.message)
     }
@@ -246,350 +607,511 @@ export function MapaProducao() {
     try {
       await mapaProducaoQueries.removerVinculoArvore(id)
       toastSuccess('Vínculo Removido', 'Relação descartada da árvore.')
-      carregarTudo()
+      carregarListagens()
     } catch (err) {
       toastError('Erro', err.message)
     }
   }
 
-  const totaisSelecionados = useMemo(() => {
-    const sel = linhasMapa.filter((l) => l.incluir)
-    return {
-      cortes: sel.length,
-      kgProduzir: sel.reduce((s, l) => s + Number(l.qtd_produzir_kg || 0), 0),
-      kgMp: sel.reduce((s, l) => s + Number(l.qtd_mp_necessaria_kg || 0), 0),
-    }
-  }, [linhasMapa])
-
   if (!apiAtiva) {
     return (
-      <div className="card p-24">
-        <h2 className="text-lg font-bold mb-8">Mapa de Produção & Árvore Auto-Aprendiz (Modo ERP API)</h2>
-        <p className="text-sm text-muted">
-          Ative o Backend API PostgreSQL (`VITE_API_URL`) para puxar demanda de pedidos em aberto, gerar OPs agrupadas em 1 clique e gerenciar os rendimentos auto-aprendidos da árvore.
-        </p>
+      <div className="fade-in">
+        <div className="page-header">
+          <h1 className="page-header__title flex items-center gap-12">
+            <GitBranch className="text-primary" size={26} /> Mapa de Produção Diário
+          </h1>
+        </div>
+        <div className="card p-24 text-muted">
+          O Mapa de Produção Diário requer a API Backend PostgreSQL conectada (`VITE_API_URL`).
+        </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <div className="page-header mb-16">
-        <div>
-          <h1 className="page-header__title flex items-center gap-10">
-            <Factory size={24} className="text-primary" /> Mapa de Produção Diário & Árvore Auto-Aprendiz
-          </h1>
-          <p className="page-header__subtitle">
-            Consolida cortes em falta dos pedidos, calcula a Matéria-Prima via Árvore e gera OPs no WMS em 1 clique
-          </p>
-        </div>
-        <button type="button" className="btn btn--ghost" onClick={carregarTudo} disabled={loading}>
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Atualizar
-        </button>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-8 mb-16 flex-wrap" style={{ borderBottom: '2px solid var(--border)', paddingBottom: 8 }}>
-        <button type="button" className={`btn ${aba === 'DEMANDA' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setAba('DEMANDA')}>
-          <Download size={15} /> Programação / Puxar Pedidos ({linhasMapa.filter((l) => l.incluir).length})
-        </button>
-        <button type="button" className={`btn ${aba === 'MAPAS' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setAba('MAPAS')}>
-          <Layers size={15} /> Mapas Salvos & OPs ({mapas.length})
-        </button>
-        <button type="button" className={`btn ${aba === 'ARVORE' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setAba('ARVORE')}>
-          <GitBranch size={15} /> Árvore Auto-Aprendiz
-          {pendentesArvore.length > 0 && (
-            <span className="badge badge--warning" style={{ marginLeft: 6 }}>{pendentesArvore.length} p/ revisar</span>
-          )}
-        </button>
-      </div>
-
-      {/* ABA 1: DEMANDA & GERAÇÃO DO MAPA */}
-      {aba === 'DEMANDA' && (
-        <div>
-          <div className="card mb-16">
-            <div className="flex gap-12 flex-wrap items-end">
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Data do Mapa</label>
-                <input type="date" className="form-input" value={dataMapa} onChange={(e) => setDataMapa(e.target.value)} />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Pedidos Previsão De</label>
-                <input type="date" className="form-input" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Até</label>
-                <input type="date" className="form-input" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
-              </div>
-              <div className="form-group" style={{ minWidth: 160, marginBottom: 0 }}>
-                <label className="form-label">Grupo</label>
-                <select className="form-input" value={grupoFiltro} onChange={(e) => setGrupoFiltro(e.target.value)}>
-                  <option value="">Todos os Grupos</option>
-                  {gruposDisponiveis.map((g) => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
-                </select>
-              </div>
-              <label className="flex items-center gap-6 text-xs cursor-pointer mb-8">
-                <input type="checkbox" checked={incluirRascunho} onChange={(e) => setIncluirRascunho(e.target.checked)} />
-                Incluir Rascunhos
-              </label>
-              <button type="button" className="btn btn--info" onClick={carregarTudo}>
-                <RefreshCw size={14} /> Puxar Demanda
-              </button>
-            </div>
+    <div className="fade-in">
+      {/* Cabeçalho Principal quando está na listagem ou Árvore */}
+      {(!mapaAtivo || abaTop === 'ARVORE') && (
+        <div className="page-header">
+          <div>
+            <h1 className="page-header__title flex items-center gap-12">
+              <GitBranch className="text-primary" size={26} /> Mapa de Produção Diário
+            </h1>
+            <p className="page-header__subtitle">
+              Crie e gerencie mapas de produção diários selecionando itens de pedidos, especificações automáticas e programação semanal
+            </p>
           </div>
+          <div className="flex gap-8 flex-wrap">
+            {abaTop === 'MAPAS' && podeEscrever && (
+              <>
+                <button type="button" className="btn btn--secondary" onClick={() => abrirModalNovoMapa('COMPLEMENTAR')}>
+                  <Sparkles size={15} /> + Mapa Complementar
+                </button>
+                <button type="button" className="btn btn--primary" onClick={() => abrirModalNovoMapa('PRINCIPAL')}>
+                  <Plus size={16} /> + Criar Novo Mapa
+                </button>
+              </>
+            )}
+            <button type="button" className="btn btn--ghost" onClick={carregarListagens} disabled={loading}>
+              <RefreshCw size={15} />
+            </button>
+          </div>
+        </div>
+      )}
 
-          {/* Adicionar corte extra manual */}
-          {podeEscrever && (
-            <div className="card mb-16">
-              <div className="flex gap-8 flex-wrap items-end">
-                <div className="form-group" style={{ flex: 2, minWidth: 240, marginBottom: 0 }}>
-                  <label className="form-label">Adicionar Corte Extra / Estoque ao Mapa</label>
-                  <select className="form-input" value={extraProdId} onChange={(e) => setExtraProdId(e.target.value)}>
-                    <option value="">Selecione um corte...</option>
-                    {subprodutosLista.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.codigo} — {p.descricao}
-                      </option>
-                    ))}
-                  </select>
+      {/* Abas superiores: Mapas Diários vs Árvore Auto-Aprendiz */}
+      {!mapaAtivo && (
+        <div className="flex justify-between items-center flex-wrap gap-10 mb-16">
+          <div className="flex gap-8 flex-wrap">
+            <button
+              type="button"
+              className={`btn ${abaTop === 'MAPAS' && filtroLista === 'ABERTOS' ? 'btn--primary' : 'btn--ghost'}`}
+              onClick={() => {
+                setAbaTop('MAPAS')
+                setFiltroLista('ABERTOS')
+              }}
+            >
+              <ClipboardList size={15} /> Em Aberto
+            </button>
+            <button
+              type="button"
+              className={`btn ${abaTop === 'MAPAS' && filtroLista === 'HISTORICO' ? 'btn--primary' : 'btn--ghost'}`}
+              onClick={() => {
+                setAbaTop('MAPAS')
+                setFiltroLista('HISTORICO')
+              }}
+            >
+              <FileText size={15} /> Histórico (Finalizados)
+            </button>
+            <button
+              type="button"
+              className={`btn ${abaTop === 'ARVORE' ? 'btn--primary' : 'btn--ghost'}`}
+              onClick={() => setAbaTop('ARVORE')}
+            >
+              <Sparkles size={15} /> Árvore Auto-Aprendiz ({arvore.length})
+              {pendentesArvore.length > 0 && (
+                <span className="badge badge--warning" style={{ marginLeft: 4 }}>
+                  {pendentesArvore.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── LISTA EM CARDS DOS MAPAS (igual ao layout referência) ── */}
+      {!mapaAtivo && abaTop === 'MAPAS' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 14 }}>
+          {mapasFiltrados.map((m) => {
+            const st = STATUS_MAPA_BADGE[m.status] || { label: m.status, cls: 'badge--neutral' }
+            return (
+              <div
+                key={m.id}
+                className="card"
+                style={{
+                  padding: 16,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div className="flex justify-between items-center gap-8 mb-8 flex-wrap">
+                    <span className="text-xs text-muted flex items-center gap-6">
+                      <Calendar size={13} /> {fmtDataBr(m.data_mapa)}
+                    </span>
+                    <div className="flex items-center gap-6">
+                      {m.tipo === 'COMPLEMENTAR' && (
+                        <span className="badge badge--warning" style={{ fontSize: 10 }}>
+                          ✨ COMPLEMENTAR
+                        </span>
+                      )}
+                      <span className={`badge ${st.cls}`} style={{ fontSize: 10 }}>
+                        {st.label}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: 800, fontSize: 15, lineHeight: 1.35, color: 'var(--text-primary)' }}>
+                    {m.titulo}
+                  </div>
+                  <div className="text-xs text-muted mt-6 font-mono">
+                    {m.codigo} • {m.qtd_itens || 0} corte(s) • {fmtKg(m.total_previsto_kg)}
+                    {m.qtd_ops > 0 ? ` • ${m.qtd_ops} OP(s)` : ''}
+                  </div>
                 </div>
-                <div className="form-group" style={{ width: 140, marginBottom: 0 }}>
-                  <label className="form-label">Produzir (kg)</label>
-                  <input type="number" step="0.001" className="form-input" value={extraQtdKg} onChange={(e) => setExtraQtdKg(e.target.value)} placeholder="50" />
+
+                <div className="flex gap-8 items-center">
+                  <button type="button" className="btn btn--primary btn--sm" style={{ flex: 1 }} onClick={() => abrirMapa(m.id)}>
+                    <Edit3 size={14} /> Abrir
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={async () => setMapaPrint(await mapaProducaoQueries.obterMapa(m.id))}
+                  >
+                    <Printer size={14} /> Imprimir
+                  </button>
+                  {podeEscrever && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm text-danger"
+                      title="Excluir Mapa"
+                      onClick={() => handleExcluirMapa(m)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
-                <button type="button" className="btn btn--ghost" onClick={handleAddLinhaExtra}>
-                  <Plus size={15} /> Incluir no Mapa
+              </div>
+            )
+          })}
+
+          {mapasFiltrados.length === 0 && (
+            <div className="card p-32 text-center text-muted" style={{ gridColumn: '1 / -1' }}>
+              Nenhum mapa {filtroLista === 'ABERTOS' ? 'em aberto' : 'finalizado'} encontrado.
+              Clique em <strong>+ Criar Novo Mapa</strong> para começar!
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── WORKSPACE DO MAPA ABERTO ── */}
+      {mapaAtivo && abaTop === 'MAPAS' && (
+        <div>
+          <div className="card mb-14" style={{ padding: 16 }}>
+            <div className="flex justify-between items-center flex-wrap gap-10 mb-12">
+              <div className="flex items-center gap-12 flex-wrap">
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setMapaAtivo(null)}>
+                  <ArrowLeft size={14} /> Mapas
+                </button>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{mapaAtivo.titulo}</h2>
+                  <div className="text-xs text-muted">
+                    {mapaAtivo.codigo} • Data de Produção: {fmtDataBr(mapaAtivo.data_mapa)} •{' '}
+                    {(mapaAtivo.itens || []).length} linha(s)
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-8 flex-wrap items-center">
+                <span className={`badge ${(STATUS_MAPA_BADGE[mapaAtivo.status] || { cls: 'badge--info' }).cls}`}>
+                  {mapaAtivo.status}
+                </span>
+                {podeEscrever && (
+                  <>
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => abrirModalNovoMapa('COMPLEMENTAR')}>
+                      <Sparkles size={13} /> + Mapa Complementar
+                    </button>
+                    {mapaAtivo.status !== 'FINALIZADO' && (
+                      <button type="button" className="btn btn--success btn--sm" onClick={() => handleStatusMapa('FINALIZADO')}>
+                        <CheckCircle2 size={13} /> Finalizar Mapa
+                      </button>
+                    )}
+                    {mapaAtivo.status !== 'CONCLUIDO' && (
+                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => handleStatusMapa('CONCLUIDO')}>
+                        <Zap size={13} /> Concluir / Marcar Produzido
+                      </button>
+                    )}
+                    <button type="button" className="btn btn--primary btn--sm" onClick={() => setModalSemanalOpen(true)}>
+                      <Calendar size={13} /> Carregar Programação Semanal
+                    </button>
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={abrirModalPuxarPedidos}>
+                      <ClipboardList size={13} /> Puxar dos Pedidos
+                    </button>
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModalLinhaOpen(true)}>
+                      <Plus size={13} /> Linha Manual
+                    </button>
+                  </>
+                )}
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModalEspecOpen(true)}>
+                  <Settings size={13} /> Especificações
+                </button>
+                <button type="button" className="btn btn--primary btn--sm" onClick={() => setMapaPrint(mapaAtivo)}>
+                  <Printer size={13} /> Imprimir Mapa
                 </button>
               </div>
             </div>
+
+            {/* Observações do Mapa */}
+            <div className="flex items-center gap-10 flex-wrap">
+              <div style={{ flex: 1, minWidth: 260, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="text-xs font-bold text-warning" style={{ whiteSpace: 'nowrap' }}>
+                  📝 Observações do Mapa:
+                </span>
+                <input
+                  className="form-input"
+                  value={obsEdit}
+                  placeholder="Escreva observações para este mapa de produção (aparecerá no mapa impresso)..."
+                  onChange={(e) => setObsEdit(e.target.value)}
+                  onBlur={() => {
+                    if (obsEdit !== (mapaAtivo.observacoes || '')) {
+                      mapaProducaoQueries.atualizarMapa(mapaAtivo.id, { observacoes: obsEdit }).catch(() => {})
+                    }
+                  }}
+                />
+              </div>
+
+              {podeEscrever && (mapaAtivo.itens || []).length > 0 && (
+                <div className="flex items-center gap-6">
+                  <select className="form-input" style={{ width: 170 }} value={agruparModo} onChange={(e) => setAgruparModo(e.target.value)}>
+                    <option value="MP">1 OP por Matéria-Prima</option>
+                    <option value="GRUPO">1 OP por Grupo</option>
+                    <option value="UNICO">OP Única</option>
+                  </select>
+                  <button type="button" className="btn btn--success btn--sm" onClick={handleGerarOps}>
+                    <Play size={13} /> Gerar OPs no PCP
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Alerta se existirem itens sem especificação */}
+          {qtdSemEspecNoMapa > 0 && (
+            <div
+              className="mb-12"
+              style={{
+                background: 'rgba(245, 158, 11, 0.12)',
+                border: '1px solid rgba(245, 158, 11, 0.45)',
+                borderRadius: 10,
+                padding: '10px 14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div className="text-xs" style={{ color: '#fde68a' }}>
+                <strong>⚠️ {qtdSemEspecNoMapa} item(ns) sem especificação definida:</strong>{' '}
+                digite diretamente na coluna <strong>Especificação</strong> (o sistema memoriza para as próximas vezes!) ou puxe o padrão cadastrado.
+              </div>
+              <button type="button" className="btn btn--warning btn--sm" onClick={handlePuxarEspecificacoesMapa}>
+                <Download size={13} /> Puxar Especificações Padrão
+              </button>
+            </div>
           )}
 
-          {/* Tabela Consolidada */}
-          <div className="card mb-16" style={{ padding: 0, overflow: 'hidden' }}>
+          {/* Tabela Agrupada por Grupo (BOVINOS / AVES / etc.) */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Usar</th>
-                    <th>Corte / Produto</th>
-                    <th>Especificação & Clientes</th>
-                    <th style={{ textAlign: 'right' }}>Pedidos</th>
-                    <th style={{ textAlign: 'right' }}>Estoque + OP</th>
-                    <th style={{ textAlign: 'right' }}>Produzir (kg)</th>
-                    <th>Matéria-Prima (Árvore)</th>
-                    <th style={{ textAlign: 'right' }}>MP Necess. (kg)</th>
+                    <th>Código</th>
+                    <th>Produto</th>
+                    <th>Especificação (Auto)</th>
+                    <th>Grupo</th>
+                    <th>Conservação</th>
+                    <th style={{ textAlign: 'right' }}>Previsto (kg)</th>
+                    <th>Cliente</th>
+                    <th>Matéria-Prima / Qtd MP</th>
+                    <th>Observação</th>
+                    <th style={{ textAlign: 'right' }}>Realizado</th>
+                    <th style={{ textAlign: 'right' }}>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {linhasMapa.map((l, idx) => (
-                    <tr key={`${l.produto_id}-${idx}`}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(l.incluir)}
-                          onChange={(e) =>
-                            setLinhasMapa((prev) =>
-                              prev.map((x, i) => (i === idx ? { ...x, incluir: e.target.checked } : x)),
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <div className="font-bold">
-                          <span className="font-mono text-xs text-muted">{l.produto_codigo}</span> {l.produto_descricao}
-                        </div>
-                        <div className="text-xs text-muted">{l.grupo || 'SEM GRUPO'} • {l.conservacao}</div>
-                      </td>
-                      <td className="text-xs" style={{ maxWidth: 260 }}>
-                        <div>{l.especificacao || '-'}</div>
-                        {l.clientes?.length > 0 && (
-                          <div className="text-muted mt-2">
-                            {l.clientes.map((c) => `${c.cliente_nome} (${c.qtd_kg}kg)`).join(', ')}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg(l.qtd_pedida_kg)}</td>
-                      <td style={{ textAlign: 'right' }} className="font-mono text-xs">
-                        {fmtKg(l.saldo_disponivel_kg)}
-                        {l.saldo_em_op_kg > 0 && <div className="text-info">+{fmtKg(l.saldo_em_op_kg)} em OP</div>}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <input
-                          type="number"
-                          step="0.001"
-                          className="form-input"
-                          style={{ width: 95, textAlign: 'right', display: 'inline-block' }}
-                          value={l.qtd_produzir_kg}
-                          onChange={(e) => {
-                            const val = Math.max(0, Number(e.target.value || 0))
-                            const rend = Number(l.rendimento_usado_pct || 100)
-                            const mpKg = l.materia_prima_id ? Number((val / ((rend > 5 ? rend : 100) / 100)).toFixed(3)) : 0
-                            setLinhasMapa((prev) =>
-                              prev.map((x, i) =>
-                                i === idx
-                                  ? { ...x, qtd_produzir_kg: val, qtd_mp_necessaria_kg: mpKg }
-                                  : x,
-                              ),
-                            )
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          className="form-input text-xs"
-                          value={l.materia_prima_id || ''}
-                          onChange={(e) => {
-                            const mpId = e.target.value || null
-                            const vinc = arvore.find((a) => a.pai_id === mpId && a.filho_id === l.produto_id)
-                            const rend = vinc ? Number(vinc.rendimento_aprendido_pct || vinc.rendimento_esperado_pct || 100) : 100
-                            const mpKg = mpId ? Number((Number(l.qtd_produzir_kg || 0) / ((rend > 5 ? rend : 100) / 100)).toFixed(3)) : 0
-                            setLinhasMapa((prev) =>
-                              prev.map((x, i) =>
-                                i === idx
-                                  ? { ...x, materia_prima_id: mpId, rendimento_usado_pct: rend, qtd_mp_necessaria_kg: mpKg }
-                                  : x,
-                              ),
-                            )
-                          }}
-                        >
-                          <option value="">Sem MP / Corte direto</option>
-                          {mpsLista.map((mp) => (
-                            <option key={mp.id} value={mp.id}>
-                              {mp.codigo} — {mp.descricao}
-                            </option>
-                          ))}
-                        </select>
-                        {l.materia_prima_id && (
-                          <div className="text-xs text-muted mt-2">Rend. Árvore: {l.rendimento_usado_pct}%</div>
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'right' }} className="font-mono font-bold text-warning">
-                        {l.materia_prima_id ? fmtKg(l.qtd_mp_necessaria_kg) : '-'}
-                      </td>
-                    </tr>
+                  {gruposNoMapa.map(([nomeGrupo, rowsGrupo]) => (
+                    <React.Fragment key={nomeGrupo}>
+                      <tr style={{ background: 'rgba(59,130,246,0.1)' }}>
+                        <td colSpan={11} style={{ fontWeight: 800, fontSize: 12, color: '#93c5fd', letterSpacing: '0.04em' }}>
+                          📦 {nomeGrupo} ({rowsGrupo.length} {rowsGrupo.length === 1 ? 'item' : 'itens'} •{' '}
+                          {fmtKg(rowsGrupo.reduce((s, r) => s + Number(r.qtd_prevista_kg || 0), 0))})
+                        </td>
+                      </tr>
+                      {rowsGrupo.map((it) => {
+                        const especVal = getValItem(it, 'especificacao')
+                        const obsVal = getValItem(it, 'observacao')
+                        const prevVal = getValItem(it, 'qtd_prevista_kg')
+                        const mpKgVal = getValItem(it, 'qtd_mp_kg')
+                        const realVal = getValItem(it, 'qtd_realizada_kg')
+                        return (
+                          <tr key={it.id}>
+                            <td className="font-mono font-bold text-cyan">{it.produto_codigo || '-'}</td>
+                            <td>
+                              <div style={{ fontWeight: 700 }}>{it.produto_descricao}</div>
+                              {it.pedido_codigo && (
+                                <span className="badge badge--ghost" style={{ fontSize: 10 }}>
+                                  #{it.pedido_codigo}
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ minWidth: 190 }}>
+                              <input
+                                className="form-input"
+                                style={{
+                                  fontSize: 12,
+                                  borderColor: !String(especVal).trim() ? '#f59e0b' : undefined,
+                                }}
+                                placeholder="Ex: PACOTES DE 5KG..."
+                                value={especVal}
+                                onChange={(e) => setValItemLocal(it.id, 'especificacao', e.target.value.toUpperCase())}
+                                onBlur={() => {
+                                  if (especVal !== (it.especificacao || '')) {
+                                    salvarCampoItem(it, { especificacao: especVal })
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td style={{ minWidth: 110 }}>
+                              <input
+                                className="form-input"
+                                style={{ fontSize: 11 }}
+                                value={getValItem(it, 'grupo_mapa') || it.grupo || 'GERAL'}
+                                onChange={(e) => setValItemLocal(it.id, 'grupo_mapa', e.target.value.toUpperCase())}
+                                onBlur={() => {
+                                  const v = getValItem(it, 'grupo_mapa')
+                                  if (v !== (it.grupo_mapa || '')) {
+                                    salvarCampoItem(it, { grupo_mapa: v })
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <select
+                                className="form-input"
+                                style={{ fontSize: 11, minWidth: 110 }}
+                                value={it.conservacao || 'RESFRIADO'}
+                                onChange={(e) => salvarCampoItem(it, { conservacao: e.target.value })}
+                              >
+                                <option value="RESFRIADO">RESFRIADO</option>
+                                <option value="CONGELADO">CONGELADO</option>
+                                <option value="IN NATURA">IN NATURA</option>
+                              </select>
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="form-input font-mono text-right"
+                                style={{ width: 82 }}
+                                value={prevVal}
+                                onChange={(e) => setValItemLocal(it.id, 'qtd_prevista_kg', e.target.value)}
+                                onBlur={() => {
+                                  const num = Number(prevVal)
+                                  if (Number.isFinite(num) && num > 0 && num !== Number(it.qtd_prevista_kg)) {
+                                    salvarCampoItem(it, { qtd_prevista_kg: num })
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td className="text-xs" style={{ minWidth: 130 }}>
+                              {it.cliente_nome || <span className="text-muted">Estoque / Interno</span>}
+                            </td>
+                            <td style={{ minWidth: 185 }}>
+                              <select
+                                className="form-input"
+                                style={{ fontSize: 11, marginBottom: 4 }}
+                                value={it.materia_prima_id || ''}
+                                onChange={(e) => salvarCampoItem(it, { materia_prima_id: e.target.value || null })}
+                              >
+                                <option value="">-- Selecione MP --</option>
+                                {mpsLista.map((mp) => (
+                                  <option key={mp.id} value={mp.id}>
+                                    {mp.codigo ? `${mp.codigo} — ` : ''}
+                                    {mp.descricao}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="flex items-center gap-4">
+                                <span className="text-xs text-muted">Qtd MP:</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  className="form-input font-mono text-right"
+                                  style={{ width: 78, height: 26, fontSize: 11 }}
+                                  value={mpKgVal}
+                                  onChange={(e) => setValItemLocal(it.id, 'qtd_mp_kg', e.target.value)}
+                                  onBlur={() => {
+                                    const num = Number(mpKgVal)
+                                    if (Number.isFinite(num) && num >= 0 && num !== Number(it.qtd_mp_kg)) {
+                                      salvarCampoItem(it, { qtd_mp_kg: num })
+                                    }
+                                  }}
+                                />
+                                <span className="text-xs text-muted">kg</span>
+                              </div>
+                            </td>
+                            <td style={{ minWidth: 130 }}>
+                              <input
+                                className="form-input"
+                                style={{ fontSize: 11 }}
+                                placeholder="Obs / dia entrega..."
+                                value={obsVal}
+                                onChange={(e) => setValItemLocal(it.id, 'observacao', e.target.value.toUpperCase())}
+                                onBlur={() => {
+                                  if (obsVal !== (it.observacao || '')) {
+                                    salvarCampoItem(it, { observacao: obsVal })
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="form-input font-mono text-right"
+                                style={{ width: 78 }}
+                                value={realVal}
+                                onChange={(e) => setValItemLocal(it.id, 'qtd_realizada_kg', e.target.value)}
+                                onBlur={() => {
+                                  const num = Number(realVal)
+                                  if (Number.isFinite(num) && num >= 0 && num !== Number(it.qtd_realizada_kg)) {
+                                    salvarCampoItem(it, { qtd_realizada_kg: num })
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {podeEscrever && (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--sm text-danger"
+                                  title="Remover linha do Mapa"
+                                  onClick={() => handleRemoverLinha(it.id)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </React.Fragment>
                   ))}
-                  {linhasMapa.length === 0 && (
+
+                  {gruposNoMapa.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="text-center p-24 text-muted">
-                        Nenhum corte pendente nos pedidos abertos para os filtros selecionados.
+                      <td colSpan={11} className="text-center p-32 text-muted">
+                        Mapa vazio. Clique em <strong>Puxar dos Pedidos</strong>, <strong>Carregar Programação Semanal</strong> ou{' '}
+                        <strong>+ Linha Manual</strong>.
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
-          </div>
 
-          {podeEscrever && (
-            <div className="card flex justify-between items-center flex-wrap gap-12">
-              <div className="flex gap-16 flex-wrap items-center">
-                <div>
-                  <div className="text-xs text-muted">Cortes Selecionados</div>
-                  <div className="font-bold text-lg">{totaisSelecionados.cortes} ({fmtKg(totaisSelecionados.kgProduzir)})</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted">Matéria-Prima Estimada</div>
-                  <div className="font-bold text-lg text-warning">{fmtKg(totaisSelecionados.kgMp)}</div>
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label text-xs">Agrupamento das OPs</label>
-                  <select className="form-input" value={agruparModo} onChange={(e) => setAgruparModo(e.target.value)}>
-                    <option value="MP">1 OP por Matéria-Prima (Recomendado)</option>
-                    <option value="GRUPO">1 OP por Grupo (Bovino/Aves)</option>
-                    <option value="UNICO">OP Única</option>
-                  </select>
-                </div>
-                <div className="form-group" style={{ minWidth: 200, marginBottom: 0 }}>
-                  <label className="form-label text-xs">Observações do Mapa</label>
-                  <input type="text" className="form-input" value={observacoesMapa} onChange={(e) => setObservacoesMapa(e.target.value)} placeholder="Turno manhã..." />
+            {mapaAtivo.ops?.length > 0 && (
+              <div className="p-14 border-t border-border" style={{ background: 'var(--bg-2)' }}>
+                <strong className="text-xs uppercase text-muted">OPs Geradas por este Mapa ({mapaAtivo.ops.length}):</strong>
+                <div className="flex gap-8 flex-wrap mt-6">
+                  {mapaAtivo.ops.map((op) => (
+                    <span key={op.id} className="badge badge--info">
+                      {op.codigo} ({op.status}) — {op.nome}
+                    </span>
+                  ))}
                 </div>
               </div>
-              <div className="flex gap-8">
-                <button type="button" className="btn btn--ghost" onClick={() => handleSalvarEGerarOps(false)}>
-                  Salvar Só Rascunho
-                </button>
-                <button type="button" className="btn btn--primary" onClick={() => handleSalvarEGerarOps(true)}>
-                  <Play size={15} /> Salvar Mapa & Gerar OPs (1 Clique)
-                </button>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
-      {/* ABA 2: MAPAS SALVOS */}
-      {aba === 'MAPAS' && (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Código</th>
-                  <th>Data</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Itens</th>
-                  <th style={{ textAlign: 'right' }}>Cortes (kg)</th>
-                  <th style={{ textAlign: 'right' }}>MP (kg)</th>
-                  <th style={{ textAlign: 'right' }}>OPs Geradas</th>
-                  <th style={{ textAlign: 'right' }}>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mapas.map((m) => (
-                  <tr key={m.id}>
-                    <td className="font-mono font-bold text-primary">{m.codigo}</td>
-                    <td>{m.data_mapa}</td>
-                    <td><span className={`badge ${m.status === 'ABERTO' ? 'badge--warning' : 'badge--success'}`}>{m.status}</span></td>
-                    <td style={{ textAlign: 'right' }}>{m.qtd_itens}</td>
-                    <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg(m.total_previsto_kg)}</td>
-                    <td style={{ textAlign: 'right' }} className="font-mono text-warning">{fmtKg(m.total_mp_kg)}</td>
-                    <td style={{ textAlign: 'right' }}>{m.qtd_ops}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="flex justify-end gap-6">
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={async () => setMapaDetalhe(await mapaProducaoQueries.obterMapa(m.id))}
-                        >
-                          Ver OPs
-                        </button>
-                        {podeEscrever && m.status === 'ABERTO' && (
-                          <button type="button" className="btn btn--primary btn--sm" onClick={() => handleGerarOpsExistente(m.id)}>
-                            <Play size={14} /> Gerar OPs
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {mapas.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="text-center p-24 text-muted">Nenhum mapa salvo ainda.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          {mapaDetalhe && (
-            <div className="p-16 border-t border-border" style={{ background: 'var(--bg-2)' }}>
-              <div className="flex justify-between items-center mb-8">
-                <strong>{mapaDetalhe.codigo} — OPs Vinculadas ({mapaDetalhe.ops?.length || 0})</strong>
-                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setMapaDetalhe(null)}>Fechar</button>
-              </div>
-              <div className="flex gap-8 flex-wrap">
-                {(mapaDetalhe.ops || []).map((op) => (
-                  <span key={op.id} className="badge badge--info">{op.codigo} ({op.status}) — {op.nome}</span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ABA 3: ÁRVORE AUTO-APRENDIZ */}
-      {aba === 'ARVORE' && (
+      {/* ── ÁRVORE AUTO-APRENDIZ (mantida na 2ª aba) ── */}
+      {!mapaAtivo && abaTop === 'ARVORE' && (
         <div>
           <div className="card mb-16" style={{ background: 'rgba(59,130,246,0.06)', borderColor: 'rgba(59,130,246,0.3)' }}>
             <div className="flex justify-between items-center flex-wrap gap-12">
@@ -615,7 +1137,9 @@ export function MapaProducao() {
                   <select className="form-input" value={novoPaiId} onChange={(e) => setNovoPaiId(e.target.value)} required>
                     <option value="">Selecione MP...</option>
                     {mpsLista.map((p) => (
-                      <option key={p.id} value={p.id}>{p.codigo} — {p.descricao}</option>
+                      <option key={p.id} value={p.id}>
+                        {p.codigo} — {p.descricao}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -624,7 +1148,9 @@ export function MapaProducao() {
                   <select className="form-input" value={novoFilhoId} onChange={(e) => setNovoFilhoId(e.target.value)} required>
                     <option value="">Selecione corte...</option>
                     {subprodutosLista.map((p) => (
-                      <option key={p.id} value={p.id}>{p.codigo} — {p.descricao}</option>
+                      <option key={p.id} value={p.id}>
+                        {p.codigo} — {p.descricao}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -657,17 +1183,23 @@ export function MapaProducao() {
                 <tbody>
                   {arvoreFiltrada.map((a) => {
                     const conf = Number(a.confirmado) === 1
-                    const valorRend = rendEditMap[a.id] ?? (a.rendimento_esperado_pct ?? a.rendimento_aprendido_pct ?? '')
+                    const valorRend = rendEditMap[a.id] ?? a.rendimento_esperado_pct ?? a.rendimento_aprendido_pct ?? ''
                     return (
                       <tr key={a.id}>
-                        <td><strong>{a.pai_codigo}</strong> — {a.pai_descricao}</td>
-                        <td><strong>{a.filho_codigo}</strong> — {a.filho_descricao}</td>
+                        <td>
+                          <strong>{a.pai_codigo}</strong> — {a.pai_descricao}
+                        </td>
+                        <td>
+                          <strong>{a.filho_codigo}</strong> — {a.filho_descricao}
+                        </td>
                         <td>
                           <span className={`badge ${a.origem_vinculo === 'OP_AUTO' ? 'badge--warning' : 'badge--info'}`}>
                             {a.origem_vinculo === 'OP_AUTO' ? 'Aprendido OP' : 'Manual'}
                           </span>
                         </td>
-                        <td style={{ textAlign: 'right' }} className="font-mono">{a.amostras_aprendizado || 0}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono">
+                          {a.amostras_aprendizado || 0}
+                        </td>
                         <td style={{ textAlign: 'right' }} className="font-mono text-cyan">
                           {a.rendimento_aprendido_pct != null ? `${a.rendimento_aprendido_pct}%` : '-'}
                         </td>
@@ -711,6 +1243,715 @@ export function MapaProducao() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: NOVO MAPA DE PRODUÇÃO (Principal / Complementar) ── */}
+      {modalNovoOpen && (
+        <div className="modal-overlay" style={{ padding: 20, zIndex: 90 }}>
+          <div className="card" style={{ width: '92vw', maxWidth: 520, padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
+            <div className="flex items-center justify-between p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+              <h3 className="text-base font-bold flex items-center gap-8" style={{ margin: 0 }}>
+                <ClipboardList size={18} className="text-primary" /> Novo Mapa de Produção
+              </h3>
+              <button type="button" className="btn-icon" onClick={() => setModalNovoOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleCriarMapaModal} style={{ padding: 20 }} className="flex flex-col gap-14">
+              <div>
+                <label className="form-label">TIPO DE MAPA</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  {[
+                    {
+                      id: 'PRINCIPAL',
+                      title: '📋 Principal',
+                      desc: 'Mapa diário padrão. Reabre o aberto se já existir.',
+                    },
+                    {
+                      id: 'COMPLEMENTAR',
+                      title: '✨ Complementar',
+                      desc: 'Novo mapa do zero (0 itens) para a mesma data.',
+                    },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setNovoTipo(opt.id)}
+                      style={{
+                        textAlign: 'left',
+                        padding: 12,
+                        borderRadius: 10,
+                        border: novoTipo === opt.id ? '2px solid var(--accent)' : '1px solid var(--border)',
+                        background: novoTipo === opt.id ? 'rgba(59,130,246,0.12)' : 'var(--bg-2)',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>{opt.title}</div>
+                      <div className="text-xs text-muted">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="form-label">DATA DE PRODUÇÃO *</label>
+                <input type="date" required className="form-input" value={novaData} onChange={(e) => setNovaData(e.target.value)} />
+              </div>
+
+              <div>
+                <label className="form-label">TÍTULO DO MAPA (Opcional / Gerado automático)</label>
+                <input
+                  className="form-input"
+                  value={novoTitulo}
+                  onChange={(e) => setNovoTitulo(e.target.value.toUpperCase())}
+                  placeholder={`MAPA DE PRODUÇÃO ${novoTipo === 'COMPLEMENTAR' ? 'COMPLEMENTAR ' : 'DIÁRIO '}${fmtDataBr(novaData)}`}
+                />
+              </div>
+
+              <div
+                className="text-xs"
+                style={{
+                  background: 'rgba(59,130,246,0.1)',
+                  border: '1px solid rgba(59,130,246,0.28)',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  color: '#cbd5e1',
+                }}
+              >
+                📋 <strong>Mapa {novoTipo === 'PRINCIPAL' ? 'Principal' : 'Complementar'}:</strong>{' '}
+                {novoTipo === 'PRINCIPAL'
+                  ? 'Se já existir um mapa principal aberto para esta data, ele será reaberto automaticamente.'
+                  : 'Cria um mapa extra independente para a mesma data começando do zero.'}
+              </div>
+
+              <div className="flex justify-end gap-8 pt-8 border-t border-border">
+                <button type="button" className="btn btn--ghost" onClick={() => setModalNovoOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn--primary">
+                  Criar Mapa
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: SELECIONAR ITENS DOS PEDIDOS (Puxar por Data de Entrega) ── */}
+      {modalPedidosOpen && (
+        <div className="modal-overlay" style={{ padding: 20, zIndex: 92 }}>
+          <div
+            className="card"
+            style={{ width: '94vw', maxWidth: 880, maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}
+          >
+            <div className="flex items-center justify-between p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+              <h3 className="text-base font-bold flex items-center gap-8" style={{ margin: 0 }}>
+                <ClipboardList size={18} className="text-primary" /> Selecionar Itens dos Pedidos
+              </h3>
+              <div className="flex items-center gap-12">
+                <span className="text-xs text-muted font-mono">{Object.keys(selecionadosPedidos).length} selecionados</span>
+                <button type="button" className="btn-icon" onClick={() => setModalPedidosOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ padding: 16, borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className="flex gap-8 flex-wrap items-center">
+                <div style={{ flex: 1, minWidth: 220, position: 'relative' }}>
+                  <Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--text-muted)' }} />
+                  <input
+                    className="form-input"
+                    style={{ paddingLeft: 32 }}
+                    placeholder="Buscar produto ou cliente..."
+                    value={pedBusca}
+                    onChange={(e) => setPedBusca(e.target.value)}
+                  />
+                </div>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={selecionarTodosModal}>
+                  ✓ Todos
+                </button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setSelecionadosPedidos({})}>
+                  ✗ Limpar
+                </button>
+              </div>
+
+              <div className="flex gap-6 flex-wrap items-center">
+                <span className="text-xs text-muted flex items-center gap-4">
+                  <Calendar size={12} /> Entrega:
+                </span>
+                <button
+                  type="button"
+                  className={`btn btn--sm ${!pedDataFiltro ? 'btn--primary' : 'btn--ghost'}`}
+                  onClick={() => setPedDataFiltro('')}
+                >
+                  Todos
+                </button>
+                {(pedidosDisp.datasDisponiveis || []).map((dt) => (
+                  <button
+                    key={dt}
+                    type="button"
+                    className={`btn btn--sm ${pedDataFiltro === dt ? 'btn--primary' : 'btn--ghost'}`}
+                    onClick={() => setPedDataFiltro(pedDataFiltro === dt ? '' : dt)}
+                  >
+                    {fmtDataBr(dt).slice(0, 5)}
+                  </button>
+                ))}
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 145, height: 30, fontSize: 12 }}
+                  value={pedDataFiltro}
+                  onChange={(e) => setPedDataFiltro(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, padding: 16 }} className="flex flex-col gap-12">
+              {loadingPedidosDisp ? (
+                <div className="p-24 text-center text-muted">Carregando itens dos pedidos...</div>
+              ) : (pedidosDisp.gruposProduto || []).length === 0 ? (
+                <div className="p-24 text-center text-muted">Nenhum item de pedido encontrado para os filtros informados.</div>
+              ) : (
+                (pedidosDisp.gruposProduto || []).map((grp) => (
+                  <div key={grp.produto_id} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg-2)' }}>
+                    <div
+                      style={{
+                        padding: '10px 14px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontWeight: 800,
+                        fontSize: 13,
+                        background: 'rgba(59,130,246,0.08)',
+                        borderBottom: '1px solid var(--border)',
+                      }}
+                    >
+                      <span>
+                        {grp.produto_codigo ? `${grp.produto_codigo} — ` : ''}
+                        {grp.produto_descricao}
+                      </span>
+                      <span className="font-mono">{fmtKg(grp.total_kg)}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      {(grp.itens || []).map((it) => {
+                        const checked = Boolean(selecionadosPedidos[it.pedido_item_id])
+                        return (
+                          <label
+                            key={it.pedido_item_id}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '9px 14px',
+                              borderTop: '1px solid rgba(42,58,85,0.45)',
+                              cursor: 'pointer',
+                              opacity: it.no_mapa_atual ? 0.55 : 1,
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <div className="flex items-center gap-10" style={{ flex: 1, minWidth: 220 }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={it.no_mapa_atual}
+                                onChange={() => toggleSelecionadoPedidoItem(it)}
+                              />
+                              <span className="font-mono font-bold text-cyan text-xs">#{it.pedido_codigo}</span>
+                              <span style={{ fontWeight: 600, fontSize: 13 }}>{it.cliente_nome}</span>
+                              {it.especificacao_auto ? (
+                                <span className="badge badge--success" style={{ fontSize: 10 }}>
+                                  {it.especificacao_auto} • {it.conservacao_auto}
+                                </span>
+                              ) : (
+                                <span className="badge badge--warning" style={{ fontSize: 10 }}>
+                                  Sem especificação padrão
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-10">
+                              <span className="text-xs text-muted flex items-center gap-4">
+                                <Calendar size={11} /> {fmtDataBr(it.previsao_entrega)}
+                              </span>
+                              <span className="font-mono font-bold text-success">{fmtKg(it.qtd_kg_solicitada)}</span>
+                              {it.no_mapa_atual && (
+                                <span className="badge badge--info" style={{ fontSize: 10 }}>
+                                  ✓ Neste mapa
+                                </span>
+                              )}
+                              {!it.no_mapa_atual && it.em_outro_mapa && (
+                                <span className="badge badge--warning" style={{ fontSize: 10 }}>
+                                  ⚠️ Em {it.em_outro_mapa}
+                                </span>
+                              )}
+                              {it.em_embarque && (
+                                <span className="badge badge--ghost" style={{ fontSize: 10 }}>
+                                  🚚 em embarque
+                                </span>
+                              )}
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end gap-8 p-16" style={{ background: 'var(--bg-2)', borderTop: '1px solid var(--border)' }}>
+              <button type="button" className="btn btn--ghost" onClick={() => setModalPedidosOpen(false)}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn--primary" onClick={handleConfirmarPuxarPedidos}>
+                Adicionar ao Mapa →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: CARREGAR PROGRAMAÇÃO SEMANAL ── */}
+      {modalSemanalOpen && (
+        <div className="modal-overlay" style={{ padding: 20, zIndex: 93 }}>
+          <div className="card" style={{ width: '92vw', maxWidth: 680, maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
+            <div className="flex items-center justify-between p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+              <h3 className="text-base font-bold flex items-center gap-8" style={{ margin: 0 }}>
+                <Download size={18} className="text-primary" /> Carregar Programação Semanal
+              </h3>
+              <button type="button" className="btn-icon" onClick={() => setModalSemanalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: 18 }} className="flex flex-col gap-12">
+              <p className="text-xs text-muted" style={{ margin: 0 }}>
+                Selecione o dia da semana para importar os produtos oficiais, especificações padrão e metas de kg no mapa:
+              </p>
+              <div className="flex gap-8 items-end flex-wrap">
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <label className="form-label">DIA DA SEMANA</label>
+                  <select className="form-input" value={diaSemanalSel} onChange={(e) => setDiaSemanalSel(Number(e.target.value))}>
+                    {DIAS_SEMANA.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setMostrarFormSemanal((v) => !v)}>
+                  <Plus size={14} /> {mostrarFormSemanal ? 'Fechar Cadastro' : 'Cadastrar Corte neste Dia'}
+                </button>
+              </div>
+
+              {mostrarFormSemanal && (
+                <form onSubmit={handleSalvarItemSemanal} className="card" style={{ background: 'var(--bg-2)', padding: 12 }}>
+                  <div className="form-grid form-grid--3" style={{ gap: 8 }}>
+                    <div>
+                      <label className="form-label">Corte *</label>
+                      <select className="form-input" required value={semForm.produto_id} onChange={(e) => setSemForm({ ...semForm, produto_id: e.target.value })}>
+                        <option value="">-- Selecionar --</option>
+                        {subprodutosLista.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.codigo} — {p.descricao}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Meta (kg) *</label>
+                      <input type="number" step="0.01" required className="form-input" value={semForm.qtd_meta_kg} onChange={(e) => setSemForm({ ...semForm, qtd_meta_kg: e.target.value })} placeholder="Ex: 100" />
+                    </div>
+                    <div>
+                      <label className="form-label">Especificação</label>
+                      <input className="form-input" value={semForm.especificacao} onChange={(e) => setSemForm({ ...semForm, especificacao: e.target.value.toUpperCase() })} placeholder="PACOTES DE 5KG" />
+                    </div>
+                  </div>
+                  <div className="form-grid form-grid--3 mt-8" style={{ gap: 8 }}>
+                    <div>
+                      <label className="form-label">Cliente (opcional)</label>
+                      <select className="form-input" value={semForm.cliente_id} onChange={(e) => setSemForm({ ...semForm, cliente_id: e.target.value })}>
+                        <option value="">-- Estoque / Geral --</option>
+                        {clientes.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.razao_social}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Matéria-Prima</label>
+                      <select className="form-input" value={semForm.materia_prima_id} onChange={(e) => setSemForm({ ...semForm, materia_prima_id: e.target.value })}>
+                        <option value="">-- Via Árvore --</option>
+                        {mpsLista.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.codigo} — {m.descricao}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-end">
+                      <button type="submit" className="btn btn--success w-full">
+                        <Plus size={14} /> Salvar na Programação
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
+
+              <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Produto</th>
+                      <th>Especificação</th>
+                      <th style={{ textAlign: 'right' }}>Meta (kg)</th>
+                      <th style={{ textAlign: 'right' }}>Excluir</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {semanalLista.map((s) => (
+                      <tr key={s.id}>
+                        <td>
+                          <strong>{s.produto_codigo}</strong> — {s.produto_descricao}
+                          {s.cliente_nome && <div className="text-xs text-muted">{s.cliente_nome}</div>}
+                        </td>
+                        <td className="text-xs">{s.especificacao || s.conservacao}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono font-bold">
+                          {fmtKg(s.qtd_meta_kg)}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm text-danger"
+                            onClick={async () => {
+                              await mapaProducaoQueries.excluirProgramacaoSemanal(s.id)
+                              carregarSemanal(diaSemanalSel)
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {semanalLista.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="text-center p-16 text-muted">
+                          Nenhum corte configurado para este dia da semana ainda.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="flex justify-end gap-8 p-16" style={{ background: 'var(--bg-2)', borderTop: '1px solid var(--border)' }}>
+              <button type="button" className="btn btn--ghost" onClick={() => setModalSemanalOpen(false)}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn--primary" onClick={handleImportarSemanal} disabled={semanalLista.length === 0}>
+                <Download size={14} /> Importar Itens →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: ESPECIFICAÇÕES AUTOMÁTICAS (Produto x Cliente) ── */}
+      {modalEspecOpen && (
+        <div className="modal-overlay" style={{ padding: 20, zIndex: 93 }}>
+          <div className="card" style={{ width: '94vw', maxWidth: 840, maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
+            <div className="flex items-center justify-between p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+              <h3 className="text-base font-bold flex items-center gap-8" style={{ margin: 0 }}>
+                <Settings size={18} className="text-primary" /> Especificações Padrão por Corte &amp; Cliente
+              </h3>
+              <button type="button" className="btn-icon" onClick={() => setModalEspecOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: 18 }} className="flex flex-col gap-12">
+              <form onSubmit={handleSalvarSpec} className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
+                <div className="form-grid form-grid--3" style={{ gap: 10 }}>
+                  <div>
+                    <label className="form-label">Produto / Corte *</label>
+                    <select className="form-input" required value={especForm.produto_id} onChange={(e) => setEspecForm({ ...especForm, produto_id: e.target.value })}>
+                      <option value="">-- Selecionar --</option>
+                      {subprodutosLista.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.codigo} — {p.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Cliente (opcional — em branco = geral)</label>
+                    <select className="form-input" value={especForm.cliente_id} onChange={(e) => setEspecForm({ ...especForm, cliente_id: e.target.value })}>
+                      <option value="">Padrão Geral (todos os clientes)</option>
+                      {clientes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.razao_social}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Conservação</label>
+                    <select className="form-input" value={especForm.conservacao} onChange={(e) => setEspecForm({ ...especForm, conservacao: e.target.value })}>
+                      <option value="RESFRIADO">RESFRIADO</option>
+                      <option value="CONGELADO">CONGELADO</option>
+                      <option value="IN NATURA">IN NATURA</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="form-grid form-grid--3 mt-8" style={{ gap: 10 }}>
+                  <div>
+                    <label className="form-label">Especificação *</label>
+                    <input className="form-input" required value={especForm.especificacao} onChange={(e) => setEspecForm({ ...especForm, especificacao: e.target.value.toUpperCase() })} placeholder="Ex: PACOTES DE 5KG" />
+                  </div>
+                  <div>
+                    <label className="form-label">Matéria-Prima Padrão</label>
+                    <select className="form-input" value={especForm.materia_prima_id} onChange={(e) => setEspecForm({ ...especForm, materia_prima_id: e.target.value })}>
+                      <option value="">-- Via Árvore --</option>
+                      {mpsLista.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.codigo} — {m.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <button type="submit" className="btn btn--primary w-full">
+                      <Check size={14} /> Salvar Especificação Automática
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              <div className="table-wrap" style={{ border: '1px solid var(--border)', borderRadius: 8 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Produto</th>
+                      <th>Cliente</th>
+                      <th>Especificação</th>
+                      <th>Conservação</th>
+                      <th>Matéria-Prima</th>
+                      <th style={{ textAlign: 'right' }}>Excluir</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {especsLista.map((sp) => (
+                      <tr key={sp.id}>
+                        <td>
+                          <strong>{sp.produto_codigo}</strong> — {sp.produto_descricao}
+                        </td>
+                        <td className="text-xs">{sp.cliente_nome || 'Geral'}</td>
+                        <td className="font-bold text-xs">{sp.especificacao}</td>
+                        <td className="text-xs">{sp.conservacao}</td>
+                        <td className="text-xs">{sp.materia_prima_descricao || '-'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm text-danger"
+                            onClick={async () => {
+                              await mapaProducaoQueries.excluirEspecificacaoMapa(sp.id)
+                              carregarEspecs()
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {especsLista.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="text-center p-16 text-muted">
+                          Nenhuma especificação cadastrada ainda. Ao editar qualquer linha do mapa ela também é salva automaticamente aqui!
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="flex justify-end gap-8 p-16" style={{ background: 'var(--bg-2)', borderTop: '1px solid var(--border)' }}>
+              {mapaAtivo && (
+                <button
+                  type="button"
+                  className="btn btn--success"
+                  onClick={async () => {
+                    await handlePuxarEspecificacoesMapa()
+                    setModalEspecOpen(false)
+                  }}
+                >
+                  <Download size={14} /> Aplicar ao Mapa Atual
+                </button>
+              )}
+              <button type="button" className="btn btn--ghost" onClick={() => setModalEspecOpen(false)}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: + LINHA MANUAL ── */}
+      {modalLinhaOpen && (
+        <div className="modal-overlay" style={{ padding: 20, zIndex: 93 }}>
+          <div className="card" style={{ width: '92vw', maxWidth: 620, padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
+            <div className="flex items-center justify-between p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+              <h3 className="text-base font-bold" style={{ margin: 0 }}>
+                + Adicionar Linha Manual no Mapa
+              </h3>
+              <button type="button" className="btn-icon" onClick={() => setModalLinhaOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSalvarLinhaManual} style={{ padding: 20 }} className="flex flex-col gap-12">
+              <div className="form-grid form-grid--2">
+                <div>
+                  <label className="form-label">Produto / Corte *</label>
+                  <select className="form-input" required value={linhaForm.produto_id} onChange={(e) => setLinhaForm({ ...linhaForm, produto_id: e.target.value })}>
+                    <option value="">-- Selecionar corte --</option>
+                    {subprodutosLista.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.codigo} — {p.descricao}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Quantidade Prevista (kg) *</label>
+                  <input type="number" step="0.01" required className="form-input" value={linhaForm.qtd_prevista_kg} onChange={(e) => setLinhaForm({ ...linhaForm, qtd_prevista_kg: e.target.value })} placeholder="Ex: 50" />
+                </div>
+              </div>
+              <div className="form-grid form-grid--2">
+                <div>
+                  <label className="form-label">Cliente (opcional)</label>
+                  <select className="form-input" value={linhaForm.cliente_id} onChange={(e) => setLinhaForm({ ...linhaForm, cliente_id: e.target.value })}>
+                    <option value="">-- Estoque / Interno --</option>
+                    {clientes.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.razao_social}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Matéria-Prima (opcional — via Árvore)</label>
+                  <select className="form-input" value={linhaForm.materia_prima_id} onChange={(e) => setLinhaForm({ ...linhaForm, materia_prima_id: e.target.value })}>
+                    <option value="">-- Automática --</option>
+                    {mpsLista.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.codigo} — {m.descricao}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="form-grid form-grid--3">
+                <div>
+                  <label className="form-label">Especificação</label>
+                  <input className="form-input" value={linhaForm.especificacao} onChange={(e) => setLinhaForm({ ...linhaForm, especificacao: e.target.value.toUpperCase() })} placeholder="Se vazio, puxa automática" />
+                </div>
+                <div>
+                  <label className="form-label">Conservação</label>
+                  <select className="form-input" value={linhaForm.conservacao} onChange={(e) => setLinhaForm({ ...linhaForm, conservacao: e.target.value })}>
+                    <option value="RESFRIADO">RESFRIADO</option>
+                    <option value="CONGELADO">CONGELADO</option>
+                    <option value="IN NATURA">IN NATURA</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Grupo</label>
+                  <input list="grupos-mapa-sug" className="form-input" value={linhaForm.grupo_mapa} onChange={(e) => setLinhaForm({ ...linhaForm, grupo_mapa: e.target.value.toUpperCase() })} placeholder="BOVINOS / AVES..." />
+                  <datalist id="grupos-mapa-sug">
+                    {gruposDisponiveis.map((g) => (
+                      <option key={g} value={g} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+              <div>
+                <label className="form-label">Observação</label>
+                <input className="form-input" value={linhaForm.observacao} onChange={(e) => setLinhaForm({ ...linhaForm, observacao: e.target.value.toUpperCase() })} />
+              </div>
+              <div className="flex justify-end gap-8 pt-8 border-t border-border">
+                <button type="button" className="btn btn--ghost" onClick={() => setModalLinhaOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn--primary">
+                  <Plus size={15} /> Incluir no Mapa
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL IMPRESSÃO A4 DO MAPA ── */}
+      {mapaPrint && (
+        <div className="modal-overlay" style={{ padding: 20, zIndex: 98 }}>
+          <div className="card" style={{ width: '95vw', maxWidth: 1020, maxHeight: '92vh', overflowY: 'auto', padding: 24, background: '#ffffff', color: '#0f172a' }}>
+            <div className="flex justify-between items-center mb-12 no-print">
+              <strong>Pré-visualização para Impressão</strong>
+              <div className="flex gap-8">
+                <button type="button" className="btn btn--primary btn--sm" onClick={() => window.print()}>
+                  <Printer size={14} /> Imprimir Agora
+                </button>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setMapaPrint(null)}>
+                  <X size={14} /> Fechar
+                </button>
+              </div>
+            </div>
+            <div style={{ borderBottom: '2px solid #0f172a', paddingBottom: 8, marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>
+                {mapaPrint.titulo} ({mapaPrint.codigo})
+              </h2>
+              <div style={{ fontSize: 12 }}>
+                Data de Produção: <strong>{fmtDataBr(mapaPrint.data_mapa)}</strong> • Status: <strong>{mapaPrint.status}</strong>
+                {mapaPrint.observacoes ? ` • Obs.: ${mapaPrint.observacoes}` : ''}
+              </div>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+              <thead>
+                <tr style={{ background: '#e2e8f0', textAlign: 'left' }}>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Código</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Produto</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Especificação</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Conserv.</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6, textAlign: 'right' }}>Previsto</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Cliente</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Matéria-Prima</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Obs.</th>
+                  <th style={{ border: '1px solid #94a3b8', padding: 6, textAlign: 'right' }}>Realizado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(mapaPrint.itens || []).map((it) => (
+                  <tr key={it.id}>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.produto_codigo || '-'}</td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6, fontWeight: 700 }}>{it.produto_descricao}</td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.especificacao || '-'}</td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.conservacao}</td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6, textAlign: 'right', fontWeight: 700 }}>
+                      {fmtKg(it.qtd_prevista_kg)}
+                    </td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.cliente_nome || 'INTERNO'}</td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>
+                      {it.materia_prima_descricao ? `${it.materia_prima_descricao} (${fmtKg(it.qtd_mp_kg)})` : '-'}
+                    </td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.observacao || ''}</td>
+                    <td style={{ border: '1px solid #cbd5e1', padding: 6, textAlign: 'right' }}>
+                      {Number(it.qtd_realizada_kg) > 0 ? fmtKg(it.qtd_realizada_kg) : '________ kg'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

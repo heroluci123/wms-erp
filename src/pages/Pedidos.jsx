@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   ClipboardList,
   Plus,
@@ -100,6 +101,7 @@ const fmtDataHora = (d) => {
 }
 
 export function Pedidos() {
+  const navigate = useNavigate()
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   const podeGerenciarPedidos = temPermissao(operador, 'pedidos')
   const podeFinanceiroPedidos = temPermissao(operador, 'financeiro_pedidos')
@@ -710,6 +712,7 @@ export function Pedidos() {
 
     setLoading(true)
     let savedId = editId
+    let travaDisparada = false
     try {
       if (editId) {
         const resEdit = await pedidosQueries.atualizarPedido({
@@ -728,7 +731,8 @@ export function Pedidos() {
           itens: payloadItens,
           liberar
         })
-        if (resEdit?.trava_estoque) {
+        travaDisparada = Boolean(resEdit?.trava_estoque)
+        if (travaDisparada) {
           toastWarning(
             `🔒 Trava de Estoque (${editCodigo}): Saldo insuficiente. Pedido bloqueado com cadeado na Central de Pendências (ou abra OP).`
           )
@@ -759,7 +763,8 @@ export function Pedidos() {
           liberar: somenteFinanceiro ? false : liberar,
         })
         savedId = res.id
-        if (res?.trava_estoque) {
+        travaDisparada = Boolean(res?.trava_estoque)
+        if (travaDisparada) {
           toastWarning(
             `🔒 Trava de Estoque (${res.codigo}): Saldo insuficiente p/ separação imediata. Cadeado enviado para Central de Pendências!`
           )
@@ -776,7 +781,7 @@ export function Pedidos() {
       resetarFormulario()
       setAba('GERENCIADOR')
       await carregarDados()
-      if (imprimirApos && savedId) {
+      if (imprimirApos && savedId && !travaDisparada) {
         await handleImprimirFolhaPedido(savedId)
       }
     } catch (err) {
@@ -798,9 +803,8 @@ export function Pedidos() {
 
   const handleGerarOpPedido = async (ped) => {
     try {
-      const res = await pedidosQueries.gerarOpAutomatica(ped.id)
-      toastSuccess(`OP ${res.op_codigo} aberta no PCP!`, `${res.itens_sem_saldo} corte(s) sem estoque enviados para produção.`)
-      await carregarDados()
+      const preview = await pedidosQueries.gerarOpAutomatica(ped.id, { preview_only: true })
+      navigate('/producao', { state: { abrirNovaOpPrefill: preview } })
     } catch (err) {
       toastWarning(err.message)
     }
@@ -997,6 +1001,15 @@ export function Pedidos() {
         Number(String(i.preco_unitario || 0).replace(',', '.') || 0),
     0
   )
+
+  const itensSemEstoqueForm = useMemo(() => {
+    return itensForm.filter((item) => {
+      const prodLive = produtos.find((p) => String(p.id) === String(item.produto_id))
+      const saldoKg = Number(prodLive?.saldo_kg ?? item.saldo_kg ?? 0)
+      const solKg = Number(String(item.qtd_kg_solicitada).replace(',', '.') || 0)
+      return solKg > saldoKg + 0.001
+    })
+  }, [itensForm, produtos])
 
   const parcelasSimuladas = (() => {
     if (!apiAtiva || totalFormValor <= 0) return []
@@ -2110,7 +2123,21 @@ export function Pedidos() {
                               value={item.qtd_caixas_solicitada}
                               onChange={(e) => {
                                 const v = e.target.value
-                                setItensForm((prev) => prev.map((r, i) => (i === idx ? { ...r, qtd_caixas_solicitada: v } : r)))
+                                const cx = Number(String(v).replace(',', '.') || 0)
+                                setItensForm((prev) =>
+                                  prev.map((r, i) => {
+                                    if (i !== idx) return r
+                                    const pm = Number(r.peso_medio_cx || 0)
+                                    return {
+                                      ...r,
+                                      qtd_caixas_solicitada: v,
+                                      unidade_solicitada: 'CX',
+                                      qtd_solicitada_exibicao: cx > 0 ? cx : r.qtd_solicitada_exibicao,
+                                      qtd_kg_solicitada:
+                                        pm > 0 && cx > 0 ? String(Number((cx * pm).toFixed(3))) : r.qtd_kg_solicitada,
+                                    }
+                                  })
+                                )
                               }}
                             />
                           </td>
@@ -2206,6 +2233,29 @@ export function Pedidos() {
                     </span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {apiAtiva && itensSemEstoqueForm.length > 0 && !somenteFinanceiro && (
+            <div
+              style={{
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.45)',
+                borderRadius: 10,
+                padding: '12px 14px',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                color: '#fca5a5',
+                fontSize: 12.5,
+              }}
+            >
+              <Lock size={18} style={{ color: '#ef4444', flexShrink: 0 }} />
+              <div>
+                <strong>Trava de Estoque ativa ao liberar:</strong> {itensSemEstoqueForm.length} item(ns) acima do saldo disponível em câmara.
+                Ao clicar em <strong>Liberar Pedido para Separação</strong>, o pedido ficará bloqueado com cadeado na <strong>Central de Pendências</strong> antes de aparecer para os operadores.
               </div>
             </div>
           )}

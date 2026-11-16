@@ -308,6 +308,11 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
       }>
     }
 
+    const itens = Array.isArray(body.itensPrevistos) ? body.itensPrevistos : []
+    if (!itens.some((i) => i.tipo === 'ENTRADA')) {
+      throw new HttpError(400, 'É obrigatório informar ao menos 1 Matéria-Prima de ENTRADA para criar uma OP.')
+    }
+
     const op = await conn.db.transaction(async (tx) => {
       const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'OP', 'OP', 3)
       const id = uuidv7()
@@ -332,7 +337,6 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
         liberadaEm: statusInicial === 'LIBERADA' ? new Date() : null,
       })
 
-      const itens = Array.isArray(body.itensPrevistos) ? body.itensPrevistos : []
       if (itens.length > 0) {
         await tx.insert(opItensPrevistos).values(
           itens.map((it) => ({
@@ -398,6 +402,9 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
         .where(eq(ordensProducao.id, opId))
 
       if (Array.isArray(body.itensPrevistos)) {
+        if (!body.itensPrevistos.some((i) => i.tipo === 'ENTRADA')) {
+          throw new HttpError(400, 'A Ordem de Produção deve possuir ao menos 1 Matéria-Prima de ENTRADA.')
+        }
         await tx.delete(opItensPrevistos).where(eq(opItensPrevistos.opId, opId))
         if (body.itensPrevistos.length > 0) {
           await tx.insert(opItensPrevistos).values(

@@ -694,6 +694,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         const estoqueCheck = await verificarEstoquePedido(tx, {
           tenantId: ctx.tenantId,
           filialId: ctx.filialId,
+          ignorePedidoId: pedidoId,
           itens: itensConsolidados,
         })
         if (!estoqueCheck.suficiente) {
@@ -845,6 +846,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         : await verificarEstoquePedido(tx, {
             tenantId: ctx.tenantId,
             filialId: ctx.filialId,
+            ignorePedidoId: pedidoId,
             itens: itensPed.map((i) => ({
               produto_id: i.produto_id,
               qtd_kg_solicitada: toNum(i.qtd_kg_solicitada, 0),
@@ -969,10 +971,12 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
     return reply.status(201).send({ success: true, ...cloned })
   })
 
-  // Trava Inteligente: Gera Ordem de Producao automatica para itens sem saldo suficiente
+  // Trava Inteligente: Gera (ou prepara preview para abrir) Ordem de Producao para itens sem saldo
   app.post('/api/pedidos/:id/gerar-op', { preHandler: requirePermission(['pedidos', 'producao_criar_op']) }, async (req, reply) => {
     const ctx = req.authCtx!
     const pedidoId = parseUuidOrBadRequest((req.params as { id: string }).id, 'pedido_id')
+    const body = (req.body || {}) as { preview_only?: boolean }
+    const previewOnly = body.preview_only === true
 
     const resOp = await conn.db.transaction(async (tx) => {
       const [ped] = await tx
@@ -1034,6 +1038,50 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         }
       }
 
+      const todosProdsIds = [...new Set([...faltantes.map((f) => f.item.produtoId), ...mpNecessarias.keys()])]
+      const prodsRows = await tx
+        .select({ id: produtos.id, codigo: produtos.codigo, descricao: produtos.descricao })
+        .from(produtos)
+        .where(inArray(produtos.id, todosProdsIds))
+      const prodMeta = new Map(prodsRows.map((p) => [p.id, p]))
+
+      const opNome = `Produção p/ ${ped.codigo} — ${ped.cliente}`
+      const opDataProd = ped.previsaoEntrega || hojeIsoLocal()
+      const opObs = `Gerada automaticamente pelo ${ped.codigo} (itens sem saldo).`
+
+      if (previewOnly) {
+        return {
+          preview_only: true,
+          pedido_id: ped.id,
+          pedido_codigo: ped.codigo,
+          nome: opNome,
+          data_producao: opDataProd,
+          observacoes: opObs,
+          itens_sem_saldo: faltantes.length,
+          previstos_entrada: Array.from(mpNecessarias.entries()).map(([mpId, kgMp]) => ({
+            produto_id: mpId,
+            produto_codigo: prodMeta.get(mpId)?.codigo || '',
+            produto_descricao: prodMeta.get(mpId)?.descricao || '',
+            peso_kg_previsto: kgMp,
+            unidade_prevista: 'KG',
+          })),
+          previstos_saida: faltantes.map((f) => ({
+            produto_id: f.item.produtoId,
+            produto_codigo: prodMeta.get(f.item.produtoId)?.codigo || '',
+            produto_descricao: prodMeta.get(f.item.produtoId)?.descricao || '',
+            peso_kg_previsto: f.deficit,
+            unidade_prevista: 'KG',
+          })),
+        }
+      }
+
+      if (mpNecessarias.size === 0) {
+        throw new HttpError(
+          400,
+          'Não é possível abrir OP sem Matéria-Prima de entrada. Selecione a Matéria-Prima na tela de Produção.',
+        )
+      }
+
       const opCodigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'OP', 'OP', 3)
       const opId = uuidv7()
 
@@ -1042,14 +1090,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         tenantId: ctx.tenantId,
         filialId: ctx.filialId,
         codigo: opCodigo,
-        nome: `Produção p/ ${ped.codigo} — ${ped.cliente}`,
+        nome: opNome,
         status: 'LIBERADA',
         operadorId: ctx.operador.id,
         operadorNome: ctx.operador.nome,
         cliente: ped.cliente,
         endereco: 'PRODUCAO',
-        dataProducao: ped.previsaoEntrega || hojeIsoLocal(),
-        observacoes: `Gerada automaticamente pelo ${ped.codigo} (itens sem saldo).`,
+        dataProducao: opDataProd,
+        observacoes: opObs,
         criadoPorId: ctx.operador.id,
         criadoPorNome: ctx.operador.nome,
         liberadaEm: new Date(),

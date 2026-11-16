@@ -350,6 +350,100 @@ test('Fase 2 Parte 2: Pedido de Compra + Trava Recebimento + Mapa Producao + Arv
     assert.equal(resConfArv.statusCode, 200)
     assert.equal(resConfArv.json().rendimento_esperado_pct, 45)
 
+    // 4B. Fluxo Dinamico do Mapa Diario: criar vazio c/ titulo opcional, reabrir mesma data, puxar disponibilidade, auto-aprender especificacao e programacao semanal
+    const resNovoMapa = await app.inject({
+      method: 'POST',
+      url: '/api/mapas-producao',
+      headers,
+      payload: { data_mapa: '2026-11-20', tipo: 'PRINCIPAL' },
+    })
+    assert.equal(resNovoMapa.statusCode, 201, `Criar mapa principal vazio falhou: ${resNovoMapa.body}`)
+    const novoMapaId = resNovoMapa.json().id
+    assert.ok(String(resNovoMapa.json().titulo || '').includes('20/11/2026'), `Titulo auto-gerado invalido: ${resNovoMapa.body}`)
+
+    const resReabrir = await app.inject({
+      method: 'POST',
+      url: '/api/mapas-producao',
+      headers,
+      payload: { data_mapa: '2026-11-20', tipo: 'PRINCIPAL' },
+    })
+    assert.ok(resReabrir.statusCode === 200 || resReabrir.statusCode === 201)
+    assert.equal(resReabrir.json().reopened, true)
+    assert.equal(resReabrir.json().id, novoMapaId)
+
+    const resDisp = await app.inject({
+      method: 'GET',
+      url: '/api/mapas-producao/itens-pedidos-disponiveis',
+      headers,
+    })
+    assert.equal(resDisp.statusCode, 200)
+    assert.ok(Array.isArray(resDisp.json().gruposProduto), `gruposProduto ausente: ${resDisp.body}`)
+    assert.ok(Array.isArray(resDisp.json().datasDisponiveis), `datasDisponiveis ausente: ${resDisp.body}`)
+
+    const resAddMapa = await app.inject({
+      method: 'POST',
+      url: `/api/mapas-producao/${novoMapaId}/itens`,
+      headers,
+      payload: {
+        itens: [{ produto_id: corteId, cliente_id: cliId, materia_prima_id: mpId, qtd_prevista_kg: 12 }],
+      },
+    })
+    assert.equal(resAddMapa.statusCode, 201, `Adicionar item no mapa falhou: ${resAddMapa.body}`)
+
+    const resDetMapa = await app.inject({ method: 'GET', url: `/api/mapas-producao/${novoMapaId}`, headers })
+    assert.equal(resDetMapa.statusCode, 200)
+    const itemMapaId = resDetMapa.json().data.itens[0].id
+
+    const resEditEspec = await app.inject({
+      method: 'PUT',
+      url: `/api/mapas-producao/${novoMapaId}/itens/${itemMapaId}`,
+      headers,
+      payload: {
+        especificacao: 'BIFE 200G EMBALAGEM 5KG',
+        conservacao: 'CONGELADO',
+        grupo_mapa: 'NOBRES',
+      },
+    })
+    assert.equal(resEditEspec.statusCode, 200)
+
+    const resListaEspec = await app.inject({ method: 'GET', url: '/api/mapas-producao/especificacoes', headers })
+    assert.equal(resListaEspec.statusCode, 200)
+    assert.ok(
+      resListaEspec.json().data.some(
+        (e: any) => e.cliente_id === cliId && e.produto_id === corteId && e.especificacao === 'BIFE 200G EMBALAGEM 5KG',
+      ),
+      `Especificacao auto-aprendida nao encontrada: ${resListaEspec.body}`,
+    )
+
+    const resSemanalPost = await app.inject({
+      method: 'POST',
+      url: '/api/mapas-producao/programacao-semanal',
+      headers,
+      payload: {
+        dia_semana: 2,
+        produto_id: corteId,
+        cliente_id: cliId,
+        materia_prima_id: mpId,
+        especificacao: 'PROGRAMACAO TERCA 5KG',
+        conservacao: 'RESFRIADO',
+        qtd_meta_kg: 30,
+      },
+    })
+    assert.equal(resSemanalPost.statusCode, 201)
+
+    const resImportSemanal = await app.inject({
+      method: 'POST',
+      url: `/api/mapas-producao/${novoMapaId}/importar-semanal`,
+      headers,
+      payload: { dia_semana: 2 },
+    })
+    assert.equal(resImportSemanal.statusCode, 200, `Importar semanal falhou: ${resImportSemanal.body}`)
+    assert.ok(Number(resImportSemanal.json().importados) >= 1, `Esperava importados >= 1: ${resImportSemanal.body}`)
+
+    const resDetPosSemanal = await app.inject({ method: 'GET', url: `/api/mapas-producao/${novoMapaId}`, headers })
+    assert.equal(resDetPosSemanal.statusCode, 200)
+    assert.ok((resDetPosSemanal.json().data?.itens || []).length >= 2, 'Item importado da semanal deve constar no mapa')
+
     // 5. RBAC: usuario CLIENTE bloqueado (403)
     const resCliUser = await app.inject({
       method: 'POST',

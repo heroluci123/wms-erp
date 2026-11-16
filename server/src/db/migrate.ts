@@ -602,6 +602,8 @@ CREATE TABLE IF NOT EXISTS mapas_producao (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
   codigo TEXT NOT NULL,
+  titulo TEXT NOT NULL DEFAULT '',
+  tipo TEXT NOT NULL DEFAULT 'PRINCIPAL',
   data_mapa DATE NOT NULL,
   status TEXT NOT NULL DEFAULT 'ABERTO',
   observacoes TEXT NOT NULL DEFAULT '',
@@ -616,13 +618,51 @@ CREATE TABLE IF NOT EXISTS mapas_producao_itens (
   produto_id UUID NOT NULL REFERENCES produtos(id),
   materia_prima_id UUID REFERENCES produtos(id),
   cliente_id UUID REFERENCES clientes(id),
+  pedido_id UUID,
+  pedido_item_id UUID,
+  pedido_codigo TEXT NOT NULL DEFAULT '',
+  previsao_entrega DATE,
+  grupo_mapa TEXT NOT NULL DEFAULT '',
   especificacao TEXT NOT NULL DEFAULT '',
   conservacao TEXT NOT NULL DEFAULT 'RESFRIADO',
+  observacao TEXT NOT NULL DEFAULT '',
   qtd_prevista_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
   qtd_mp_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  qtd_realizada_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  concluido INTEGER NOT NULL DEFAULT 0,
   ordem INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_mpi_mapa ON mapas_producao_itens(mapa_id);
+
+CREATE TABLE IF NOT EXISTS mapa_especificacoes_padrao (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  cliente_id UUID REFERENCES clientes(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  materia_prima_id UUID REFERENCES produtos(id) ON DELETE SET NULL,
+  especificacao TEXT NOT NULL DEFAULT '',
+  conservacao TEXT NOT NULL DEFAULT 'RESFRIADO',
+  grupo_mapa TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mapa_espec_tenant_prod ON mapa_especificacoes_padrao(tenant_id, produto_id);
+
+CREATE TABLE IF NOT EXISTS mapa_programacao_semanal (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  dia_semana INTEGER NOT NULL,
+  produto_id UUID NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+  materia_prima_id UUID REFERENCES produtos(id) ON DELETE SET NULL,
+  especificacao TEXT NOT NULL DEFAULT '',
+  conservacao TEXT NOT NULL DEFAULT 'RESFRIADO',
+  grupo_mapa TEXT NOT NULL DEFAULT '',
+  qtd_meta_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  observacao TEXT NOT NULL DEFAULT '',
+  ativo INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mapa_prog_sem ON mapa_programacao_semanal(tenant_id, filial_id, dia_semana);
 
 CREATE TABLE IF NOT EXISTS ordens_producao (
   id UUID PRIMARY KEY,
@@ -990,6 +1030,16 @@ ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS setor_solicitante TEXT NOT NULL DEF
 ALTER TABLE rotas ADD COLUMN IF NOT EXISTS transportadora_id UUID REFERENCES transportadoras(id) ON DELETE SET NULL;
 ALTER TABLE rotas ADD COLUMN IF NOT EXISTS veiculo_padrao TEXT NOT NULL DEFAULT '';
 ALTER TABLE rotas ADD COLUMN IF NOT EXISTS dias_entrega TEXT NOT NULL DEFAULT '';
+ALTER TABLE mapas_producao ADD COLUMN IF NOT EXISTS titulo TEXT NOT NULL DEFAULT '';
+ALTER TABLE mapas_producao ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'PRINCIPAL';
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS pedido_id UUID;
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS pedido_item_id UUID;
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS pedido_codigo TEXT NOT NULL DEFAULT '';
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS previsao_entrega DATE;
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS grupo_mapa TEXT NOT NULL DEFAULT '';
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS observacao TEXT NOT NULL DEFAULT '';
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS qtd_realizada_kg NUMERIC(14,3) NOT NULL DEFAULT 0;
+ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS concluido INTEGER NOT NULL DEFAULT 0;
 `
 
 export interface SeedDefaultsResult {
