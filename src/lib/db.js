@@ -1,6 +1,7 @@
 // ─── db.js ───────────────────────────────────────────────────────────────────
 // Se estiver rodando dentro do Electron, usa o banco LOCAL via IPC (instantâneo).
 // Caso contrário (navegador puro / dev sem Electron), cai para HTTP remoto.
+import { createClient } from '@libsql/client/web'
 
 const isElectron = typeof window !== 'undefined' && typeof window.wmsAPI?.db !== 'undefined'
 
@@ -40,7 +41,6 @@ const DEFAULT_TURSO_URL = 'libsql://wms-erp-heroluci123.aws-us-east-1.turso.io'
 const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODIzMDMwMjUsImlkIjoiMDE5ZWY5ODktOTEwMS03N2IwLTlkYzUtNWIzMjZkYmQwNTk0IiwicmlkIjoiZjg0ZmM3ZTEtZGE4ZC00MWY0LTliODUtYTQ2ZTdhMTk3ODU2In0.jwPV7pJtq6P7s-ApY4hXEMG7TGerCpi1FEEVY2ND8642kawySSLH2udkUgXx4XoaYzNa3y2xgudPeY7Rj-4pBg'
 
 async function makeWebClient() {
-  const { createClient } = await import('@libsql/client/web')
   let rawUrl = ''
   let authToken = ''
 
