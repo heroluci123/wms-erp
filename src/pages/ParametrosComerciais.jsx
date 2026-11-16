@@ -176,7 +176,7 @@ export function ParametrosComerciais() {
                   <div>
                     <label className="form-label">Dias das Parcelas (separados por vírgula ou barra)</label>
                     <input className="form-input" value={fpForm.diasTexto} onChange={(e) => setFpForm({ ...fpForm, diasTexto: e.target.value })} placeholder="Ex: 14, 21 ou 7, 14, 21" />
-                    <div className="text-xs text-muted mt-4">Simulação 0ms: {previewParcelas.join(' | ')}</div>
+                    <div className="text-xs text-muted mt-4">Simulação de Parcelas: {previewParcelas.join(' | ')}</div>
                   </div>
                   <label className="flex items-center gap-8 cursor-pointer text-sm">
                     <input type="checkbox" checked={fpForm.pagamento_na_entrega} onChange={(e) => setFpForm({ ...fpForm, pagamento_na_entrega: e.target.checked })} />

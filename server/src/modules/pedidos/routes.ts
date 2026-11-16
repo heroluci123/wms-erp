@@ -23,6 +23,7 @@ import {
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
 import { calcularESalvarParcelas } from './parcelasHelper.js'
+import { registrarPendenciaTravaEstoque, verificarEstoquePedido } from './travaEstoqueHelper.js'
 import {
   assertEnderecosNaoBloqueados,
   gerarCodigoDocumento,
@@ -177,6 +178,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           romaneio_status: sql<string | null>`(SELECT r.status FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
           total_kg_separado: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
           total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
+          qtd_conferidas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id" AND ri.conferido = 1), 0)`,
         })
         .from(pedidos)
         .where(and(...conds))
@@ -212,6 +214,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           valor_unitario: produtos.valorUnitario,
           custo_medio_kg: produtos.custoMedioKg,
           peso_padrao_cx: produtos.pesoPadraoCx,
+          qtd_caixas: sql<number>`COUNT(${estoqueCaixas.id})::int`,
           saldo_caixas: sql<number>`COUNT(${estoqueCaixas.id})::int`,
           saldo_kg: sql<string>`COALESCE(ROUND(SUM(${estoqueCaixas.pesoKg}), 3), 0)`,
           peso_medio_cx: sql<string>`COALESCE(ROUND(AVG(${estoqueCaixas.pesoKg}), 4), 0)`,
@@ -448,6 +451,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       origem_pedido?: string
       setor_solicitante?: string
       liberar?: boolean
+      ignorar_trava_estoque?: boolean
       itens: ItemPedidoInput[]
     }
 
@@ -504,7 +508,19 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       if (!clienteNome) clienteNome = 'CLIENTE PADRÃO'
 
       const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'PEDIDO', 'PED', 4)
-      const status = body.liberar === false || forcarRascunho ? 'RASCUNHO' : 'LIBERADO'
+      let status = body.liberar === false || forcarRascunho ? 'RASCUNHO' : 'LIBERADO'
+      let itensInsuficientes: Awaited<ReturnType<typeof verificarEstoquePedido>>['insuficientes'] = []
+      if (status === 'LIBERADO' && body.ignorar_trava_estoque !== true) {
+        const estoqueCheck = await verificarEstoquePedido(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          itens: itensConsolidados,
+        })
+        if (!estoqueCheck.suficiente) {
+          status = 'BLOQUEADO_ESTOQUE'
+          itensInsuficientes = estoqueCheck.insuficientes
+        }
+      }
       const valorTotal = itensConsolidados.reduce(
         (acc, it) =>
           acc + Math.max(0, it.qtd_kg_solicitada * it.preco_unitario * (1 - it.desconto_pct / 100) - it.desconto_valor),
@@ -599,6 +615,17 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         })),
       )
 
+      if (status === 'BLOQUEADO_ESTOQUE' && itensInsuficientes.length > 0) {
+        await registrarPendenciaTravaEstoque(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          pedidoId,
+          codigoPedido: codigo,
+          clienteNome,
+          insuficientes: itensInsuficientes,
+        })
+      }
+
       await calcularESalvarParcelas(tx, {
         tenantId: ctx.tenantId,
         pedidoId,
@@ -610,7 +637,13 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         dataBaseIso: body.previsao_entrega,
       })
 
-      return { id: pedidoId, codigo, status }
+      return {
+        id: pedidoId,
+        codigo,
+        status,
+        trava_estoque: status === 'BLOQUEADO_ESTOQUE',
+        itens_insuficientes: itensInsuficientes,
+      }
     })
 
     return reply.code(201).send({ success: true, ...created })
@@ -632,6 +665,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       previsao_entrega?: string | null
       observacoes?: string
       liberar?: boolean
+      ignorar_trava_estoque?: boolean
       itens: ItemPedidoInput[]
     }
 
@@ -642,19 +676,31 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
     }
     const itensConsolidados = consolidarItensPedido(body.itens)
 
-    const novoStatus = await conn.db.transaction(async (tx) => {
+    const resultadoPut = await conn.db.transaction(async (tx) => {
       const [atual] = await tx
         .select()
         .from(pedidos)
         .where(and(eq(pedidos.id, pedidoId), eq(pedidos.tenantId, ctx.tenantId)))
         .limit(1)
       if (!atual) throw new HttpError(404, 'Pedido não encontrado.')
-      if (!['RASCUNHO', 'LIBERADO'].includes(atual.status)) {
+      if (!['RASCUNHO', 'LIBERADO', 'BLOQUEADO_ESTOQUE'].includes(atual.status)) {
         throw new HttpError(409, `Não é possível editar itens de um pedido no status ${atual.status}.`)
       }
 
-      const nextStatus =
+      let nextStatus =
         body.liberar === true ? 'LIBERADO' : body.liberar === false ? 'RASCUNHO' : atual.status
+      let itensInsuficientes: Awaited<ReturnType<typeof verificarEstoquePedido>>['insuficientes'] = []
+      if (nextStatus === 'LIBERADO' && body.ignorar_trava_estoque !== true) {
+        const estoqueCheck = await verificarEstoquePedido(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          itens: itensConsolidados,
+        })
+        if (!estoqueCheck.suficiente) {
+          nextStatus = 'BLOQUEADO_ESTOQUE'
+          itensInsuficientes = estoqueCheck.insuficientes
+        }
+      }
       const valorTotal = itensConsolidados.reduce(
         (acc, it) =>
           acc + Math.max(0, it.qtd_kg_solicitada * it.preco_unitario * (1 - it.desconto_pct / 100) - it.desconto_valor),
@@ -741,6 +787,17 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         dataBaseIso: body.previsao_entrega,
       })
 
+      if (nextStatus === 'BLOQUEADO_ESTOQUE' && itensInsuficientes.length > 0) {
+        await registrarPendenciaTravaEstoque(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          pedidoId,
+          codigoPedido: atual.codigo,
+          clienteNome: body.cliente ? body.cliente.trim() : atual.cliente,
+          insuficientes: itensInsuficientes,
+        })
+      }
+
       if (nextStatus === 'LIBERADO') {
         await tx
           .update(pendenciasSetor)
@@ -748,35 +805,87 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           .where(and(eq(pendenciasSetor.tenantId, ctx.tenantId), eq(pendenciasSetor.referenciaId, pedidoId)))
       }
 
-      return nextStatus
+      return {
+        status: nextStatus,
+        trava_estoque: nextStatus === 'BLOQUEADO_ESTOQUE',
+        itens_insuficientes: itensInsuficientes,
+      }
     })
 
-    return { success: true, id: pedidoId, status: novoStatus }
+    return { success: true, id: pedidoId, ...resultadoPut }
   })
 
   app.post('/api/pedidos/:id/liberar', { preHandler: requirePermission('pedidos') }, async (req) => {
     const ctx = req.authCtx!
     const pedidoId = parseUuidOrBadRequest((req.params as { id: string }).id, 'pedido_id')
-    await conn.db.transaction(async (tx) => {
+    const body = (req.body || {}) as { ignorar_trava_estoque?: boolean }
+    const ignorarTrava = body.ignorar_trava_estoque === true
+
+    const resLib = await conn.db.transaction(async (tx) => {
       const [ped] = await tx
-        .select({ status: pedidos.status })
+        .select()
         .from(pedidos)
         .where(and(eq(pedidos.id, pedidoId), eq(pedidos.tenantId, ctx.tenantId)))
         .limit(1)
       if (!ped) throw new HttpError(404, 'Pedido não encontrado.')
-      if (ped.status !== 'RASCUNHO') {
-        throw new HttpError(400, 'Somente pedidos em RASCUNHO podem ser liberados.')
+      if (ped.status === 'LIBERADO') {
+        return { id: pedidoId, codigo: ped.codigo, status: 'LIBERADO', trava_estoque: false, itens_insuficientes: [] }
       }
+      if (!['RASCUNHO', 'BLOQUEADO_ESTOQUE'].includes(ped.status)) {
+        throw new HttpError(400, 'Somente pedidos em RASCUNHO ou com Trava de Estoque podem ser liberados.')
+      }
+
+      const itensPed = await tx
+        .select({ produto_id: pedidosItens.produtoId, qtd_kg_solicitada: pedidosItens.qtdKgSolicitada })
+        .from(pedidosItens)
+        .where(eq(pedidosItens.pedidoId, pedidoId))
+
+      const estoqueCheck = ignorarTrava
+        ? { suficiente: true, insuficientes: [] }
+        : await verificarEstoquePedido(tx, {
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            itens: itensPed.map((i) => ({
+              produto_id: i.produto_id,
+              qtd_kg_solicitada: toNum(i.qtd_kg_solicitada, 0),
+            })),
+          })
+
+      if (!estoqueCheck.suficiente) {
+        await tx
+          .update(pedidos)
+          .set({ status: 'BLOQUEADO_ESTOQUE', updatedAt: new Date() })
+          .where(eq(pedidos.id, pedidoId))
+        await registrarPendenciaTravaEstoque(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          pedidoId,
+          codigoPedido: ped.codigo,
+          clienteNome: ped.cliente,
+          insuficientes: estoqueCheck.insuficientes,
+        })
+        return {
+          id: pedidoId,
+          codigo: ped.codigo,
+          status: 'BLOQUEADO_ESTOQUE',
+          trava_estoque: true,
+          itens_insuficientes: estoqueCheck.insuficientes,
+        }
+      }
+
       await tx
         .update(pedidos)
-        .set({ status: 'LIBERADO', liberadoAt: new Date(), updatedAt: new Date() })
+        .set({ status: 'LIBERADO', liberadoAt: ped.liberadoAt || new Date(), updatedAt: new Date() })
         .where(eq(pedidos.id, pedidoId))
       await tx
         .update(pendenciasSetor)
         .set({ status: 'CONCLUIDA', concluidaPorId: ctx.operador.id, concluidaAt: new Date() })
         .where(and(eq(pendenciasSetor.tenantId, ctx.tenantId), eq(pendenciasSetor.referenciaId, pedidoId)))
+
+      return { id: pedidoId, codigo: ped.codigo, status: 'LIBERADO', trava_estoque: false, itens_insuficientes: [] }
     })
-    return { success: true }
+
+    return { success: true, ...resLib }
   })
 
   // Clonar Pedido (com todos os itens, condicoes comerciais e parcelas)

@@ -49,8 +49,8 @@ export async function calcularDemandaEMateriasPrimas(
   },
 ) {
   const statusPermitidos = params.incluirRascunho
-    ? ['RASCUNHO', 'LIBERADO', 'EM_SEPARACAO', 'AGUARDANDO_PRODUCAO']
-    : ['LIBERADO', 'EM_SEPARACAO', 'AGUARDANDO_PRODUCAO']
+    ? ['RASCUNHO', 'BLOQUEADO_ESTOQUE', 'LIBERADO', 'EM_SEPARACAO', 'AGUARDANDO_PRODUCAO']
+    : ['BLOQUEADO_ESTOQUE', 'LIBERADO', 'EM_SEPARACAO', 'AGUARDANDO_PRODUCAO']
 
   const dtIni = normalizarDataIso(params.dataInicio)
   const dtFim = normalizarDataIso(params.dataFim)

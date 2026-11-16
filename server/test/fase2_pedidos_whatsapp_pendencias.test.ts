@@ -303,7 +303,7 @@ test('Fase 2: WhatsApp parser, Inbox -> Pedido, Parcelas, Clonar, Gerar OP e Cen
       : convListRaw.itens || []
     assert.ok(convList.some((x: any) => x.id === inboxId), 'Inbox convertido deve aparecer em status=CONVERTIDO')
 
-    // 5. PUT /api/pedidos/:id com liberar: true
+    // 5. PUT /api/pedidos/:id com liberar: true e sem estoque -> Trava Estoque + Cadeado na Central de Pendencias
     const resPut = await app.inject({
       method: 'PUT',
       url: `/api/pedidos/${pedidoId}`,
@@ -326,6 +326,36 @@ test('Fase 2: WhatsApp parser, Inbox -> Pedido, Parcelas, Clonar, Gerar OP e Cen
       200,
       `PUT /api/pedidos/:id falhou (${resPut.statusCode}): ${resPut.body}`
     )
+    const putBody = resPut.json()
+    assert.equal(putBody.trava_estoque, true, 'Sem estoque deve ativar trava_estoque')
+    assert.equal(putBody.status, 'BLOQUEADO_ESTOQUE')
+
+    // Pedido bloqueado NAO aparece na fila dos operadores (Saida de Materiais)
+    const resFilaLocked = await app.inject({ method: 'GET', url: '/api/saida/fila', headers })
+    assert.equal(resFilaLocked.statusCode, 200)
+    assert.ok(
+      !(resFilaLocked.json().data || []).some((x: any) => x.id === pedidoId),
+      'Pedido BLOQUEADO_ESTOQUE nao pode aparecer em /api/saida/fila antes de liberar cadeado',
+    )
+
+    // Cadeado registrado na Central de Pendencias
+    const resPendTrava = await app.inject({ method: 'GET', url: '/api/pendencias?setor=SUPPLY_CHAIN', headers })
+    assert.equal(resPendTrava.statusCode, 200)
+    assert.ok(
+      (resPendTrava.json().data || []).some((p: any) => p.tipo_pendencia === 'TRAVA_ESTOQUE_PEDIDO' && p.referencia_id === pedidoId),
+      'Pendencia TRAVA_ESTOQUE_PEDIDO (cadeado) deve existir em Central de Pendencias',
+    )
+
+    // Liberar Cadeado (ignorar_trava_estoque: true) -> vai para LIBERADO e aparece em /api/saida/fila
+    const resUnlock = await app.inject({
+      method: 'POST',
+      url: `/api/pedidos/${pedidoId}/liberar`,
+      headers,
+      payload: { ignorar_trava_estoque: true },
+    })
+    assert.equal(resUnlock.statusCode, 200, `Unlock falhou: ${resUnlock.body}`)
+    assert.equal(resUnlock.json().status, 'LIBERADO')
+
     const resPedPosPut = await app.inject({
       method: 'GET',
       url: `/api/pedidos/${pedidoId}`,
@@ -333,6 +363,11 @@ test('Fase 2: WhatsApp parser, Inbox -> Pedido, Parcelas, Clonar, Gerar OP e Cen
     })
     const pedPosPut = resPedPosPut.json().data || resPedPosPut.json()
     assert.equal(pedPosPut.status, 'LIBERADO')
+
+    // Saldos de produtos expoe qtd_caixas
+    const resSaldos = await app.inject({ method: 'GET', url: '/api/pedidos/saldos-produtos', headers })
+    assert.equal(resSaldos.statusCode, 200)
+    assert.ok('qtd_caixas' in (resSaldos.json().data?.[0] || {}), 'saldos-produtos deve retornar qtd_caixas')
 
     // 6. Clonar pedido
     const resClone = await app.inject({

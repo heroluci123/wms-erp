@@ -377,11 +377,12 @@ export const pedidosQueries = {
     pagamento_na_entrega,
     previsao_entrega = null,
     observacoes = '',
-    origem_pedido = 'SUPPLY_CHAIN',
+    origem_pedido,
     setor_solicitante,
     itens = [],
     operador,
     liberar = true,
+    ignorar_trava_estoque = false,
   }) {
     if (isApiEnabled()) {
       return apiRequest('/api/pedidos', {
@@ -402,6 +403,7 @@ export const pedidosQueries = {
           setor_solicitante,
           itens,
           liberar,
+          ignorar_trava_estoque,
         },
       })
     }
@@ -577,9 +579,12 @@ export const pedidosQueries = {
   },
 
   /** Libera um pedido RASCUNHO para separação */
-  async liberarPedido(id) {
+  async liberarPedido(id, { ignorar_trava_estoque = false } = {}) {
     if (isApiEnabled()) {
-      return apiRequest(`/api/pedidos/${id}/liberar`, { method: 'POST' })
+      return apiRequest(`/api/pedidos/${id}/liberar`, {
+        method: 'POST',
+        body: { ignorar_trava_estoque },
+      })
     }
     await assertPermissao('pedidos')
     const check = await db.execute({ sql: 'SELECT status FROM pedidos WHERE id = ?', args: [id] })

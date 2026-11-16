@@ -21,7 +21,9 @@ import {
   Copy,
   Zap,
   MessageSquare,
-  DollarSign
+  DollarSign,
+  Lock,
+  Unlock
 } from 'lucide-react'
 import { pedidosQueries } from '../queries/pedidos'
 import { cadastrosQueries } from '../queries/cadastros'
@@ -36,6 +38,7 @@ import { EtiquetaReservaZebraModal } from '../components/shared/EtiquetaZebraPri
 
 const STATUS_BADGE = {
   RASCUNHO: { label: 'Rascunho', cls: 'badge--neutral' },
+  BLOQUEADO_ESTOQUE: { label: '🔒 Trava Estoque', cls: 'badge--danger' },
   LIBERADO: { label: 'Liberado p/ Separação', cls: 'badge--info' },
   EM_SEPARACAO: { label: 'Em Separação', cls: 'badge--warning' },
   AGUARDANDO_CONFERENCIA: { label: 'Separação Finalizada', cls: 'badge--purple' },
@@ -64,7 +67,7 @@ const normTxt = (v) =>
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
 
-const temSaldoProduto = (p) => Number(p?.saldo_kg || 0) > 0 || Number(p?.qtd_caixas || 0) > 0
+const temSaldoProduto = (p) => Number(p?.saldo_kg || 0) > 0 || Number(p?.qtd_caixas ?? p?.saldo_caixas ?? 0) > 0
 
 /** Ordena produtos priorizando itens com saldo em estoque antes dos zerados */
 const ordenarProdutosSaldoPrimeiro = (lista) =>
@@ -256,6 +259,7 @@ export function Pedidos() {
 
   const kpis = useMemo(() => {
     return {
+      bloqueadosEstoque: pedidos.filter((p) => p.status === 'BLOQUEADO_ESTOQUE').length,
       liberados: pedidos.filter((p) => p.status === 'LIBERADO').length,
       emSeparacao: pedidos.filter((p) => p.status === 'EM_SEPARACAO').length,
       emConferencia: pedidos.filter((p) => ['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(p.status)).length,
@@ -375,9 +379,7 @@ export function Pedidos() {
         String(p.ean || '').trim().toLowerCase() === clean
     )
     if (match) {
-      setProdutoSelecionado(match)
-      setDescricaoInput(match.descricao || '')
-      setMostrarSugestoes(false)
+      aplicarProdutoSelecionado(match, false)
     } else if (produtoSelecionado) {
       setProdutoSelecionado(null)
       setDescricaoInput('')
@@ -462,7 +464,7 @@ export function Pedidos() {
     const qtdValida = Number.isFinite(qtdDigitada) && qtdDigitada > 0 ? qtdDigitada : 0
 
     const saldoAtualKg = Number(produtoSelecionado.saldo_kg || 0)
-    const saldoAtualCx = Number(produtoSelecionado.qtd_caixas || 0)
+    const saldoAtualCx = Number(produtoSelecionado.qtd_caixas ?? produtoSelecionado.saldo_caixas ?? 0)
 
     const lancamentoKg =
       unidadeInput === 'KG'
@@ -523,8 +525,8 @@ export function Pedidos() {
     try {
       const ped = await pedidosQueries.obterPedido(pedId)
       if (!ped) return toastError('Pedido não encontrado.')
-      if (!['RASCUNHO', 'LIBERADO'].includes(ped.status)) {
-        return toastWarning('Somente pedidos em Rascunho ou Liberado podem ser editados.')
+      if (!['RASCUNHO', 'LIBERADO', 'BLOQUEADO_ESTOQUE'].includes(ped.status)) {
+        return toastWarning('Somente pedidos em Rascunho, Trava de Estoque ou Liberado podem ser editados.')
       }
       setEditId(ped.id)
       setEditCodigo(ped.codigo)
@@ -644,7 +646,7 @@ export function Pedidos() {
           produto_descricao: produtoSelecionado.descricao,
           codigo_aux: espec?.codigo_aux_cliente || produtoSelecionado.codigo_auxiliar || '',
           saldo_kg: Number(produtoSelecionado.saldo_kg || 0),
-          qtd_caixas_estoque: Number(produtoSelecionado.qtd_caixas || 0),
+          qtd_caixas_estoque: Number(produtoSelecionado.qtd_caixas ?? produtoSelecionado.saldo_caixas ?? 0),
           peso_medio_cx: pesoPorCx,
           qtd_kg_solicitada: String(kgFinal),
           qtd_caixas_solicitada: cxFinal !== null ? String(cxFinal) : '',
@@ -710,7 +712,7 @@ export function Pedidos() {
     let savedId = editId
     try {
       if (editId) {
-        await pedidosQueries.atualizarPedido({
+        const resEdit = await pedidosQueries.atualizarPedido({
           id: editId,
           titulo,
           cliente_id: cliId,
@@ -726,11 +728,17 @@ export function Pedidos() {
           itens: payloadItens,
           liberar
         })
-        toastSuccess(
-          liberar
-            ? `Pedido ${editCodigo} atualizado e liberado para Separação!`
-            : `Rascunho do pedido ${editCodigo} atualizado.`
-        )
+        if (resEdit?.trava_estoque) {
+          toastWarning(
+            `🔒 Trava de Estoque (${editCodigo}): Saldo insuficiente. Pedido bloqueado com cadeado na Central de Pendências (ou abra OP).`
+          )
+        } else {
+          toastSuccess(
+            liberar
+              ? `Pedido ${editCodigo} atualizado e liberado para Separação!`
+              : `Rascunho do pedido ${editCodigo} atualizado.`
+          )
+        }
       } else {
         const res = await pedidosQueries.criarPedido({
           titulo,
@@ -751,13 +759,19 @@ export function Pedidos() {
           liberar: somenteFinanceiro ? false : liberar,
         })
         savedId = res.id
-        toastSuccess(
-          somenteFinanceiro
-            ? `Pedido ${res.codigo} enviado pelo Financeiro para a fila do Supply Chain!`
-            : liberar
-              ? `Pedido ${res.codigo} criado e enviado para Saída de Materiais!`
-              : `Pedido ${res.codigo} salvo como rascunho.`
-        )
+        if (res?.trava_estoque) {
+          toastWarning(
+            `🔒 Trava de Estoque (${res.codigo}): Saldo insuficiente p/ separação imediata. Cadeado enviado para Central de Pendências!`
+          )
+        } else {
+          toastSuccess(
+            somenteFinanceiro
+              ? `Pedido ${res.codigo} enviado pelo Financeiro para a fila do Supply Chain!`
+              : liberar
+                ? `Pedido ${res.codigo} criado e enviado para Saída de Materiais!`
+                : `Pedido ${res.codigo} salvo como rascunho.`
+          )
+        }
       }
       resetarFormulario()
       setAba('GERENCIADOR')
@@ -786,6 +800,7 @@ export function Pedidos() {
     try {
       const res = await pedidosQueries.gerarOpAutomatica(ped.id)
       toastSuccess(`OP ${res.op_codigo} aberta no PCP!`, `${res.itens_sem_saldo} corte(s) sem estoque enviados para produção.`)
+      await carregarDados()
     } catch (err) {
       toastWarning(err.message)
     }
@@ -861,10 +876,20 @@ export function Pedidos() {
     }
   }
 
-  const handleLiberar = async (ped) => {
+  const handleLiberar = async (ped, { ignorarTrava = false } = {}) => {
+    if (
+      ignorarTrava &&
+      !window.confirm(`Desbloquear a trava de estoque do pedido ${ped.codigo} e liberar mesmo assim para a operação (Câmara Fria)?`)
+    ) {
+      return
+    }
     try {
-      await pedidosQueries.liberarPedido(ped.id)
-      toastSuccess(`Pedido ${ped.codigo} liberado para separação!`)
+      const res = await pedidosQueries.liberarPedido(ped.id, { ignorar_trava_estoque: ignorarTrava })
+      if (res?.trava_estoque) {
+        toastWarning(`🔒 Trava de Estoque no ${ped.codigo}: saldo insuficiente! Cadeado enviado para Central de Pendências.`)
+      } else {
+        toastSuccess(`Pedido ${ped.codigo} liberado para separação!`)
+      }
       await carregarDados()
     } catch (err) {
       toastError(err.message)
@@ -1023,6 +1048,12 @@ export function Pedidos() {
         <>
           {/* KPIs */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+            <div className="card" style={{ padding: '14px', borderColor: kpis.bloqueadosEstoque > 0 ? 'var(--danger)' : undefined }}>
+              <div className="text-muted text-xs flex items-center gap-6">
+                <Lock size={12} className="text-danger" /> Trava Estoque (Cadeado)
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 800, color: '#ef4444' }}>{kpis.bloqueadosEstoque}</div>
+            </div>
             <div className="card" style={{ padding: '14px' }}>
               <div className="text-muted text-xs">Liberados p/ Separação</div>
               <div style={{ fontSize: '24px', fontWeight: 800, color: '#38bdf8' }}>{kpis.liberados}</div>
@@ -1064,6 +1095,7 @@ export function Pedidos() {
                 <select className="form-input" value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
                   <option value="TODOS">Todos os Status</option>
                   <option value="RASCUNHO">Rascunho</option>
+                  <option value="BLOQUEADO_ESTOQUE">🔒 Trava Estoque</option>
                   <option value="LIBERADO">Liberado p/ Separação</option>
                   <option value="EM_SEPARACAO">Em Separação</option>
                   <option value="AGUARDANDO_CONFERENCIA">Separação Finalizada</option>
@@ -1172,7 +1204,7 @@ export function Pedidos() {
                           <td>
                             {ped.total_caixas_separadas > 0 ? (
                               <span className="text-xs font-mono">
-                                {ped.qtd_conferidas}/{ped.total_caixas_separadas} cx
+                                {Number(ped.qtd_conferidas || 0)}/{ped.total_caixas_separadas} cx
                               </span>
                             ) : (
                               <span className="text-muted text-xs">-</span>
@@ -1222,9 +1254,19 @@ export function Pedidos() {
                                   type="button"
                                   className="btn btn--success btn--sm"
                                   title="Liberar para Separação"
-                                  onClick={() => handleLiberar(ped)}
+                                  onClick={() => handleLiberar(ped, { ignorarTrava: false })}
                                 >
                                   <Send size={14} /> Liberar
+                                </button>
+                              )}
+                              {ped.status === 'BLOQUEADO_ESTOQUE' && podeGerenciarPedidos && (
+                                <button
+                                  type="button"
+                                  className="btn btn--danger btn--sm"
+                                  title="Desbloquear trava de estoque e liberar pedido para os operadores"
+                                  onClick={() => handleLiberar(ped, { ignorarTrava: true })}
+                                >
+                                  <Unlock size={14} /> Liberar Cadeado
                                 </button>
                               )}
                               {apiAtiva && podeGerenciarPedidos && !['EXPEDIDO', 'CANCELADO'].includes(ped.status) && (
@@ -1247,7 +1289,7 @@ export function Pedidos() {
                                   <Copy size={14} /> Clonar
                                 </button>
                               )}
-                              {['RASCUNHO', 'LIBERADO'].includes(ped.status) && podeGerenciarPedidos && (
+                              {['RASCUNHO', 'LIBERADO', 'BLOQUEADO_ESTOQUE'].includes(ped.status) && podeGerenciarPedidos && (
                                 <button
                                   type="button"
                                   className="btn btn--secondary btn--sm"
@@ -2119,7 +2161,7 @@ export function Pedidos() {
             )}
           </div>
 
-          {/* Simulação Instantânea de Parcelas (0ms - Zero PgDown!) */}
+          {/* Simulação de Parcelas */}
           {apiAtiva && parcelasSimuladas.length > 0 && (
             <div
               style={{
@@ -2131,7 +2173,7 @@ export function Pedidos() {
               }}
             >
               <div className="text-xs font-bold uppercase text-primary mb-8" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Simulação de Parcelas em Tempo Real (0ms)</span>
+                <span>Simulação de Parcelas</span>
                 <span className="font-mono" style={{ color: '#4ade80' }}>
                   Total do Pedido: R$ {totalFormValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
@@ -2266,7 +2308,7 @@ export function Pedidos() {
                         <td style={{ textAlign: 'right', fontWeight: 700, color: Number(p.saldo_kg) > 0 ? '#4ade80' : '#94a3b8' }} className="font-mono">
                           {fmtKg(p.saldo_kg)}
                         </td>
-                        <td style={{ textAlign: 'right' }} className="font-mono">{fmtCx(p.qtd_caixas)}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono">{fmtCx(p.qtd_caixas ?? p.saldo_caixas)}</td>
                         <td style={{ textAlign: 'right' }} className="font-mono text-muted">
                           {Number(p.peso_medio_cx) > 0 ? `${Number(p.peso_medio_cx).toFixed(2)} kg` : '-'}
                         </td>

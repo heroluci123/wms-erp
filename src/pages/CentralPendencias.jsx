@@ -14,10 +14,14 @@ import {
   DollarSign,
   Package,
   X,
+  Lock,
+  Unlock,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import { isApiEnabled } from '../lib/apiClient'
 import { pendenciasQueries } from '../queries/pendencias'
+import { pedidosQueries } from '../queries/pedidos'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 
 const SETORES = [
@@ -36,8 +40,9 @@ const STATUS_BADGE = {
 }
 
 export function CentralPendencias() {
-  const { toastSuccess, toastError } = useAppStore()
+  const { operador, toastSuccess, toastError } = useAppStore()
   const navigate = useNavigate()
+  const podeDesbloquearPedido = temPermissao(operador, 'pedidos')
 
   const [setorFiltro, setSetorFiltro] = useState('TODOS')
   const [statusFiltro, setStatusFiltro] = useState('ATIVAS')
@@ -79,6 +84,20 @@ export function CentralPendencias() {
       carregar()
     } catch (err) {
       toastError('Erro', err.message)
+    }
+  }
+
+  const liberarCadeadoPedido = async (p) => {
+    if (!p?.referencia_id) return
+    if (!window.confirm('Deseja desbloquear a trava de estoque e liberar este pedido para aparecer na Separação (operação)?')) {
+      return
+    }
+    try {
+      await pedidosQueries.liberarPedido(p.referencia_id, { ignorar_trava_estoque: true })
+      toastSuccess('Cadeado Liberado!', 'Pedido desbloqueado e enviado para Separação na Câmara Fria.')
+      carregar()
+    } catch (err) {
+      toastError('Erro ao liberar pedido', err.message)
     }
   }
 
@@ -130,6 +149,13 @@ export function CentralPendencias() {
           </div>
           <div className="kpi-card__value">{filaAoVivo.pedidos_financeiro || 0}</div>
           <div className="kpi-card__sub">Aguardando Supply Chain liberar</div>
+        </div>
+        <div className="kpi-card kpi-card--danger" style={{ cursor: 'pointer' }} onClick={() => navigate('/pedidos')}>
+          <div className="kpi-card__label flex items-center gap-6">
+            <Lock size={13} /> Cadeados (Trava Estoque)
+          </div>
+          <div className="kpi-card__value">{filaAoVivo.pedidos_trava_estoque || 0}</div>
+          <div className="kpi-card__sub">Pedidos sem saldo p/ liberar</div>
         </div>
         <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/producao')}>
           <div className="kpi-card__label flex items-center gap-6">
@@ -228,7 +254,15 @@ export function CentralPendencias() {
                         {setorObj?.label || p.setor_destino}
                       </span>
                     </td>
-                    <td className="td-mono" style={{ fontSize: 11 }}>{p.tipo_pendencia}</td>
+                    <td className="td-mono" style={{ fontSize: 11 }}>
+                      {p.tipo_pendencia === 'TRAVA_ESTOQUE_PEDIDO' ? (
+                        <span className="badge badge--danger" style={{ gap: 4 }}>
+                          <Lock size={11} /> TRAVA ESTOQUE
+                        </span>
+                      ) : (
+                        p.tipo_pendencia
+                      )}
+                    </td>
                     <td className="font-bold">{p.titulo}</td>
                     <td>
                       {Number(p.prioridade) >= 3 ? (
@@ -243,6 +277,11 @@ export function CentralPendencias() {
                     <td className="td-muted">{new Date(p.created_at).toLocaleString('pt-BR')}</td>
                     <td style={{ textAlign: 'right' }}>
                       <div className="flex justify-end gap-6 flex-wrap">
+                        {p.tipo_pendencia === 'TRAVA_ESTOQUE_PEDIDO' && p.status !== 'CONCLUIDA' && podeDesbloquearPedido && (
+                          <button className="btn btn--sm btn--danger" onClick={() => liberarCadeadoPedido(p)} title="Liberar cadeado e exibir para operação">
+                            <Unlock size={13} /> Liberar p/ Operação
+                          </button>
+                        )}
                         <button className="btn btn--sm btn--secondary" onClick={() => navigate(rotaParaPendencia(p))}>
                           Abrir <ArrowRight size={13} />
                         </button>

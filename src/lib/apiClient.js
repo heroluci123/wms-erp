@@ -35,7 +35,10 @@ export async function apiRequest(path, { method = 'GET', body, tokenOverride } =
   const state = useAppStore.getState()
   const token = tokenOverride || state.jwtToken || state.sessionToken
 
-  const headers = { 'Content-Type': 'application/json' }
+  const headers = {}
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }

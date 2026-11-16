@@ -1094,7 +1094,10 @@ input[type="number"] {
 .flex        { display: flex; }
 .flex-col    { flex-direction: column; }
 .items-center{ align-items: center; }
+.justify-center  { justify-content: center; }
 .justify-between { justify-content: space-between; }
+.justify-end     { justify-content: flex-end; }
+.flex-wrap       { flex-wrap: wrap; }
 .gap-8  { gap: 8px; }
 .gap-12 { gap: 12px; }
 .gap-16 { gap: 16px; }

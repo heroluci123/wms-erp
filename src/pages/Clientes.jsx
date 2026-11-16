@@ -442,11 +442,11 @@ export function Clientes() {
       {/* Modal Cadastro / Edição Cliente */}
       {modalOpen && (
         <div
-          className="flex items-center justify-center p-24 fade-in"
-          style={{ position: 'fixed', inset: 0, zIndex: 90, backgroundColor: 'rgba(5,9,18,0.82)', backdropFilter: 'blur(4px)' }}
+          className="modal-overlay fade-in"
+          style={{ padding: 20, zIndex: 90 }}
         >
-          <div className="card" style={{ width: '100%', maxWidth: 860, maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)' }}>
-            <div className="flex items-center justify-between p-16 border-b border-border" style={{ background: 'var(--bg-2)' }}>
+          <div className="card" style={{ width: '94vw', maxWidth: 1080, maxHeight: '92vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)' }}>
+            <div className="flex items-center justify-between p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
               <h3 className="text-base font-bold">{form.id ? 'Editar Cliente' : 'Novo Cliente'}</h3>
               <button className="btn-icon" onClick={() => setModalOpen(false)}>
                 <X size={18} />
@@ -637,11 +637,11 @@ export function Clientes() {
       {/* Modal Especificacoes de Corte & Alertas por Cliente */}
       {clienteEspec && (
         <div
-          className="flex items-center justify-center p-24 fade-in"
-          style={{ position: 'fixed', inset: 0, zIndex: 95, backgroundColor: 'rgba(5,9,18,0.84)', backdropFilter: 'blur(4px)' }}
+          className="modal-overlay fade-in"
+          style={{ padding: 20, zIndex: 95 }}
         >
-          <div className="card" style={{ width: '100%', maxWidth: 880, maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)' }}>
-            <div className="flex items-center justify-between p-16 border-b border-border" style={{ background: 'var(--bg-2)' }}>
+          <div className="card" style={{ width: '94vw', maxWidth: 1040, maxHeight: '92vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)' }}>
+            <div className="flex items-center justify-between p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
               <div>
                 <h3 className="text-base font-bold flex items-center gap-8">
                   <Scissors size={18} className="text-primary" /> Especificações de Corte & Alertas — {clienteEspec.razao_social}
