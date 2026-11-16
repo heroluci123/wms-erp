@@ -10,3 +10,7 @@ import_*.csv
 wms-local.db*
 
 backup_*.json
+server/node_modules/
+server/dist/
+server/.env
+server/data/

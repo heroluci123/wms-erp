@@ -1,0 +1,69 @@
+import Fastify, { type FastifyInstance } from 'fastify'
+import cors from '@fastify/cors'
+import fastifyJwt from '@fastify/jwt'
+import type { DbConnection } from './db/client.js'
+import { env, type AppEnv } from './config/env.js'
+import { HttpError } from './middlewares/auth.js'
+import { registerAuthRoutes } from './modules/auth/routes.js'
+import { registerOperadoresRoutes } from './modules/operadores/routes.js'
+import { registerCadastrosRoutes } from './modules/cadastros/routes.js'
+
+export async function buildApp(
+  conn: DbConnection,
+  customEnv: Partial<AppEnv> = {}
+): Promise<FastifyInstance> {
+  const cfg = { ...env, ...customEnv }
+  const app = Fastify({
+    logger: cfg.NODE_ENV === 'production',
+  })
+
+  const allowedOrigins = cfg.CORS_ORIGIN.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  await app.register(cors, {
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+    credentials: true,
+  })
+
+  await app.register(fastifyJwt, {
+    secret: cfg.JWT_SECRET,
+  })
+
+  app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof HttpError) {
+      return reply.status(err.statusCode).send({ success: false, error: err.message })
+    }
+    const e = err as { code?: string; message?: string; statusCode?: number }
+    if (e.code === '23505') {
+      return reply.status(409).send({ success: false, error: 'Registro duplicado ja existente.' })
+    }
+    if (e.code === '23503') {
+      return reply.status(400).send({ success: false, error: 'Referencia de cadastro invalida ou em uso.' })
+    }
+    const status = e.statusCode && e.statusCode >= 400 ? e.statusCode : 500
+    if (status >= 500) {
+      app.log.error(err)
+    }
+    return reply.status(status).send({
+      success: false,
+      error: status >= 500 ? 'Erro interno no servidor.' : e.message || 'Erro na requisicao.',
+    })
+  })
+
+  app.get('/api/health', async () => {
+    const res = await conn.queryRaw<{ ok: number }>('SELECT 1 AS ok')
+    return {
+      ok: Number(res[0]?.ok) === 1,
+      driver: conn.driver,
+      service: 'wms-erp-server',
+      timestamp: new Date().toISOString(),
+    }
+  })
+
+  registerAuthRoutes(app, conn)
+  registerOperadoresRoutes(app, conn)
+  registerCadastrosRoutes(app, conn)
+
+  return app
+}
