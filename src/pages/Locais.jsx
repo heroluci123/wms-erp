@@ -47,7 +47,13 @@ export function Locais() {
 
   const handleDelete = async (id) => {
     if (!temPermissao(operador, 'locais')) return toastError('Acesso Negado', 'Você não possui permissão para gerenciar locais.')
-    if (!window.confirm('Tem certeza que deseja desativar este local?')) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Desativar Local',
+      message: 'Tem certeza que deseja desativar este local?',
+      type: 'error',
+      confirmLabel: 'Desativar',
+    })
+    if (!ok) return
     
     try {
       const res = await locaisQueries.deletar(id)

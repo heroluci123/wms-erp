@@ -552,7 +552,13 @@ export function Recebimento() {
       toastWarning('Atenção', 'Esta caixa já foi fechada na Doca anteriormente e não pode ser apagada do sistema.');
       return;
     }
-    if (!window.confirm(`Tem certeza que deseja apagar a caixa de ${c.peso_kg}kg do palete?`)) return;
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Apagar Caixa do Palete',
+      message: `Tem certeza que deseja apagar a caixa de ${c.peso_kg}kg do palete?`,
+      type: 'error',
+      confirmLabel: 'Apagar Caixa',
+    })
+    if (!ok) return;
     try {
       const res = await movimentacoesQueries.removerCaixaSerializada(c.id, operador.id, operador.nome);
       if (res.success) {

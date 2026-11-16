@@ -947,7 +947,13 @@ export function Producao() {
 
   const handleFinalizarOP = async () => {
     if (!isAdm || !opSelecionada) return
-    if (!window.confirm(`Deseja finalizar a ${opSelecionada.codigo}? Os insumos alocados serão marcados como consumidos e o rendimento será consolidado.`)) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Finalizar Ordem de Produção',
+      message: `Deseja finalizar a ${opSelecionada.codigo}? Os insumos alocados serão marcados como consumidos e o rendimento será consolidado.`,
+      type: 'success',
+      confirmLabel: 'Finalizar OP',
+    })
+    if (!ok) return
     const res = await producaoQueries.finalizarOP(opSelecionada.id)
     if (!res.success) return toastError('Erro', res.error)
     toastSuccess('OP Finalizada!', `${opSelecionada.codigo} concluída com sucesso.`)
@@ -958,7 +964,13 @@ export function Producao() {
 
   const handleReabrirOP = async (op) => {
     if (!isAdm) return
-    if (!window.confirm(`Deseja reabrir a ${op.codigo} para edição?`)) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Reabrir Ordem de Produção',
+      message: `Deseja reabrir a ${op.codigo} para edição?`,
+      type: 'confirm',
+      confirmLabel: 'Reabrir OP',
+    })
+    if (!ok) return
     const res = await producaoQueries.reabrirOP(op.id)
     if (!res.success) return toastError('Erro', res.error)
     toastSuccess('OP Reaberta', `${op.codigo} liberada novamente.`)
@@ -969,7 +981,13 @@ export function Producao() {
 
   const handleCancelarOP = async () => {
     if (!isAdm || !opSelecionada) return
-    if (!window.confirm(`Excluir permanentemente a ${opSelecionada.codigo}?`)) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Excluir Ordem de Produção',
+      message: `Excluir permanentemente a ${opSelecionada.codigo}?`,
+      type: 'error',
+      confirmLabel: 'Excluir OP',
+    })
+    if (!ok) return
     const res = await producaoQueries.cancelarOP(opSelecionada.id)
     if (!res.success) return toastError('Não permitido', res.error)
     toastSuccess('OP Excluída', `${opSelecionada.codigo} removida.`)
@@ -998,7 +1016,13 @@ export function Producao() {
   }
 
   const handleRemoverItem = async (tipo, item) => {
-    if (!window.confirm(`Remover ${tipo === 'INSUMO' ? 'esta entrada' : 'esta saída'} da ${opSelecionada.codigo}?`)) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Estornar Item da OP',
+      message: `Remover ${tipo === 'INSUMO' ? 'esta entrada' : 'esta saída'} da ${opSelecionada.codigo}?`,
+      type: 'error',
+      confirmLabel: 'Remover Item',
+    })
+    if (!ok) return
     const res = await producaoQueries.removerItemOP(opSelecionada.id, tipo, item.id, item.caixa_id)
     if (!res.success) return toastError('Erro', res.error)
     toastSuccess('Item removido', 'Registro estornado da OP.')

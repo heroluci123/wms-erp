@@ -877,11 +877,14 @@ export function Pedidos() {
   }
 
   const handleLiberar = async (ped, { ignorarTrava = false } = {}) => {
-    if (
-      ignorarTrava &&
-      !window.confirm(`Desbloquear a trava de estoque do pedido ${ped.codigo} e liberar mesmo assim para a operação (Câmara Fria)?`)
-    ) {
-      return
+    if (ignorarTrava) {
+      const ok = await useAppStore.getState().confirmar({
+        title: 'Desbloquear Trava de Estoque',
+        message: `Desbloquear a trava de estoque do pedido ${ped.codigo} e liberar mesmo assim para a operação (Câmara Fria)?`,
+        type: 'error',
+        confirmLabel: 'Liberar para Operação',
+      })
+      if (!ok) return
     }
     try {
       const res = await pedidosQueries.liberarPedido(ped.id, { ignorar_trava_estoque: ignorarTrava })
@@ -901,7 +904,13 @@ export function Pedidos() {
       ped.total_caixas_separadas > 0
         ? `O pedido ${ped.codigo} possui ${ped.total_caixas_separadas} caixa(s) já reservadas na separação. Ao cancelar, todas voltarão para DISPONIVEL no estoque. Confirma o cancelamento?`
         : `Deseja cancelar o pedido ${ped.codigo} ("${ped.titulo}")?`
-    if (!window.confirm(msg)) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Cancelar Pedido',
+      message: msg,
+      type: 'error',
+      confirmLabel: 'Confirmar Cancelamento',
+    })
+    if (!ok) return
 
     try {
       await pedidosQueries.cancelarPedido(ped.id, operador)

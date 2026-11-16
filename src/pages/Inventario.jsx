@@ -334,7 +334,13 @@ export function Inventario() {
   }
 
   const handleCriarCargaInicial = async () => {
-    if (!window.confirm('Isso iniciará a carga inicial do sistema. Todos os endereços serão abertos para inserção de saldo. Confirmar?')) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Iniciar Carga Inicial',
+      message: 'Isso iniciará a carga inicial do sistema. Todos os endereços serão abertos para inserção de saldo. Confirmar?',
+      type: 'confirm',
+      confirmLabel: 'Iniciar Carga',
+    })
+    if (!ok) return
     try {
       const res = await inventariosQueries.criarCargaInicial()
       if (res.success) {
@@ -357,7 +363,13 @@ export function Inventario() {
   }
 
   const handleCancelar = async (id) => {
-    if (!window.confirm('Tem certeza que deseja cancelar este inventário?')) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Cancelar Inventário',
+      message: 'Tem certeza que deseja cancelar este inventário?',
+      type: 'error',
+      confirmLabel: 'Cancelar Inventário',
+    })
+    if (!ok) return
     try {
       const res = await inventariosQueries.cancelar(id)
       if (res.success) { toastSuccess('Cancelado', 'Inventário cancelado.'); carregar() }

@@ -112,7 +112,13 @@ export function EanEditor() {
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Deseja realmente apagar esta caixa gerada internamente e seu estoque (INT-)?")) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Remover Caixa Interna',
+      message: 'Deseja realmente apagar esta caixa gerada internamente e seu estoque (INT-)?',
+      type: 'error',
+      confirmLabel: 'Apagar Caixa',
+    })
+    if (!ok) return
     setSalvando(true)
     try {
       const res = await movimentacoesQueries.removerCaixaSerializada(id, operador?.id, operador?.nome)

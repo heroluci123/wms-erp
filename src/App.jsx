@@ -4,6 +4,7 @@ import { ShieldAlert } from 'lucide-react'
 import { Layout } from './components/Layout/Layout'
 import { useAppStore } from './store/appStore'
 import { isCliente, temPermissao, temAlgumaPermissao } from './utils/permissoes'
+import { GlobalConfirmDialog } from './components/shared/ModalDialog'
 
 // Pages
 import { Login } from './pages/Login'
@@ -133,6 +134,7 @@ function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <GlobalConfirmDialog />
     </Router>
   )
 }

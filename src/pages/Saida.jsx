@@ -373,7 +373,13 @@ export function Saida() {
 
   const handleExcluirRomaneioAberto = async () => {
     if (!romaneioAtual) return
-    if (!window.confirm(`Deseja cancelar/excluir a separação ${romaneioAtual.codigo}? As caixas bipadas voltarão para DISPONÍVEL.`)) {
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Excluir Separação',
+      message: `Deseja cancelar/excluir a separação ${romaneioAtual.codigo}? As caixas bipadas voltarão para DISPONÍVEL.`,
+      type: 'error',
+      confirmLabel: 'Excluir Separação',
+    })
+    if (!ok) {
       return
     }
     const res = await saidaQueries.excluirRomaneio(romaneioAtual.id)
@@ -422,7 +428,13 @@ export function Saida() {
   }
 
   const handleExpedirCarga = async (romId) => {
-    if (!window.confirm('Confirma a expedição definitiva desta carga? O estoque será baixado como EXPEDIDA.')) {
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Expedir Carga Definitivamente',
+      message: 'Confirma a expedição definitiva desta carga? O estoque será baixado como EXPEDIDA.',
+      type: 'success',
+      confirmLabel: 'Confirmar Expedição',
+    })
+    if (!ok) {
       return
     }
     setLoading(true)
@@ -445,7 +457,13 @@ export function Saida() {
   }
 
   const handleReabrirSeparacao = async (rom) => {
-    if (!window.confirm(`Deseja reabrir o romaneio ${rom.codigo} para separação? As conferências feitas serão zeradas.`)) {
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Reabrir Separação do Romaneio',
+      message: `Deseja reabrir o romaneio ${rom.codigo} para separação? As conferências feitas serão zeradas.`,
+      type: 'confirm',
+      confirmLabel: 'Reabrir Separação',
+    })
+    if (!ok) {
       return
     }
     const res = await saidaQueries.reabrirRomaneio(rom.id)

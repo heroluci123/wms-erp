@@ -111,4 +111,26 @@ export const useAppStore = create((set, get) => ({
   toastSuccess: (title, message) => get().addToast({ type: 'success', title, message }),
   toastError:   (title, message) => get().addToast({ type: 'error',   title, message, duration: 6000 }),
   toastWarning: (title, message) => get().addToast({ type: 'warning', title, message, duration: 5000 }),
+
+  // ─── Diálogo Global de Confirmação (substitui window.confirm nativo) ──────
+  confirmState: null,
+  confirmar: ({
+    title = 'Confirmação',
+    message = '',
+    type = 'confirm',
+    confirmLabel = 'Confirmar',
+    cancelLabel = 'Cancelar',
+  }) =>
+    new Promise((resolve) => {
+      const prev = get().confirmState
+      if (prev?.resolve) prev.resolve(false)
+      set({
+        confirmState: { title, message, type, confirmLabel, cancelLabel, resolve },
+      })
+    }),
+  responderConfirmacao: (aceito) => {
+    const atual = get().confirmState
+    set({ confirmState: null })
+    if (atual?.resolve) atual.resolve(Boolean(aceito))
+  },
 }))

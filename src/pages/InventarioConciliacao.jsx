@@ -78,7 +78,13 @@ export function InventarioConciliacao() {
 
   const handleRecontarEndereco = async (endereco, e) => {
     e.stopPropagation()
-    if (!window.confirm(`Deseja resetar o endereço "${endereco}" para recontagem completa? Todos os itens deste endereço voltarão para Pendente.`)) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Recontar Endereço',
+      message: `Deseja resetar o endereço "${endereco}" para recontagem completa? Todos os itens deste endereço voltarão para Pendente.`,
+      type: 'confirm',
+      confirmLabel: 'Resetar Endereço',
+    })
+    if (!ok) return
     try {
       const invId = /^\d+$/.test(String(id)) ? Number(id) : id
       const res = await inventariosQueries.recontarEndereco(invId, endereco)
@@ -91,7 +97,13 @@ export function InventarioConciliacao() {
 
   const handleCancelarItem = async (item_id, descricao, e) => {
     e.stopPropagation()
-    if (!window.confirm(`Cancelar o item "${descricao}"? Ele será removido deste inventário.`)) return
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Remover Item do Inventário',
+      message: `Cancelar o item "${descricao}"? Ele será removido deste inventário.`,
+      type: 'error',
+      confirmLabel: 'Remover Item',
+    })
+    if (!ok) return
     try {
       const res = await inventariosQueries.cancelarItem(item_id)
       if (res.success) { toastSuccess('Item Cancelado', 'Item removido do inventário.'); carregar() }

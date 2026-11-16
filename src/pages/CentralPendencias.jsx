@@ -89,7 +89,13 @@ export function CentralPendencias() {
 
   const liberarCadeadoPedido = async (p) => {
     if (!p?.referencia_id) return
-    if (!window.confirm('Deseja desbloquear a trava de estoque e liberar este pedido para aparecer na Separação (operação)?')) {
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Liberar Cadeado de Estoque',
+      message: 'Deseja desbloquear a trava de estoque e liberar este pedido para aparecer na Separação (operação)?',
+      type: 'error',
+      confirmLabel: 'Liberar para Operação',
+    })
+    if (!ok) {
       return
     }
     try {
