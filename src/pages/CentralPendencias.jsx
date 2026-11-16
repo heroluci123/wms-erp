@@ -84,6 +84,8 @@ export function CentralPendencias() {
 
   const rotaParaPendencia = (p) => {
     if (p.tipo_pendencia === 'PEDIDO_WHATSAPP' && p.referencia_tabela === 'whatsapp_inbox') return '/whatsapp-inbox'
+    if (p.tipo_pendencia === 'VALIDACAO_RECEBIMENTO' || p.referencia_tabela === 'pedidos_compra') return '/compras'
+    if (p.tipo_pendencia === 'OP_DE_MAPA' || p.referencia_tabela === 'mapas_producao') return '/mapa-producao'
     if (p.referencia_tabela === 'pedidos') return '/pedidos'
     if (p.referencia_tabela === 'ordens_producao') return '/producao'
     const s = SETORES.find((x) => x.id === p.setor_destino)
@@ -149,6 +151,20 @@ export function CentralPendencias() {
           </div>
           <div className="kpi-card__value">{filaAoVivo.romaneios_conferencia || 0}</div>
           <div className="kpi-card__sub">Romaneios prontos para conferir</div>
+        </div>
+        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/compras')}>
+          <div className="kpi-card__label flex items-center gap-6">
+            <Package size={13} /> Compras 3-Way
+          </div>
+          <div className="kpi-card__value">{filaAoVivo.recebimentos_validacao || 0}</div>
+          <div className="kpi-card__sub">Recebimentos p/ validar</div>
+        </div>
+        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/mapa-producao')}>
+          <div className="kpi-card__label flex items-center gap-6">
+            <Factory size={13} /> Árvore Auto-Aprendiz
+          </div>
+          <div className="kpi-card__value">{filaAoVivo.arvore_pendentes || 0}</div>
+          <div className="kpi-card__sub">Vínculos aprendidos p/ revisar</div>
         </div>
       </div>
 

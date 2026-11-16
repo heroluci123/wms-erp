@@ -27,6 +27,7 @@ export const SETORES_PERMISSOES = [
       { key: 'producao_entrada', label: 'Registrar entrada na produção', desc: 'Bipar e alocar caixas de matéria-prima na OP.' },
       { key: 'producao_saida', label: 'Registrar saída da produção', desc: 'Pesar, gerar etiquetas próprias e retornar caixas produzidas.' },
       { key: 'producao_criar_op', label: 'Criar / Configurar / Finalizar OP', desc: 'Abrir novas OPs, editar itens previstos, liberar, finalizar e reabrir.' },
+      { key: 'mapa_producao', label: 'Mapa de Produção Diário & Árvore BOM', desc: 'Consolidar demanda dos pedidos em mapa de produção, gerar OPs em lote e revisar rendimentos aprendidos.' },
       { key: 'desmembramento', label: 'Desmembramento de caixas', desc: 'Dividir caixas originais em múltiplas etiquetas herdando validade.' },
       { key: 'reimpressao', label: 'Gerar e reimprimir etiquetas (100×70mm)', desc: 'Imprimir e reimprimir etiquetas térmicas preservando EAN original.' },
     ],
@@ -47,6 +48,7 @@ export const SETORES_PERMISSOES = [
     permissoes: [
       { key: 'recebimento', label: 'Registrar recebimentos e novas caixas', desc: 'Bipar EANs, informar peso bruto, tara, produção e validade.' },
       { key: 'recebimento_consultar', label: 'Consultar recebimentos', desc: 'Acompanhar paletes e registros de entrada no recebimento.' },
+      { key: 'compras', label: 'Pedidos de Compra & Validação 3-Way', desc: 'Criar e aprovar pedidos de compra, vincular no recebimento e validar divergências.' },
     ],
   },
   {
@@ -128,6 +130,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'producao_entrada',
   'producao_saida',
   'producao_criar_op',
+  'mapa_producao',
   'desmembramento',
   'reimpressao',
   'movimentacao',
@@ -135,6 +138,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'movimentacao_historico',
   'recebimento',
   'recebimento_consultar',
+  'compras',
   'inventario_coletor',
   'inventario_divergencias',
   'inventario_gestao',
@@ -338,8 +342,14 @@ export function sanitizarPermissoes(rawPermissoes = {}, nivel = 'OPERACIONAL', p
   if ((obj?.pedidos || obj?.financeiro_pedidos) && obj?.whatsapp_inbox === undefined) {
     mapa.whatsapp_inbox = true
   }
+  if ((obj?.fornecedores || obj?.pedidos) && obj?.compras === undefined) {
+    mapa.compras = true
+  }
+  if ((obj?.producao_criar_op || obj?.pedidos) && obj?.mapa_producao === undefined) {
+    mapa.mapa_producao = true
+  }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox']) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao']) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }

@@ -2,7 +2,7 @@ import { db } from '../lib/db.js';
 import { apiRequest, isApiEnabled } from '../lib/apiClient.js';
 import { assertPermissao } from '../lib/authGuard.js';
 
-const PERM_PROD_READ = ['produtos', 'consulta_estoque', 'recebimento', 'inventario_coletor', 'inventario_gestao', 'retorno_producao', 'desmembramento', 'pedidos', 'pedidos_consultar', 'saida', 'ean_etiquetas', 'reimpressao', 'rastreabilidade'];
+const PERM_PROD_READ = ['produtos', 'consulta_estoque', 'recebimento', 'compras', 'inventario_coletor', 'inventario_gestao', 'retorno_producao', 'producao_criar_op', 'mapa_producao', 'desmembramento', 'pedidos', 'pedidos_consultar', 'saida', 'ean_etiquetas', 'reimpressao', 'rastreabilidade'];
 
 /** Queries de Produtos */
 export async function listar() {

@@ -8,6 +8,8 @@ import * as movimentacoesQueries from '../queries/movimentacoes.js';
 import * as produtosQueries from '../queries/produtos.js';
 import * as estoqueQueries from '../queries/estoque.js';
 import { tarasQueries } from '../queries/taras.js';
+import { comprasQueries } from '../queries/compras.js';
+import { isApiEnabled } from '../lib/apiClient.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx';
 import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared/PesagemTaraFields.jsx';
 import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx';
@@ -456,9 +458,16 @@ function HistoricoPaletes() {
 // ─── COMPONENTE PRINCIPAL ────────────────────────────────────────────────────
 export function Recebimento() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
+  const apiAtiva = isApiEnabled()
   
   // Tabs
   const [activeTab, setActiveTab] = useState('palete') // 'palete' | 'historico'
+  
+  // Pedido de Compra vinculado na doca (ERP API)
+  const [pcsDoca, setPcsDoca] = useState([])
+  const [travaSemPc, setTravaSemPc] = useState(false)
+  const [pcSelecionadoId, setPcSelecionadoId] = useState('')
+  const [numeroNfPc, setNumeroNfPc] = useState('')
   
   // Estado do Palete LPN
   const [paletesAbertos, setPaletesAbertos] = useState([])
@@ -486,9 +495,19 @@ export function Recebimento() {
   const [modalEanOpen, setModalEanOpen] = useState(false)
   const [eanDesconhecido, setEanDesconhecido] = useState('')
 
+  const carregarPcsDoca = useCallback(async () => {
+    if (!apiAtiva) return
+    try {
+      const res = await comprasQueries.listarPedidosLiberadosParaDoca()
+      setPcsDoca(res?.data || [])
+      setTravaSemPc(Boolean(res?.trava_recebimento_sem_pc))
+    } catch { /* ignore */ }
+  }, [apiAtiva])
+
   // Carregar dados iniciais
   useEffect(() => {
     carregarPaletesAbertos()
+    carregarPcsDoca()
     tarasQueries.listar(true).then((lista) => {
       setTaras(lista)
       const padrao = resolverTaraSelecionada(lista, '')
@@ -496,7 +515,7 @@ export function Recebimento() {
         setBoxData(prev => prev.tara_id ? prev : { ...prev, tara_id: String(padrao.id) })
       }
     }).catch(() => {})
-  }, [])
+  }, [carregarPcsDoca])
 
   const carregarPaletesAbertos = async () => {
     try {
@@ -540,6 +559,7 @@ export function Recebimento() {
         toastSuccess('Sucesso', 'Caixa apagada.');
         selecionarPalete(paleteAtivo);
         carregarPaletesAbertos();
+        carregarPcsDoca();
       } else {
         toastError('Erro', res.error);
       }
@@ -636,6 +656,8 @@ export function Recebimento() {
         ean_caixa: eanCaixaReal,
         produto_id: produtoDetectado.id,
         palete_id: paleteAtivo.id,
+        pedido_compra_id: pcSelecionadoId || null,
+        numero_nf: numeroNfPc || '',
         peso_kg: valid.peso_liquido_kg,
         peso_bruto_kg: valid.peso_bruto_kg,
         tara_id: valid.tara_id,
@@ -667,6 +689,7 @@ export function Recebimento() {
         }))
         selecionarPalete(paleteAtivo)
         carregarPaletesAbertos()
+        carregarPcsDoca()
         codigoRef.current?.focus()
       } else {
         toastError('Erro', res.error)
@@ -710,6 +733,66 @@ export function Recebimento() {
       {/* TAB: Recebimento */}
       {activeTab === 'palete' && (
         <div className="grid-responsive">
+          {apiAtiva && (
+            <div className="card mb-12" style={{ borderColor: travaSemPc && !pcSelecionadoId ? 'var(--warning)' : 'var(--border)' }}>
+              <div className="flex justify-between items-center flex-wrap gap-8 mb-8">
+                <div className="text-xs font-bold uppercase text-primary">
+                  {travaSemPc ? '🔒 Vínculo Obrigatório: Pedido de Compra' : '📋 Pedido de Compra (Opcional)'}
+                </div>
+                {pcSelecionadoId && (
+                  <button
+                    type="button"
+                    className="btn btn--info btn--sm"
+                    onClick={async () => {
+                      try {
+                        const r = await comprasQueries.enviarParaValidacao(pcSelecionadoId, { numero_nf: numeroNfPc })
+                        toastSuccess('Enviado para Supply Chain', `Recebimento ${r.recebimento_codigo} (${r.status_validacao}) aguardando validação 3-Way!`)
+                        carregarPcsDoca()
+                      } catch (err) {
+                        toastError('Erro', err.message)
+                      }
+                    }}
+                  >
+                    Enviar p/ Validação 3-Way
+                  </button>
+                )}
+              </div>
+              <div className="form-grid form-grid--3" style={{ gap: 8 }}>
+                <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
+                  <select className="form-input" value={pcSelecionadoId} onChange={(e) => setPcSelecionadoId(e.target.value)}>
+                    <option value="">{travaSemPc ? 'Selecione um Pedido de Compra aprovado (obrigatório)...' : 'Recebimento avulso (sem PC vinculado)...'}</option>
+                    {pcsDoca.map((pc) => (
+                      <option key={pc.id} value={pc.id}>
+                        {pc.codigo} — {pc.fornecedor_nome} ({pc.status}) {pc.fornecedor_sif ? `• SIF ${pc.fornecedor_sif}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Nº Nota Fiscal (opcional)"
+                    value={numeroNfPc}
+                    onChange={(e) => setNumeroNfPc(e.target.value)}
+                  />
+                </div>
+              </div>
+              {pcSelecionadoId && (() => {
+                const pcObj = pcsDoca.find((x) => x.id === pcSelecionadoId)
+                if (!pcObj?.itens?.length) return null
+                return (
+                  <div className="flex gap-8 flex-wrap mt-8">
+                    {pcObj.itens.map((it) => (
+                      <span key={it.id} className="badge badge--neutral">
+                        {it.produto_descricao}: {Number(it.qtd_kg_recebida || 0).toFixed(1)} / {Number(it.qtd_kg_solicitada || 0).toFixed(1)} kg
+                      </span>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
           
           {/* MASTER: Seleção de Palete */}
           {!paleteAtivo && (

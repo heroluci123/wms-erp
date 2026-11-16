@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -330,12 +330,14 @@ function Sidebar() {
   const temOperacao = temAlgumaPermissao(operador, [
     'recebimento',
     'recebimento_consultar',
+    'compras',
     'movimentacao',
     'movimentacao_consultar',
     'retorno_producao',
     'producao_entrada',
     'producao_saida',
     'producao_criar_op',
+    'mapa_producao',
     'desmembramento',
     'reimpressao',
     'pedidos',
@@ -403,9 +405,19 @@ function Sidebar() {
           <Upload size={18} /> Recebimento (REC)
         </NavLink>
       )}
+      {temAlgumaPermissao(operador, ['compras', 'recebimento']) && (
+        <NavLink to="/compras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <ShoppingBag size={18} /> Pedidos de Compra
+        </NavLink>
+      )}
       {temAlgumaPermissao(operador, ['movimentacao', 'movimentacao_consultar']) && (
         <NavLink to="/movimentacao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ArrowRightLeft size={18} /> Movimentação Interna
+        </NavLink>
+      )}
+      {temAlgumaPermissao(operador, ['mapa_producao', 'producao_criar_op']) && (
+        <NavLink to="/mapa-producao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <GitBranch size={18} /> Mapa de Produção
         </NavLink>
       )}
       {temAlgumaPermissao(operador, ['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op']) && (

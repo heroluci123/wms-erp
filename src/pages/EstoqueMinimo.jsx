@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { TrendingDown, AlertTriangle, CheckCircle, Package, ShoppingCart, RefreshCw, Filter, Search, ChevronDown, ChevronRight, Download, Layers, ShieldAlert, Clock, ArrowRight } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { isApiEnabled } from '../lib/apiClient'
 import * as estoqueMinimoQueries from '../queries/estoqueMinimo.js'
 
 export function EstoqueMinimo() {
-  const { toastSuccess, toastError } = useAppStore()
+  const navigate = useNavigate()
+  const { toastSuccess, toastError, toastWarning } = useAppStore()
+  const apiAtiva = isApiEnabled()
+  const [selecionadosCompra, setSelecionadosCompra] = useState({})
 
   const [loading, setLoading] = useState(true)
   const [dados, setDados] = useState(null)
@@ -97,6 +102,31 @@ export function EstoqueMinimo() {
           </p>
         </div>
         <div className="flex gap-8">
+          {apiAtiva && (
+            <button
+              className="btn btn--info"
+              onClick={() => {
+                const selecionados = itens.filter((i) => selecionadosCompra[i.id] && Number(i.sugestao_compra_kg || 0) > 0)
+                const listaAuto = selecionados.length > 0 ? selecionados : itens.filter((i) => Number(i.sugestao_compra_kg || 0) > 0)
+                if (listaAuto.length === 0) {
+                  return toastWarning('Sugestão de Compras', 'Não há matérias-primas com sugestão de compra positiva no momento.')
+                }
+                navigate('/compras', {
+                  state: {
+                    prefillItens: listaAuto.map((i) => ({
+                      produto_id: i.id,
+                      produto_codigo: i.codigo,
+                      produto_descricao: i.descricao,
+                      qtd_kg_solicitada: i.sugestao_compra_kg,
+                      preco_unitario_kg: Number(i.custo_medio_kg || 0),
+                    })),
+                  },
+                })
+              }}
+            >
+              <ShoppingCart size={16} /> Gerar Pedido de Compra ({Object.values(selecionadosCompra).filter(Boolean).length || 'Sugestões'})
+            </button>
+          )}
           <button className="btn btn--ghost" onClick={carregarDados} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Atualizar
           </button>
@@ -299,6 +329,15 @@ export function EstoqueMinimo() {
                 >
                   {/* Nome & Grupo */}
                   <div className="flex items-center gap-12">
+                    {apiAtiva && Number(item.sugestao_compra_kg || 0) > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selecionadosCompra[item.id])}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setSelecionadosCompra((prev) => ({ ...prev, [item.id]: e.target.checked }))}
+                        title="Selecionar para gerar Pedido de Compra"
+                      />
+                    )}
                     <div style={{ color: 'var(--text-muted)' }}>
                       {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                     </div>
@@ -307,7 +346,11 @@ export function EstoqueMinimo() {
                         {item.descricao}
                         {item.grupo && <span className="badge" style={{ fontSize: 10, background: 'var(--bg-1)' }}>{item.grupo}</span>}
                       </div>
-                      <div className="text-xs text-muted font-mono mt-2">Cód: {item.codigo || '-'} | Matéria-Prima In Natura</div>
+                      <div className="text-xs text-muted font-mono mt-2">
+                        Cód: {item.codigo || '-'}
+                        {Number(item.demanda_pedidos_kg || 0) > 0 && ` • Pedidos Abertos: ${Number(item.demanda_pedidos_kg).toFixed(1)}kg`}
+                        {Number(item.em_compra_kg || 0) > 0 && ` • Em Compra (PC): +${Number(item.em_compra_kg).toFixed(1)}kg`}
+                      </div>
                     </div>
                   </div>
 
@@ -379,7 +422,7 @@ export function EstoqueMinimo() {
                       Origem da Demanda e Consumo nos últimos {diasAnalise} dias
                     </div>
 
-                    {item.detalhamento.length === 0 ? (
+                    {(item.detalhamento || []).length === 0 ? (
                       <div className="text-xs text-muted italic">Nenhuma baixa ou saída registrada nesta janela de {diasAnalise} dias.</div>
                     ) : (
                       <table style={{ margin: 0, fontSize: 13 }}>
@@ -392,7 +435,7 @@ export function EstoqueMinimo() {
                           </tr>
                         </thead>
                         <tbody>
-                          {item.detalhamento.map((det, idx) => {
+                          {(item.detalhamento || []).map((det, idx) => {
                             const pctConsumo = item.consumo_total_kg > 0 ? Math.round((det.kg / item.consumo_total_kg) * 100) : 0
                             return (
                               <tr key={idx}>

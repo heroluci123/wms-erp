@@ -41,6 +41,8 @@ import { EmpresasFiliais } from './pages/EmpresasFiliais'
 import { ParametrosComerciais } from './pages/ParametrosComerciais'
 import { CentralPendencias } from './pages/CentralPendencias'
 import { WhatsappInbox } from './pages/WhatsappInbox'
+import { Compras } from './pages/Compras'
+import { MapaProducao } from './pages/MapaProducao'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -95,7 +97,9 @@ function App() {
           <Route path="portal-cliente" element={<RequirePermissao allowCliente={true} element={<PortalCliente />} />} />
           <Route path="estoque" element={<RequirePermissao permissoes={['estoque_enderecos']} element={<EstoqueEnderecos />} />} />
           <Route path="recebimento" element={<RequirePermissao permissoes={['recebimento', 'recebimento_consultar']} element={<Recebimento />} />} />
+          <Route path="compras" element={<RequirePermissao permissoes={['compras', 'recebimento']} element={<Compras />} />} />
           <Route path="movimentacao" element={<RequirePermissao permissoes={['movimentacao', 'movimentacao_consultar']} element={<Movimentacao />} />} />
+          <Route path="mapa-producao" element={<RequirePermissao permissoes={['mapa_producao', 'producao_criar_op']} element={<MapaProducao />} />} />
           <Route path="producao" element={<RequirePermissao permissoes={['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op']} element={<Producao />} />} />
           <Route path="desmembramento" element={<RequirePermissao permissoes={['desmembramento']} element={<Desmembramento />} />} />
           <Route path="reimpressao" element={<RequirePermissao permissoes={['reimpressao']} element={<ReimpressaoEtiquetas />} />} />

@@ -20,6 +20,7 @@ import {
   vendedores,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
+import { sugerirCfopOperacao } from '../wms/helpers.js'
 import { uuidv7 } from '../../utils/uuid.js'
 
 const optStr = (fallback = '') =>
@@ -657,7 +658,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
   // ── FORNECEDORES ────────────────────────────────────────────────────────────
   app.get(
     '/api/cadastros/fornecedores',
-    { preHandler: requirePermission(['fornecedores', 'recebimento', 'recebimento_consultar', 'produtos'], { write: false }) },
+    { preHandler: requirePermission(['fornecedores', 'recebimento', 'recebimento_consultar', 'compras', 'produtos'], { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
       const rows = await conn.db
@@ -1259,44 +1260,14 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     async (req) => {
       const ctx = req.authCtx!
       const q = req.query as { tipo_movimento?: string; finalidade?: string; uf_parceiro?: string }
-      const [filial] = await conn.db
-        .select({ uf: filiais.uf })
-        .from(filiais)
-        .where(and(eq(filiais.id, ctx.filialId), eq(filiais.tenantId, ctx.tenantId)))
-        .limit(1)
-      const ufFilial = (filial?.uf || 'SP').toUpperCase()
-      const ufParceiro = String(q.uf_parceiro || ufFilial).trim().toUpperCase()
-      const dentroEstado = ufFilial === ufParceiro
-
-      const tipo = String(q.tipo_movimento || 'SAIDA').toUpperCase()
-      const finalidade = String(q.finalidade || '').toUpperCase()
-      const nats = await conn.db
-        .select()
-        .from(naturezasOperacao)
-        .where(
-          and(
-            eq(naturezasOperacao.tenantId, ctx.tenantId),
-            eq(naturezasOperacao.tipoMovimento, tipo),
-            eq(naturezasOperacao.ativo, 1)
-          )
-        )
-
-      const chosen = finalidade ? nats.find((n) => n.finalidade.toUpperCase() === finalidade) || nats[0] : nats[0]
-      if (!chosen) return { success: true, data: null }
-      const cfopBase = dentroEstado ? chosen.cfopEstadual : chosen.cfopInterestadual
-      return {
-        success: true,
-        data: {
-          natureza_id: chosen.id,
-          descricao: chosen.descricao,
-          uf_filial: ufFilial,
-          uf_parceiro: ufParceiro,
-          dentro_estado: dentroEstado,
-          cfop: cfopBase,
-          codigo_sub_operacao: chosen.codigoSubOperacao,
-          cfop_completo: `${cfopBase}${chosen.codigoSubOperacao}`,
-        },
-      }
+      const data = await sugerirCfopOperacao(conn.db, {
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        tipoMovimento: q.tipo_movimento,
+        finalidade: q.finalidade,
+        ufParceiro: q.uf_parceiro,
+      })
+      return { success: true, data }
     }
   )
 }

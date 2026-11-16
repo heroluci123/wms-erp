@@ -14,6 +14,8 @@ import { registerPedidosRoutes } from './modules/pedidos/routes.js'
 import { registerRelatoriosRoutes } from './modules/relatorios/routes.js'
 import { registerPendenciasRoutes } from './modules/pendencias/routes.js'
 import { registerWhatsappRoutes } from './modules/whatsapp/routes.js'
+import { registerComprasRoutes } from './modules/compras/routes.js'
+import { registerMapaProducaoRoutes } from './modules/producao/mapaRoutes.js'
 
 export async function buildApp(
   conn: DbConnection,
@@ -78,6 +80,8 @@ export async function buildApp(
   registerRelatoriosRoutes(app, conn)
   registerPendenciasRoutes(app, conn)
   registerWhatsappRoutes(app, conn)
+  registerComprasRoutes(app, conn)
+  registerMapaProducaoRoutes(app, conn)
 
   return app
 }

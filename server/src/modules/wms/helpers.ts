@@ -5,15 +5,18 @@ import {
   eanSequencias,
   estoqueCaixas,
   estoquePosicao,
+  filiais,
   inventarioItens,
   inventarios,
   movimentacoesLog,
+  naturezasOperacao,
   ordensProducao,
   paletes,
   pedidos,
   produtos,
   romaneios,
   taras,
+  tenants,
 } from '../../db/schema/index.js'
 import { HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
@@ -262,7 +265,16 @@ export async function gerarProximosEansInternos(
 export async function gerarCodigoDocumento(
   tx: DbOrTx,
   tenantId: string,
-  chave: 'PALETE' | 'PEDIDO' | 'ROMANEIO' | 'OP' | 'DESM',
+  chave:
+    | 'PALETE'
+    | 'PEDIDO'
+    | 'ROMANEIO'
+    | 'OP'
+    | 'DESM'
+    | 'PEDIDO_COMPRA'
+    | 'RECEBIMENTO'
+    | 'MAPA_PRODUCAO'
+    | 'EMBARQUE',
   prefix: string,
   pad = 4,
 ): Promise<string> {
@@ -518,5 +530,76 @@ export function normalizeCaixaRow<T extends Record<string, unknown>>(row: T): T 
         : null,
     tara_kg: toNum(row.tara_kg ?? row.taraKg, 0),
     custo_unitario_kg: toNum(row.custo_unitario_kg ?? row.custoUnitarioKg, 0),
+  }
+}
+
+export async function lerTenantFeatures(tx: DbOrTx, tenantId: string): Promise<Record<string, boolean>> {
+  const [row] = await tx
+    .select({ featuresJson: tenants.featuresJson })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1)
+  return (row?.featuresJson as Record<string, boolean>) || {}
+}
+
+export async function sugerirCfopOperacao(
+  tx: DbOrTx,
+  params: {
+    tenantId: string
+    filialId: string
+    tipoMovimento?: string
+    finalidade?: string
+    ufParceiro?: string
+    naturezaId?: string | null
+  },
+) {
+  const [filial] = await tx
+    .select({ uf: filiais.uf })
+    .from(filiais)
+    .where(and(eq(filiais.id, params.filialId), eq(filiais.tenantId, params.tenantId)))
+    .limit(1)
+  const ufFilial = (filial?.uf || 'SP').toUpperCase()
+  const ufParceiro = String(params.ufParceiro || ufFilial).trim().toUpperCase() || ufFilial
+  const dentroEstado = ufFilial === ufParceiro
+
+  const tipo = String(params.tipoMovimento || 'SAIDA').toUpperCase()
+  const finalidade = String(params.finalidade || '').toUpperCase()
+
+  const nats = await tx
+    .select()
+    .from(naturezasOperacao)
+    .where(
+      and(
+        eq(naturezasOperacao.tenantId, params.tenantId),
+        eq(naturezasOperacao.tipoMovimento, tipo),
+        eq(naturezasOperacao.ativo, 1),
+      ),
+    )
+
+  let chosen = params.naturezaId ? nats.find((n) => n.id === params.naturezaId) : undefined
+  if (!chosen && params.naturezaId) {
+    const [directNat] = await tx
+      .select()
+      .from(naturezasOperacao)
+      .where(and(eq(naturezasOperacao.tenantId, params.tenantId), eq(naturezasOperacao.id, params.naturezaId)))
+      .limit(1)
+    chosen = directNat
+  }
+  if (!chosen) {
+    chosen = finalidade ? nats.find((n) => n.finalidade.toUpperCase() === finalidade) || nats[0] : nats[0]
+  }
+  if (!chosen) return null
+
+  const cfopBase = dentroEstado ? chosen.cfopEstadual : chosen.cfopInterestadual
+  return {
+    natureza_id: chosen.id,
+    descricao: chosen.descricao,
+    finalidade: chosen.finalidade,
+    uf_filial: ufFilial,
+    uf_parceiro: ufParceiro,
+    dentro_estado: dentroEstado,
+    cfop: cfopBase,
+    codigo_sub_operacao: chosen.codigoSubOperacao,
+    cfop_completo: `${cfopBase}${chosen.codigoSubOperacao}`,
   }
 }

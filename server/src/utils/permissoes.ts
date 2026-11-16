@@ -3,12 +3,14 @@ export const TODAS_CHAVES_PERMISSAO = [
   'producao_entrada',
   'producao_saida',
   'producao_criar_op',
+  'mapa_producao',
   'desmembramento',
   'reimpressao',
   'movimentacao',
   'movimentacao_consultar',
   'recebimento',
   'recebimento_consultar',
+  'compras',
   'inventario_coletor',
   'inventario_divergencias',
   'inventario_gestao',
@@ -53,6 +55,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set<string>([
   'producao_entrada',
   'producao_saida',
   'producao_criar_op',
+  'mapa_producao',
   'desmembramento',
   'reimpressao',
   'movimentacao',
@@ -60,6 +63,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set<string>([
   'movimentacao_historico',
   'recebimento',
   'recebimento_consultar',
+  'compras',
   'inventario_coletor',
   'inventario_divergencias',
   'inventario_gestao',
@@ -277,8 +281,14 @@ export function sanitizarPermissoes(
   if ((obj?.pedidos || obj?.financeiro_pedidos) && obj?.whatsapp_inbox === undefined) {
     mapa.whatsapp_inbox = true
   }
+  if ((obj?.fornecedores || obj?.pedidos) && obj?.compras === undefined) {
+    mapa.compras = true
+  }
+  if ((obj?.producao_criar_op || obj?.pedidos) && obj?.mapa_producao === undefined) {
+    mapa.mapa_producao = true
+  }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox'] as const) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao'] as const) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }

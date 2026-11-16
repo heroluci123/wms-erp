@@ -51,7 +51,9 @@ export function registerPendenciasRoutes(app: FastifyInstance, conn: DbConnectio
             (SELECT COUNT(*)::int FROM pedidos p WHERE p.tenant_id = ${ctx.tenantId} AND p.filial_id = ${ctx.filialId} AND p.status IN ('LIBERADO', 'EM_SEPARACAO')) AS pedidos_separacao,
             (SELECT COUNT(*)::int FROM romaneios r WHERE r.tenant_id = ${ctx.tenantId} AND r.filial_id = ${ctx.filialId} AND r.status IN ('AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA')) AS romaneios_conferencia,
             (SELECT COUNT(*)::int FROM ordens_producao op WHERE op.tenant_id = ${ctx.tenantId} AND op.filial_id = ${ctx.filialId} AND op.status IN ('RASCUNHO', 'LIBERADA', 'ABERTA')) AS ops_pendentes,
-            (SELECT COUNT(*)::int FROM pedidos p WHERE p.tenant_id = ${ctx.tenantId} AND p.filial_id = ${ctx.filialId} AND p.pagamento_na_entrega = 1 AND p.status NOT IN ('CANCELADO')) AS pedidos_pgto_entrega
+            (SELECT COUNT(*)::int FROM pedidos p WHERE p.tenant_id = ${ctx.tenantId} AND p.filial_id = ${ctx.filialId} AND p.pagamento_na_entrega = 1 AND p.status NOT IN ('CANCELADO')) AS pedidos_pgto_entrega,
+            (SELECT COUNT(*)::int FROM recebimentos rec WHERE rec.tenant_id = ${ctx.tenantId} AND rec.filial_id = ${ctx.filialId} AND rec.status_validacao IN ('AGUARDANDO_VALIDACAO_SISTEMICA', 'DIVERGENTE')) AS recebimentos_validacao,
+            (SELECT COUNT(*)::int FROM produto_arvore pa WHERE pa.tenant_id = ${ctx.tenantId} AND pa.confirmado = 0) AS arvore_pendentes
         `),
       ])
 
@@ -91,6 +93,8 @@ export function registerPendenciasRoutes(app: FastifyInstance, conn: DbConnectio
           romaneios_conferencia: Number(live.romaneios_conferencia || 0),
           ops_pendentes: Number(live.ops_pendentes || 0),
           pedidos_pgto_entrega: Number(live.pedidos_pgto_entrega || 0),
+          recebimentos_validacao: Number(live.recebimentos_validacao || 0),
+          arvore_pendentes: Number(live.arvore_pendentes || 0),
         },
         data: filtradas.map((p) => ({
           id: p.id,
@@ -112,7 +116,7 @@ export function registerPendenciasRoutes(app: FastifyInstance, conn: DbConnectio
 
   app.post(
     '/api/pendencias',
-    { preHandler: requirePermission(['pedidos', 'financeiro_pedidos', 'recebimento', 'producao_criar_op', 'saida', 'expedicao']) },
+    { preHandler: requirePermission(['pedidos', 'financeiro_pedidos', 'recebimento', 'compras', 'producao_criar_op', 'mapa_producao', 'saida', 'expedicao']) },
     async (req, reply) => {
       const ctx = req.authCtx!
       const parsed = CreatePendenciaSchema.safeParse(req.body)

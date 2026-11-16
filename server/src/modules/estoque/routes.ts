@@ -6,18 +6,23 @@ import {
   desmembramentosVinculos,
   estoqueCaixas,
   estoquePosicao,
+  fornecedores,
   inventarios,
   locais,
   movimentacoesLog,
   ordensProducao,
   paletes,
+  pedidosCompra,
+  pedidosCompraItens,
   produtoArvore,
   produtos,
   produtosEans,
+  recebimentos,
   taras,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { calcularDemandaEMateriasPrimas } from '../wms/demandaHelper.js'
 import {
   assertEnderecosNaoBloqueados,
   calcularPesoLiquido,
@@ -25,6 +30,7 @@ import {
   gerarLotePorData,
   gerarProximosEansInternos,
   hojeIsoLocal,
+  lerTenantFeatures,
   normalizarDataIso,
   normalizeCaixaRow,
   parseUuidOrBadRequest,
@@ -641,7 +647,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         return cur
       }
 
-      const [caixasDisp, consumoRes] = await Promise.all([
+      const [caixasDisp, consumoRes, demandaPedidos, comprasAbertasRes] = await Promise.all([
         conn.db
           .select({
             produtoId: estoqueCaixas.produtoId,
@@ -673,7 +679,34 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
             ),
           )
           .groupBy(movimentacoesLog.produtoId, movimentacoesLog.tipo),
+        calcularDemandaEMateriasPrimas(conn.db, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          incluirRascunho: true,
+        }),
+        conn.db
+          .select({
+            produtoId: pedidosCompraItens.produtoId,
+            pendenteKg: sql<string>`COALESCE(SUM(GREATEST(0, ${pedidosCompraItens.qtdKgSolicitada} - ${pedidosCompraItens.qtdKgRecebida})), 0)`,
+          })
+          .from(pedidosCompraItens)
+          .innerJoin(pedidosCompra, eq(pedidosCompra.id, pedidosCompraItens.pedidoCompraId))
+          .where(
+            and(
+              eq(pedidosCompra.tenantId, ctx.tenantId),
+              eq(pedidosCompra.filialId, ctx.filialId),
+              inArray(pedidosCompra.status, ['ABERTO', 'APROVADO', 'PARCIAL']),
+            ),
+          )
+          .groupBy(pedidosCompraItens.produtoId),
       ])
+
+      const emCompraMap = new Map(comprasAbertasRes.map((r) => [r.produtoId, toNum(r.pendenteKg, 0)]))
+      const prodExtras = await conn.db
+        .select({ id: produtos.id, custo_medio_kg: produtos.custoMedioKg })
+        .from(produtos)
+        .where(eq(produtos.tenantId, ctx.tenantId))
+      const custoMap = new Map(prodExtras.map((p) => [p.id, toNum(p.custo_medio_kg, 0)]))
 
       const paisRecord = new Map<
         string,
@@ -685,6 +718,9 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           estoque_caixas: number
           estoque_kg: number
           consumo_total_kg: number
+          demanda_pedidos_kg: number
+          em_compra_kg: number
+          custo_medio_kg: number
         }
       >()
       for (const p of allProds) {
@@ -697,6 +733,9 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
             estoque_caixas: 0,
             estoque_kg: 0,
             consumo_total_kg: 0,
+            demanda_pedidos_kg: Number((demandaPedidos.mpPorProdutoId.get(p.id) || 0).toFixed(3)),
+            em_compra_kg: Number((emCompraMap.get(p.id) || 0).toFixed(3)),
+            custo_medio_kg: custoMap.get(p.id) || 0,
           })
         }
       }
@@ -717,13 +756,16 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
       const itens = Array.from(paisRecord.values()).map((p) => {
         const consumoDiario = p.consumo_total_kg / diasAnalise
         const estoqueMinimo = consumoDiario * leadTimePadrao * (1 + margemSegurancaPct / 100)
+        const saldoProjetado = p.estoque_kg + p.em_compra_kg
+        const necessidadeBruta = Math.max(estoqueMinimo, p.demanda_pedidos_kg)
         const diasCobertura =
           consumoDiario > 0 ? p.estoque_kg / consumoDiario : p.estoque_kg > 0 ? 999 : 0
-        const sugestaoCompra = Math.max(0, estoqueMinimo - p.estoque_kg)
+        const sugestaoCompra = Math.max(0, necessidadeBruta - saldoProjetado)
+        const sugestaoImediata = Math.max(0, p.demanda_pedidos_kg - saldoProjetado)
         const status =
-          p.estoque_kg < estoqueMinimo
+          p.estoque_kg < estoqueMinimo || (p.demanda_pedidos_kg > 0 && saldoProjetado < p.demanda_pedidos_kg)
             ? 'CRITICO'
-            : p.estoque_kg < estoqueMinimo * 1.25
+            : saldoProjetado < necessidadeBruta * 1.25
               ? 'ALERTA'
               : 'OK'
         return {
@@ -732,6 +774,8 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           estoque_minimo_kg: Math.round(estoqueMinimo * 100) / 100,
           dias_cobertura: Math.round(diasCobertura * 10) / 10,
           sugestao_compra_kg: Math.round(sugestaoCompra * 100) / 100,
+          sugestao_imediata_kg: Math.round(sugestaoImediata * 100) / 100,
+          valor_estimado_compra: Math.round(sugestaoCompra * p.custo_medio_kg * 100) / 100,
           status,
         }
       })
@@ -1044,6 +1088,12 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
     const ctx = req.authCtx!
     const body = req.body as {
       palete_id?: string | null
+      pedido_compra_id?: string | null
+      recebimento_id?: string | null
+      numero_nf?: string
+      chave_nfe?: string
+      exigir_pedido_compra?: boolean
+      forcar_produto_extra?: boolean
       ean_caixa: string
       produto_id: string
       endereco?: string
@@ -1070,6 +1120,15 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
     const criado = await conn.db.transaction(async (tx) => {
       await assertEnderecosNaoBloqueados(tx, ctx.tenantId, ctx.filialId, [enderecoFinal])
 
+      const features = await lerTenantFeatures(tx, ctx.tenantId)
+      const travaAtiva = Boolean(features.trava_recebimento_sem_pc) || Boolean(body.exigir_pedido_compra)
+      if (travaAtiva && !body.pedido_compra_id) {
+        throw new HttpError(
+          400,
+          'Recebimento bloqueado: vincule um Pedido de Compra aprovado antes de bipar caixas na doca.',
+        )
+      }
+
       const [dup] = await tx
         .select({ id: estoqueCaixas.id })
         .from(estoqueCaixas)
@@ -1085,6 +1144,80 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         .where(and(eq(produtos.id, produtoId), eq(produtos.tenantId, ctx.tenantId)))
         .limit(1)
       if (!prod) throw new HttpError(404, 'Produto não encontrado.')
+
+      let pcIdFinal: string | null = null
+      let recebimentoIdFinal: string | null = body.recebimento_id
+        ? parseUuidOrBadRequest(body.recebimento_id, 'recebimento_id')
+        : null
+      let fornecedorPcId: string | null = null
+      let sifPc = ''
+      let custoPcItem = 0
+      let pcItemMatchId: string | null = null
+
+      if (body.pedido_compra_id) {
+        pcIdFinal = parseUuidOrBadRequest(body.pedido_compra_id, 'pedido_compra_id')
+        const [pc] = await tx
+          .select()
+          .from(pedidosCompra)
+          .where(and(eq(pedidosCompra.id, pcIdFinal), eq(pedidosCompra.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!pc) throw new HttpError(404, 'Pedido de Compra não encontrado.')
+        if (!['APROVADO', 'PARCIAL'].includes(pc.status)) {
+          throw new HttpError(
+            400,
+            `Pedido de Compra ${pc.codigo} está com status "${pc.status}". Somente pedidos APROVADOS ou PARCIAIS liberam recebimento.`,
+          )
+        }
+        fornecedorPcId = pc.fornecedorId
+
+        const [forn] = await tx
+          .select({ sif: fornecedores.registroSanitarioSif })
+          .from(fornecedores)
+          .where(eq(fornecedores.id, pc.fornecedorId))
+          .limit(1)
+        sifPc = forn?.sif || ''
+
+        const [pcItem] = await tx
+          .select()
+          .from(pedidosCompraItens)
+          .where(and(eq(pedidosCompraItens.pedidoCompraId, pcIdFinal), eq(pedidosCompraItens.produtoId, prod.id)))
+          .limit(1)
+        if (!pcItem && !body.forcar_produto_extra) {
+          throw new HttpError(
+            400,
+            `O produto ${prod.descricao} não faz parte do Pedido de Compra ${pc.codigo}.`,
+          )
+        }
+        if (pcItem) {
+          pcItemMatchId = pcItem.id
+          custoPcItem = toNum(pcItem.precoUnitarioKg, 0)
+        }
+
+        if (!recebimentoIdFinal) {
+          const [recExist] = await tx
+            .select()
+            .from(recebimentos)
+            .where(and(eq(recebimentos.pedidoCompraId, pcIdFinal), eq(recebimentos.tenantId, ctx.tenantId)))
+            .limit(1)
+          if (recExist) {
+            recebimentoIdFinal = recExist.id
+          } else {
+            recebimentoIdFinal = uuidv7()
+            const recCod = await gerarCodigoDocumento(tx, ctx.tenantId, 'RECEBIMENTO', 'REC', 4)
+            await tx.insert(recebimentos).values({
+              id: recebimentoIdFinal,
+              tenantId: ctx.tenantId,
+              filialId: ctx.filialId,
+              codigo: recCod,
+              pedidoCompraId: pcIdFinal,
+              fornecedorId: pc.fornecedorId,
+              numeroNf: String(body.numero_nf || '').trim(),
+              chaveNfe: String(body.chave_nfe || '').trim(),
+              statusValidacao: 'AGUARDANDO_BIPAGEM',
+            })
+          }
+        }
+      }
 
       let paleteIdFinal: string | null = null
       let endEfetivo = enderecoFinal
@@ -1141,6 +1274,15 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
       }
 
       const caixaId = uuidv7()
+      const fornecedorFinalId = body.fornecedor_id
+        ? parseUuidOrBadRequest(body.fornecedor_id, 'fornecedor_id')
+        : fornecedorPcId
+      const sifFinal = String(body.sif_origem || sifPc || '').trim()
+      const custoFinalKg =
+        body.custo_unitario_kg != null && toNum(body.custo_unitario_kg, 0) > 0
+          ? toNum(body.custo_unitario_kg, 0)
+          : custoPcItem
+
       await tx.insert(estoqueCaixas).values({
         id: caixaId,
         tenantId: ctx.tenantId,
@@ -1149,8 +1291,9 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         produtoId: prod.id,
         paleteId: paleteIdFinal,
         paleteOrigemId: paleteIdFinal,
-        fornecedorId: body.fornecedor_id ? parseUuidOrBadRequest(body.fornecedor_id, 'fornecedor_id') : null,
-        sifOrigem: String(body.sif_origem || '').trim(),
+        fornecedorId: fornecedorFinalId,
+        recebimentoId: recebimentoIdFinal,
+        sifOrigem: sifFinal,
         endereco: endEfetivo,
         lote: pesagem.lote,
         dataProducao: pesagem.dataProducao,
@@ -1161,11 +1304,24 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         taraPrimariaTotalKg: toDec(taraPrimTotal, 3),
         pesoKg: toDec(pesagem.pesoLiquidoKg, 3),
         qtdPecas: pesagem.qtdPecas,
-        custoUnitarioKg: toDec(toNum(body.custo_unitario_kg, 0), 4),
+        custoUnitarioKg: toDec(custoFinalKg, 4),
         origemTipo: 'RECEBIMENTO',
         operadorCadastroNome: ctx.operador.nome,
         status: 'DISPONIVEL',
       })
+
+      if (pcItemMatchId && pcIdFinal) {
+        await tx
+          .update(pedidosCompraItens)
+          .set({
+            qtdKgRecebida: sql`${pedidosCompraItens.qtdKgRecebida} + ${toDec(pesagem.pesoLiquidoKg, 3)}`,
+          })
+          .where(eq(pedidosCompraItens.id, pcItemMatchId))
+        await tx
+          .update(pedidosCompra)
+          .set({ status: 'PARCIAL', updatedAt: new Date() })
+          .where(and(eq(pedidosCompra.id, pcIdFinal), eq(pedidosCompra.status, 'APROVADO')))
+      }
 
       if (paleteIdFinal) {
         await tx
@@ -1227,7 +1383,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
 
     await conn.db.transaction(async (tx) => {
       const lockRes = await tx.execute(sql`
-        SELECT id, ean_caixa, endereco, status, produto_id, peso_kg, lote
+        SELECT id, ean_caixa, endereco, status, produto_id, peso_kg, lote, recebimento_id
         FROM estoque_caixas
         WHERE id = ${caixaId} AND tenant_id = ${ctx.tenantId}
         FOR UPDATE
@@ -1241,6 +1397,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
             produto_id: string
             peso_kg: string
             lote: string
+            recebimento_id: string | null
           }
         | undefined
       if (!caixa) throw new HttpError(404, 'Caixa não encontrada.')
@@ -1249,6 +1406,27 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
       }
 
       await assertEnderecosNaoBloqueados(tx, ctx.tenantId, ctx.filialId, [caixa.endereco])
+
+      if (caixa.recebimento_id) {
+        const [rec] = await tx
+          .select({ pedidoCompraId: recebimentos.pedidoCompraId })
+          .from(recebimentos)
+          .where(eq(recebimentos.id, caixa.recebimento_id))
+          .limit(1)
+        if (rec?.pedidoCompraId) {
+          await tx
+            .update(pedidosCompraItens)
+            .set({
+              qtdKgRecebida: sql`GREATEST(0, ${pedidosCompraItens.qtdKgRecebida} - ${toDec(toNum(caixa.peso_kg, 0), 3)})`,
+            })
+            .where(
+              and(
+                eq(pedidosCompraItens.pedidoCompraId, rec.pedidoCompraId),
+                eq(pedidosCompraItens.produtoId, caixa.produto_id),
+              ),
+            )
+        }
+      }
 
       await tx
         .update(caixasHistorico)
