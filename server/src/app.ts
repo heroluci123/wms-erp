@@ -7,6 +7,11 @@ import { HttpError } from './middlewares/auth.js'
 import { registerAuthRoutes } from './modules/auth/routes.js'
 import { registerOperadoresRoutes } from './modules/operadores/routes.js'
 import { registerCadastrosRoutes } from './modules/cadastros/routes.js'
+import { registerEstoqueRoutes } from './modules/estoque/routes.js'
+import { registerProducaoRoutes } from './modules/producao/routes.js'
+import { registerInventarioRoutes } from './modules/inventario/routes.js'
+import { registerPedidosRoutes } from './modules/pedidos/routes.js'
+import { registerRelatoriosRoutes } from './modules/relatorios/routes.js'
 
 export async function buildApp(
   conn: DbConnection,
@@ -64,6 +69,11 @@ export async function buildApp(
   registerAuthRoutes(app, conn)
   registerOperadoresRoutes(app, conn)
   registerCadastrosRoutes(app, conn)
+  registerEstoqueRoutes(app, conn)
+  registerProducaoRoutes(app, conn)
+  registerInventarioRoutes(app, conn)
+  registerPedidosRoutes(app, conn)
+  registerRelatoriosRoutes(app, conn)
 
   return app
 }
