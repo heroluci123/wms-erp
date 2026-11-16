@@ -365,11 +365,44 @@ export const pedidosQueries = {
   },
 
   /** Cria novo pedido com itens */
-  async criarPedido({ titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], operador, liberar = true }) {
+  async criarPedido({
+    titulo,
+    cliente_id = null,
+    cliente = 'BEEF CONTAINER LIMITADA',
+    vendedor_id = null,
+    forma_pagamento_id = null,
+    local_cobranca_id = null,
+    natureza_id = null,
+    marchante = '',
+    pagamento_na_entrega,
+    previsao_entrega = null,
+    observacoes = '',
+    origem_pedido = 'SUPPLY_CHAIN',
+    setor_solicitante,
+    itens = [],
+    operador,
+    liberar = true,
+  }) {
     if (isApiEnabled()) {
       return apiRequest('/api/pedidos', {
         method: 'POST',
-        body: { titulo, cliente_id, cliente, previsao_entrega, observacoes, itens, liberar },
+        body: {
+          titulo,
+          cliente_id,
+          cliente,
+          vendedor_id,
+          forma_pagamento_id,
+          local_cobranca_id,
+          natureza_id,
+          marchante,
+          pagamento_na_entrega,
+          previsao_entrega,
+          observacoes,
+          origem_pedido,
+          setor_solicitante,
+          itens,
+          liberar,
+        },
       })
     }
     await assertPermissao('pedidos')
@@ -442,11 +475,40 @@ export const pedidosQueries = {
   },
 
   /** Atualiza pedido em status RASCUNHO ou LIBERADO */
-  async atualizarPedido({ id, titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], liberar }) {
+  async atualizarPedido({
+    id,
+    titulo,
+    cliente_id = null,
+    cliente = 'BEEF CONTAINER LIMITADA',
+    vendedor_id,
+    forma_pagamento_id,
+    local_cobranca_id,
+    natureza_id,
+    marchante,
+    pagamento_na_entrega,
+    previsao_entrega = null,
+    observacoes = '',
+    itens = [],
+    liberar,
+  }) {
     if (isApiEnabled()) {
       return apiRequest(`/api/pedidos/${id}`, {
         method: 'PUT',
-        body: { titulo, cliente_id, cliente, previsao_entrega, observacoes, itens, liberar },
+        body: {
+          titulo,
+          cliente_id,
+          cliente,
+          vendedor_id,
+          forma_pagamento_id,
+          local_cobranca_id,
+          natureza_id,
+          marchante,
+          pagamento_na_entrega,
+          previsao_entrega,
+          observacoes,
+          itens,
+          liberar,
+        },
       })
     }
     await assertPermissao('pedidos')
@@ -615,5 +677,24 @@ export const pedidosQueries = {
       `,
       args: [id]
     })
-  }
+  },
+
+  /** Clona um pedido existente em 1 clique */
+  async clonarPedido(id, { liberar = false } = {}) {
+    if (!isApiEnabled()) {
+      throw new Error('Clonagem rápida requer o Backend PostgreSQL ativo (VITE_API_URL).')
+    }
+    return apiRequest(`/api/pedidos/${id}/clonar`, {
+      method: 'POST',
+      body: { liberar },
+    })
+  },
+
+  /** Gera Ordem de Produção automática para os itens sem saldo do pedido */
+  async gerarOpAutomatica(id) {
+    if (!isApiEnabled()) {
+      throw new Error('Geração automática de OP por pedido requer o Backend PostgreSQL ativo (VITE_API_URL).')
+    }
+    return apiRequest(`/api/pedidos/${id}/gerar-op`, { method: 'POST' })
+  },
 }

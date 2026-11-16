@@ -39,6 +39,8 @@ import { Vendedores } from './pages/Vendedores'
 import { TransportadorasRotas } from './pages/TransportadorasRotas'
 import { EmpresasFiliais } from './pages/EmpresasFiliais'
 import { ParametrosComerciais } from './pages/ParametrosComerciais'
+import { CentralPendencias } from './pages/CentralPendencias'
+import { WhatsappInbox } from './pages/WhatsappInbox'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -98,7 +100,9 @@ function App() {
           <Route path="desmembramento" element={<RequirePermissao permissoes={['desmembramento']} element={<Desmembramento />} />} />
           <Route path="reimpressao" element={<RequirePermissao permissoes={['reimpressao']} element={<ReimpressaoEtiquetas />} />} />
           <Route path="taras" element={<RequirePermissao permissoes={['taras']} element={<Taras />} />} />
-          <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos']} element={<Pedidos />} />} />
+          <Route path="pendencias" element={<RequirePermissao allowCliente={false} element={<CentralPendencias />} />} />
+          <Route path="whatsapp-inbox" element={<RequirePermissao permissoes={['whatsapp_inbox', 'pedidos']} element={<WhatsappInbox />} />} />
+          <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos', 'financeiro_pedidos']} element={<Pedidos />} />} />
           <Route path="saida" element={<RequirePermissao permissoes={['saida', 'expedicao']} element={<Saida />} />} />
 
           <Route path="inventario" element={<RequirePermissao permissoes={['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial']} element={<Inventario />} />} />

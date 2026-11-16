@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2 } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -339,6 +339,8 @@ function Sidebar() {
     'desmembramento',
     'reimpressao',
     'pedidos',
+    'financeiro_pedidos',
+    'whatsapp_inbox',
     'saida',
     'expedicao',
   ])
@@ -372,6 +374,9 @@ function Sidebar() {
       )}
       <NavLink to="/" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
         <Package size={18} /> {temPermissao(operador, 'dashboard_executivo') ? 'Dashboard' : 'Início / Operações'}
+      </NavLink>
+      <NavLink to="/pendencias" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+        <BellRing size={18} /> Central de Pendências
       </NavLink>
       {temPermissao(operador, 'estoque_enderecos') && (
         <NavLink to="/estoque" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
@@ -418,7 +423,12 @@ function Sidebar() {
           <Printer size={18} /> Reimpressão Etiquetas
         </NavLink>
       )}
-      {temPermissao(operador, 'pedidos') && (
+      {temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos']) && (
+        <NavLink to="/whatsapp-inbox" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <MessageSquare size={18} /> Entrada WhatsApp
+        </NavLink>
+      )}
+      {temAlgumaPermissao(operador, ['pedidos', 'financeiro_pedidos']) && (
         <NavLink to="/pedidos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ClipboardList size={18} /> Pedidos
         </NavLink>

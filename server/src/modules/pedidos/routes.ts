@@ -4,18 +4,28 @@ import type { DbConnection } from '../../db/client.js'
 import {
   clientes,
   estoqueCaixas,
+  formasPagamento,
+  locaisCobranca,
+  naturezasOperacao,
+  opItensPrevistos,
+  ordensProducao,
   pedidos,
   pedidosItens,
+  pedidosParcelas,
   pendenciasSetor,
+  produtoArvore,
   produtos,
   romaneios,
   romaneiosItens,
+  vendedores,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { calcularESalvarParcelas } from './parcelasHelper.js'
 import {
   assertEnderecosNaoBloqueados,
   gerarCodigoDocumento,
+  hojeIsoLocal,
   normalizarDataIso,
   parseUuidOrBadRequest,
   recalcularPosicaoEnderecos,
@@ -25,7 +35,7 @@ import {
   toNum,
 } from '../wms/helpers.js'
 
-const PERM_PED_READ = ['pedidos_consultar', 'pedidos', 'saida', 'expedicao']
+const PERM_PED_READ = ['pedidos_consultar', 'pedidos', 'financeiro_pedidos', 'saida', 'expedicao']
 
 interface ItemPedidoInput {
   produto_id: string
@@ -39,6 +49,7 @@ interface ItemPedidoInput {
   cfop_aplicado?: string
   codigo_aux?: string
   observacao?: string
+  alerta_reclamacao?: string
 }
 
 function consolidarItensPedido(itens: ItemPedidoInput[]) {
@@ -56,6 +67,7 @@ function consolidarItensPedido(itens: ItemPedidoInput[]) {
       cfop_aplicado: string
       codigo_aux: string
       observacao: string
+      alerta_reclamacao: string
     }
   >()
 
@@ -88,6 +100,7 @@ function consolidarItensPedido(itens: ItemPedidoInput[]) {
         prev.qtd_solicitada_exibicao = prev.qtd_kg_solicitada
       }
       if (item.observacao && !prev.observacao) prev.observacao = String(item.observacao).trim()
+      if (item.alerta_reclamacao && !prev.alerta_reclamacao) prev.alerta_reclamacao = String(item.alerta_reclamacao).trim()
     } else {
       consolidados.set(pid, {
         produto_id: pid,
@@ -101,6 +114,7 @@ function consolidarItensPedido(itens: ItemPedidoInput[]) {
         cfop_aplicado: String(item.cfop_aplicado || '').trim(),
         codigo_aux: String(item.codigo_aux || '').trim(),
         observacao: String(item.observacao || '').trim(),
+        alerta_reclamacao: String(item.alerta_reclamacao || '').trim(),
       })
     }
   }
@@ -153,6 +167,8 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           created_at: pedidos.createdAt,
           liberado_at: pedidos.liberadoAt,
           expedido_at: pedidos.expedidoAt,
+          vendedor_nome: sql<string | null>`(SELECT v.nome FROM vendedores v WHERE v.id = ${pedidos.vendedorId} LIMIT 1)`,
+          forma_pagamento_descricao: sql<string | null>`(SELECT fp.descricao FROM formas_pagamento fp WHERE fp.id = ${pedidos.formaPagamentoId} LIMIT 1)`,
           qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = ${pedidos.id})`,
           total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = ${pedidos.id}), 0)`,
           romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = ${pedidos.id} ORDER BY r.created_at DESC LIMIT 1)`,
@@ -191,7 +207,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           descricao: produtos.descricao,
           unidade: produtos.unidade,
           grupo: produtos.grupo,
+          classificacao: produtos.classificacao,
           valor_unitario: produtos.valorUnitario,
+          custo_medio_kg: produtos.custoMedioKg,
           peso_padrao_cx: produtos.pesoPadraoCx,
           saldo_caixas: sql<number>`COUNT(${estoqueCaixas.id})::int`,
           saldo_kg: sql<string>`COALESCE(ROUND(SUM(${estoqueCaixas.pesoKg}), 3), 0)`,
@@ -221,6 +239,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         data: rows.map((r) => ({
           ...r,
           valor_unitario: toNum(r.valor_unitario, 0),
+          custo_medio_kg: toNum(r.custo_medio_kg, 0),
           peso_padrao_cx: r.peso_padrao_cx != null ? toNum(r.peso_padrao_cx, 0) : null,
           saldo_kg: toNum(r.saldo_kg, 0),
           peso_medio_cx: toNum(r.peso_medio_cx, 0),
@@ -284,6 +303,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           desconto_valor: pedidosItens.descontoValor,
           cfop_aplicado: pedidosItens.cfopAplicado,
           observacao: pedidosItens.observacao,
+          alerta_reclamacao: pedidosItens.alertaReclamacao,
           produto_codigo: produtos.codigo,
           produto_ean: produtos.ean,
           produto_descricao: produtos.descricao,
@@ -330,6 +350,26 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             .orderBy(romaneiosItens.createdAt)
         : []
 
+      const [parcelasRows, vendRow, fpRow, lcRow, natRow] = await Promise.all([
+        conn.db
+          .select()
+          .from(pedidosParcelas)
+          .where(eq(pedidosParcelas.pedidoId, pedidoId))
+          .orderBy(pedidosParcelas.numeroParcela),
+        pedido.vendedorId
+          ? conn.db.select({ nome: vendedores.nome, sigla: vendedores.sigla }).from(vendedores).where(eq(vendedores.id, pedido.vendedorId)).limit(1)
+          : Promise.resolve([]),
+        pedido.formaPagamentoId
+          ? conn.db.select({ descricao: formasPagamento.descricao, dias: formasPagamento.diasParcelasJson }).from(formasPagamento).where(eq(formasPagamento.id, pedido.formaPagamentoId)).limit(1)
+          : Promise.resolve([]),
+        pedido.localCobrancaId
+          ? conn.db.select({ nome: locaisCobranca.nome }).from(locaisCobranca).where(eq(locaisCobranca.id, pedido.localCobrancaId)).limit(1)
+          : Promise.resolve([]),
+        pedido.naturezaId
+          ? conn.db.select({ descricao: naturezasOperacao.descricao }).from(naturezasOperacao).where(eq(naturezasOperacao.id, pedido.naturezaId)).limit(1)
+          : Promise.resolve([]),
+      ])
+
       return {
         data: {
           id: pedido.id,
@@ -338,9 +378,15 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           cliente_id: pedido.clienteId,
           cliente: pedido.cliente,
           vendedor_id: pedido.vendedorId,
+          vendedor_nome: vendRow[0]?.nome || null,
+          vendedor_sigla: vendRow[0]?.sigla || null,
           forma_pagamento_id: pedido.formaPagamentoId,
+          forma_pagamento_descricao: fpRow[0]?.descricao || null,
+          forma_pagamento_dias: fpRow[0]?.dias || null,
           local_cobranca_id: pedido.localCobrancaId,
+          local_cobranca_nome: lcRow[0]?.nome || null,
           natureza_id: pedido.naturezaId,
+          natureza_descricao: natRow[0]?.descricao || null,
           marchante: pedido.marchante,
           pagamento_na_entrega: pedido.pagamentoNaEntrega,
           previsao_entrega: pedido.previsaoEntrega,
@@ -359,6 +405,13 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           operador_conferencia_nome: rom?.operadorConferenciaNome || null,
           operador_expedicao_nome: rom?.operadorExpedicaoNome || null,
           cliente_dados: clienteDados,
+          parcelas: parcelasRows.map((p) => ({
+            id: p.id,
+            numero_parcela: p.numeroParcela,
+            dias_prazo: p.diasPrazo,
+            vencimento: p.vencimento,
+            valor: toNum(p.valor, 0),
+          })),
           itens: itens.map((it) => ({
             ...it,
             qtd_kg_solicitada: toNum(it.qtd_kg_solicitada, 0),
@@ -521,8 +574,20 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           descontoValor: toDec(it.desconto_valor, 2),
           cfopAplicado: it.cfop_aplicado,
           observacao: it.observacao,
+          alertaReclamacao: it.alerta_reclamacao,
         })),
       )
+
+      await calcularESalvarParcelas(tx, {
+        tenantId: ctx.tenantId,
+        pedidoId,
+        formaPagamentoId:
+          body.forma_pagamento_id
+            ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id')
+            : cliDefaults?.formaPagamentoPadraoId || null,
+        valorTotal,
+        dataBaseIso: body.previsao_entrega,
+      })
 
       return { id: pedidoId, codigo, status }
     })
@@ -537,6 +602,12 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       titulo: string
       cliente_id?: string | null
       cliente?: string
+      vendedor_id?: string | null
+      forma_pagamento_id?: string | null
+      local_cobranca_id?: string | null
+      natureza_id?: string | null
+      marchante?: string
+      pagamento_na_entrega?: boolean | number
       previsao_entrega?: string | null
       observacoes?: string
       liberar?: boolean
@@ -569,6 +640,13 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         0,
       )
 
+      const formaPgtoFinal =
+        body.forma_pagamento_id !== undefined
+          ? body.forma_pagamento_id
+            ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id')
+            : null
+          : atual.formaPagamentoId
+
       await tx
         .update(pedidos)
         .set({
@@ -577,6 +655,32 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             ? parseUuidOrBadRequest(body.cliente_id, 'cliente_id')
             : atual.clienteId,
           cliente: body.cliente ? body.cliente.trim() : atual.cliente,
+          vendedorId:
+            body.vendedor_id !== undefined
+              ? body.vendedor_id
+                ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
+                : null
+              : atual.vendedorId,
+          formaPagamentoId: formaPgtoFinal,
+          localCobrancaId:
+            body.local_cobranca_id !== undefined
+              ? body.local_cobranca_id
+                ? parseUuidOrBadRequest(body.local_cobranca_id, 'local_cobranca_id')
+                : null
+              : atual.localCobrancaId,
+          naturezaId:
+            body.natureza_id !== undefined
+              ? body.natureza_id
+                ? parseUuidOrBadRequest(body.natureza_id, 'natureza_id')
+                : null
+              : atual.naturezaId,
+          marchante: body.marchante !== undefined ? String(body.marchante || '').trim() : atual.marchante,
+          pagamentoNaEntrega:
+            body.pagamento_na_entrega !== undefined
+              ? body.pagamento_na_entrega
+                ? 1
+                : 0
+              : atual.pagamentoNaEntrega,
           previsaoEntrega: normalizarDataIso(body.previsao_entrega),
           valorTotal: toDec(valorTotal, 2),
           observacoes: body.observacoes != null ? body.observacoes.trim() : atual.observacoes,
@@ -604,8 +708,24 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           descontoValor: toDec(it.desconto_valor, 2),
           cfopAplicado: it.cfop_aplicado,
           observacao: it.observacao,
+          alertaReclamacao: it.alerta_reclamacao,
         })),
       )
+
+      await calcularESalvarParcelas(tx, {
+        tenantId: ctx.tenantId,
+        pedidoId,
+        formaPagamentoId: formaPgtoFinal,
+        valorTotal,
+        dataBaseIso: body.previsao_entrega,
+      })
+
+      if (nextStatus === 'LIBERADO') {
+        await tx
+          .update(pendenciasSetor)
+          .set({ status: 'CONCLUIDA', concluidaPorId: ctx.operador.id, concluidaAt: new Date() })
+          .where(and(eq(pendenciasSetor.tenantId, ctx.tenantId), eq(pendenciasSetor.referenciaId, pedidoId)))
+      }
 
       return nextStatus
     })
@@ -616,20 +736,239 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
   app.post('/api/pedidos/:id/liberar', { preHandler: requirePermission('pedidos') }, async (req) => {
     const ctx = req.authCtx!
     const pedidoId = parseUuidOrBadRequest((req.params as { id: string }).id, 'pedido_id')
-    const [ped] = await conn.db
-      .select({ status: pedidos.status })
-      .from(pedidos)
-      .where(and(eq(pedidos.id, pedidoId), eq(pedidos.tenantId, ctx.tenantId)))
-      .limit(1)
-    if (!ped) throw new HttpError(404, 'Pedido não encontrado.')
-    if (ped.status !== 'RASCUNHO') {
-      throw new HttpError(400, 'Somente pedidos em RASCUNHO podem ser liberados.')
-    }
-    await conn.db
-      .update(pedidos)
-      .set({ status: 'LIBERADO', liberadoAt: new Date(), updatedAt: new Date() })
-      .where(eq(pedidos.id, pedidoId))
+    await conn.db.transaction(async (tx) => {
+      const [ped] = await tx
+        .select({ status: pedidos.status })
+        .from(pedidos)
+        .where(and(eq(pedidos.id, pedidoId), eq(pedidos.tenantId, ctx.tenantId)))
+        .limit(1)
+      if (!ped) throw new HttpError(404, 'Pedido não encontrado.')
+      if (ped.status !== 'RASCUNHO') {
+        throw new HttpError(400, 'Somente pedidos em RASCUNHO podem ser liberados.')
+      }
+      await tx
+        .update(pedidos)
+        .set({ status: 'LIBERADO', liberadoAt: new Date(), updatedAt: new Date() })
+        .where(eq(pedidos.id, pedidoId))
+      await tx
+        .update(pendenciasSetor)
+        .set({ status: 'CONCLUIDA', concluidaPorId: ctx.operador.id, concluidaAt: new Date() })
+        .where(and(eq(pendenciasSetor.tenantId, ctx.tenantId), eq(pendenciasSetor.referenciaId, pedidoId)))
+    })
     return { success: true }
+  })
+
+  // Clonar Pedido (com todos os itens, condicoes comerciais e parcelas)
+  app.post('/api/pedidos/:id/clonar', { preHandler: requirePermission(['pedidos', 'financeiro_pedidos']) }, async (req, reply) => {
+    const ctx = req.authCtx!
+    const origId = parseUuidOrBadRequest((req.params as { id: string }).id, 'pedido_id')
+    const liberar = Boolean((req.body as { liberar?: boolean })?.liberar)
+
+    const cloned = await conn.db.transaction(async (tx) => {
+      const [orig] = await tx
+        .select()
+        .from(pedidos)
+        .where(and(eq(pedidos.id, origId), eq(pedidos.tenantId, ctx.tenantId)))
+        .limit(1)
+      if (!orig) throw new HttpError(404, 'Pedido original não encontrado.')
+
+      const itensOrig = await tx.select().from(pedidosItens).where(eq(pedidosItens.pedidoId, origId))
+      const novoCodigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'PEDIDO', 'PED', 4)
+      const novoId = uuidv7()
+      const status = liberar ? 'LIBERADO' : 'RASCUNHO'
+
+      await tx.insert(pedidos).values({
+        id: novoId,
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        codigo: novoCodigo,
+        titulo: `${orig.titulo} (Cópia)`,
+        clienteId: orig.clienteId,
+        cliente: orig.cliente,
+        vendedorId: orig.vendedorId,
+        formaPagamentoId: orig.formaPagamentoId,
+        localCobrancaId: orig.localCobrancaId,
+        naturezaId: orig.naturezaId,
+        marchante: orig.marchante,
+        pagamentoNaEntrega: orig.pagamentoNaEntrega,
+        previsaoEntrega: orig.previsaoEntrega,
+        valorTotal: orig.valorTotal,
+        observacoes: orig.observacoes,
+        origemPedido: orig.origemPedido,
+        setorSolicitante: orig.setorSolicitante,
+        status,
+        rastreioToken: uuidv7(),
+        criadoPorId: ctx.operador.id,
+        criadoPorNome: ctx.operador.nome,
+        liberadoAt: status === 'LIBERADO' ? new Date() : null,
+      })
+
+      if (itensOrig.length > 0) {
+        await tx.insert(pedidosItens).values(
+          itensOrig.map((it) => ({
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            pedidoId: novoId,
+            produtoId: it.produtoId,
+            codigoAux: it.codigoAux,
+            qtdKgSolicitada: it.qtdKgSolicitada,
+            qtdCaixasSolicitada: it.qtdCaixasSolicitada,
+            unidadeSolicitada: it.unidadeSolicitada,
+            qtdSolicitadaExibicao: it.qtdSolicitadaExibicao,
+            precoUnitario: it.precoUnitario,
+            descontoPct: it.descontoPct,
+            descontoValor: it.descontoValor,
+            cfopAplicado: it.cfopAplicado,
+            observacao: it.observacao,
+            alertaReclamacao: it.alertaReclamacao,
+          }))
+        )
+      }
+
+      await calcularESalvarParcelas(tx, {
+        tenantId: ctx.tenantId,
+        pedidoId: novoId,
+        formaPagamentoId: orig.formaPagamentoId,
+        valorTotal: toNum(orig.valorTotal, 0),
+        dataBaseIso: orig.previsaoEntrega,
+      })
+
+      return { id: novoId, codigo: novoCodigo, status }
+    })
+
+    return reply.status(201).send({ success: true, ...cloned })
+  })
+
+  // Trava Inteligente: Gera Ordem de Producao automatica para itens sem saldo suficiente
+  app.post('/api/pedidos/:id/gerar-op', { preHandler: requirePermission(['pedidos', 'producao_criar_op']) }, async (req, reply) => {
+    const ctx = req.authCtx!
+    const pedidoId = parseUuidOrBadRequest((req.params as { id: string }).id, 'pedido_id')
+
+    const resOp = await conn.db.transaction(async (tx) => {
+      const [ped] = await tx
+        .select()
+        .from(pedidos)
+        .where(and(eq(pedidos.id, pedidoId), eq(pedidos.tenantId, ctx.tenantId)))
+        .limit(1)
+      if (!ped) throw new HttpError(404, 'Pedido não encontrado.')
+
+      const itens = await tx.select().from(pedidosItens).where(eq(pedidosItens.pedidoId, pedidoId))
+      if (itens.length === 0) throw new HttpError(400, 'Pedido sem itens para gerar produção.')
+
+      const prodIds = itens.map((i) => i.produtoId)
+      const [saldosRes, arvores] = await Promise.all([
+        tx
+          .select({
+            produto_id: estoqueCaixas.produtoId,
+            saldo_kg: sql<string>`COALESCE(ROUND(SUM(${estoqueCaixas.pesoKg}), 3), 0)`,
+          })
+          .from(estoqueCaixas)
+          .where(
+            and(
+              eq(estoqueCaixas.tenantId, ctx.tenantId),
+              eq(estoqueCaixas.filialId, ctx.filialId),
+              eq(estoqueCaixas.status, 'DISPONIVEL'),
+              inArray(estoqueCaixas.produtoId, prodIds)
+            )
+          )
+          .groupBy(estoqueCaixas.produtoId),
+        tx
+          .select()
+          .from(produtoArvore)
+          .where(and(eq(produtoArvore.tenantId, ctx.tenantId), inArray(produtoArvore.filhoId, prodIds))),
+      ])
+
+      const saldoMap = new Map(saldosRes.map((s) => [s.produto_id, toNum(s.saldo_kg, 0)]))
+      const faltantes = itens
+        .map((it) => {
+          const disp = saldoMap.get(it.produtoId) || 0
+          const sol = toNum(it.qtdKgSolicitada, 0)
+          const deficit = Number(Math.max(0, sol - disp).toFixed(3))
+          return { item: it, deficit }
+        })
+        .filter((x) => x.deficit > 0)
+
+      if (faltantes.length === 0) {
+        throw new HttpError(400, 'Todos os itens deste pedido já possuem estoque suficiente.')
+      }
+
+      const mpNecessarias = new Map<string, number>()
+      for (const f of faltantes) {
+        const vinculos = arvores.filter((a) => a.filhoId === f.item.produtoId)
+        if (vinculos.length > 0) {
+          const v = vinculos[0]
+          const rend = toNum(v.rendimentoAprendidoPct ?? v.rendimentoEsperadoPct, 100)
+          const factor = rend > 5 && rend <= 100 ? rend / 100 : 1
+          const kgMp = Number((f.deficit / factor).toFixed(3))
+          mpNecessarias.set(v.paiId, Number(((mpNecessarias.get(v.paiId) || 0) + kgMp).toFixed(3)))
+        }
+      }
+
+      const opCodigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'OP', 'OP', 3)
+      const opId = uuidv7()
+
+      await tx.insert(ordensProducao).values({
+        id: opId,
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        codigo: opCodigo,
+        nome: `Produção p/ ${ped.codigo} — ${ped.cliente}`,
+        status: 'LIBERADA',
+        operadorId: ctx.operador.id,
+        operadorNome: ctx.operador.nome,
+        cliente: ped.cliente,
+        endereco: 'PRODUCAO',
+        dataProducao: ped.previsaoEntrega || hojeIsoLocal(),
+        observacoes: `Gerada automaticamente pelo ${ped.codigo} (itens sem saldo).`,
+        criadoPorId: ctx.operador.id,
+        criadoPorNome: ctx.operador.nome,
+        liberadaEm: new Date(),
+      })
+
+      const previstosInsert: Array<typeof opItensPrevistos.$inferInsert> = []
+      for (const [mpId, kgMp] of mpNecessarias.entries()) {
+        previstosInsert.push({
+          id: uuidv7(),
+          tenantId: ctx.tenantId,
+          opId,
+          tipo: 'ENTRADA',
+          produtoId: mpId,
+          pesoKgPrevisto: toDec(kgMp, 3),
+          unidadePrevista: 'KG',
+          observacao: `MP sugerida via Árvore p/ ${ped.codigo}`,
+        })
+      }
+      for (const f of faltantes) {
+        previstosInsert.push({
+          id: uuidv7(),
+          tenantId: ctx.tenantId,
+          opId,
+          tipo: 'SAIDA',
+          produtoId: f.item.produtoId,
+          pesoKgPrevisto: toDec(f.deficit, 3),
+          unidadePrevista: 'KG',
+          observacao: [f.item.observacao, f.item.alertaReclamacao].filter(Boolean).join(' | '),
+        })
+      }
+      await tx.insert(opItensPrevistos).values(previstosInsert)
+
+      await tx.insert(pendenciasSetor).values({
+        id: uuidv7(),
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        setorDestino: 'PCP',
+        tipoPendencia: 'OP_POR_PEDIDO',
+        referenciaTabela: 'ordens_producao',
+        referenciaId: opId,
+        titulo: `${opCodigo}: Produzir ${faltantes.length} corte(s) faltante(s) para ${ped.codigo} (${ped.cliente})`,
+        prioridade: 4,
+        status: 'PENDENTE',
+      })
+
+      return { op_id: opId, op_codigo: opCodigo, itens_sem_saldo: faltantes.length }
+    })
+
+    return reply.status(201).send({ success: true, ...resOp })
   })
 
   app.post('/api/pedidos/:id/cancelar', { preHandler: requirePermission('pedidos') }, async (req) => {

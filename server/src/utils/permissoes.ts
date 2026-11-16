@@ -18,6 +18,7 @@ export const TODAS_CHAVES_PERMISSAO = [
   'expedicao',
   'pedidos',
   'financeiro_pedidos',
+  'whatsapp_inbox',
   'estoque_enderecos',
   'consulta_estoque',
   'rastreabilidade',
@@ -66,6 +67,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set<string>([
   'pedidos',
   'pedidos_consultar',
   'financeiro_pedidos',
+  'whatsapp_inbox',
   'saida',
   'expedicao',
   'ean_etiquetas',
@@ -272,8 +274,11 @@ export function sanitizarPermissoes(
   if (obj?.pedidos && obj?.clientes === undefined) {
     mapa.clientes = true
   }
+  if ((obj?.pedidos || obj?.financeiro_pedidos) && obj?.whatsapp_inbox === undefined) {
+    mapa.whatsapp_inbox = true
+  }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos'] as const) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox'] as const) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }

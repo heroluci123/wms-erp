@@ -17,9 +17,16 @@ import {
   RefreshCw,
   Scale,
   Box,
-  Tag
+  Tag,
+  Copy,
+  Zap,
+  MessageSquare,
+  DollarSign
 } from 'lucide-react'
 import { pedidosQueries } from '../queries/pedidos'
+import { cadastrosQueries } from '../queries/cadastros'
+import { whatsappQueries } from '../queries/whatsapp'
+import { isApiEnabled } from '../lib/apiClient'
 import * as saidaQueries from '../queries/saida'
 import { useAppStore } from '../store/appStore'
 import { temPermissao } from '../utils/permissoes'
@@ -35,6 +42,14 @@ const STATUS_BADGE = {
   EM_CONFERENCIA: { label: 'Em Conferência', cls: 'badge--warning' },
   EXPEDIDO: { label: 'Expedido', cls: 'badge--success' },
   CANCELADO: { label: 'Cancelado', cls: 'badge--danger' }
+}
+
+const ORIGEM_BADGE = {
+  SUPPLY_CHAIN: { label: 'Supply Chain', cls: 'badge--info' },
+  FINANCEIRO: { label: 'Financeiro', cls: 'badge--warning' },
+  WHATSAPP: { label: 'WhatsApp', cls: 'badge--success' },
+  VENDEDOR: { label: 'Vendedor', cls: 'badge--purple' },
+  PORTAL: { label: 'Portal', cls: 'badge--neutral' },
 }
 
 const normTxt = (v) =>
@@ -82,12 +97,20 @@ const fmtDataHora = (d) => {
 export function Pedidos() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   const podeGerenciarPedidos = temPermissao(operador, 'pedidos')
+  const podeFinanceiroPedidos = temPermissao(operador, 'financeiro_pedidos')
+  const podeAcessarTela = podeGerenciarPedidos || podeFinanceiroPedidos
+  const somenteFinanceiro = podeFinanceiroPedidos && !podeGerenciarPedidos
+  const apiAtiva = isApiEnabled()
 
   const [aba, setAba] = useState('GERENCIADOR') // 'GERENCIADOR' | 'FORM'
   const [loading, setLoading] = useState(false)
   const [pedidos, setPedidos] = useState([])
   const [produtos, setProdutos] = useState([])
   const [clientes, setClientes] = useState([])
+  const [vendedores, setVendedores] = useState([])
+  const [auxiliares, setAuxiliares] = useState({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] })
+  const [especificacoesCliente, setEspecificacoesCliente] = useState([])
+  const [cfopSugerido, setCfopSugerido] = useState(null)
 
   // Filtros do Gerenciador
   const [filtroStatus, setFiltroStatus] = useState('TODOS')
@@ -100,6 +123,13 @@ export function Pedidos() {
   const [editCodigo, setEditCodigo] = useState('')
   const [titulo, setTitulo] = useState('')
   const [clienteIdSelecionado, setClienteIdSelecionado] = useState(null)
+  const [origemPedido, setOrigemPedido] = useState(somenteFinanceiro ? 'FINANCEIRO' : 'SUPPLY_CHAIN')
+  const [vendedorId, setVendedorId] = useState('')
+  const [formaPagamentoId, setFormaPagamentoId] = useState('')
+  const [localCobrancaId, setLocalCobrancaId] = useState('')
+  const [naturezaId, setNaturezaId] = useState('')
+  const [marchante, setMarchante] = useState('')
+  const [pagamentoNaEntrega, setPagamentoNaEntrega] = useState(0)
   const [mostrarTrocaCliente, setMostrarTrocaCliente] = useState(false)
   const [modalNovoClienteAberto, setModalNovoClienteAberto] = useState(false)
   const [novoCliForm, setNovoCliForm] = useState({
@@ -118,14 +148,18 @@ export function Pedidos() {
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
   const [indiceSugestao, setIndiceSugestao] = useState(-1)
 
-  // Modal da lupa
+  // Modal da lupa e WhatsApp
   const [modalBuscaAberto, setModalBuscaAberto] = useState(false)
   const [modalBuscaTexto, setModalBuscaTexto] = useState('')
   const [modalSomenteComSaldo, setModalSomenteComSaldo] = useState(false)
+  const [modalWhatsappAberto, setModalWhatsappAberto] = useState(false)
+  const [whatsappTextoInput, setWhatsappTextoInput] = useState('')
+  const [parseandoWpp, setParseandoWpp] = useState(false)
 
-  // Quantidade, Unidade (KG padrão / CX) e Peso Manual fallback
+  // Quantidade, Preço, Unidade (KG padrão / CX) e Peso Manual fallback
   const [unidadeInput, setUnidadeInput] = useState('KG') // 'KG' | 'CX'
   const [qtdInput, setQtdInput] = useState('')
+  const [precoUnitInput, setPrecoUnitInput] = useState('')
   const [pesoManualCxInput, setPesoManualCxInput] = useState('')
   const [obsItemInput, setObsItemInput] = useState('')
 
@@ -149,7 +183,7 @@ export function Pedidos() {
   const carregarDados = async () => {
     setLoading(true)
     try {
-      const [listaPed, listaProd, listaCli] = await Promise.all([
+      const [listaPed, listaProd, listaCli, listaVend, auxData] = await Promise.all([
         pedidosQueries.listarPedidos({
           status: filtroStatus,
           busca: filtroBusca,
@@ -157,11 +191,15 @@ export function Pedidos() {
           dataFim: dataFim || null
         }),
         pedidosQueries.listarSaldosProdutosParaPedido(),
-        pedidosQueries.listarClientes()
+        pedidosQueries.listarClientes(),
+        apiAtiva ? cadastrosQueries.listarVendedores().catch(() => []) : Promise.resolve([]),
+        apiAtiva ? cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] })) : Promise.resolve({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] }),
       ])
       setPedidos(listaPed)
       setProdutos(listaProd)
       setClientes(listaCli)
+      setVendedores(listaVend || [])
+      setAuxiliares(auxData || { formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] })
       if (!clienteIdSelecionado && listaCli.length > 0) {
         const pad = listaCli.find((c) => Number(c.is_padrao) === 1) || listaCli[0]
         setClienteIdSelecionado(pad.id)
@@ -174,10 +212,10 @@ export function Pedidos() {
   }
 
   useEffect(() => {
-    if (podeGerenciarPedidos) {
+    if (podeAcessarTela) {
       carregarDados()
     }
-  }, [podeGerenciarPedidos, filtroStatus, dataInicio, dataFim])
+  }, [podeAcessarTela, filtroStatus, dataInicio, dataFim])
 
   useEffect(() => {
     if (modalBuscaAberto) {
@@ -231,6 +269,7 @@ export function Pedidos() {
     setIndiceSugestao(-1)
     setUnidadeInput('KG')
     setQtdInput('')
+    setPrecoUnitInput('')
     setPesoManualCxInput('')
     setObsItemInput('')
     if (focarCodigo) {
@@ -248,11 +287,44 @@ export function Pedidos() {
     [clientes, clienteIdSelecionado, clientePadrao]
   )
 
+  const aplicarRegrasDoCliente = async (cli, preservarCamposEdit = false) => {
+    if (!apiAtiva || !cli) return
+    try {
+      const [especs, cfopRes] = await Promise.all([
+        cadastrosQueries.listarEspecificacoesCliente(cli.id).catch(() => []),
+        cadastrosQueries.sugerirCfop({ tipo_movimento: 'SAIDA', finalidade: 'REVENDA', uf_parceiro: cli.uf || 'SP' }).catch(() => null),
+      ])
+      setEspecificacoesCliente(especs || [])
+      setCfopSugerido(cfopRes || null)
+      if (!preservarCamposEdit) {
+        setVendedorId(cli.vendedor_padrao_id || '')
+        setFormaPagamentoId(cli.forma_pagamento_padrao_id || '')
+        setLocalCobrancaId(cli.local_cobranca_padrao_id || '')
+        setMarchante(cli.marchante_padrao || '')
+        setPagamentoNaEntrega(Number(cli.permite_pagamento_entrega ?? 0))
+        if (cfopRes?.natureza_id) setNaturezaId(cfopRes.natureza_id)
+      }
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => {
+    if (apiAtiva && clienteAtivo?.id && !editId && aba === 'FORM') {
+      aplicarRegrasDoCliente(clienteAtivo, false)
+    }
+  }, [clienteAtivo?.id, aba, editId, apiAtiva])
+
   const resetarFormulario = () => {
     setEditId(null)
     setEditCodigo('')
     setTitulo('')
     setClienteIdSelecionado(clientePadrao?.id || null)
+    setOrigemPedido(somenteFinanceiro ? 'FINANCEIRO' : 'SUPPLY_CHAIN')
+    setVendedorId(clientePadrao?.vendedor_padrao_id || '')
+    setFormaPagamentoId(clientePadrao?.forma_pagamento_padrao_id || '')
+    setLocalCobrancaId(clientePadrao?.local_cobranca_padrao_id || '')
+    setNaturezaId('')
+    setMarchante(clientePadrao?.marchante_padrao || '')
+    setPagamentoNaEntrega(Number(clientePadrao?.permite_pagamento_entrega ?? 0))
     setMostrarTrocaCliente(false)
     setPrevisaoEntrega('')
     setObservacoes('')
@@ -267,6 +339,12 @@ export function Pedidos() {
     setMostrarSugestoes(false)
     setIndiceSugestao(-1)
     setPesoManualCxInput('')
+    const espec = especificacoesCliente.find((e) => String(e.produto_id) === String(prod.id))
+    const precoSug = espec?.preco_negociado ?? espec?.ultima_venda_preco ?? prod.valor_unitario ?? 0
+    setPrecoUnitInput(precoSug > 0 ? String(precoSug) : '')
+    if (espec?.especificacao_corte && !obsItemInput) {
+      setObsItemInput(espec.especificacao_corte)
+    }
     if (focarQtd) {
       setTimeout(() => {
         qtdRef.current?.focus()
@@ -445,6 +523,17 @@ export function Pedidos() {
       setEditCodigo(ped.codigo)
       setTitulo(ped.titulo || '')
       setClienteIdSelecionado(ped.cliente_id || clientePadrao?.id || null)
+      setOrigemPedido(ped.origem_pedido || 'SUPPLY_CHAIN')
+      setVendedorId(ped.vendedor_id || '')
+      setFormaPagamentoId(ped.forma_pagamento_id || '')
+      setLocalCobrancaId(ped.local_cobranca_id || '')
+      setNaturezaId(ped.natureza_id || '')
+      setMarchante(ped.marchante || '')
+      setPagamentoNaEntrega(Number(ped.pagamento_na_entrega || 0))
+      if (apiAtiva && ped.cliente_id) {
+        const cliObj = clientes.find((c) => String(c.id) === String(ped.cliente_id))
+        if (cliObj) aplicarRegrasDoCliente(cliObj, true)
+      }
       setMostrarTrocaCliente(false)
       setPrevisaoEntrega(ped.previsao_entrega ? String(ped.previsao_entrega).slice(0, 10) : '')
       setObservacoes(ped.observacoes || '')
@@ -453,6 +542,7 @@ export function Pedidos() {
           produto_id: it.produto_id,
           produto_codigo: it.produto_codigo,
           produto_descricao: it.produto_descricao,
+          codigo_aux: it.codigo_aux || '',
           saldo_kg: Number(it.estoque_disponivel_kg || 0),
           qtd_caixas_estoque: Number(it.estoque_disponivel_caixas || 0),
           peso_medio_cx: Number(it.peso_medio_cx || 0),
@@ -460,7 +550,10 @@ export function Pedidos() {
           qtd_caixas_solicitada: it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : '',
           unidade_solicitada: it.unidade_solicitada === 'CX' ? 'CX' : 'KG',
           qtd_solicitada_exibicao: it.qtd_solicitada_exibicao != null ? Number(it.qtd_solicitada_exibicao) : Number(it.qtd_kg_solicitada),
-          observacao: it.observacao || ''
+          preco_unitario: it.preco_unitario != null ? String(it.preco_unitario) : '0',
+          cfop_aplicado: it.cfop_aplicado || '',
+          observacao: it.observacao || '',
+          alerta_reclamacao: it.alerta_reclamacao || '',
         }))
       )
       limparCamposItem(false)
@@ -507,6 +600,10 @@ export function Pedidos() {
       )
     }
 
+    const espec = especificacoesCliente.find((e) => String(e.produto_id) === String(produtoSelecionado.id))
+    const precoNum = Number(String(precoUnitInput).replace(',', '.') || 0)
+    const precoFinal = Number.isFinite(precoNum) && precoNum >= 0 ? precoNum : Number(produtoSelecionado.valor_unitario || 0)
+
     setItensForm((prev) => {
       const idx = prev.findIndex((i) => String(i.produto_id) === String(produtoSelecionado.id))
       if (idx >= 0) {
@@ -527,7 +624,8 @@ export function Pedidos() {
             next[idx].unidade_solicitada === unidadeInput && unidadeInput === 'CX'
               ? Number(novoCx || 0)
               : Number(novoKg.toFixed(3)),
-          observacao: obsItemInput.trim() || next[idx].observacao
+          preco_unitario: precoFinal > 0 ? String(precoFinal) : next[idx].preco_unitario,
+          observacao: obsItemInput.trim() || next[idx].observacao,
         }
         return next
       }
@@ -537,6 +635,7 @@ export function Pedidos() {
           produto_id: produtoSelecionado.id,
           produto_codigo: produtoSelecionado.codigo,
           produto_descricao: produtoSelecionado.descricao,
+          codigo_aux: espec?.codigo_aux_cliente || produtoSelecionado.codigo_auxiliar || '',
           saldo_kg: Number(produtoSelecionado.saldo_kg || 0),
           qtd_caixas_estoque: Number(produtoSelecionado.qtd_caixas || 0),
           peso_medio_cx: pesoPorCx,
@@ -544,7 +643,10 @@ export function Pedidos() {
           qtd_caixas_solicitada: cxFinal !== null ? String(cxFinal) : '',
           unidade_solicitada: unidadeInput,
           qtd_solicitada_exibicao: qtdNum,
-          observacao: obsItemInput.trim()
+          preco_unitario: String(precoFinal),
+          cfop_aplicado: cfopSugerido?.cfop_completo || '',
+          observacao: obsItemInput.trim(),
+          alerta_reclamacao: espec?.alerta_reclamacao ? (espec.alerta_descricao || 'Reclamação anterior registrada') : '',
         }
       ]
     })
@@ -575,7 +677,7 @@ export function Pedidos() {
     }
   }
 
-  const handleSalvarPedido = async (liberar) => {
+  const handleSalvarPedido = async (liberar, { imprimirApos = false } = {}) => {
     if (!titulo.trim()) return toastWarning('Informe o Título do Pedido (será impresso no Romaneio de Embarque).')
     if (itensForm.length === 0) return toastWarning('Adicione pelo menos 1 item ao pedido.')
 
@@ -587,13 +689,18 @@ export function Pedidos() {
         : null,
       unidade_solicitada: i.unidade_solicitada || 'KG',
       qtd_solicitada_exibicao: i.qtd_solicitada_exibicao != null ? Number(i.qtd_solicitada_exibicao) : null,
-      observacao: i.observacao || ''
+      preco_unitario: Number(String(i.preco_unitario || 0).replace(',', '.') || 0),
+      codigo_aux: i.codigo_aux || '',
+      cfop_aplicado: i.cfop_aplicado || cfopSugerido?.cfop_completo || '',
+      observacao: i.observacao || '',
+      alerta_reclamacao: i.alerta_reclamacao || '',
     }))
 
     const cliId = clienteAtivo?.id || null
     const cliNome = clienteAtivo?.razao_social || 'BEEF CONTAINER LIMITADA'
 
     setLoading(true)
+    let savedId = editId
     try {
       if (editId) {
         await pedidosQueries.atualizarPedido({
@@ -601,6 +708,12 @@ export function Pedidos() {
           titulo,
           cliente_id: cliId,
           cliente: cliNome,
+          vendedor_id: vendedorId || null,
+          forma_pagamento_id: formaPagamentoId || null,
+          local_cobranca_id: localCobrancaId || null,
+          natureza_id: naturezaId || null,
+          marchante,
+          pagamento_na_entrega: pagamentoNaEntrega,
           previsao_entrega: previsaoEntrega || null,
           observacoes,
           itens: payloadItens,
@@ -616,25 +729,128 @@ export function Pedidos() {
           titulo,
           cliente_id: cliId,
           cliente: cliNome,
+          vendedor_id: vendedorId || null,
+          forma_pagamento_id: formaPagamentoId || null,
+          local_cobranca_id: localCobrancaId || null,
+          natureza_id: naturezaId || null,
+          marchante,
+          pagamento_na_entrega: pagamentoNaEntrega,
           previsao_entrega: previsaoEntrega || null,
           observacoes,
+          origem_pedido: somenteFinanceiro ? 'FINANCEIRO' : origemPedido,
+          setor_solicitante: somenteFinanceiro ? 'FINANCEIRO' : origemPedido,
           itens: payloadItens,
           operador,
-          liberar
+          liberar: somenteFinanceiro ? false : liberar,
         })
+        savedId = res.id
         toastSuccess(
-          liberar
-            ? `Pedido ${res.codigo} criado e enviado para Saída de Materiais!`
-            : `Pedido ${res.codigo} salvo como rascunho.`
+          somenteFinanceiro
+            ? `Pedido ${res.codigo} enviado pelo Financeiro para a fila do Supply Chain!`
+            : liberar
+              ? `Pedido ${res.codigo} criado e enviado para Saída de Materiais!`
+              : `Pedido ${res.codigo} salvo como rascunho.`
         )
       }
       resetarFormulario()
       setAba('GERENCIADOR')
       await carregarDados()
+      if (imprimirApos && savedId) {
+        await handleImprimirFolhaPedido(savedId)
+      }
     } catch (err) {
       toastError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleClonarPedido = async (ped) => {
+    try {
+      const res = await pedidosQueries.clonarPedido(ped.id, { liberar: false })
+      toastSuccess(`Pedido ${res.codigo} clonado!`, `Cópia criada em rascunho pronta para editar/liberar.`)
+      await carregarDados()
+    } catch (err) {
+      toastError(err.message)
+    }
+  }
+
+  const handleGerarOpPedido = async (ped) => {
+    try {
+      const res = await pedidosQueries.gerarOpAutomatica(ped.id)
+      toastSuccess(`OP ${res.op_codigo} aberta no PCP!`, `${res.itens_sem_saldo} corte(s) sem estoque enviados para produção.`)
+    } catch (err) {
+      toastWarning(err.message)
+    }
+  }
+
+  const handleAplicarTextoWhatsapp = async () => {
+    if (!whatsappTextoInput.trim()) return toastWarning('Cole a mensagem do WhatsApp para analisar.')
+    setParseandoWpp(true)
+    try {
+      const parsed = await whatsappQueries.parsePreview({ mensagem_bruta: whatsappTextoInput })
+      if (parsed.cliente_sugerido_id) {
+        setClienteIdSelecionado(parsed.cliente_sugerido_id)
+      }
+      if (parsed.forma_pagamento_sugerida_id) {
+        setFormaPagamentoId(parsed.forma_pagamento_sugerida_id)
+      }
+      if (!titulo.trim()) {
+        setTitulo(`Pedido WhatsApp — ${parsed.cliente_texto || 'Cliente'}`)
+      }
+      setOrigemPedido('WHATSAPP')
+      if (parsed.observacoes) {
+        setObservacoes((prev) => [prev, parsed.observacoes].filter(Boolean).join(' | '))
+      }
+
+      const vinculados = (parsed.itens || []).filter((i) => i.produto_id)
+      if (vinculados.length === 0) {
+        toastWarning('Nenhum produto casou automaticamente; você pode adicionar manualmente.')
+      } else {
+        setItensForm((prev) => {
+          const next = [...prev]
+          for (const itemWpp of vinculados) {
+            const prod = produtos.find((p) => String(p.id) === String(itemWpp.produto_id))
+            const idx = next.findIndex((x) => String(x.produto_id) === String(itemWpp.produto_id))
+            if (idx >= 0) {
+              const novoKg = Number(next[idx].qtd_kg_solicitada || 0) + Number(itemWpp.qtd_kg_solicitada || 0)
+              next[idx] = { ...next[idx], qtd_kg_solicitada: String(Number(novoKg.toFixed(3))) }
+            } else {
+              next.push({
+                produto_id: itemWpp.produto_id,
+                produto_codigo: itemWpp.produto_codigo || prod?.codigo || '',
+                produto_descricao: itemWpp.produto_descricao || prod?.descricao || '',
+                codigo_aux: itemWpp.codigo_aux || '',
+                saldo_kg: Number(prod?.saldo_kg || 0),
+                qtd_caixas_estoque: Number(prod?.qtd_caixas || 0),
+                peso_medio_cx: Number(prod?.peso_medio_cx || 0),
+                qtd_kg_solicitada: String(itemWpp.qtd_kg_solicitada || 1),
+                qtd_caixas_solicitada: '',
+                unidade_solicitada: itemWpp.unidade_solicitada || 'KG',
+                qtd_solicitada_exibicao: Number(itemWpp.qtd_kg_solicitada || 1),
+                preco_unitario: String(itemWpp.preco_unitario || prod?.valor_unitario || 0),
+                cfop_aplicado: cfopSugerido?.cfop_completo || '',
+                observacao: itemWpp.observacao || '',
+                alerta_reclamacao: itemWpp.alerta_reclamacao || '',
+              })
+            }
+          }
+          return next
+        })
+        toastSuccess(
+          `${vinculados.length} item(ns) importado(s) do WhatsApp!`,
+          parsed.itens.length > vinculados.length
+            ? `${parsed.itens.length - vinculados.length} linha(s) não reconhecida(s) podem ser adicionadas manualmente.`
+            : `Confiança do parser: ${parsed.confianca_pct}%`
+        )
+      }
+      setModalWhatsappAberto(false)
+      setWhatsappTextoInput('')
+      setAba('FORM')
+    } catch (err) {
+      toastError('Erro ao analisar mensagem: ' + err.message)
+    } finally {
+      setParseandoWpp(false)
     }
   }
 
@@ -716,14 +932,14 @@ export function Pedidos() {
     }
   }
 
-  if (!podeGerenciarPedidos) {
+  if (!podeAcessarTela) {
     return (
       <div className="page-container">
         <div className="card" style={{ maxWidth: '580px', margin: '40px auto', textAlign: 'center', padding: '32px' }}>
           <ShieldAlert size={48} className="text-warning" style={{ margin: '0 auto 12px' }} />
-          <h2 style={{ marginBottom: '8px' }}>Acesso Restrito à Gerência / Administração</h2>
+          <h2 style={{ marginBottom: '8px' }}>Acesso Restrito</h2>
           <p className="text-muted">
-            A criação e o gerenciamento de Pedidos são permitidos apenas para usuários Administradores ou da Gerência.
+            O lançamento de Pedidos requer permissão de Supply Chain/Pedidos ou Lançamento pelo Financeiro.
             Para separar pedidos liberados, acesse <strong>Saída de Materiais</strong>.
           </p>
         </div>
@@ -733,6 +949,29 @@ export function Pedidos() {
 
   const totalFormKg = itensForm.reduce((s, i) => s + Number(String(i.qtd_kg_solicitada).replace(',', '.') || 0), 0)
   const totalFormCx = itensForm.reduce((s, i) => s + Number(String(i.qtd_caixas_solicitada).replace(',', '.') || 0), 0)
+  const totalFormValor = itensForm.reduce(
+    (s, i) =>
+      s +
+      Number(String(i.qtd_kg_solicitada).replace(',', '.') || 0) *
+        Number(String(i.preco_unitario || 0).replace(',', '.') || 0),
+    0
+  )
+
+  const parcelasSimuladas = (() => {
+    if (!apiAtiva || totalFormValor <= 0) return []
+    const fp = (auxiliares.formasPagamento || []).find((f) => String(f.id) === String(formaPagamentoId))
+    const dias = Array.isArray(fp?.dias_parcelas) && fp.dias_parcelas.length > 0 ? fp.dias_parcelas : [0]
+    const baseStr = previsaoEntrega || new Date().toISOString().slice(0, 10)
+    const baseMs = new Date(`${baseStr}T12:00:00Z`).getTime()
+    let soma = 0
+    return dias.map((d, i) => {
+      const isLast = i === dias.length - 1
+      const val = isLast ? Number((totalFormValor - soma).toFixed(2)) : Number((totalFormValor / dias.length).toFixed(2))
+      soma += val
+      const venc = new Date(baseMs + Number(d || 0) * 86400000).toLocaleDateString('pt-BR')
+      return { numero: i + 1, dias: Number(d || 0), vencimento: venc, valor: val }
+    })
+  })()
 
   return (
     <div className="page-container">
@@ -746,7 +985,16 @@ export function Pedidos() {
             Crie pedidos com os cortes solicitados para liberar automaticamente na Separação (Saída de Materiais) e emitir Folha do Pedido / Romaneio.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {apiAtiva && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => setModalWhatsappAberto(true)}
+            >
+              <MessageSquare size={16} /> Colar WhatsApp
+            </button>
+          )}
           <button
             type="button"
             className={`btn ${aba === 'GERENCIADOR' ? 'btn--primary' : 'btn--secondary'}`}
@@ -759,7 +1007,7 @@ export function Pedidos() {
             className={`btn ${aba === 'FORM' ? 'btn--primary' : 'btn--success'}`}
             onClick={abrirNovoPedido}
           >
-            <Plus size={16} /> Novo Pedido
+            <Plus size={16} /> {somenteFinanceiro ? 'Solicitar Pedido (Financeiro)' : 'Novo Pedido'}
           </button>
         </div>
       </div>
@@ -870,11 +1118,26 @@ export function Pedidos() {
 
                       return (
                         <tr key={ped.id}>
-                          <td className="font-mono font-bold">{ped.codigo}</td>
+                          <td className="font-mono font-bold">
+                            <div>{ped.codigo}</div>
+                            {ped.origem_pedido && (
+                              <span
+                                className={`badge ${(ORIGEM_BADGE[ped.origem_pedido] || { cls: 'badge--ghost' }).cls}`}
+                                style={{ fontSize: 10, marginTop: 4 }}
+                              >
+                                {(ORIGEM_BADGE[ped.origem_pedido] || { label: ped.origem_pedido }).label}
+                              </span>
+                            )}
+                          </td>
                           <td>
                             <div style={{ fontWeight: 700 }}>{ped.titulo}</div>
                             <div className="text-muted text-xs">
                               {ped.cliente || 'BEEF CONTAINER LIMITADA'} • Criado em {fmtDataHora(ped.created_at)} por {ped.criado_por_nome || '-'}
+                              {Number(ped.valor_total || 0) > 0 && (
+                                <strong style={{ color: '#4ade80', marginLeft: 8 }}>
+                                  R$ {Number(ped.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </strong>
+                              )}
                             </div>
                           </td>
                           <td>
@@ -947,7 +1210,7 @@ export function Pedidos() {
                                   <Truck size={14} /> Romaneio
                                 </button>
                               )}
-                              {ped.status === 'RASCUNHO' && (
+                              {ped.status === 'RASCUNHO' && podeGerenciarPedidos && (
                                 <button
                                   type="button"
                                   className="btn btn--success btn--sm"
@@ -957,7 +1220,27 @@ export function Pedidos() {
                                   <Send size={14} /> Liberar
                                 </button>
                               )}
-                              {['RASCUNHO', 'LIBERADO'].includes(ped.status) && (
+                              {apiAtiva && podeGerenciarPedidos && !['EXPEDIDO', 'CANCELADO'].includes(ped.status) && (
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary btn--sm"
+                                  title="Abrir Ordem de Produção automática para cortes sem estoque"
+                                  onClick={() => handleGerarOpPedido(ped)}
+                                >
+                                  <Zap size={14} /> Abrir OP
+                                </button>
+                              )}
+                              {apiAtiva && (
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary btn--sm"
+                                  title="Clonar Pedido"
+                                  onClick={() => handleClonarPedido(ped)}
+                                >
+                                  <Copy size={14} /> Clonar
+                                </button>
+                              )}
+                              {['RASCUNHO', 'LIBERADO'].includes(ped.status) && podeGerenciarPedidos && (
                                 <button
                                   type="button"
                                   className="btn btn--secondary btn--sm"
@@ -967,7 +1250,7 @@ export function Pedidos() {
                                   <Edit3 size={14} /> Editar
                                 </button>
                               )}
-                              {!['EXPEDIDO', 'CANCELADO'].includes(ped.status) && (
+                              {!['EXPEDIDO', 'CANCELADO'].includes(ped.status) && podeGerenciarPedidos && (
                                 <button
                                   type="button"
                                   className="btn btn--danger btn--sm"
@@ -1034,6 +1317,12 @@ export function Pedidos() {
                   {Number(clienteAtivo?.is_padrao) === 1 && (
                     <span className="badge badge--success">Cliente Padrão</span>
                   )}
+                  {Number(clienteAtivo?.bloqueado_financeiro) === 1 && (
+                    <span className="badge badge--danger">⚠️ Bloqueio Financeiro</span>
+                  )}
+                  {Number(clienteAtivo?.qtd_alertas || 0) > 0 && (
+                    <span className="badge badge--warning">⚠️ {clienteAtivo.qtd_alertas} Alerta(s) de Reclamação</span>
+                  )}
                 </div>
                 <div className="text-xs text-muted" style={{ marginTop: '4px', lineHeight: 1.5 }}>
                   CNPJ: <span className="font-mono">{clienteAtivo?.cnpj_cpf || '54.142.043/0001-30'}</span>
@@ -1068,7 +1357,10 @@ export function Pedidos() {
                   <select
                     className="form-input"
                     value={clienteIdSelecionado || ''}
-                    onChange={(e) => setClienteIdSelecionado(Number(e.target.value))}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setClienteIdSelecionado(/^\d+$/.test(val) ? Number(val) : val)
+                    }}
                   >
                     {clientes.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -1110,7 +1402,7 @@ export function Pedidos() {
             </div>
           </div>
 
-          <div style={{ marginBottom: '20px' }}>
+          <div style={{ marginBottom: '16px' }}>
             <label className="form-label">Observações do Pedido</label>
             <input
               className="form-input"
@@ -1119,6 +1411,96 @@ export function Pedidos() {
               onChange={(e) => setObservacoes(e.target.value)}
             />
           </div>
+
+          {/* Condições Comerciais & Cobrança (Auto do Cliente no Modo API/PostgreSQL) */}
+          {apiAtiva && (
+            <div
+              style={{
+                background: 'rgba(13, 20, 36, 0.72)',
+                border: '1px solid var(--border)',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                marginBottom: '16px',
+              }}
+            >
+              <div className="text-xs font-bold uppercase text-primary mb-10" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                <span>Dados Comerciais, Cobrança &amp; Natureza / CFOP (Puxados do Cliente)</span>
+                {cfopSugerido && (
+                  <span className="badge badge--info font-mono">
+                    CFOP Automático: {cfopSugerido.cfop} {cfopSugerido.codigo_sub_operacao} ({cfopSugerido.dentro_estado ? 'Dentro UF' : 'Fora UF'})
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '10px' }}>
+                <div>
+                  <label className="form-label">Origem do Pedido</label>
+                  <select
+                    className="form-input"
+                    value={origemPedido}
+                    disabled={somenteFinanceiro}
+                    onChange={(e) => setOrigemPedido(e.target.value)}
+                  >
+                    <option value="SUPPLY_CHAIN">Supply Chain (Padrão)</option>
+                    <option value="FINANCEIRO">Financeiro → Supply Chain</option>
+                    <option value="WHATSAPP">WhatsApp</option>
+                    <option value="VENDEDOR">Vendedor</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Vendedor (Comissão)</label>
+                  <select className="form-input" value={vendedorId} onChange={(e) => setVendedorId(e.target.value)}>
+                    <option value="">-- Nenhum --</option>
+                    {vendedores.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.sigla ? `(${v.sigla}) ` : ''}{v.nome}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Forma de Pagamento</label>
+                  <select className="form-input" value={formaPagamentoId} onChange={(e) => setFormaPagamentoId(e.target.value)}>
+                    <option value="">-- À definir --</option>
+                    {(auxiliares.formasPagamento || []).map((fp) => (
+                      <option key={fp.id} value={fp.id}>{fp.descricao}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Local Cobrança / Banco</label>
+                  <select className="form-input" value={localCobrancaId} onChange={(e) => setLocalCobrancaId(e.target.value)}>
+                    <option value="">-- Padrão --</option>
+                    {(auxiliares.locaisCobranca || []).map((b) => (
+                      <option key={b.id} value={b.id}>{b.nome}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Natureza Operação</label>
+                  <select className="form-input" value={naturezaId} onChange={(e) => setNaturezaId(e.target.value)}>
+                    <option value="">-- Automática --</option>
+                    {(auxiliares.naturezasOperacao || []).map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {n.cfop_estadual}/{n.cfop_interestadual} - {n.descricao}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Marchante</label>
+                  <input className="form-input" value={marchante} onChange={(e) => setMarchante(e.target.value.toUpperCase())} placeholder="Ex: FRIGODIL" />
+                </div>
+              </div>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginTop: '10px', fontSize: '12.5px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={Number(pagamentoNaEntrega) === 1}
+                  onChange={(e) => setPagamentoNaEntrega(e.target.checked ? 1 : 0)}
+                />
+                Pagamento na Entrega (motorista só conclui após confirmar PIX/cartão/dinheiro)
+              </label>
+            </div>
+          )}
 
           {/* ── Novo Seletor Dinâmico de Produtos (Código + Autocomplete + Lupa + KG/CX) ── */}
           <div
@@ -1143,7 +1525,9 @@ export function Pedidos() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '145px minmax(260px, 1.8fr) 205px minmax(140px, 1fr) auto',
+                gridTemplateColumns: apiAtiva
+                  ? '130px minmax(220px, 1.8fr) 195px 115px minmax(120px, 1fr) auto'
+                  : '145px minmax(260px, 1.8fr) 205px minmax(140px, 1fr) auto',
                 gap: '10px',
                 alignItems: 'end'
               }}
@@ -1366,6 +1750,28 @@ export function Pedidos() {
                 </div>
               </div>
 
+              {/* 4B. Preço Unitário (Modo API/Comercial) */}
+              {apiAtiva && (
+                <div>
+                  <label className="form-label">Preço R$/kg</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="form-input font-mono text-right"
+                    placeholder="0,00"
+                    value={precoUnitInput}
+                    onChange={(e) => setPrecoUnitInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleAdicionarItem()
+                      }
+                    }}
+                  />
+                </div>
+              )}
+
               {/* 5. Observação do item */}
               <div>
                 <label className="form-label">Obs. do Item</label>
@@ -1529,6 +1935,11 @@ export function Pedidos() {
               <strong>Itens do Pedido ({itensForm.length})</strong>
               <span className="font-mono font-bold">
                 Total Solicitado: {fmtKg(totalFormKg)} {totalFormCx > 0 ? `• ~${fmtCx(totalFormCx)}` : ''}
+                {apiAtiva && totalFormValor > 0 && (
+                  <span style={{ color: '#4ade80', marginLeft: 10 }}>
+                    • R$ {totalFormValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                )}
               </span>
             </div>
 
@@ -1544,10 +1955,12 @@ export function Pedidos() {
                       <th>Código</th>
                       <th>Produto</th>
                       <th style={{ textAlign: 'right' }}>Estoque Atual</th>
-                      <th style={{ width: '140px' }}>Kg Solicitado *</th>
-                      <th style={{ width: '110px' }}>Cx Previstas</th>
+                      <th style={{ width: '130px' }}>Kg Solicitado *</th>
+                      <th style={{ width: '100px' }}>Cx Previstas</th>
+                      {apiAtiva && <th style={{ width: '115px', textAlign: 'right' }}>R$/kg</th>}
+                      {apiAtiva && <th style={{ textAlign: 'right' }}>Subtotal</th>}
                       <th style={{ textAlign: 'right' }}>Saldo Projetado</th>
-                      <th>Obs.</th>
+                      <th>Obs. / Alertas</th>
                       <th style={{ textAlign: 'right' }}>Remover</th>
                     </tr>
                   </thead>
@@ -1555,14 +1968,24 @@ export function Pedidos() {
                     {itensForm.map((item, idx) => {
                       const kgNum = Number(String(item.qtd_kg_solicitada).replace(',', '.') || 0)
                       const cxNum = Number(String(item.qtd_caixas_solicitada).replace(',', '.') || 0)
+                      const precoNum = Number(String(item.preco_unitario || 0).replace(',', '.') || 0)
+                      const subtotalItem = kgNum * precoNum
                       const projKg = Number((Number(item.saldo_kg || 0) - kgNum).toFixed(2))
                       const projCx = Number((Number(item.qtd_caixas_estoque || 0) - cxNum).toFixed(2))
                       const abaixoEstoque = projKg < 0
                       return (
                         <tr key={item.produto_id}>
-                          <td className="font-mono">{item.produto_codigo || '-'}</td>
+                          <td className="font-mono">
+                            <div>{item.produto_codigo || '-'}</div>
+                            {item.codigo_aux && <div className="text-xs text-muted">Aux: {item.codigo_aux}</div>}
+                          </td>
                           <td>
                             <div style={{ fontWeight: 700 }}>{item.produto_descricao}</div>
+                            {item.alerta_reclamacao && (
+                              <div className="badge badge--warning" style={{ fontSize: 10.5, marginTop: 4 }}>
+                                ⚠️ {item.alerta_reclamacao}
+                              </div>
+                            )}
                             {abaixoEstoque && (
                               <div
                                 style={{
@@ -1579,7 +2002,7 @@ export function Pedidos() {
                                   fontWeight: 600
                                 }}
                               >
-                                <AlertTriangle size={12} /> Solicitado acima do estoque atual
+                                <AlertTriangle size={12} /> Sem estoque p/ atender ({fmtKg(Math.abs(projKg))} p/ OP)
                               </div>
                             )}
                           </td>
@@ -1626,6 +2049,26 @@ export function Pedidos() {
                               }}
                             />
                           </td>
+                          {apiAtiva && (
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="form-input font-mono text-right"
+                                value={item.preco_unitario || ''}
+                                onChange={(e) => {
+                                  const v = e.target.value
+                                  setItensForm((prev) => prev.map((r, i) => (i === idx ? { ...r, preco_unitario: v } : r)))
+                                }}
+                              />
+                            </td>
+                          )}
+                          {apiAtiva && (
+                            <td style={{ textAlign: 'right' }} className="font-mono font-bold text-success">
+                              R$ {subtotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          )}
                           <td style={{ textAlign: 'right' }} className="font-mono">
                             <div style={{ fontWeight: 700, color: projKg < 0 ? '#fbbf24' : '#4ade80' }}>
                               {fmtKg(projKg)}
@@ -1662,13 +2105,64 @@ export function Pedidos() {
             )}
           </div>
 
+          {/* Simulação Instantânea de Parcelas (0ms - Zero PgDown!) */}
+          {apiAtiva && parcelasSimuladas.length > 0 && (
+            <div
+              style={{
+                background: 'rgba(13, 20, 36, 0.72)',
+                border: '1px solid var(--border)',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                marginBottom: '18px',
+              }}
+            >
+              <div className="text-xs font-bold uppercase text-primary mb-8" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Simulação de Parcelas em Tempo Real (0ms)</span>
+                <span className="font-mono" style={{ color: '#4ade80' }}>
+                  Total do Pedido: R$ {totalFormValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                {parcelasSimuladas.map((p) => (
+                  <div
+                    key={p.numero}
+                    style={{
+                      background: 'var(--bg-2)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      fontSize: '12px',
+                    }}
+                    className="font-mono"
+                  >
+                    <strong>Parcela {p.numero}</strong> ({p.dias}d • {p.vencimento}):{' '}
+                    <span style={{ color: '#4ade80', fontWeight: 700 }}>
+                      R$ {p.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn--secondary" disabled={loading} onClick={() => handleSalvarPedido(false)}>
-              Salvar como Rascunho
-            </button>
-            <button type="button" className="btn btn--success" disabled={loading} onClick={() => handleSalvarPedido(true)}>
-              <Send size={16} /> Liberar Pedido para Separação
-            </button>
+            {somenteFinanceiro ? (
+              <button type="button" className="btn btn--warning" disabled={loading} onClick={() => handleSalvarPedido(false)}>
+                <DollarSign size={16} /> Enviar Solicitação p/ Fila Supply Chain
+              </button>
+            ) : (
+              <>
+                <button type="button" className="btn btn--secondary" disabled={loading} onClick={() => handleSalvarPedido(false)}>
+                  Salvar como Rascunho
+                </button>
+                <button type="button" className="btn btn--success" disabled={loading} onClick={() => handleSalvarPedido(true)}>
+                  <Send size={16} /> Liberar Pedido para Separação
+                </button>
+                <button type="button" className="btn btn--primary" disabled={loading} onClick={() => handleSalvarPedido(true, { imprimirApos: true })}>
+                  <Printer size={16} /> Liberar &amp; Imprimir Folha
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1994,6 +2488,41 @@ export function Pedidos() {
               <button type="submit" className="btn btn--success">Salvar Cliente</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Modal Parser Direto WhatsApp -> Preenche Formulario em 1 Clique */}
+      {modalWhatsappAberto && (
+        <div className="modal-overlay" style={{ padding: '16px' }} onClick={() => setModalWhatsappAberto(false)}>
+          <div className="card" style={{ width: '680px', maxWidth: '100%', padding: '20px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <MessageSquare size={19} className="text-success" /> Importar Pedido do WhatsApp (Sem Alt+Tab)
+              </h2>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModalWhatsappAberto(false)}>
+                <X size={15} /> Fechar
+              </button>
+            </div>
+            <p className="text-xs text-muted" style={{ marginBottom: '10px' }}>
+              Cole abaixo a mensagem recebida do cliente ou vendedor. O sistema identifica automaticamente o cliente, forma de pagamento, preços, cortes e observações.
+            </p>
+            <textarea
+              className="form-input font-mono"
+              rows={10}
+              style={{ fontSize: 12, marginBottom: '12px' }}
+              placeholder="Cole a mensagem aqui..."
+              value={whatsappTextoInput}
+              onChange={(e) => setWhatsappTextoInput(e.target.value)}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button type="button" className="btn btn--secondary" onClick={() => setModalWhatsappAberto(false)}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn--success" disabled={parseandoWpp} onClick={handleAplicarTextoWhatsapp}>
+                <MessageSquare size={15} /> {parseandoWpp ? 'Analisando...' : 'Preencher Pedido Agora'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

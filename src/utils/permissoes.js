@@ -70,6 +70,7 @@ export const SETORES_PERMISSOES = [
       { key: 'expedicao', label: 'Conferência caixa a caixa e expedição', desc: 'Conferir e expedir pedidos com emissão do romaneio de embarque.' },
       { key: 'pedidos', label: 'Criar / Editar / Liberar pedidos', desc: 'Cadastrar novos pedidos, editar quantidades e liberar para câmara.' },
       { key: 'financeiro_pedidos', label: 'Lançar pedidos pelo Financeiro', desc: 'Permite ao Financeiro criar solicitações de pedido que caem na fila do Supply Chain.' },
+      { key: 'whatsapp_inbox', label: 'Caixa de Entrada WhatsApp (Parser)', desc: 'Visualizar mensagens recebidas do WhatsApp e converter em pedidos.' },
     ],
   },
   {
@@ -141,6 +142,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'pedidos',
   'pedidos_consultar',
   'financeiro_pedidos',
+  'whatsapp_inbox',
   'saida',
   'expedicao',
   'ean_etiquetas',
@@ -333,8 +335,11 @@ export function sanitizarPermissoes(rawPermissoes = {}, nivel = 'OPERACIONAL', p
   if (obj?.pedidos && obj?.clientes === undefined) {
     mapa.clientes = true
   }
+  if ((obj?.pedidos || obj?.financeiro_pedidos) && obj?.whatsapp_inbox === undefined) {
+    mapa.whatsapp_inbox = true
+  }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos']) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox']) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }
