@@ -1,6 +1,24 @@
 import { create } from 'zustand'
 
 const STORAGE_KEY = 'wmsphere_auth_session_v2'
+const FILIAL_KEY = 'wmsphere_filial_ativa_v1'
+
+function lerFilialSalva() {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return ''
+    return window.sessionStorage.getItem(FILIAL_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function salvarFilialStorage(filialId) {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return
+    if (filialId) window.sessionStorage.setItem(FILIAL_KEY, String(filialId))
+    else window.sessionStorage.removeItem(FILIAL_KEY)
+  } catch { /* ignore */ }
+}
 
 function lerSessaoSalva() {
   try {
@@ -36,21 +54,46 @@ export const useAppStore = create((set, get) => ({
   // ─── Operador / Sessão ──────────────────────────────────────────────────────
   operador: inicial.operador,
   sessionToken: inicial.sessionToken,
+  filialAtivaId: lerFilialSalva() || inicial.operador?.filialId || '',
+  filiaisDisponiveis: [],
 
   setSessao: (operador, sessionToken) => {
     salvarSessaoStorage(operador, sessionToken)
-    set({ operador, sessionToken })
+    const nextFilial = get().filialAtivaId || operador?.filialId || ''
+    salvarFilialStorage(nextFilial)
+    set({ operador, sessionToken, filialAtivaId: nextFilial })
   },
 
   setOperador: (operador) => {
     const tokenAtual = get().sessionToken
     salvarSessaoStorage(operador, tokenAtual)
-    set({ operador })
+    const nextFilial = get().filialAtivaId || operador?.filialId || ''
+    set({ operador, filialAtivaId: nextFilial })
+  },
+
+  setFilialAtiva: (filialId) => {
+    const val = String(filialId || '')
+    salvarFilialStorage(val)
+    set({ filialAtivaId: val })
+  },
+
+  setFiliaisDisponiveis: (filiais) => {
+    const lista = Array.isArray(filiais) ? filiais : []
+    const atual = get().filialAtivaId
+    const aindaExiste = lista.some((f) => String(f.id) === String(atual))
+    if (!aindaExiste && lista.length > 0) {
+      const padrao = lista.find((f) => Number(f.is_padrao) === 1) || lista[0]
+      salvarFilialStorage(padrao.id)
+      set({ filiaisDisponiveis: lista, filialAtivaId: padrao.id })
+    } else {
+      set({ filiaisDisponiveis: lista })
+    }
   },
 
   logout: () => {
     salvarSessaoStorage(null, null)
-    set({ operador: null, sessionToken: null })
+    salvarFilialStorage('')
+    set({ operador: null, sessionToken: null, filialAtivaId: '', filiaisDisponiveis: [] })
   },
 
   // ─── Toasts ─────────────────────────────────────────────────────────────────

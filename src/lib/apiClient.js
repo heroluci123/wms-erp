@@ -39,6 +39,9 @@ export async function apiRequest(path, { method = 'GET', body, tokenOverride } =
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }
+  if (state.filialAtivaId && !path.startsWith('/api/auth/')) {
+    headers['x-filial-id'] = state.filialAtivaId
+  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     method,

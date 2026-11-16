@@ -33,6 +33,12 @@ import { EanEditor } from './pages/EanEditor'
 import { EstoqueMinimo } from './pages/EstoqueMinimo'
 import { Taras } from './pages/Taras'
 import { ReimpressaoEtiquetas } from './pages/ReimpressaoEtiquetas'
+import { Clientes } from './pages/Clientes'
+import { Fornecedores } from './pages/Fornecedores'
+import { Vendedores } from './pages/Vendedores'
+import { TransportadorasRotas } from './pages/TransportadorasRotas'
+import { EmpresasFiliais } from './pages/EmpresasFiliais'
+import { ParametrosComerciais } from './pages/ParametrosComerciais'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -109,6 +115,12 @@ function App() {
           <Route path="/consulta-endereco" element={<RequirePermissao permissoes={['consulta_endereco']} element={<ConsultaEndereco />} />} />
           <Route path="/relatorios" element={<RequirePermissao permissoes={['relatorios_producao', 'relatorios_estoque']} allowCliente={true} element={<Relatorios />} />} />
           <Route path="estoque-minimo" element={<RequirePermissao permissoes={['consulta_estoque', 'relatorios_estoque']} element={<EstoqueMinimo />} />} />
+          <Route path="clientes" element={<RequirePermissao permissoes={['clientes', 'pedidos', 'financeiro_pedidos']} element={<Clientes />} />} />
+          <Route path="fornecedores" element={<RequirePermissao permissoes={['fornecedores', 'recebimento']} element={<Fornecedores />} />} />
+          <Route path="vendedores" element={<RequirePermissao permissoes={['vendedores', 'operadores']} element={<Vendedores />} />} />
+          <Route path="transportadoras" element={<RequirePermissao permissoes={['transportadoras']} element={<TransportadorasRotas />} />} />
+          <Route path="filiais" element={<RequirePermissao permissoes={['empresas_filiais']} element={<EmpresasFiliais />} />} />
+          <Route path="parametros-comerciais" element={<RequirePermissao permissoes={['parametros_comerciais']} element={<ParametrosComerciais />} />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

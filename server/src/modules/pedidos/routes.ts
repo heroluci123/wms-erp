@@ -6,6 +6,7 @@ import {
   estoqueCaixas,
   pedidos,
   pedidosItens,
+  pendenciasSetor,
   produtos,
   romaneios,
   romaneiosItens,
@@ -144,6 +145,8 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           previsao_entrega: pedidos.previsaoEntrega,
           valor_total: pedidos.valorTotal,
           observacoes: pedidos.observacoes,
+          origem_pedido: pedidos.origemPedido,
+          setor_solicitante: pedidos.setorSolicitante,
           status: pedidos.status,
           rastreio_token: pedidos.rastreioToken,
           criado_por_nome: pedidos.criadoPorNome,
@@ -343,6 +346,8 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           previsao_entrega: pedido.previsaoEntrega,
           valor_total: toNum(pedido.valorTotal, 0),
           observacoes: pedido.observacoes,
+          origem_pedido: pedido.origemPedido,
+          setor_solicitante: pedido.setorSolicitante,
           status: pedido.status,
           rastreio_token: pedido.rastreioToken,
           criado_por_nome: pedido.criadoPorNome,
@@ -372,7 +377,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
     },
   )
 
-  app.post('/api/pedidos', { preHandler: requirePermission('pedidos') }, async (req, reply) => {
+  app.post('/api/pedidos', { preHandler: requirePermission(['pedidos', 'financeiro_pedidos']) }, async (req, reply) => {
     const ctx = req.authCtx!
     const body = req.body as {
       titulo: string
@@ -386,9 +391,18 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       pagamento_na_entrega?: boolean | number
       previsao_entrega?: string | null
       observacoes?: string
+      origem_pedido?: string
+      setor_solicitante?: string
       liberar?: boolean
       itens: ItemPedidoInput[]
     }
+
+    const origPermitidas = new Set(['SUPPLY_CHAIN', 'FINANCEIRO', 'WHATSAPP', 'VENDEDOR', 'PORTAL', 'SISTEMA'])
+    const origRaw = String(body.origem_pedido || 'SUPPLY_CHAIN').trim().toUpperCase()
+    const origemPedido = origPermitidas.has(origRaw) ? origRaw : 'SUPPLY_CHAIN'
+    const setorSolicitante = String(body.setor_solicitante || origemPedido).trim().toUpperCase()
+    const temPermissaoLiberar = ctx.operador.permissoes?.pedidos === true || ctx.operador.nivel === 'MASTER'
+    const forcarRascunho = origemPedido === 'FINANCEIRO' && (!temPermissaoLiberar || body.liberar !== true)
 
     const tituloTrim = String(body.titulo || '').trim()
     if (!tituloTrim) throw new HttpError(400, 'Informe o título do pedido.')
@@ -427,7 +441,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       if (!clienteNome) clienteNome = 'CLIENTE PADRÃO'
 
       const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'PEDIDO', 'PED', 4)
-      const status = body.liberar === false ? 'RASCUNHO' : 'LIBERADO'
+      const status = body.liberar === false || forcarRascunho ? 'RASCUNHO' : 'LIBERADO'
       const valorTotal = itensConsolidados.reduce(
         (acc, it) =>
           acc + Math.max(0, it.qtd_kg_solicitada * it.preco_unitario * (1 - it.desconto_pct / 100) - it.desconto_valor),
@@ -463,12 +477,32 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         previsaoEntrega: normalizarDataIso(body.previsao_entrega),
         valorTotal: toDec(valorTotal, 2),
         observacoes: String(body.observacoes || '').trim(),
+        origemPedido,
+        setorSolicitante,
         status,
         rastreioToken: uuidv7(),
         criadoPorId: ctx.operador.id,
         criadoPorNome: ctx.operador.nome,
         liberadoAt: status === 'LIBERADO' ? new Date() : null,
       })
+
+      if (origemPedido === 'FINANCEIRO' || (origemPedido === 'WHATSAPP' && status === 'RASCUNHO')) {
+        await tx.insert(pendenciasSetor).values({
+          id: uuidv7(),
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          setorDestino: 'SUPPLY_CHAIN',
+          tipoPendencia: origemPedido === 'FINANCEIRO' ? 'PEDIDO_FINANCEIRO' : 'PEDIDO_WHATSAPP',
+          referenciaTabela: 'pedidos',
+          referenciaId: pedidoId,
+          titulo:
+            origemPedido === 'FINANCEIRO'
+              ? `${codigo} — ${clienteNome} (lançado pelo Financeiro p/ Supply Chain)`
+              : `${codigo} — ${clienteNome} (via WhatsApp aguardando análise)`,
+          prioridade: 3,
+          status: 'PENDENTE',
+        })
+      }
 
       await tx.insert(pedidosItens).values(
         itensConsolidados.map((it) => ({

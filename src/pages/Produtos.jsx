@@ -35,10 +35,26 @@ export function Produtos() {
   const [savedRowId, setSavedRowId] = useState(null)
   const tableRef = useRef(null)
   const scrollYRef = useRef(0)
-  const [formData, setFormData] = useState({ 
-    id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', 
-    valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '', 
-    classificacao: '', pais_ids: [] 
+  const [formData, setFormData] = useState({
+    id: null,
+    codigo: '',
+    codigo_auxiliar: '',
+    ean: '',
+    descricao: '',
+    status_curva: 'C',
+    unidade: 'CX',
+    valor_unitario: 0,
+    custo_medio_kg: 0,
+    tipo_produto: 'Materia Prima',
+    grupo: '',
+    classificacao: '',
+    peso_padrao_cx: '',
+    tara_primaria_peca_kg: 0,
+    ncm: '',
+    cest: '',
+    origem_mercadoria: '0',
+    pais_ids: [],
+    rendimentos_map: {},
   })
 
   const carregar = async () => {
@@ -60,12 +76,25 @@ export function Produtos() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     const editedId = formData.id
+    const payload = {
+      ...formData,
+      arvore_vinculos:
+        formData.classificacao === 'SUBPRODUTO'
+          ? (formData.pais_ids || []).map((pid) => ({
+              pai_id: String(pid),
+              rendimento_esperado_pct:
+                formData.rendimentos_map?.[pid] !== undefined && formData.rendimentos_map?.[pid] !== ''
+                  ? Number(formData.rendimentos_map[pid])
+                  : null,
+            }))
+          : [],
+    }
     try {
       if (formData.id) {
-        const result = await produtosQueries.atualizar(formData)
+        const result = await produtosQueries.atualizar(payload)
         if (!result.success) throw new Error(result.error)
       } else {
-        const result = await produtosQueries.criar(formData)
+        const result = await produtosQueries.criar(payload)
         if (!result.success) throw new Error(result.error)
       }
       resetForm()
@@ -87,17 +116,34 @@ export function Produtos() {
 
   const handleEdit = (p) => {
     scrollYRef.current = window.scrollY
+    const rendMap = {}
+    if (Array.isArray(p.arvore_vinculos)) {
+      p.arvore_vinculos.forEach((v) => {
+        if (v.pai_id && v.rendimento_esperado_pct != null) {
+          rendMap[v.pai_id] = v.rendimento_esperado_pct
+        }
+      })
+    }
     setFormData({
       id: p.id,
       codigo: p.codigo || '',
+      codigo_auxiliar: p.codigo_auxiliar || '',
+      ean: p.ean || '',
       descricao: p.descricao,
       status_curva: p.status_curva || 'C',
       unidade: p.unidade || 'CX',
       valor_unitario: p.valor_unitario || 0,
+      custo_medio_kg: p.custo_medio_kg || 0,
       tipo_produto: p.tipo_produto || 'Materia Prima',
       grupo: p.grupo || '',
       classificacao: p.classificacao || '',
-      pais_ids: p.pais_ids ? p.pais_ids.toString().split(',').map(s => s.trim()).filter(Boolean).map(v => /^\d+$/.test(v) ? Number(v) : v) : []
+      peso_padrao_cx: p.peso_padrao_cx != null ? p.peso_padrao_cx : '',
+      tara_primaria_peca_kg: p.tara_primaria_peca_kg || 0,
+      ncm: p.ncm || '',
+      cest: p.cest || '',
+      origem_mercadoria: p.origem_mercadoria || '0',
+      pais_ids: p.pais_ids ? p.pais_ids.toString().split(',').map(s => s.trim()).filter(Boolean).map(v => /^\d+$/.test(v) ? Number(v) : v) : [],
+      rendimentos_map: rendMap,
     })
     setIsEditing(true)
   }
@@ -120,10 +166,26 @@ export function Produtos() {
 
   const resetForm = () => {
     setIsEditing(false)
-    setFormData({ 
-      id: null, codigo: '', descricao: '', status_curva: 'C', unidade: 'CX', 
-      valor_unitario: 0, tipo_produto: 'Materia Prima', grupo: '', 
-      classificacao: '', pais_ids: [] 
+    setFormData({
+      id: null,
+      codigo: '',
+      codigo_auxiliar: '',
+      ean: '',
+      descricao: '',
+      status_curva: 'C',
+      unidade: 'CX',
+      valor_unitario: 0,
+      custo_medio_kg: 0,
+      tipo_produto: 'Materia Prima',
+      grupo: '',
+      classificacao: '',
+      peso_padrao_cx: '',
+      tara_primaria_peca_kg: 0,
+      ncm: '',
+      cest: '',
+      origem_mercadoria: '0',
+      pais_ids: [],
+      rendimentos_map: {},
     })
   }
 
@@ -356,27 +418,37 @@ export function Produtos() {
                 {/* SESSÃO: DADOS GERAIS */}
                 <div className="card p-16 border border-border bg-bg-1">
                   <h3 className="text-sm font-bold text-primary mb-16 border-b border-border pb-8 uppercase">Dados Gerais</h3>
-                  <div className="flex gap-16 mb-16">
-                    <div className="form-group w-[200px] shrink-0">
+                  <div className="flex gap-16 mb-16 flex-wrap">
+                    <div className="form-group w-[180px] shrink-0">
                       <label className="form-label">Código Interno (SKU) *</label>
-                      <input type="text" className="form-input" value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value})} required placeholder="Ex: 4033" />
+                      <input type="text" className="form-input" value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value})} required placeholder="Ex: 10232" />
                     </div>
-                    <div className="form-group flex-1">
+                    <div className="form-group w-[150px] shrink-0">
+                      <label className="form-label">Código Auxiliar</label>
+                      <input type="text" className="form-input" value={formData.codigo_auxiliar} onChange={e => setFormData({...formData, codigo_auxiliar: e.target.value})} placeholder="Ex: 5951" />
+                    </div>
+                    <div className="form-group flex-1 min-w-[240px]">
                       <label className="form-label">Descrição *</label>
                       <input type="text" className="form-input" value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value.toUpperCase()})} required />
                     </div>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Grupo Comercial</label>
-                    <select className="form-input" value={formData.grupo} onChange={e => setFormData({...formData, grupo: e.target.value})}>
-                      <option value="">Selecione um Grupo...</option>
-                      <option value="BOVINO">BOVINO</option>
-                      <option value="SUINO">SUINO</option>
-                      <option value="AVES">AVES</option>
-                      <option value="EMBUTIDOS">EMBUTIDOS</option>
-                      <option value="MATERIAL USO E CONS">MATERIAL DE USO E CONSUMO</option>
-                      <option value="BEBIDAS ALCOOLICA">BEBIDAS ALCOÓLICA</option>
-                    </select>
+                  <div className="flex gap-16 flex-wrap">
+                    <div className="form-group flex-1 min-w-[200px]">
+                      <label className="form-label">Grupo Comercial</label>
+                      <select className="form-input" value={formData.grupo} onChange={e => setFormData({...formData, grupo: e.target.value})}>
+                        <option value="">Selecione um Grupo...</option>
+                        <option value="BOVINO">BOVINO</option>
+                        <option value="SUINO">SUINO</option>
+                        <option value="AVES">AVES</option>
+                        <option value="EMBUTIDOS">EMBUTIDOS</option>
+                        <option value="MATERIAL USO E CONS">MATERIAL DE USO E CONSUMO</option>
+                        <option value="BEBIDAS ALCOOLICA">BEBIDAS ALCOÓLICA</option>
+                      </select>
+                    </div>
+                    <div className="form-group w-[220px]">
+                      <label className="form-label">EAN / GTIN Principal</label>
+                      <input type="text" className="form-input font-mono" value={formData.ean} onChange={e => setFormData({...formData, ean: e.target.value})} placeholder="Opcional" />
+                    </div>
                   </div>
                 </div>
 
@@ -412,6 +484,43 @@ export function Produtos() {
                     <div className="form-group flex-1 min-w-[150px]">
                       <label className="form-label">Valor Unitário (R$) *</label>
                       <input type="number" step="0.01" className="form-input text-right font-mono" value={formData.valor_unitario} onChange={e => setFormData({...formData, valor_unitario: e.target.value})} required />
+                    </div>
+                  </div>
+                </div>
+
+                {/* SESSÃO: EMBALAGEM PRIMÁRIA, CUSTOS & FISCAL (FASE 1) */}
+                <div className="card p-16 border border-border bg-bg-1">
+                  <h3 className="text-sm font-bold text-primary mb-16 border-b border-border pb-8 uppercase">Custos, Embalagem Primária & Fiscal</h3>
+                  <div className="flex gap-16 flex-wrap mb-12">
+                    <div className="form-group flex-1 min-w-[150px]">
+                      <label className="form-label">Custo Médio (R$/kg)</label>
+                      <input type="number" step="0.01" className="form-input text-right font-mono" value={formData.custo_medio_kg} onChange={e => setFormData({...formData, custo_medio_kg: e.target.value})} />
+                    </div>
+                    <div className="form-group flex-1 min-w-[150px]">
+                      <label className="form-label">Peso Padrão Caixa (kg)</label>
+                      <input type="number" step="0.001" className="form-input text-right font-mono" value={formData.peso_padrao_cx} onChange={e => setFormData({...formData, peso_padrao_cx: e.target.value})} placeholder="Ex: 20.000" />
+                    </div>
+                    <div className="form-group flex-1 min-w-[200px]">
+                      <label className="form-label">Tara Saco / Vácuo por Peça (kg)</label>
+                      <input type="number" step="0.0001" className="form-input text-right font-mono" value={formData.tara_primaria_peca_kg} onChange={e => setFormData({...formData, tara_primaria_peca_kg: e.target.value})} placeholder="Ex: 0.0150 (15g)" />
+                    </div>
+                  </div>
+                  <div className="flex gap-16 flex-wrap">
+                    <div className="form-group flex-1 min-w-[150px]">
+                      <label className="form-label">NCM</label>
+                      <input type="text" className="form-input font-mono" value={formData.ncm} onChange={e => setFormData({...formData, ncm: e.target.value})} placeholder="Ex: 02013000" />
+                    </div>
+                    <div className="form-group flex-1 min-w-[150px]">
+                      <label className="form-label">CEST</label>
+                      <input type="text" className="form-input font-mono" value={formData.cest} onChange={e => setFormData({...formData, cest: e.target.value})} placeholder="Opcional" />
+                    </div>
+                    <div className="form-group flex-1 min-w-[150px]">
+                      <label className="form-label">Origem Mercadoria</label>
+                      <select className="form-input" value={formData.origem_mercadoria} onChange={e => setFormData({...formData, origem_mercadoria: e.target.value})}>
+                        <option value="0">0 - Nacional</option>
+                        <option value="1">1 - Estrangeira (Imp. Direta)</option>
+                        <option value="2">2 - Estrangeira (Merc. Interno)</option>
+                      </select>
                     </div>
                   </div>
                 </div>
@@ -453,20 +562,47 @@ export function Produtos() {
                           <div className="p-16 text-center text-muted text-sm">Nenhuma Matéria Prima cadastrada ainda.</div>
                         ) : (
                           <div className="grid grid-cols-2 gap-4 p-8">
-                            {materiasPrimas.map(mp => (
-                              <label key={mp.id} className={`flex items-center gap-12 p-8 rounded cursor-pointer border transition-colors ${formData.pais_ids.includes(mp.id) ? 'bg-primary/20 border-primary' : 'border-transparent hover:bg-bg-3'}`}>
-                                <input 
-                                  type="checkbox"
-                                  className="w-16 h-16 rounded bg-bg border-border text-primary focus:ring-primary focus:ring-offset-bg"
-                                  checked={formData.pais_ids.includes(mp.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) setFormData({...formData, pais_ids: [...formData.pais_ids, mp.id]})
-                                    else setFormData({...formData, pais_ids: formData.pais_ids.filter(id => id !== mp.id)})
-                                  }}
-                                />
-                                <span className="text-sm font-semibold flex-1">{mp.descricao}</span>
-                              </label>
-                            ))}
+                            {materiasPrimas.map(mp => {
+                              const marcado = formData.pais_ids.includes(mp.id)
+                              return (
+                                <div key={mp.id} className={`flex items-center gap-8 p-8 rounded border transition-colors ${marcado ? 'bg-primary/20 border-primary' : 'border-transparent hover:bg-bg-3'}`}>
+                                  <label className="flex items-center gap-10 flex-1 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="w-16 h-16 rounded bg-bg border-border text-primary focus:ring-primary focus:ring-offset-bg"
+                                      checked={marcado}
+                                      onChange={(e) => {
+                                        if (e.target.checked) setFormData({...formData, pais_ids: [...formData.pais_ids, mp.id]})
+                                        else setFormData({...formData, pais_ids: formData.pais_ids.filter(id => id !== mp.id)})
+                                      }}
+                                    />
+                                    <span className="text-sm font-semibold flex-1">{mp.descricao}</span>
+                                  </label>
+                                  {marcado && (
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max="100"
+                                      className="form-input font-mono text-right"
+                                      style={{ width: 82, padding: '4px 6px', fontSize: 12 }}
+                                      placeholder="% Rend."
+                                      title="Rendimento esperado (%) deste corte sobre a matéria-prima"
+                                      value={formData.rendimentos_map?.[mp.id] ?? ''}
+                                      onChange={(e) =>
+                                        setFormData({
+                                          ...formData,
+                                          rendimentos_map: {
+                                            ...(formData.rendimentos_map || {}),
+                                            [mp.id]: e.target.value,
+                                          },
+                                        })
+                                      }
+                                    />
+                                  )}
+                                </div>
+                              )
+                            })}
                           </div>
                         )}
                       </div>

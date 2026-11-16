@@ -7,6 +7,9 @@ export const SETORES_EMPRESA = [
   'Câmara Fria / Estoque',
   'Recebimento',
   'Expedição / Pedidos',
+  'Supply Chain / Compras',
+  'Comercial / Vendas',
+  'Financeiro',
   'Inventário',
   'Qualidade',
   'Administrativo',
@@ -66,6 +69,7 @@ export const SETORES_PERMISSOES = [
       { key: 'saida', label: 'Bipar e registrar separação de pedidos', desc: 'Separar caixas bipadas na câmara para atender pedidos liberados.' },
       { key: 'expedicao', label: 'Conferência caixa a caixa e expedição', desc: 'Conferir e expedir pedidos com emissão do romaneio de embarque.' },
       { key: 'pedidos', label: 'Criar / Editar / Liberar pedidos', desc: 'Cadastrar novos pedidos, editar quantidades e liberar para câmara.' },
+      { key: 'financeiro_pedidos', label: 'Lançar pedidos pelo Financeiro', desc: 'Permite ao Financeiro criar solicitações de pedido que caem na fila do Supply Chain.' },
     ],
   },
   {
@@ -97,6 +101,12 @@ export const SETORES_PERMISSOES = [
     descricao: 'Cadastros mestres, usuários, perfis, configurações e ações sensíveis.',
     permissoes: [
       { key: 'produtos', label: 'Gerenciar cadastro de produtos', desc: 'Criar, editar produtos e consultar catálogo completo.' },
+      { key: 'clientes', label: 'Gerenciar cadastro de clientes', desc: 'Cadastro completo de clientes, condições padrão, crédito e especificações de corte.' },
+      { key: 'fornecedores', label: 'Gerenciar cadastro de fornecedores', desc: 'Cadastro de fornecedores, SIF/DIPOA e prazos de entrega.' },
+      { key: 'vendedores', label: 'Gerenciar vendedores e comissões', desc: 'Cadastro de equipe comercial, metas e regras de comissão.' },
+      { key: 'transportadoras', label: 'Gerenciar transportadoras e rotas', desc: 'Cadastro de veículos, transportadoras e rotas de embarque.' },
+      { key: 'empresas_filiais', label: 'Gerenciar empresas, filiais e SIF', desc: 'Configurar unidades (1/1, 1/2, 2/1) e registros sanitários DIPOA/SIF/SISBI.' },
+      { key: 'parametros_comerciais', label: 'Parâmetros comerciais e fiscais', desc: 'Formas de pagamento, bancos de cobrança, centros de custo, naturezas/CFOP e tributação.' },
       { key: 'taras', label: 'Gerenciar cadastro de taras', desc: 'Cadastrar e definir taras padrão das caixas.' },
       { key: 'locais', label: 'Gerenciar cadastro de locais', desc: 'Criar e manter câmaras e endereços do armazém.' },
       { key: 'operadores', label: 'Gerenciar usuários e permissões', desc: 'Cadastrar contas, atribuir perfis, ativar/desativar e auditar.' },
@@ -130,11 +140,18 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'inventario_carga_inicial',
   'pedidos',
   'pedidos_consultar',
+  'financeiro_pedidos',
   'saida',
   'expedicao',
   'ean_etiquetas',
   'dashboard_executivo',
   'produtos',
+  'clientes',
+  'fornecedores',
+  'vendedores',
+  'transportadoras',
+  'empresas_filiais',
+  'parametros_comerciais',
   'taras',
   'locais',
   'operadores',
@@ -312,6 +329,14 @@ export function sanitizarPermissoes(rawPermissoes = {}, nivel = 'OPERACIONAL', p
   if (obj?.produtos && obj?.relatorios_estoque === undefined) {
     mapa.relatorios_producao = true
     mapa.relatorios_estoque = true
+  }
+  if (obj?.pedidos && obj?.clientes === undefined) {
+    mapa.clientes = true
+  }
+  if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos']) {
+      if (obj?.[k] === undefined) mapa[k] = true
+    }
   }
 
   if (nivelUp === 'CLIENTE' || perfilUp === 'CLIENTE') {

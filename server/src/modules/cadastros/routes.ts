@@ -3,38 +3,41 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import {
-  centrosCusto,
-  clientes,
   estoquePosicao,
   filiais,
-  formasPagamento,
-  fornecedores,
   locais,
-  locaisCobranca,
-  naturezasOperacao,
   produtoArvore,
   produtos,
   taras,
-  vendedores,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { registerCadastrosMestresRoutes } from './mestresRoutes.js'
+
+const ArvoreVinculoSchema = z.object({
+  pai_id: z.string().uuid(),
+  rendimento_esperado_pct: z.coerce.number().min(0).max(100).nullish(),
+})
 
 const ProdutoSchema = z.object({
   codigo: z.string().trim().min(1, 'Codigo interno obrigatorio.'),
-  codigo_auxiliar: z.string().trim().optional().nullable(),
-  ean: z.string().trim().optional().nullable(),
+  codigo_auxiliar: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
+  ean: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
   descricao: z.string().trim().min(1, 'Descricao obrigatoria.'),
   valor_unitario: z.coerce.number().min(0).default(0),
   custo_medio_kg: z.coerce.number().min(0).default(0),
-  tipo_produto: z.string().trim().default('Materia Prima'),
+  tipo_produto: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : 'Materia Prima')),
   status_curva: z.enum(['A', 'B', 'C']).default('C'),
-  unidade: z.string().trim().default('CX'),
-  grupo: z.string().trim().default(''),
-  classificacao: z.string().trim().optional().nullable(),
+  unidade: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : 'CX')),
+  grupo: z.string().nullish().transform((v) => (v ?? '').trim()),
+  classificacao: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
+  peso_padrao_cx: z.coerce.number().min(0).nullish(),
   tara_primaria_peca_kg: z.coerce.number().min(0).default(0),
-  ncm: z.string().trim().default(''),
+  ncm: z.string().nullish().transform((v) => (v ?? '').trim()),
+  cest: z.string().nullish().transform((v) => (v ?? '').trim()),
+  origem_mercadoria: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : '0')),
   pais_ids: z.array(z.string().uuid()).optional().default([]),
+  arvore_vinculos: z.array(ArvoreVinculoSchema).optional(),
 })
 
 const TaraSchema = z.object({
@@ -50,55 +53,6 @@ const LocalSchema = z.object({
   is_insumo: z.union([z.boolean(), z.number()]).optional().default(0),
   tipo_armazenamento: z.string().trim().default('FRIO'),
   filial_id: z.string().uuid().optional(),
-})
-
-const ClienteSchema = z.object({
-  codigo: z.string().trim().optional().nullable(),
-  razao_social: z.string().trim().min(1, 'Informe a Razao Social.'),
-  nome_fantasia: z.string().trim().optional(),
-  cnpj_cpf: z.string().trim().default(''),
-  inscricao_estadual: z.string().trim().default(''),
-  endereco: z.string().trim().default(''),
-  numero: z.string().trim().default(''),
-  complemento: z.string().trim().default(''),
-  bairro: z.string().trim().default(''),
-  cep: z.string().trim().default(''),
-  cidade: z.string().trim().default(''),
-  uf: z.string().trim().max(2).default('SP'),
-  telefone: z.string().trim().default(''),
-  icms: z.string().trim().default('CONTRIBUINTE'),
-  vendedor_padrao_id: z.string().uuid().optional().nullable(),
-  forma_pagamento_padrao_id: z.string().uuid().optional().nullable(),
-  local_cobranca_padrao_id: z.string().uuid().optional().nullable(),
-  marchante_padrao: z.string().trim().default(''),
-  rota_padrao_nome: z.string().trim().default(''),
-  limite_credito: z.coerce.number().min(0).default(0),
-  permite_pagamento_entrega: z.union([z.boolean(), z.number()]).optional().default(1),
-  is_padrao: z.union([z.boolean(), z.number()]).optional().default(0),
-})
-
-const FornecedorSchema = z.object({
-  codigo: z.string().trim().optional().nullable(),
-  razao_social: z.string().trim().min(1, 'Informe a Razao Social do fornecedor.'),
-  nome_fantasia: z.string().trim().optional(),
-  cnpj_cpf: z.string().trim().default(''),
-  inscricao_estadual: z.string().trim().default(''),
-  uf: z.string().trim().max(2).default('SP'),
-  cidade: z.string().trim().default(''),
-  telefone: z.string().trim().default(''),
-  registro_sanitario_sif: z.string().trim().default(''),
-  prazo_entrega_dias: z.coerce.number().int().min(0).default(5),
-})
-
-const VendedorSchema = z.object({
-  codigo: z.string().trim().min(1, 'Informe o codigo do vendedor.'),
-  sigla: z.string().trim().default(''),
-  nome: z.string().trim().min(1, 'Informe o nome do vendedor.'),
-  tipo_comissao: z.enum(['PCT_VENDA', 'PCT_MARGEM', 'VALOR_KG']).default('PCT_VENDA'),
-  pct_comissao: z.coerce.number().min(0).default(0),
-  regra_liberacao: z.enum(['FATURAMENTO', 'LIQUIDACAO']).default('FATURAMENTO'),
-  meta_mensal_kg: z.coerce.number().min(0).default(0),
-  meta_mensal_valor: z.coerce.number().min(0).default(0),
 })
 
 const PERM_PROD_READ = [
@@ -131,7 +85,25 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
         .from(filiais)
         .where(and(eq(filiais.tenantId, ctx.tenantId), eq(filiais.ativo, 1)))
         .orderBy(asc(filiais.codigo))
-      return { success: true, data: rows }
+      return {
+        success: true,
+        filial_ativa_id: ctx.filialId,
+        data: rows.map((f) => ({
+          id: f.id,
+          empresa_id: f.empresaId,
+          codigo: f.codigo,
+          nome: f.nome,
+          tipo_unidade: f.tipoUnidade,
+          cnpj: f.cnpj,
+          inscricao_estadual: f.inscricaoEstadual,
+          uf: f.uf,
+          cidade: f.cidade,
+          codigo_ibge: f.codigoIbge,
+          registro_sanitario_tipo: f.registroSanitarioTipo,
+          registro_sanitario_num: f.registroSanitarioNum,
+          is_padrao: f.isPadrao,
+        })),
+      }
     }
   )
 
@@ -141,50 +113,81 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
     { preHandler: requirePermission(PERM_PROD_READ, { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
-      const res = await conn.db.execute(sql`
-        SELECT
-          p.id,
-          p.codigo,
-          p.codigo_auxiliar,
-          p.ean,
-          p.descricao,
-          p.valor_unitario,
-          p.custo_medio_kg,
-          p.tipo_produto,
-          p.status_curva,
-          p.unidade,
-          p.grupo,
-          p.classificacao,
-          p.tara_primaria_peca_kg,
-          p.ncm,
-          p.created_at,
-          STRING_AGG(DISTINCT pai.id::text, ',') AS pais_ids,
-          STRING_AGG(DISTINCT pai.descricao, ', ') AS pai_descricao,
-          COALESCE(pos.saldo_kg, 0) AS saldo_kg,
-          COALESCE(pos.qtd_caixas, 0) AS qtd_caixas
-        FROM produtos p
-        LEFT JOIN produto_arvore pa ON pa.filho_id = p.id AND pa.tenant_id = ${ctx.tenantId}
-        LEFT JOIN produtos pai ON pai.id = pa.pai_id
-        LEFT JOIN (
-          SELECT ep.produto_id,
-                 SUM(ep.qtd_kg) AS saldo_kg,
-                 SUM(ep.qtd_caixas) AS qtd_caixas
-          FROM estoque_posicao ep
-          WHERE ep.tenant_id = ${ctx.tenantId} AND ep.filial_id = ${ctx.filialId}
-          GROUP BY ep.produto_id
-        ) pos ON pos.produto_id = p.id
-        WHERE p.tenant_id = ${ctx.tenantId} AND p.ativo = 1
-        GROUP BY p.id, pos.saldo_kg, pos.qtd_caixas
-        ORDER BY p.descricao ASC
-      `)
+      const [res, arvRes] = await Promise.all([
+        conn.db.execute(sql`
+          SELECT
+            p.id,
+            p.codigo,
+            p.codigo_auxiliar,
+            p.ean,
+            p.descricao,
+            p.valor_unitario,
+            p.custo_medio_kg,
+            p.tipo_produto,
+            p.status_curva,
+            p.unidade,
+            p.grupo,
+            p.classificacao,
+            p.peso_padrao_cx,
+            p.tara_primaria_peca_kg,
+            p.ncm,
+            p.cest,
+            p.origem_mercadoria,
+            p.created_at,
+            STRING_AGG(DISTINCT pai.id::text, ',') AS pais_ids,
+            STRING_AGG(DISTINCT pai.descricao, ', ') AS pai_descricao,
+            COALESCE(pos.saldo_kg, 0) AS saldo_kg,
+            COALESCE(pos.qtd_caixas, 0) AS qtd_caixas
+          FROM produtos p
+          LEFT JOIN produto_arvore pa ON pa.filho_id = p.id AND pa.tenant_id = ${ctx.tenantId}
+          LEFT JOIN produtos pai ON pai.id = pa.pai_id
+          LEFT JOIN (
+            SELECT ep.produto_id,
+                   SUM(ep.qtd_kg) AS saldo_kg,
+                   SUM(ep.qtd_caixas) AS qtd_caixas
+            FROM estoque_posicao ep
+            WHERE ep.tenant_id = ${ctx.tenantId} AND ep.filial_id = ${ctx.filialId}
+            GROUP BY ep.produto_id
+          ) pos ON pos.produto_id = p.id
+          WHERE p.tenant_id = ${ctx.tenantId} AND p.ativo = 1
+          GROUP BY p.id, pos.saldo_kg, pos.qtd_caixas
+          ORDER BY p.descricao ASC
+        `),
+        conn.db
+          .select({
+            pai_id: produtoArvore.paiId,
+            filho_id: produtoArvore.filhoId,
+            rendimento_esperado_pct: produtoArvore.rendimentoEsperadoPct,
+            rendimento_aprendido_pct: produtoArvore.rendimentoAprendidoPct,
+            amostras_aprendizado: produtoArvore.amostrasAprendizado,
+            origem_vinculo: produtoArvore.origemVinculo,
+          })
+          .from(produtoArvore)
+          .where(eq(produtoArvore.tenantId, ctx.tenantId)),
+      ])
+
+      const arvMap = new Map<string, Array<Record<string, unknown>>>()
+      for (const v of arvRes) {
+        const list = arvMap.get(v.filho_id) || []
+        list.push({
+          pai_id: v.pai_id,
+          rendimento_esperado_pct: v.rendimento_esperado_pct != null ? Number(v.rendimento_esperado_pct) : null,
+          rendimento_aprendido_pct: v.rendimento_aprendido_pct != null ? Number(v.rendimento_aprendido_pct) : null,
+          amostras_aprendizado: Number(v.amostras_aprendizado || 0),
+          origem_vinculo: v.origem_vinculo,
+        })
+        arvMap.set(v.filho_id, list)
+      }
 
       const rows = (res.rows as Array<Record<string, unknown>>).map((r) => ({
         ...r,
         valor_unitario: Number(r.valor_unitario || 0),
         custo_medio_kg: Number(r.custo_medio_kg || 0),
+        peso_padrao_cx: r.peso_padrao_cx != null ? Number(r.peso_padrao_cx) : null,
         tara_primaria_peca_kg: Number(r.tara_primaria_peca_kg || 0),
         saldo_kg: Number(r.saldo_kg || 0),
         qtd_caixas: Number(r.qtd_caixas || 0),
+        arvore_vinculos: arvMap.get(String(r.id)) || [],
       }))
       return { success: true, data: rows }
     }
@@ -327,14 +330,19 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
         .limit(1)
       if (dup.length > 0) throw new HttpError(409, `Ja existe produto com o codigo "${d.codigo}".`)
 
+      const vinculos =
+        Array.isArray(d.arvore_vinculos) && d.arvore_vinculos.length > 0
+          ? d.arvore_vinculos
+          : d.pais_ids.map((paiId) => ({ pai_id: paiId, rendimento_esperado_pct: null }))
+
       const id = uuidv7()
       await conn.db.transaction(async (tx) => {
         await tx.insert(produtos).values({
           id,
           tenantId: ctx.tenantId,
           codigo: d.codigo,
-          codigoAuxiliar: d.codigo_auxiliar || null,
-          ean: d.ean || null,
+          codigoAuxiliar: d.codigo_auxiliar,
+          ean: d.ean,
           descricao: d.descricao,
           valorUnitario: String(d.valor_unitario),
           custoMedioKg: String(d.custo_medio_kg),
@@ -342,20 +350,25 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           statusCurva: d.status_curva,
           unidade: d.unidade,
           grupo: d.grupo,
-          classificacao: d.classificacao || null,
+          classificacao: d.classificacao,
+          pesoPadraoCx: d.peso_padrao_cx != null ? String(d.peso_padrao_cx) : null,
           taraPrimariaPecaKg: String(d.tara_primaria_peca_kg),
           ncm: d.ncm,
+          cest: d.cest,
+          origemMercadoria: d.origem_mercadoria,
         })
 
-        if (d.classificacao === 'SUBPRODUTO' && d.pais_ids.length > 0) {
-          for (const paiId of d.pais_ids) {
+        if (d.classificacao === 'SUBPRODUTO' && vinculos.length > 0) {
+          for (const v of vinculos) {
             await tx
               .insert(produtoArvore)
               .values({
                 id: uuidv7(),
                 tenantId: ctx.tenantId,
-                paiId,
+                paiId: v.pai_id,
                 filhoId: id,
+                rendimentoEsperadoPct:
+                  v.rendimento_esperado_pct != null ? String(v.rendimento_esperado_pct) : null,
                 origemVinculo: 'MANUAL',
                 confirmado: 1,
               })
@@ -376,6 +389,10 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
       const parsed = ProdutoSchema.safeParse(req.body)
       if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
       const d = parsed.data
+      const vinculos =
+        Array.isArray(d.arvore_vinculos) && d.arvore_vinculos.length > 0
+          ? d.arvore_vinculos
+          : d.pais_ids.map((paiId) => ({ pai_id: paiId, rendimento_esperado_pct: null }))
 
       const dup = await conn.db
         .select({ id: produtos.id })
@@ -395,8 +412,8 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           .update(produtos)
           .set({
             codigo: d.codigo,
-            codigoAuxiliar: d.codigo_auxiliar || null,
-            ean: d.ean || null,
+            codigoAuxiliar: d.codigo_auxiliar,
+            ean: d.ean,
             descricao: d.descricao,
             valorUnitario: String(d.valor_unitario),
             custoMedioKg: String(d.custo_medio_kg),
@@ -404,9 +421,12 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             statusCurva: d.status_curva,
             unidade: d.unidade,
             grupo: d.grupo,
-            classificacao: d.classificacao || null,
+            classificacao: d.classificacao,
+            pesoPadraoCx: d.peso_padrao_cx != null ? String(d.peso_padrao_cx) : null,
             taraPrimariaPecaKg: String(d.tara_primaria_peca_kg),
             ncm: d.ncm,
+            cest: d.cest,
+            origemMercadoria: d.origem_mercadoria,
             updatedAt: new Date(),
           })
           .where(and(eq(produtos.id, id), eq(produtos.tenantId, ctx.tenantId)))
@@ -415,15 +435,17 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           .delete(produtoArvore)
           .where(and(eq(produtoArvore.tenantId, ctx.tenantId), eq(produtoArvore.filhoId, id)))
 
-        if (d.classificacao === 'SUBPRODUTO' && d.pais_ids.length > 0) {
-          for (const paiId of d.pais_ids) {
+        if (d.classificacao === 'SUBPRODUTO' && vinculos.length > 0) {
+          for (const v of vinculos) {
             await tx
               .insert(produtoArvore)
               .values({
                 id: uuidv7(),
                 tenantId: ctx.tenantId,
-                paiId,
+                paiId: v.pai_id,
                 filhoId: id,
+                rendimentoEsperadoPct:
+                  v.rendimento_esperado_pct != null ? String(v.rendimento_esperado_pct) : null,
                 origemVinculo: 'MANUAL',
                 confirmado: 1,
               })
@@ -725,199 +747,8 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
     return { success: true }
   })
 
-  // Clientes (com condicao de pagamento, vendedor, local de cobranca, marchante)
-  app.get(
-    '/api/cadastros/clientes',
-    { preHandler: requirePermission(['pedidos', 'pedidos_consultar', 'saida', 'expedicao'], { write: false }) },
-    async (req) => {
-      const ctx = req.authCtx!
-      const rows = await conn.db
-        .select({
-          id: clientes.id,
-          codigo: clientes.codigo,
-          razao_social: clientes.razaoSocial,
-          nome_fantasia: clientes.nomeFantasia,
-          cnpj_cpf: clientes.cnpjCpf,
-          inscricao_estadual: clientes.inscricaoEstadual,
-          endereco: clientes.endereco,
-          numero: clientes.numero,
-          complemento: clientes.complemento,
-          bairro: clientes.bairro,
-          cep: clientes.cep,
-          cidade: clientes.cidade,
-          uf: clientes.uf,
-          pais: clientes.pais,
-          telefone: clientes.telefone,
-          icms: clientes.icms,
-          vendedor_padrao_id: clientes.vendedorPadraoId,
-          forma_pagamento_padrao_id: clientes.formaPagamentoPadraoId,
-          local_cobranca_padrao_id: clientes.localCobrancaPadraoId,
-          marchante_padrao: clientes.marchantePadrao,
-          rota_padrao_nome: clientes.rotaPadraoNome,
-          permite_pagamento_entrega: clientes.permitePagamentoEntrega,
-          is_padrao: clientes.isPadrao,
-          ativo: clientes.ativo,
-        })
-        .from(clientes)
-        .where(and(eq(clientes.tenantId, ctx.tenantId), eq(clientes.ativo, 1)))
-        .orderBy(asc(clientes.razaoSocial))
-      return { success: true, data: rows }
-    }
-  )
-
-  app.post(
-    '/api/cadastros/clientes',
-    { preHandler: requirePermission('pedidos') },
-    async (req, reply) => {
-      const ctx = req.authCtx!
-      const parsed = ClienteSchema.safeParse(req.body)
-      if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
-      const d = parsed.data
-      const isPadrao = d.is_padrao === true || Number(d.is_padrao) === 1 ? 1 : 0
-      const id = uuidv7()
-
-      await conn.db.transaction(async (tx) => {
-        if (isPadrao === 1) {
-          await tx.update(clientes).set({ isPadrao: 0 }).where(eq(clientes.tenantId, ctx.tenantId))
-        }
-        await tx.insert(clientes).values({
-          id,
-          tenantId: ctx.tenantId,
-          codigo: d.codigo || null,
-          razaoSocial: d.razao_social,
-          nomeFantasia: d.nome_fantasia || d.razao_social,
-          cnpjCpf: d.cnpj_cpf,
-          inscricaoEstadual: d.inscricao_estadual,
-          endereco: d.endereco,
-          numero: d.numero,
-          complemento: d.complemento,
-          bairro: d.bairro,
-          cep: d.cep,
-          cidade: d.cidade,
-          uf: d.uf.toUpperCase(),
-          telefone: d.telefone,
-          icms: d.icms,
-          vendedorPadraoId: d.vendedor_padrao_id || null,
-          formaPagamentoPadraoId: d.forma_pagamento_padrao_id || null,
-          localCobrancaPadraoId: d.local_cobranca_padrao_id || null,
-          marchantePadrao: d.marchante_padrao,
-          rotaPadraoNome: d.rota_padrao_nome,
-          limiteCredito: String(d.limite_credito),
-          permitePagamentoEntrega:
-            d.permite_pagamento_entrega === false || Number(d.permite_pagamento_entrega) === 0 ? 0 : 1,
-          isPadrao,
-        })
-      })
-
-      return reply.status(201).send({ success: true, id })
-    }
-  )
-
-  // Fornecedores
-  app.get(
-    '/api/cadastros/fornecedores',
-    { preHandler: requirePermission(['recebimento', 'recebimento_consultar', 'produtos'], { write: false }) },
-    async (req) => {
-      const ctx = req.authCtx!
-      const rows = await conn.db
-        .select()
-        .from(fornecedores)
-        .where(and(eq(fornecedores.tenantId, ctx.tenantId), eq(fornecedores.ativo, 1)))
-        .orderBy(asc(fornecedores.razaoSocial))
-      return { success: true, data: rows }
-    }
-  )
-
-  app.post(
-    '/api/cadastros/fornecedores',
-    { preHandler: requirePermission(['recebimento', 'produtos']) },
-    async (req, reply) => {
-      const ctx = req.authCtx!
-      const parsed = FornecedorSchema.safeParse(req.body)
-      if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
-      const d = parsed.data
-      const id = uuidv7()
-      await conn.db.insert(fornecedores).values({
-        id,
-        tenantId: ctx.tenantId,
-        codigo: d.codigo || null,
-        razaoSocial: d.razao_social,
-        nomeFantasia: d.nome_fantasia || d.razao_social,
-        cnpjCpf: d.cnpj_cpf,
-        inscricaoEstadual: d.inscricao_estadual,
-        uf: d.uf.toUpperCase(),
-        cidade: d.cidade,
-        telefone: d.telefone,
-        registroSanitarioSif: d.registro_sanitario_sif,
-        prazoEntregaDias: d.prazo_entrega_dias,
-      })
-      return reply.status(201).send({ success: true, id })
-    }
-  )
-
-  // Vendedores
-  app.get(
-    '/api/cadastros/vendedores',
-    { preHandler: requirePermission(['pedidos', 'pedidos_consultar', 'operadores'], { write: false }) },
-    async (req) => {
-      const ctx = req.authCtx!
-      const rows = await conn.db
-        .select()
-        .from(vendedores)
-        .where(and(eq(vendedores.tenantId, ctx.tenantId), eq(vendedores.ativo, 1)))
-        .orderBy(asc(vendedores.nome))
-      return { success: true, data: rows }
-    }
-  )
-
-  app.post(
-    '/api/cadastros/vendedores',
-    { preHandler: requirePermission('operadores') },
-    async (req, reply) => {
-      const ctx = req.authCtx!
-      const parsed = VendedorSchema.safeParse(req.body)
-      if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
-      const d = parsed.data
-      const id = uuidv7()
-      await conn.db.insert(vendedores).values({
-        id,
-        tenantId: ctx.tenantId,
-        codigo: d.codigo,
-        sigla: d.sigla.toUpperCase(),
-        nome: d.nome,
-        tipoComissao: d.tipo_comissao,
-        pctComissao: String(d.pct_comissao),
-        regraLiberacao: d.regra_liberacao,
-        metaMensalKg: String(d.meta_mensal_kg),
-        metaMensalValor: String(d.meta_mensal_valor),
-      })
-      return reply.status(201).send({ success: true, id })
-    }
-  )
-
-  // Auxiliares comerciais/fiscais (formas pgto, bancos cobranca, centros de custo, naturezas CFOP)
-  app.get(
-    '/api/cadastros/auxiliares',
-    { preHandler: requirePermission(null, { write: false, bloquearCliente: true }) },
-    async (req) => {
-      const ctx = req.authCtx!
-      const [formas, bancos, centros, naturezas] = await Promise.all([
-        conn.db.select().from(formasPagamento).where(eq(formasPagamento.tenantId, ctx.tenantId)),
-        conn.db.select().from(locaisCobranca).where(eq(locaisCobranca.tenantId, ctx.tenantId)),
-        conn.db.select().from(centrosCusto).where(eq(centrosCusto.tenantId, ctx.tenantId)),
-        conn.db.select().from(naturezasOperacao).where(eq(naturezasOperacao.tenantId, ctx.tenantId)),
-      ])
-      return {
-        success: true,
-        data: {
-          formasPagamento: formas,
-          locaisCobranca: bancos,
-          centrosCusto: centros,
-          naturezasOperacao: naturezas,
-        },
-      }
-    }
-  )
+  // Cadastros Mestres Estruturantes (Empresas, Filiais/SIF, Clientes+Espec, Fornecedores, Vendedores, Transportadoras/Rotas, Auxiliares)
+  registerCadastrosMestresRoutes(app, conn)
 
   // Consulta rapida do proprio schema/contagens para health/diagnostico admin
   app.get(

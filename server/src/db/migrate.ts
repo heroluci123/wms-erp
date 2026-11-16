@@ -312,6 +312,23 @@ CREATE TABLE IF NOT EXISTS matriz_tributaria (
 );
 CREATE INDEX IF NOT EXISTS idx_matriz_trib_tenant_ncm ON matriz_tributaria(tenant_id, ncm);
 
+CREATE TABLE IF NOT EXISTS transportadoras (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  codigo TEXT,
+  razao_social TEXT NOT NULL,
+  nome_fantasia TEXT NOT NULL,
+  cnpj_cpf TEXT NOT NULL DEFAULT '',
+  inscricao_estadual TEXT NOT NULL DEFAULT '',
+  uf TEXT NOT NULL DEFAULT 'SP',
+  cidade TEXT NOT NULL DEFAULT '',
+  telefone TEXT NOT NULL DEFAULT '',
+  placa_padrao TEXT NOT NULL DEFAULT '',
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_transportadoras_tenant ON transportadoras(tenant_id);
+
 CREATE TABLE IF NOT EXISTS fornecedores (
   id UUID PRIMARY KEY,
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -802,6 +819,8 @@ CREATE TABLE IF NOT EXISTS pedidos (
   previsao_entrega DATE,
   valor_total NUMERIC(14,2) NOT NULL DEFAULT 0,
   observacoes TEXT NOT NULL DEFAULT '',
+  origem_pedido TEXT NOT NULL DEFAULT 'SUPPLY_CHAIN',
+  setor_solicitante TEXT NOT NULL DEFAULT 'SUPPLY_CHAIN',
   status TEXT NOT NULL DEFAULT 'LIBERADO',
   rastreio_token TEXT,
   criado_por_id UUID,
@@ -853,6 +872,9 @@ CREATE TABLE IF NOT EXISTS rotas (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome TEXT NOT NULL,
   regiao TEXT NOT NULL DEFAULT '',
+  transportadora_id UUID REFERENCES transportadoras(id) ON DELETE SET NULL,
+  veiculo_padrao TEXT NOT NULL DEFAULT '',
+  dias_entrega TEXT NOT NULL DEFAULT '',
   ativo INTEGER NOT NULL DEFAULT 1
 );
 
@@ -950,6 +972,14 @@ CREATE TABLE IF NOT EXISTS sync_operations_log (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_op_idempotency ON sync_operations_log(tenant_id, operation_id);
 `
 
+const POST_MIGRATIONS_SQL = `
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origem_pedido TEXT NOT NULL DEFAULT 'SUPPLY_CHAIN';
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS setor_solicitante TEXT NOT NULL DEFAULT 'SUPPLY_CHAIN';
+ALTER TABLE rotas ADD COLUMN IF NOT EXISTS transportadora_id UUID REFERENCES transportadoras(id) ON DELETE SET NULL;
+ALTER TABLE rotas ADD COLUMN IF NOT EXISTS veiculo_padrao TEXT NOT NULL DEFAULT '';
+ALTER TABLE rotas ADD COLUMN IF NOT EXISTS dias_entrega TEXT NOT NULL DEFAULT '';
+`
+
 export interface SeedDefaultsResult {
   tenantId: string
   empresaId: string
@@ -958,6 +988,7 @@ export interface SeedDefaultsResult {
 
 export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefaultsResult> {
   await conn.execMulti(SCHEMA_SQL)
+  await conn.execMulti(POST_MIGRATIONS_SQL)
 
   const { db } = conn
   const existingTenants = await db.select().from(tenants).limit(1)

@@ -217,12 +217,50 @@ export async function removerRegraEan(id) {
   }
 }
 
-export async function criar({ codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
+export async function criar({
+  codigo,
+  codigo_auxiliar,
+  ean,
+  descricao,
+  valor_unitario,
+  custo_medio_kg,
+  tipo_produto,
+  status_curva,
+  unidade,
+  grupo,
+  classificacao,
+  peso_padrao_cx,
+  tara_primaria_peca_kg,
+  ncm,
+  cest,
+  origem_mercadoria,
+  pais_ids,
+  arvore_vinculos,
+}) {
   if (isApiEnabled()) {
     try {
       return await apiRequest('/api/cadastros/produtos', {
         method: 'POST',
-        body: { codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids: pais_ids || [] },
+        body: {
+          codigo,
+          codigo_auxiliar,
+          ean,
+          descricao,
+          valor_unitario,
+          custo_medio_kg,
+          tipo_produto,
+          status_curva,
+          unidade,
+          grupo,
+          classificacao,
+          peso_padrao_cx: peso_padrao_cx === '' || peso_padrao_cx == null ? null : Number(peso_padrao_cx),
+          tara_primaria_peca_kg: Number(tara_primaria_peca_kg || 0),
+          ncm,
+          cest,
+          origem_mercadoria,
+          pais_ids: pais_ids || [],
+          arvore_vinculos,
+        },
       });
     } catch (err) {
       return { success: false, error: err.message };
@@ -264,12 +302,51 @@ export async function criar({ codigo, descricao, valor_unitario, tipo_produto, s
   }
 }
 
-export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
+export async function atualizar({
+  id,
+  codigo,
+  codigo_auxiliar,
+  ean,
+  descricao,
+  valor_unitario,
+  custo_medio_kg,
+  tipo_produto,
+  status_curva,
+  unidade,
+  grupo,
+  classificacao,
+  peso_padrao_cx,
+  tara_primaria_peca_kg,
+  ncm,
+  cest,
+  origem_mercadoria,
+  pais_ids,
+  arvore_vinculos,
+}) {
   if (isApiEnabled()) {
     try {
       return await apiRequest(`/api/cadastros/produtos/${id}`, {
         method: 'PUT',
-        body: { codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids: pais_ids || [] },
+        body: {
+          codigo,
+          codigo_auxiliar,
+          ean,
+          descricao,
+          valor_unitario,
+          custo_medio_kg,
+          tipo_produto,
+          status_curva,
+          unidade,
+          grupo,
+          classificacao,
+          peso_padrao_cx: peso_padrao_cx === '' || peso_padrao_cx == null ? null : Number(peso_padrao_cx),
+          tara_primaria_peca_kg: Number(tara_primaria_peca_kg || 0),
+          ncm,
+          cest,
+          origem_mercadoria,
+          pais_ids: pais_ids || [],
+          arvore_vinculos,
+        },
       });
     } catch (err) {
       return { success: false, error: err.message };

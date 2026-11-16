@@ -139,6 +139,27 @@ export function createAuthMiddleware(app: FastifyInstance, conn: DbConnection) {
     }
 
     let filialId = match.op.filialPadraoId || ''
+    const requestedFilial = String(req.headers['x-filial-id'] || '').trim()
+    if (requestedFilial) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedFilial)) {
+        throw new HttpError(400, 'Cabecalho x-filial-id invalido.')
+      }
+      const fValid = await conn.db
+        .select({ id: filiais.id })
+        .from(filiais)
+        .where(
+          and(
+            eq(filiais.id, requestedFilial),
+            eq(filiais.tenantId, match.op.tenantId),
+            eq(filiais.ativo, 1)
+          )
+        )
+        .limit(1)
+      if (!fValid[0]) {
+        throw new HttpError(403, 'Filial selecionada nao pertence a esta empresa ou esta inativa.')
+      }
+      filialId = fValid[0].id
+    }
     if (!filialId) {
       const fRow = await conn.db
         .select({ id: filiais.id })

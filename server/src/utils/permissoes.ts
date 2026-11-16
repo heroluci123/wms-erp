@@ -17,6 +17,7 @@ export const TODAS_CHAVES_PERMISSAO = [
   'saida',
   'expedicao',
   'pedidos',
+  'financeiro_pedidos',
   'estoque_enderecos',
   'consulta_estoque',
   'rastreabilidade',
@@ -29,6 +30,12 @@ export const TODAS_CHAVES_PERMISSAO = [
   'produtos',
   'taras',
   'locais',
+  'clientes',
+  'fornecedores',
+  'vendedores',
+  'transportadoras',
+  'empresas_filiais',
+  'parametros_comerciais',
   'operadores',
   'perfis_gerenciar',
   'redefinir_senhas',
@@ -58,6 +65,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set<string>([
   'inventario_carga_inicial',
   'pedidos',
   'pedidos_consultar',
+  'financeiro_pedidos',
   'saida',
   'expedicao',
   'ean_etiquetas',
@@ -65,6 +73,12 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set<string>([
   'produtos',
   'taras',
   'locais',
+  'clientes',
+  'fornecedores',
+  'vendedores',
+  'transportadoras',
+  'empresas_filiais',
+  'parametros_comerciais',
   'operadores',
   'perfis_gerenciar',
   'redefinir_senhas',
@@ -254,6 +268,14 @@ export function sanitizarPermissoes(
   if (obj?.produtos && obj?.relatorios_estoque === undefined) {
     mapa.relatorios_producao = true
     mapa.relatorios_estoque = true
+  }
+  if (obj?.pedidos && obj?.clientes === undefined) {
+    mapa.clientes = true
+  }
+  if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos'] as const) {
+      if (obj?.[k] === undefined) mapa[k] = true
+    }
   }
 
   if (nivelUp === 'CLIENTE' || perfilUp === 'CLIENTE') {

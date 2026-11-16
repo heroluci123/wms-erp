@@ -1,14 +1,27 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2 } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
 import { validarSessaoServidor } from '../../lib/authGuard'
+import { isApiEnabled } from '../../lib/apiClient'
+import { cadastrosQueries } from '../../queries/cadastros'
 import { operadoresQueries } from '../../queries/operadores'
 import { isCliente, isMaster, temPermissao, temAlgumaPermissao } from '../../utils/permissoes'
 
 function TopBar() {
-  const { operador, sessionToken, setOperador, logout, toastSuccess, toastError } = useAppStore()
+  const {
+    operador,
+    sessionToken,
+    filialAtivaId,
+    filiaisDisponiveis,
+    setOperador,
+    setFilialAtiva,
+    setFiliaisDisponiveis,
+    logout,
+    toastSuccess,
+    toastError,
+  } = useAppStore()
   const navigate = useNavigate()
   const [modalSenha, setModalSenha] = useState(false)
   const [senhaAtual, setSenhaAtual] = useState('')
@@ -70,12 +83,48 @@ function TopBar() {
   const clienteUser = isCliente(operador)
   const nivelLabel = masterUser ? 'MASTER' : clienteUser ? 'CLIENTE' : (operador?.nivel || operador?.perfil || 'OPERADOR')
 
+  useEffect(() => {
+    if (!isApiEnabled() || !operador || clienteUser) return
+    cadastrosQueries
+      .listarContextoFiliais()
+      .then((res) => {
+        if (Array.isArray(res?.data) && res.data.length > 0) {
+          setFiliaisDisponiveis(res.data)
+        }
+      })
+      .catch(() => {})
+  }, [operador?.id, clienteUser, setFiliaisDisponiveis])
+
   return (
     <>
       <div className="titlebar">
         <div className="titlebar__logo">
           <span className="titlebar__title">WMSphere - Tricarnes</span>
         </div>
+
+        {isApiEnabled() && operador && !clienteUser && filiaisDisponiveis.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16, WebkitAppRegion: 'no-drag' }}>
+            <span className="text-xs text-muted">Filial:</span>
+            <select
+              className="form-input"
+              style={{ padding: '3px 8px', fontSize: 11, height: 26, width: 'auto', minWidth: 185, background: 'var(--bg-2)' }}
+              value={filialAtivaId}
+              onChange={(e) => {
+                const novoId = e.target.value
+                const f = filiaisDisponiveis.find((x) => String(x.id) === String(novoId))
+                setFilialAtiva(novoId)
+                if (f) toastSuccess('Filial alterada', `Operando em ${f.codigo} - ${f.nome}`)
+              }}
+              title="Troca rápida de Empresa / Filial (ex: 1/1 Açougue, 1/2 Estoque, 2/1 FG)"
+            >
+              {filiaisDisponiveis.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.codigo} — {f.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         
         <div className="titlebar__spacer" />
         
@@ -306,6 +355,14 @@ function Sidebar() {
     'ean_etiquetas',
     'consulta_endereco',
   ])
+  const temEstruturaComercial = temAlgumaPermissao(operador, [
+    'clientes',
+    'fornecedores',
+    'vendedores',
+    'transportadoras',
+    'empresas_filiais',
+    'parametros_comerciais',
+  ])
   const temCadastros = temAlgumaPermissao(operador, ['taras', 'locais', 'operadores', 'perfis_gerenciar'])
 
   return (
@@ -412,6 +469,42 @@ function Sidebar() {
         </NavLink>
       )}
       
+      {temEstruturaComercial && (
+        <>
+          <div className="sidebar__section-label">Comercial &amp; Estrutura</div>
+          {temAlgumaPermissao(operador, ['clientes', 'pedidos', 'financeiro_pedidos']) && (
+            <NavLink to="/clientes" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Building2 size={18} /> Clientes &amp; Especif.
+            </NavLink>
+          )}
+          {temAlgumaPermissao(operador, ['fornecedores', 'recebimento']) && (
+            <NavLink to="/fornecedores" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Truck size={18} /> Fornecedores &amp; SIF
+            </NavLink>
+          )}
+          {temAlgumaPermissao(operador, ['vendedores', 'operadores']) && (
+            <NavLink to="/vendedores" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Briefcase size={18} /> Vendedores
+            </NavLink>
+          )}
+          {temPermissao(operador, 'transportadoras') && (
+            <NavLink to="/transportadoras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Route size={18} /> Rotas &amp; Transp.
+            </NavLink>
+          )}
+          {temPermissao(operador, 'empresas_filiais') && (
+            <NavLink to="/filiais" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Factory size={18} /> Empresas &amp; Filiais
+            </NavLink>
+          )}
+          {temPermissao(operador, 'parametros_comerciais') && (
+            <NavLink to="/parametros-comerciais" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Settings2 size={18} /> Pagamentos &amp; CFOP
+            </NavLink>
+          )}
+        </>
+      )}
+
       {temCadastros && (
         <>
           <div className="sidebar__section-label">Cadastros</div>
@@ -443,7 +536,7 @@ function Sidebar() {
 }
 
 export function Layout() {
-  const { operador, sessionToken, setOperador, logout, toastError } = useAppStore()
+  const { operador, sessionToken, filialAtivaId, setOperador, logout, toastError } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
@@ -507,7 +600,7 @@ export function Layout() {
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           {!isMobile && <Sidebar />}
           <main className={isMobile ? 'main-content-mobile' : 'main-content'}>
-            <Outlet />
+            <Outlet key={filialAtivaId || 'default'} />
           </main>
         </div>
       </div>

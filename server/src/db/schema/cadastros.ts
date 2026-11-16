@@ -279,6 +279,28 @@ export const clientes = pgTable(
   ]
 )
 
+export const transportadoras = pgTable(
+  'transportadoras',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    codigo: text('codigo'),
+    razaoSocial: text('razao_social').notNull(),
+    nomeFantasia: text('nome_fantasia').notNull(),
+    cnpjCpf: text('cnpj_cpf').notNull().default(''),
+    inscricaoEstadual: text('inscricao_estadual').notNull().default(''),
+    uf: text('uf').notNull().default('SP'),
+    cidade: text('cidade').notNull().default(''),
+    telefone: text('telefone').notNull().default(''),
+    placaPadrao: text('placa_padrao').notNull().default(''),
+    ativo: integer('ativo').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_transportadoras_tenant').on(t.tenantId)]
+)
+
 export const clienteProdutoEspec = pgTable(
   'cliente_produto_espec',
   {

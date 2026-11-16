@@ -340,6 +340,8 @@ export const pedidos = pgTable(
     previsaoEntrega: date('previsao_entrega'),
     valorTotal: numeric('valor_total', { precision: 14, scale: 2 }).notNull().default('0'),
     observacoes: text('observacoes').notNull().default(''),
+    origemPedido: text('origem_pedido').notNull().default('SUPPLY_CHAIN'), // SUPPLY_CHAIN | FINANCEIRO | WHATSAPP | VENDEDOR | PORTAL | SISTEMA
+    setorSolicitante: text('setor_solicitante').notNull().default('SUPPLY_CHAIN'),
     status: text('status').notNull().default('LIBERADO'),
     rastreioToken: text('rastreio_token'),
     criadoPorId: uuid('criado_por_id'),
@@ -412,6 +414,9 @@ export const rotas = pgTable('rotas', {
     .references(() => tenants.id, { onDelete: 'cascade' }),
   nome: text('nome').notNull(),
   regiao: text('regiao').notNull().default(''),
+  transportadoraId: uuid('transportadora_id'),
+  veiculoPadrao: text('veiculo_padrao').notNull().default(''),
+  diasEntrega: text('dias_entrega').notNull().default(''),
   ativo: integer('ativo').notNull().default(1),
 })
 
