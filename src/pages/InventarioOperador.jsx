@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { MapPin, Box, CheckCircle2, AlertCircle, Plus, X, Package, Settings, List, ArrowRight, MoveRight, Layers } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { apiRequest, isApiEnabled } from '../lib/apiClient.js'
 import * as inventariosQueries from '../queries/inventarios.js';
 import * as locaisQueries from '../queries/locais.js';
 import * as produtosQueries from '../queries/produtos.js';
@@ -267,12 +268,17 @@ export function InventarioOperador() {
       }
 
       // Busca a caixa no estoque
-      const { db } = await import('../lib/db.js')
-      const resEstoque = await db.execute({
-        sql: `SELECT peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, lote, data_producao, validade, ean_caixa, endereco, status FROM estoque_caixas WHERE ean_caixa = ? LIMIT 1`,
-        args: [eanBipado]
-      })
-      const caixaNoEstoque = resEstoque.rows.length > 0 ? resEstoque.rows[0] : null
+      let caixaNoEstoque = null
+      if (isApiEnabled()) {
+        caixaNoEstoque = await estoqueQueries.buscarCaixaPorEan(eanBipado)
+      } else {
+        const { db } = await import('../lib/db.js')
+        const resEstoque = await db.execute({
+          sql: `SELECT peso_kg, peso_bruto_kg, tara_id, tara_kg, qtd_pecas, lote, data_producao, validade, ean_caixa, endereco, status FROM estoque_caixas WHERE ean_caixa = ? LIMIT 1`,
+          args: [eanBipado]
+        })
+        caixaNoEstoque = resEstoque.rows.length > 0 ? resEstoque.rows[0] : null
+      }
 
       if (caixaNoEstoque) {
         const chave = `${eanBipado}__${caixaNoEstoque.validade || ''}`
@@ -283,11 +289,21 @@ export function InventarioOperador() {
         }
 
         // Verifica se já foi OK neste inventário
-        const { rows: jaOk } = await db.execute({
-          sql: `SELECT id FROM inventario_itens WHERE inventario_id = ? AND ean_caixa = ? AND status_item = 'OK' LIMIT 1`,
-          args: [inventarioAtivo.id, eanBipado]
-        })
-        if (jaOk.length > 0) {
+        let jaOk = false
+        if (isApiEnabled()) {
+          const todosItens = await inventariosQueries.listarItens(inventarioAtivo.id)
+          jaOk = todosItens.some(
+            (it) => String(it.ean_caixa || '').trim() === String(eanBipado).trim() && it.status_item === 'OK'
+          )
+        } else {
+          const { db } = await import('../lib/db.js')
+          const { rows } = await db.execute({
+            sql: `SELECT id FROM inventario_itens WHERE inventario_id = ? AND ean_caixa = ? AND status_item = 'OK' LIMIT 1`,
+            args: [inventarioAtivo.id, eanBipado]
+          })
+          jaOk = rows.length > 0
+        }
+        if (jaOk) {
           toastSuccess('Confirmado ✓', `Caixa já contada e confirmada (OK).`)
           return
         }
@@ -387,45 +403,53 @@ export function InventarioOperador() {
     if (!modalDePara) return
     setMovendo(true)
     try {
-      const { db } = await import('../lib/db.js')
       const { caixa, produto, enderecoOrigem, eanBipado, chave } = modalDePara
 
-      // Mover a caixa no estoque_caixas
-      await db.execute({
-        sql: `UPDATE estoque_caixas SET endereco = ?, updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
-        args: [enderecoAtual, eanBipado]
-      })
-
-      // Retirar do estoque_posicao de origem
-      await db.execute({
-        sql: `UPDATE estoque_posicao SET qtd_caixas = MAX(0, qtd_caixas - 1), qtd_kg = MAX(0, qtd_kg - ?), updated_at = CURRENT_TIMESTAMP
-              WHERE endereco = ? AND produto_id = ?`,
-        args: [caixa.peso_kg || 0, enderecoOrigem, produto.id]
-      })
-
-      // Adicionar no estoque_posicao de destino
-      const val = caixa.validade || null
-      const { rows: posExiste } = await db.execute({
-        sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND (validade = ? OR (validade IS NULL AND ? IS NULL))`,
-        args: [produto.id, enderecoAtual, val, val]
-      })
-      if (posExiste[0]) {
-        await db.execute({
-          sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          args: [caixa.peso_kg || 0, posExiste[0].id]
+      if (isApiEnabled()) {
+        await apiRequest('/api/estoque/mover-caixa-endereco', {
+          method: 'POST',
+          body: { ean_caixa: eanBipado, destino: enderecoAtual },
         })
       } else {
+        const { db } = await import('../lib/db.js')
+
+        // Mover a caixa no estoque_caixas
         await db.execute({
-          sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, 1, ?)`,
-          args: [produto.id, enderecoAtual, val, caixa.peso_kg || 0]
+          sql: `UPDATE estoque_caixas SET endereco = ?, updated_at = CURRENT_TIMESTAMP WHERE ean_caixa = ?`,
+          args: [enderecoAtual, eanBipado]
+        })
+
+        // Retirar do estoque_posicao de origem
+        await db.execute({
+          sql: `UPDATE estoque_posicao SET qtd_caixas = MAX(0, qtd_caixas - 1), qtd_kg = MAX(0, qtd_kg - ?), updated_at = CURRENT_TIMESTAMP
+                WHERE endereco = ? AND produto_id = ?`,
+          args: [caixa.peso_kg || 0, enderecoOrigem, produto.id]
+        })
+
+        // Adicionar no estoque_posicao de destino
+        const val = caixa.validade || null
+        const { rows: posExiste } = await db.execute({
+          sql: `SELECT id FROM estoque_posicao WHERE produto_id = ? AND endereco = ? AND (validade = ? OR (validade IS NULL AND ? IS NULL))`,
+          args: [produto.id, enderecoAtual, val, val]
+        })
+        if (posExiste[0]) {
+          await db.execute({
+            sql: `UPDATE estoque_posicao SET qtd_caixas = qtd_caixas + 1, qtd_kg = qtd_kg + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            args: [caixa.peso_kg || 0, posExiste[0].id]
+          })
+        } else {
+          await db.execute({
+            sql: `INSERT INTO estoque_posicao (produto_id, endereco, lote, validade, qtd_caixas, qtd_kg) VALUES (?, ?, '', ?, 1, ?)`,
+            args: [produto.id, enderecoAtual, val, caixa.peso_kg || 0]
+          })
+        }
+
+        // Limpar posição de origem com saldo zerado
+        await db.execute({
+          sql: `DELETE FROM estoque_posicao WHERE endereco = ? AND produto_id = ? AND qtd_caixas <= 0`,
+          args: [enderecoOrigem, produto.id]
         })
       }
-
-      // Limpar posição de origem com saldo zerado
-      await db.execute({
-        sql: `DELETE FROM estoque_posicao WHERE endereco = ? AND produto_id = ? AND qtd_caixas <= 0`,
-        args: [enderecoOrigem, produto.id]
-      })
 
       toastSuccess('Movido!', `Caixa movida de ${enderecoOrigem} → ${enderecoAtual}`)
       setModalDePara(null)
@@ -577,12 +601,24 @@ export function InventarioOperador() {
       item_id = itemMatch.id
     } else {
       try {
-        const { db } = await import('../lib/db.js')
-        const { rows: jaContada } = await db.execute({
-          sql: `SELECT id FROM inventario_itens WHERE inventario_id = ? AND endereco = ? AND ean_caixa = ? AND status_item = 'OK' LIMIT 1`,
-          args: [inventarioAtivo.id, enderecoAtual, itemAtual.codigo]
-        })
-        if (jaContada.length > 0) {
+        let jaContada = false
+        if (isApiEnabled()) {
+          const todosItens = await inventariosQueries.listarItens(inventarioAtivo.id)
+          jaContada = todosItens.some(
+            (it) =>
+              String(it.endereco || '').toUpperCase().trim() === String(enderecoAtual || '').toUpperCase().trim() &&
+              String(it.ean_caixa || '').trim() === String(itemAtual.codigo || '').trim() &&
+              it.status_item === 'OK'
+          )
+        } else {
+          const { db } = await import('../lib/db.js')
+          const { rows } = await db.execute({
+            sql: `SELECT id FROM inventario_itens WHERE inventario_id = ? AND endereco = ? AND ean_caixa = ? AND status_item = 'OK' LIMIT 1`,
+            args: [inventarioAtivo.id, enderecoAtual, itemAtual.codigo]
+          })
+          jaContada = rows.length > 0
+        }
+        if (jaContada) {
           toastSuccess('Confirmado ✓', `Caixa ${itemAtual.codigo} já confirmada (OK na 1ª contagem).`)
           voltarParaProduto()
           return

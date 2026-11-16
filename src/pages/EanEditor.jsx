@@ -2,11 +2,17 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Barcode, Search, CheckCircle, AlertTriangle, RefreshCw, Edit2, X, Check, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { temPermissao, temAlgumaPermissao } from '../utils/permissoes'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js'
 import { db } from '../lib/db.js'
 import * as movimentacoesQueries from '../queries/movimentacoes.js'
 
 // Busca todas as caixas com EAN interno (INT-...)
 async function listarCaixasComEanInt({ filtroEndereco = '', filtroProduto = '' } = {}) {
+  if (isApiEnabled()) {
+    const qs = buildQueryString({ filtroEndereco, filtroProduto })
+    const res = await apiRequest(`/api/ean-editor/caixas-int${qs}`)
+    return res.data
+  }
   const res = await db.execute({
     sql: `
       SELECT 
@@ -31,6 +37,20 @@ async function listarCaixasComEanInt({ filtroEndereco = '', filtroProduto = '' }
 }
 
 async function atualizarEan(id, novoEan) {
+  if (isApiEnabled()) {
+    if (!novoEan || novoEan.trim().length < 4) {
+      return { success: false, error: 'EAN inválido (mínimo 4 caracteres).' }
+    }
+    try {
+      await apiRequest(`/api/estoque/caixas/${id}/ean`, {
+        method: 'PATCH',
+        body: { ean_caixa: novoEan.trim() },
+      })
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   // Verifica se o novo EAN já existe
   const existe = await db.execute({
     sql: `SELECT id FROM estoque_caixas WHERE ean_caixa = ? AND id != ?`,

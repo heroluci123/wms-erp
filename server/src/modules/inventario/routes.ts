@@ -325,6 +325,12 @@ export function registerInventarioRoutes(app: FastifyInstance, conn: DbConnectio
           data_finalizacao: inventarios.dataFinalizacao,
           total_itens: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id})`,
           contados: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item NOT IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
+          ok: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'OK')`,
+          itens_ok: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'OK')`,
+          divergentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'Aguardando Ajuste')`,
+          itens_divergentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'Aguardando Ajuste')`,
+          pendentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
+          itens_pendentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
         })
         .from(inventarios)
         .where(and(eq(inventarios.tenantId, ctx.tenantId), eq(inventarios.filialId, ctx.filialId)))
@@ -633,6 +639,12 @@ export function registerInventarioRoutes(app: FastifyInstance, conn: DbConnectio
           inventario_id: inventarioItens.inventarioId,
           endereco: inventarioItens.endereco,
           produto_id: inventarioItens.produtoId,
+          codigo: produtos.codigo,
+          descricao: produtos.descricao,
+          tipo_produto: produtos.tipoProduto,
+          status_curva: produtos.statusCurva,
+          valor_unitario: produtos.valorUnitario,
+          grupo: produtos.grupo,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
           lote: inventarioItens.lote,
@@ -660,6 +672,7 @@ export function registerInventarioRoutes(app: FastifyInstance, conn: DbConnectio
       return {
         data: rows.map((r) => ({
           ...r,
+          valor_unitario: toNum(r.valor_unitario, 0),
           qtd_sistema_caixas: toNum(r.qtd_sistema_caixas, 0),
           qtd_sistema_kg: toNum(r.qtd_sistema_kg, 0),
           qtd_contada_caixas: r.qtd_contada_caixas != null ? toNum(r.qtd_contada_caixas, 0) : null,

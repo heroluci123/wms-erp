@@ -27,11 +27,12 @@ export function InventarioConciliacao() {
 
   const carregar = useCallback(async () => {
     try {
+      const invId = /^\d+$/.test(String(id)) ? Number(id) : id
       const [inv, iraData, lista, zonasData] = await Promise.all([
-        inventariosQueries.buscar(parseInt(id)),
-        inventariosQueries.calcularIRA(parseInt(id)),
-        inventariosQueries.listarItens(parseInt(id)),
-        inventariosQueries.listarZonas(parseInt(id)).catch(() => []),
+        inventariosQueries.buscar(invId),
+        inventariosQueries.calcularIRA(invId),
+        inventariosQueries.listarItens(invId),
+        inventariosQueries.listarZonas(invId).catch(() => []),
       ])
       setInventario(inv)
       setIra(iraData.ira_geral)
@@ -51,12 +52,14 @@ export function InventarioConciliacao() {
       const isCargaInicial = inventario?.tipo === 'CargaInicial'
       let res
       if (isCargaInicial) {
+        const invId = /^\d+$/.test(String(id)) ? Number(id) : id
         res = await inventariosQueries.conciliarCargaInicial({
-          inventario_id: parseInt(id), operador_id: operador.id, operador_nome: operador.nome
+          inventario_id: invId, operador_id: operador.id, operador_nome: operador.nome
         })
       } else {
+        const invId = /^\d+$/.test(String(id)) ? Number(id) : id
         res = await inventariosQueries.conciliar({
-          inventario_id: parseInt(id), operador_id: operador.id, operador_nome: operador.nome
+          inventario_id: invId, operador_id: operador.id, operador_nome: operador.nome
         })
       }
       if (res.success) {
@@ -77,7 +80,8 @@ export function InventarioConciliacao() {
     e.stopPropagation()
     if (!window.confirm(`Deseja resetar o endereço "${endereco}" para recontagem completa? Todos os itens deste endereço voltarão para Pendente.`)) return
     try {
-      const res = await inventariosQueries.recontarEndereco(parseInt(id), endereco)
+      const invId = /^\d+$/.test(String(id)) ? Number(id) : id
+      const res = await inventariosQueries.recontarEndereco(invId, endereco)
       if (res.success) {
         toastSuccess('Endereço Resetado', `${endereco} voltou para Pendente.`)
         carregar()

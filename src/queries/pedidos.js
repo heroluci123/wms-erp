@@ -1,4 +1,5 @@
 import { db } from '../lib/db'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient'
 import { recalcularPosicaoEnderecos } from './movimentacoes'
 import { assertPermissao } from '../lib/authGuard'
 
@@ -61,6 +62,9 @@ function consolidarItensPedido(itens = []) {
 export const pedidosQueries = {
   /** Lista clientes cadastrados (BEEF CONTAINER LIMITADA vem marcada como padrão) */
   async listarClientes() {
+    if (isApiEnabled()) {
+      return (await apiRequest('/api/cadastros/clientes')).data
+    }
     await assertPermissao(['pedidos', 'pedidos_consultar', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     const res = await db.execute(`
       SELECT *
@@ -73,6 +77,13 @@ export const pedidosQueries = {
 
   /** Cadastra um novo cliente para uso futuro em pedidos */
   async criarCliente(dados) {
+    if (isApiEnabled()) {
+      const res = await apiRequest('/api/cadastros/clientes', {
+        method: 'POST',
+        body: dados,
+      })
+      return { id: res.id, ...dados }
+    }
     await assertPermissao('pedidos')
     const razao = (dados.razao_social || '').trim()
     const fantasia = (dados.nome_fantasia || razao).trim()
@@ -116,6 +127,9 @@ export const pedidosQueries = {
 
   /** Lista todos os produtos com saldo serializado disponível para separação */
   async listarSaldosProdutosParaPedido() {
+    if (isApiEnabled()) {
+      return (await apiRequest('/api/pedidos/saldos-produtos')).data
+    }
     await assertPermissao(['pedidos', 'pedidos_consultar', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     const res = await db.execute(`
       SELECT
@@ -156,6 +170,12 @@ export const pedidosQueries = {
 
   /** Lista pedidos com totais solicitados, separados, conferidos e romaneio vinculado */
   async listarPedidos(filtros = {}) {
+    if (isApiEnabled()) {
+      return (await apiRequest(`/api/pedidos${buildQueryString({
+        status: filtros.status && filtros.status !== 'TODOS' ? filtros.status : undefined,
+        q: filtros.busca || filtros.q,
+      })}`)).data
+    }
     await assertPermissao(['pedidos_consultar', 'pedidos', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     let where = '1=1'
     const args = []
@@ -210,6 +230,13 @@ export const pedidosQueries = {
 
   /** Retorna pedido completo com itens, comparação solicitado vs separado e romaneio vinculado */
   async obterPedido(id) {
+    if (isApiEnabled()) {
+      try {
+        return (await apiRequest(`/api/pedidos/${id}`)).data
+      } catch {
+        return null
+      }
+    }
     await assertPermissao(['pedidos_consultar', 'pedidos', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     const pedRes = await db.execute({
       sql: `
@@ -339,6 +366,12 @@ export const pedidosQueries = {
 
   /** Cria novo pedido com itens */
   async criarPedido({ titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], operador, liberar = true }) {
+    if (isApiEnabled()) {
+      return apiRequest('/api/pedidos', {
+        method: 'POST',
+        body: { titulo, cliente_id, cliente, previsao_entrega, observacoes, itens, liberar },
+      })
+    }
     await assertPermissao('pedidos')
     const tituloTrim = (titulo || '').trim()
     if (!tituloTrim) throw new Error('Informe o título do pedido (ex: Carga Quinta-feira).')
@@ -410,6 +443,12 @@ export const pedidosQueries = {
 
   /** Atualiza pedido em status RASCUNHO ou LIBERADO */
   async atualizarPedido({ id, titulo, cliente_id = null, cliente = 'BEEF CONTAINER LIMITADA', previsao_entrega = null, observacoes = '', itens = [], liberar }) {
+    if (isApiEnabled()) {
+      return apiRequest(`/api/pedidos/${id}`, {
+        method: 'PUT',
+        body: { titulo, cliente_id, cliente, previsao_entrega, observacoes, itens, liberar },
+      })
+    }
     await assertPermissao('pedidos')
     const check = await db.execute({ sql: 'SELECT id, status, cliente_id FROM pedidos WHERE id = ?', args: [id] })
     if (check.rows.length === 0) throw new Error('Pedido não encontrado.')
@@ -477,6 +516,9 @@ export const pedidosQueries = {
 
   /** Libera um pedido RASCUNHO para separação */
   async liberarPedido(id) {
+    if (isApiEnabled()) {
+      return apiRequest(`/api/pedidos/${id}/liberar`, { method: 'POST' })
+    }
     await assertPermissao('pedidos')
     const check = await db.execute({ sql: 'SELECT status FROM pedidos WHERE id = ?', args: [id] })
     if (check.rows.length === 0) throw new Error('Pedido não encontrado.')
@@ -497,6 +539,9 @@ export const pedidosQueries = {
 
   /** Cancela um pedido antes da expedição e devolve eventuais caixas reservadas para DISPONIVEL */
   async cancelarPedido(id, operador) {
+    if (isApiEnabled()) {
+      return apiRequest(`/api/pedidos/${id}/cancelar`, { method: 'POST' })
+    }
     await assertPermissao('pedidos')
     const pedRes = await db.execute({ sql: 'SELECT id, codigo, status FROM pedidos WHERE id = ?', args: [id] })
     if (pedRes.rows.length === 0) throw new Error('Pedido não encontrado.')

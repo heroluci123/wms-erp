@@ -89,10 +89,10 @@ export function PortalCliente() {
   const produtosConsolidados = useMemo(() => {
     const mapa = new Map()
     estoqueRaw.forEach((item) => {
-      const pid = Number(item.produto_id)
+      const pid = String(item.produto_id)
       if (!mapa.has(pid)) {
         mapa.set(pid, {
-          produto_id: pid,
+          produto_id: item.produto_id,
           codigo: item.codigo || '-',
           descricao: item.descricao || 'Produto',
           grupo: item.grupo || 'Sem Grupo',

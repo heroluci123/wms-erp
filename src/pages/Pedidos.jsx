@@ -244,7 +244,7 @@ export function Pedidos() {
   )
 
   const clienteAtivo = useMemo(
-    () => clientes.find((c) => Number(c.id) === Number(clienteIdSelecionado)) || clientePadrao,
+    () => clientes.find((c) => String(c.id) === String(clienteIdSelecionado)) || clientePadrao,
     [clientes, clienteIdSelecionado, clientePadrao]
   )
 
@@ -366,7 +366,7 @@ export function Pedidos() {
     const pesoManual = Number(String(pesoManualCxInput).replace(',', '.') || 0)
     const pesoPorCx = pesoMedioCadastro > 0 ? pesoMedioCadastro : pesoManual
 
-    const itemExistente = itensForm.find((i) => Number(i.produto_id) === Number(produtoSelecionado.id))
+    const itemExistente = itensForm.find((i) => String(i.produto_id) === String(produtoSelecionado.id))
     const kgJaNoPedido = Number(String(itemExistente?.qtd_kg_solicitada || 0).replace(',', '.') || 0)
     const cxJaNoPedido = Number(
       String(itemExistente?.qtd_caixas_solicitada || 0).replace(',', '.') ||
@@ -508,7 +508,7 @@ export function Pedidos() {
     }
 
     setItensForm((prev) => {
-      const idx = prev.findIndex((i) => Number(i.produto_id) === Number(produtoSelecionado.id))
+      const idx = prev.findIndex((i) => String(i.produto_id) === String(produtoSelecionado.id))
       if (idx >= 0) {
         const next = [...prev]
         const novoKg = Number(next[idx].qtd_kg_solicitada || 0) + kgFinal

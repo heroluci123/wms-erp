@@ -1,4 +1,5 @@
 import { db } from '../lib/db.js'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js'
 import {
   ensureAuthSchema,
   validarSessaoServidor,
@@ -44,6 +45,19 @@ export async function autenticar() {
  * Autenticação segura por usuário (login) e senha com geração de sessão no banco.
  */
 export async function autenticarComSenha(login, senha) {
+  if (isApiEnabled()) {
+    try {
+      const res = await apiRequest('/api/auth/login', {
+        method: 'POST',
+        body: { login, senha },
+      })
+      limparCacheSessao()
+      return res
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
+
   await ensureAuthSchema()
   const cleanLogin = String(login || '').trim()
   const cleanSenha = String(senha ?? '')
@@ -102,6 +116,13 @@ export async function autenticarComSenha(login, senha) {
 
 export async function encerrarSessao(token) {
   if (!token) return
+  if (isApiEnabled()) {
+    try {
+      await apiRequest('/api/auth/logout', { method: 'POST', tokenOverride: token })
+    } catch { /* ignore */ }
+    limparCacheSessao()
+    return
+  }
   try {
     await db.execute({
       sql: `UPDATE sessoes_usuarios SET ativo = 0, encerrada_em = CURRENT_TIMESTAMP WHERE token = ?`,
@@ -112,6 +133,15 @@ export async function encerrarSessao(token) {
 }
 
 export async function trocarPropriaSenha({ senhaAtual, novaSenha }) {
+  if (isApiEnabled()) {
+    const res = await apiRequest('/api/auth/change-password', {
+      method: 'POST',
+      body: { senhaAtual, novaSenha },
+    })
+    limparCacheSessao()
+    return res.operador
+  }
+
   const op = await validarSessaoServidor({ forceFresh: true })
   if (!isMaster(op) && op.permissoes?.alterar_propria_senha === false && op.deve_trocar_senha !== 1) {
     throw new Error('Seu usuário não está autorizado a alterar a própria senha. Solicite ao administrador.')
@@ -163,6 +193,9 @@ export async function trocarPropriaSenha({ senhaAtual, novaSenha }) {
 }
 
 export async function listar() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/operadores')).data
+  }
   await assertPermissao('operadores', { write: false })
   const res = await db.execute(`
     SELECT id, nome, login, perfil, nivel, setor, is_adm, ativo, deve_trocar_senha,
@@ -191,6 +224,22 @@ export async function criar({
   deve_trocar_senha = false,
   ativo = 1,
 }) {
+  if (isApiEnabled()) {
+    return apiRequest('/api/operadores', {
+      method: 'POST',
+      body: {
+        nome,
+        login,
+        senha,
+        setor,
+        perfil,
+        nivel,
+        permissoes,
+        deve_trocar_senha: Boolean(deve_trocar_senha),
+        ativo,
+      },
+    })
+  }
   const executor = await assertPermissao('operadores', { forceFresh: true })
 
   const cleanNome = String(nome || '').trim()
@@ -273,6 +322,18 @@ export async function atualizar({
   novaSenha = '',
   deve_trocar_senha,
 }) {
+  if (isApiEnabled()) {
+    try {
+      const res = await apiRequest(`/api/operadores/${id}`, {
+        method: 'PUT',
+        body: { nome, login, setor, perfil, nivel, permissoes, ativo, novaSenha, deve_trocar_senha },
+      })
+      limparCacheSessao()
+      return res
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   const executor = await assertPermissao('operadores', { forceFresh: true })
   const targetId = Number(id)
 
@@ -400,6 +461,12 @@ export async function atualizar({
 }
 
 export async function redefinirSenha({ id, novaSenha, exigirTroca = true }) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/operadores/${id}/reset-password`, {
+      method: 'POST',
+      body: { novaSenha, exigirTroca },
+    })
+  }
   const executor = await assertPermissao(['redefinir_senhas', 'operadores'], { forceFresh: true })
   const targetId = Number(id)
 
@@ -453,6 +520,12 @@ export async function redefinirSenha({ id, novaSenha, exigirTroca = true }) {
 }
 
 export async function alternarStatus(id, novoAtivo) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/operadores/${id}/status`, {
+      method: 'PATCH',
+      body: { ativo: Number(novoAtivo) === 1 ? 1 : 0 },
+    })
+  }
   const executor = await assertPermissao('operadores', { forceFresh: true })
   const targetId = Number(id)
 
@@ -501,6 +574,9 @@ export async function desativar(id) {
 }
 
 export async function excluirUsuario(id) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/operadores/${id}`, { method: 'DELETE' })
+  }
   const executor = await assertPermissao('operadores', { forceFresh: true })
   if (!isMaster(executor)) {
     throw new Error('A exclusão definitiva de usuários é permitida apenas ao usuário MASTER. Utilize desativação para preservar o histórico.')
@@ -541,6 +617,9 @@ export async function excluirUsuario(id) {
 // ─── Perfis Predefinidos por Setor ────────────────────────────────────────────
 
 export async function listarPerfis() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/perfis')).data
+  }
   await assertPermissao(['operadores', 'perfis_gerenciar'], { write: false })
   const res = await db.execute(`
     SELECT id, codigo, nome, nivel, setor_padrao, descricao, permissoes_json, sistema_fixo, created_at, updated_at
@@ -558,6 +637,12 @@ export async function listarPerfis() {
 }
 
 export async function salvarPerfil({ codigo, nome, nivel, setor_padrao, descricao, permissoes }) {
+  if (isApiEnabled()) {
+    return apiRequest('/api/perfis', {
+      method: 'POST',
+      body: { codigo, nome, nivel, setor_padrao, descricao, permissoes },
+    })
+  }
   const executor = await assertPermissao('perfis_gerenciar', { forceFresh: true })
   const cod = String(codigo || nome || '')
     .normalize('NFD')
@@ -601,6 +686,9 @@ export async function salvarPerfil({ codigo, nome, nivel, setor_padrao, descrica
 }
 
 export async function excluirPerfil(codigo) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/perfis/${encodeURIComponent(codigo)}`, { method: 'DELETE' })
+  }
   const executor = await assertPermissao('perfis_gerenciar', { forceFresh: true })
   const res = await db.execute({
     sql: `SELECT codigo, nome, sistema_fixo FROM perfis_acesso WHERE codigo = ? LIMIT 1`,
@@ -621,6 +709,9 @@ export async function excluirPerfil(codigo) {
 }
 
 export async function listarAuditoria(limite = 100) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/auditoria-acessos${buildQueryString({ limite })}`)).data
+  }
   await assertPermissao('operadores', { write: false })
   const res = await db.execute({
     sql: `

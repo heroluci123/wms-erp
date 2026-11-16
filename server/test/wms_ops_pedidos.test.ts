@@ -673,3 +673,130 @@ test('WMS Parte 2D: Inventario Ciclico (Bloqueio 409, Contagem, Surpresa, IRA e 
     await conn.close()
   }
 })
+
+test('WMS Stage A: Paridade UI (Cadastros, EAN Editor, Consulta, Mover Endereco, Relatorios)', async () => {
+  const { conn, app, headers, mpId, paId, taraId } = await setupBaseApp()
+  try {
+    // 1. Produto filho com pais_ids (BOM via PUT /api/cadastros/produtos/:id)
+    const updPa = await app.inject({
+      method: 'PUT',
+      url: `/api/cadastros/produtos/${paId}`,
+      headers,
+      payload: {
+        codigo: '10055',
+        descricao: 'ACEM (CARNE SEM OSSO)',
+        tipo_produto: 'Produto Acabado',
+        valor_unitario: 38.9,
+        unidade: 'KG',
+        classificacao: 'SUBPRODUTO',
+        pais_ids: [mpId],
+      },
+    })
+    assert.equal(updPa.statusCode, 200)
+
+    // Receber caixa com prefixo INT- para testar EanEditor + saldo_kg + Consulta
+    const recInt = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/caixa',
+      headers,
+      payload: {
+        ean_caixa: 'INT-99001',
+        produto_id: mpId,
+        endereco: 'A-01-01',
+        data_producao: '2026-11-16',
+        validade: '2026-12-25',
+        peso_bruto_kg: 11.0,
+        tara_id: taraId,
+        tara_kg: 1.0,
+        qtd_pecas: 2,
+      },
+    })
+    assert.equal(recInt.statusCode, 201)
+    const intCaixaId = recInt.json().caixa.id as string
+
+    // 2. Produtos list deve trazer pais_ids e saldo_kg
+    const prodsRes = await app.inject({ method: 'GET', url: '/api/cadastros/produtos', headers })
+    assert.equal(prodsRes.statusCode, 200)
+    const prodsList = prodsRes.json().data ?? prodsRes.json()
+    const paRow = prodsList.find((p: any) => p.id === paId)
+    const mpRow = prodsList.find((p: any) => p.id === mpId)
+    assert.ok(paRow)
+    assert.ok('pais_ids' in paRow)
+    assert.ok(mpRow && Number(mpRow.saldo_kg) >= 10)
+
+    const buscarProd = await app.inject({ method: 'GET', url: '/api/cadastros/produtos/buscar/10010', headers })
+    assert.equal(buscarProd.statusCode, 200)
+
+    // 3. EAN Editor: listar INT- -> alterar EAN -> verificar movimentacao por endereco
+    const intList = await app.inject({ method: 'GET', url: '/api/ean-editor/caixas-int', headers })
+    assert.equal(intList.statusCode, 200)
+    assert.ok(intList.json().data.some((c: any) => c.id === intCaixaId))
+
+    const patchEan = await app.inject({
+      method: 'PATCH',
+      url: `/api/estoque/caixas/${intCaixaId}/ean`,
+      headers,
+      payload: { ean_caixa: '7890009900011' },
+    })
+    assert.equal(patchEan.statusCode, 200)
+
+    const moverDePara = await app.inject({
+      method: 'POST',
+      url: '/api/estoque/mover-caixa-endereco',
+      headers,
+      payload: { ean_caixa: '7890009900011', destino: 'B-02-01' },
+    })
+    assert.equal(moverDePara.statusCode, 200)
+
+    // 4. Consulta routes & Estoque posicoes/caixas
+    for (const url of [
+      `/api/consulta/resumo/${mpId}`,
+      `/api/consulta/enderecos/${mpId}`,
+      `/api/consulta/caixas/${mpId}/B-02-01`,
+      `/api/consulta/historico/${mpId}`,
+      '/api/consulta/consolidado',
+      '/api/consulta/endereco-fisico/B-02-01',
+      '/api/estoque/posicoes',
+      '/api/estoque/caixas?status=DISPONIVEL,EXPEDIDA',
+      '/api/ops?status=ATIVAS',
+      '/api/inventario',
+    ]) {
+      const r = await app.inject({ method: 'GET', url, headers })
+      assert.equal(r.statusCode, 200, `Expected 200 for ${url}`)
+    }
+
+    // 5. Relatorios Stage A shapes
+    const balRes = await app.inject({ method: 'GET', url: '/api/relatorios/balanco', headers })
+    assert.equal(balRes.statusCode, 200)
+    const balData = balRes.json().data ?? balRes.json()
+    assert.ok(Array.isArray(balData))
+    if (balData.length > 0) {
+      assert.ok('produto_id' in balData[0])
+      assert.ok('total_entrada' in balData[0])
+      assert.ok('total_saida' in balData[0])
+    }
+
+    const arvRes = await app.inject({ method: 'GET', url: '/api/relatorios/arvore', headers })
+    assert.equal(arvRes.statusCode, 200)
+    assert.ok('produtos' in arvRes.json() && 'arvore' in arvRes.json())
+
+    const dashExecRes = await app.inject({ method: 'GET', url: '/api/relatorios/dashboard-executivo', headers })
+    assert.equal(dashExecRes.statusCode, 200, `dashboard-executivo failed: ${dashExecRes.body}`)
+
+    const execRes = await app.inject({ method: 'GET', url: '/api/relatorios/executivo', headers })
+    assert.equal(execRes.statusCode, 200, `executivo failed: ${execRes.body}`)
+    const execBody = execRes.json()
+    assert.ok(Array.isArray(execBody.estoqueAtual))
+    assert.ok(execBody.estoqueAtual.length >= 1)
+    assert.ok('ean_caixa' in execBody.estoqueAtual[0])
+
+    const opsRelRes = await app.inject({ method: 'GET', url: '/api/relatorios/ordens-producao', headers })
+    assert.equal(opsRelRes.statusCode, 200, `ordens-producao failed: ${opsRelRes.body}`)
+
+    const subprodRes = await app.inject({ method: 'GET', url: '/api/relatorios/op-subprodutos/161126', headers })
+    assert.equal(subprodRes.statusCode, 200, `op-subprodutos failed: ${subprodRes.body}`)
+  } finally {
+    await app.close()
+    await conn.close()
+  }
+})

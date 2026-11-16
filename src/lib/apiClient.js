@@ -16,6 +16,17 @@ export function isApiEnabled() {
   return Boolean(API_BASE)
 }
 
+export function buildQueryString(params = {}) {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      qs.set(k, String(v))
+    }
+  }
+  const str = qs.toString()
+  return str ? `?${str}` : ''
+}
+
 export async function apiRequest(path, { method = 'GET', body, tokenOverride } = {}) {
   if (!API_BASE) {
     throw new Error('VITE_API_URL nao configurada para este ambiente.')

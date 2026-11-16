@@ -97,7 +97,7 @@ export function Produtos() {
       tipo_produto: p.tipo_produto || 'Materia Prima',
       grupo: p.grupo || '',
       classificacao: p.classificacao || '',
-      pais_ids: p.pais_ids ? p.pais_ids.toString().split(',').map(id => parseInt(id)) : []
+      pais_ids: p.pais_ids ? p.pais_ids.toString().split(',').map(s => s.trim()).filter(Boolean).map(v => /^\d+$/.test(v) ? Number(v) : v) : []
     })
     setIsEditing(true)
   }

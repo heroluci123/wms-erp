@@ -727,10 +727,10 @@ export function Producao() {
     } : o))
 
     const prevItem = (opSelecionada.previstos_entrada || []).find(
-      p => Number(p.produto_id) === Number(novoInsumo.produto_id)
+      p => String(p.produto_id) === String(novoInsumo.produto_id)
     )
     const qtdAtualProd = (opSelecionada.insumos || []).filter(
-      i => Number(i.produto_id) === Number(novoInsumo.produto_id)
+      i => String(i.produto_id) === String(novoInsumo.produto_id)
     ).length + 1
     const isModoCx = prevItem && (prevItem.unidade_prevista === 'CX' || (!prevItem.peso_kg_previsto && Number(prevItem.qtd_caixas_prevista || 0) > 0))
     const resumoMeta = isModoCx && Number(prevItem?.qtd_caixas_prevista || 0) > 0
@@ -882,7 +882,7 @@ export function Producao() {
       const res = await producaoQueries.adicionarRetorno(
         opSelecionada.id,
         {
-          produto_id: Number(produtoSaidaId),
+          produto_id: /^\d+$/.test(String(produtoSaidaId)) ? Number(produtoSaidaId) : produtoSaidaId,
           produto_codigo: prodObj?.codigo || '',
           peso_kg: valid.peso_liquido_kg,
           peso_bruto_kg: valid.peso_bruto_kg,
@@ -1257,7 +1257,7 @@ export function Producao() {
                       </thead>
                       <tbody>
                         {opSelecionada.previstos_entrada.map(pe => {
-                          const itensProd = (opSelecionada.insumos || []).filter(i => Number(i.produto_id) === Number(pe.produto_id))
+                          const itensProd = (opSelecionada.insumos || []).filter(i => String(i.produto_id) === String(pe.produto_id))
                           const bipadoCx = itensProd.length
                           const bipadoKg = itensProd.reduce((s, x) => s + Number(x.peso_kg || 0), 0)
                           const pecasTotal = itensProd.reduce((s, x) => s + Number(x.qtd_pecas || 0), 0)

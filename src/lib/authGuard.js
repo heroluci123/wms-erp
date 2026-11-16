@@ -1,4 +1,5 @@
 import { db } from './db.js'
+import { apiRequest, isApiEnabled } from './apiClient.js'
 import { useAppStore } from '../store/appStore.js'
 import {
   isMaster,
@@ -161,11 +162,31 @@ export async function registrarAuditoriaAcesso({
  * Se a conta foi desativada ou a sessão revogada, encerra a sessão local imediatamente.
  */
 export async function validarSessaoServidor({ forceFresh = false } = {}) {
-  await ensureAuthSchema()
   const state = useAppStore.getState()
   const token = state.sessionToken
   const opLocal = state.operador
 
+  if (isApiEnabled()) {
+    if (!token || !opLocal?.id) {
+      throw new Error('Sessão não autenticada. Faça login para continuar.')
+    }
+    const now = Date.now()
+    if (!forceFresh && lastCheck.token === token && now - lastCheck.ts < 15000 && lastCheck.operador) {
+      return lastCheck.operador
+    }
+    const res = await apiRequest('/api/auth/me')
+    const opApi = res?.operador
+    if (!opApi) {
+      limparCacheSessao()
+      state.logout()
+      throw new Error('Sessão expirada ou revogada. Faça login novamente.')
+    }
+    lastCheck = { token, ts: now, operador: opApi }
+    state.setOperador(opApi)
+    return opApi
+  }
+
+  await ensureAuthSchema()
   if (!token || !opLocal?.id) {
     throw new Error('Sessão não autenticada. Faça login para continuar.')
   }

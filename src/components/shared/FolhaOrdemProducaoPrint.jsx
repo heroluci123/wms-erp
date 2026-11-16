@@ -11,7 +11,7 @@ const STATUS_LABELS = {
 function agruparRealizadoPorProduto(registros = []) {
   const map = new Map()
   for (const r of registros) {
-    const pid = Number(r.produto_id)
+    const pid = String(r.produto_id)
     const atual = map.get(pid) || { kg: 0, cx: 0 }
     atual.kg += Number(r.peso_kg || 0)
     atual.cx += 1
@@ -48,8 +48,8 @@ function TabelaItensOP({
 }) {
   const totalKgPrev = itens.reduce((s, it) => s + Number(it.peso_kg_previsto || 0), 0)
   const totalCxPrev = itens.reduce((s, it) => s + Number(it.qtd_caixas_prevista || 0), 0)
-  const totalKgReal = itens.reduce((s, it) => s + (realizadosMap.get(Number(it.produto_id))?.kg || 0), 0)
-  const totalCxReal = itens.reduce((s, it) => s + (realizadosMap.get(Number(it.produto_id))?.cx || 0), 0)
+  const totalKgReal = itens.reduce((s, it) => s + (realizadosMap.get(String(it.produto_id))?.kg || 0), 0)
+  const totalCxReal = itens.reduce((s, it) => s + (realizadosMap.get(String(it.produto_id))?.cx || 0), 0)
 
   return (
     <div style={{ marginBottom: '10px', breakInside: 'avoid' }}>
@@ -108,7 +108,7 @@ function TabelaItensOP({
           <tbody>
             {itens.map((it, idx) => {
               const prev = formatarPrevistoItem(it)
-              const real = realizadosMap.get(Number(it.produto_id)) || { kg: 0, cx: 0 }
+              const real = realizadosMap.get(String(it.produto_id)) || { kg: 0, cx: 0 }
               return (
                 <tr key={it.id || `${it.produto_id}-${idx}`}>
                   <td style={{ textAlign: 'center', padding: '6px' }}>

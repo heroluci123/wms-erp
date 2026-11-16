@@ -1,10 +1,14 @@
 import { db } from '../lib/db.js';
+import { apiRequest, isApiEnabled } from '../lib/apiClient.js';
 import { assertPermissao } from '../lib/authGuard.js';
 
 const PERM_PROD_READ = ['produtos', 'consulta_estoque', 'recebimento', 'inventario_coletor', 'inventario_gestao', 'retorno_producao', 'desmembramento', 'pedidos', 'pedidos_consultar', 'saida', 'ean_etiquetas', 'reimpressao', 'rastreabilidade'];
 
 /** Queries de Produtos */
 export async function listar() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/cadastros/produtos')).data;
+  }
   await assertPermissao(PERM_PROD_READ, { write: false, bloquearCliente: false });
   const res = await db.execute(`
     SELECT p.id, p.codigo, p.ean, p.descricao, p.valor_unitario, p.tipo_produto, p.status_curva, p.unidade, p.grupo, p.created_at, p.classificacao,
@@ -29,6 +33,9 @@ export async function listar() {
 export async function buscarSugestaoEan(codigo) {
   const codigoStr = String(codigo).trim()
   if (!codigoStr || codigoStr.length < 4) return null
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/cadastros/produtos/sugestao-ean/${encodeURIComponent(codigoStr)}`)).data
+  }
 
   // Testa sufixos progressivos (últimos 4, 5, 6, 7, 8 dígitos) contra regras CONTEM
   const regrasRes = await db.execute({
@@ -54,6 +61,9 @@ export async function buscarSugestaoEan(codigo) {
 export async function buscarPorCodigo(codigo) {
   const codigoStr = String(codigo).trim()
   if (!codigoStr) return undefined
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/cadastros/produtos/buscar/${encodeURIComponent(codigoStr)}`)).data?.produto
+  }
 
   // 1. Exact match attempts (normalizing zeros)
   const codigoNorm = codigoStr.replace(/^0+/, '') || codigoStr
@@ -116,6 +126,9 @@ export async function buscarPorCodigo(codigo) {
 export async function buscarPorCodigoComInfo(codigo) {
   const codigoStr = String(codigo).trim()
   if (!codigoStr) return undefined
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/cadastros/produtos/buscar/${encodeURIComponent(codigoStr)}`)).data || undefined
+  }
 
   const codigoNorm = codigoStr.replace(/^0+/, '') || codigoStr
   const codigoExato = codigoStr
@@ -151,6 +164,16 @@ export async function buscarPorCodigoComInfo(codigo) {
 }
 
 export async function salvarRegraEan(produto_id, codigo_barras, tipo_regra = 'EXATO') {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/ean-editor/${produto_id}/eans`, {
+        method: 'POST',
+        body: { codigo_barras: String(codigo_barras || '').trim(), tipo_regra },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao(['ean_etiquetas', 'produtos', 'recebimento', 'inventario_coletor']);
     await db.execute({
@@ -167,6 +190,9 @@ export async function salvarRegraEan(produto_id, codigo_barras, tipo_regra = 'EX
 }
 
 export async function listarRegras(produto_id) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/ean-editor/eans/${produto_id}`)).data;
+  }
   const res = await db.execute({
     sql: `SELECT * FROM produtos_eans WHERE produto_id = ? ORDER BY created_at DESC`,
     args: [produto_id]
@@ -175,6 +201,13 @@ export async function listarRegras(produto_id) {
 }
 
 export async function removerRegraEan(id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/ean-editor/eans/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao(['ean_etiquetas', 'produtos']);
     await db.execute({ sql: `DELETE FROM produtos_eans WHERE id = ?`, args: [id] })
@@ -185,6 +218,16 @@ export async function removerRegraEan(id) {
 }
 
 export async function criar({ codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/cadastros/produtos', {
+        method: 'POST',
+        body: { codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids: pais_ids || [] },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('produtos');
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
@@ -222,6 +265,16 @@ export async function criar({ codigo, descricao, valor_unitario, tipo_produto, s
 }
 
 export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/cadastros/produtos/${id}`, {
+        method: 'PUT',
+        body: { codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao, pais_ids: pais_ids || [] },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('produtos');
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
@@ -259,6 +312,13 @@ export async function atualizar({ id, codigo, descricao, valor_unitario, tipo_pr
 }
 
 export async function deletar(id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/cadastros/produtos/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('produtos');
   // Verificar se tem estoque ativo
   const res = await db.execute({
@@ -284,6 +344,13 @@ export async function deletar(id) {
 }
 
 export async function buscarHistoricoCaixa(ean) {
+  if (isApiEnabled()) {
+    try {
+      return (await apiRequest(`/api/rastreabilidade/${encodeURIComponent(String(ean || '').trim())}`)).historico || [];
+    } catch {
+      return [];
+    }
+  }
   await assertPermissao(['rastreabilidade', 'consulta_estoque', 'movimentacao_historico', 'desmembramento', 'reimpressao'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
@@ -306,6 +373,16 @@ export async function buscarHistoricoCaixa(ean) {
 }
 
 export async function buscarCaixaPorEan(ean) {
+  if (isApiEnabled()) {
+    try {
+      const r = await apiRequest(`/api/rastreabilidade/${encodeURIComponent(String(ean || '').trim())}`);
+      if (!r?.caixa) return null;
+      const filhos = r.filhos_desmembramento || [];
+      return { ...r.caixa, filhos_desmembramento: filhos, vinculo_origem: null };
+    } catch {
+      return null;
+    }
+  }
   await assertPermissao(['rastreabilidade', 'consulta_estoque', 'movimentacao', 'recebimento', 'desmembramento', 'reimpressao', 'saida', 'expedicao'], { write: false, bloquearCliente: true });
   try {
     const { ensureRastreabilidadeSchema } = await import('./taras.js')

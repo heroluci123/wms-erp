@@ -1,4 +1,5 @@
 import { db } from '../lib/db'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient'
 import { ensureRastreabilidadeSchema, tarasQueries } from './taras'
 import { recalcularPosicaoEnderecos } from './movimentacoes'
 import { verificarEnderecoBloqueado } from './inventarios'
@@ -6,6 +7,29 @@ import { calcularPesoLiquido, gerarLotePorData } from '../utils/rastreabilidade'
 import { assertPermissao } from '../lib/authGuard'
 
 export async function validarCaixa(ean) {
+  if (isApiEnabled()) {
+    const res = await apiRequest('/api/desmembramento/validar', {
+      method: 'POST',
+      body: { ean },
+    })
+    if (!res.valid || !res.caixa) return res
+    const c = res.caixa
+    const enderecoResolvido = c.endereco || c.palete_endereco || 'DOCA'
+    const loteResolvido = c.lote || (c.data_producao ? gerarLotePorData(c.data_producao) : '')
+    const taraKg = Number(c.tara_kg || 0)
+    const brutoResolvido =
+      c.peso_bruto_kg != null ? Number(c.peso_bruto_kg) : Number((Number(c.peso_kg || 0) + taraKg).toFixed(3))
+    return {
+      valid: true,
+      caixa: {
+        ...c,
+        endereco_resolvido: enderecoResolvido,
+        lote_resolvido: loteResolvido,
+        peso_bruto_resolvido: brutoResolvido,
+        tara_kg_resolvido: taraKg,
+      },
+    }
+  }
   await assertPermissao('desmembramento', { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const clean = String(ean || '').trim()
@@ -83,6 +107,26 @@ export async function desmembrarCaixas({
   operador_id,
   operador_nome,
 }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/desmembramento', {
+        method: 'POST',
+        body: {
+          caixa_origem_id: caixaOrigem?.id,
+          ean_origem: caixaOrigem?.ean_caixa,
+          motivo_diferenca_pecas: motivoDiferencaPecas,
+          itens: (novasCaixas || []).map((it) => ({
+            peso_bruto_kg: it.peso_bruto_kg,
+            tara_id: it.tara_id || null,
+            tara_kg: it.tara_kg || 0,
+            qtd_pecas: it.qtd_pecas,
+          })),
+        },
+      })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   await assertPermissao('desmembramento')
   await ensureRastreabilidadeSchema()
   if (!caixaOrigem?.id) {
@@ -320,6 +364,9 @@ export async function desmembrarCaixas({
 }
 
 export async function listarDesmembramentosRecentes(limite = 30) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/desmembramento/recentes${buildQueryString({ limit: limite })}`)).data
+  }
   await assertPermissao(['desmembramento', 'reimpressao', 'rastreabilidade'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const { rows } = await db.execute({

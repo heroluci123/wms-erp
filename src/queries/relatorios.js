@@ -1,10 +1,14 @@
 import { db } from '../lib/db.js';
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js';
 import { listarDossiesProducao } from './producao.js';
 import { ensureRastreabilidadeSchema } from './taras.js';
 import { assertPermissao } from '../lib/authGuard.js';
 import { isCliente } from '../utils/permissoes.js';
 
 export async function getBalanco(dataInicio, dataFim) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/relatorios/balanco${buildQueryString({ dataInicio, dataFim })}`)).data;
+  }
   await assertPermissao(['relatorios_producao', 'relatorios_estoque', 'dashboard_executivo'], { write: false, bloquearCliente: false });
   const res = await db.execute({
     sql: `
@@ -24,6 +28,9 @@ export async function getBalanco(dataInicio, dataFim) {
 }
 
 export async function getArvoreProducao() {
+  if (isApiEnabled()) {
+    return apiRequest('/api/relatorios/arvore');
+  }
   await assertPermissao(['relatorios_producao', 'dashboard_executivo', 'produtos'], { write: false, bloquearCliente: true });
   const produtosRes = await db.execute(`
     SELECT id, descricao, classificacao
@@ -39,10 +46,16 @@ export async function getArvoreProducao() {
 }
 
 export async function getOrdensProducao(dataInicio, dataFim) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/relatorios/ordens-producao${buildQueryString({ dataInicio, dataFim })}`)).data;
+  }
   return listarDossiesProducao({ dataInicio, dataFim });
 }
 
 export async function getOPSubprodutos(lote) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/relatorios/op-subprodutos/${encodeURIComponent(lote)}`)).data;
+  }
   await assertPermissao(['relatorios_producao', 'retorno_producao', 'rastreabilidade'], { write: false, bloquearCliente: false });
   const res = await db.execute({
     sql: `
@@ -70,6 +83,9 @@ export async function getOPSubprodutos(lote) {
  * (Saídas por Romaneio, Entradas do Período, Estoque Consolidado por Produto e Estoque por Caixa)
  */
 export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/relatorios/executivo${buildQueryString({ dataInicio, dataFim })}`);
+  }
   const executor = await assertPermissao(['relatorios_estoque', 'relatorios_producao', 'dashboard_executivo'], { write: false, bloquearCliente: false });
   const modoCliente = isCliente(executor);
   await ensureRastreabilidadeSchema();

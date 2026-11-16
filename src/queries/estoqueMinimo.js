@@ -1,4 +1,5 @@
 import { db } from '../lib/db.js'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js'
 import { assertPermissao } from '../lib/authGuard.js'
 
 /**
@@ -14,6 +15,11 @@ export async function buscarEstoqueMinimoDinamico({
   leadTimePadrao = 5,
   margemSegurancaPct = 20
 } = {}) {
+  if (isApiEnabled()) {
+    return apiRequest(
+      `/api/estoque/minimo${buildQueryString({ diasAnalise, leadTimePadrao, margemSegurancaPct })}`,
+    )
+  }
   await assertPermissao(['produtos', 'consulta_estoque', 'relatorios_estoque', 'producao_criar_op'], { write: false, bloquearCliente: true });
   // 1. Buscar todas as matérias-primas e insumos (produtos Pai ou sem pai com tipo Materia Prima / Insumos)
   const { rows: todosProdutos } = await db.execute({

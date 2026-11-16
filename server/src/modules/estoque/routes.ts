@@ -63,7 +63,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
   // ── POSIÇÃO AGREGADA E CAIXAS SERIALIZADAS ──────────────────────────────────
   app.get(
     '/api/estoque/posicoes',
-    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: true }) },
+    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: false }) },
     async (req) => {
       const ctx = req.authCtx!
       const q = req.query as { incluirInsumos?: string; endereco?: string; produto_id?: string }
@@ -94,6 +94,8 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           grupo: produtos.grupo,
           tipo_produto: produtos.tipoProduto,
           status_curva: produtos.statusCurva,
+          valor_unitario: produtos.valorUnitario,
+          tipo_armazenamento: sql<string>`COALESCE(${locais.tipoArmazenamento}, 'SECO')`,
           endereco: estoquePosicao.endereco,
           lote: estoquePosicao.lote,
           validade: estoquePosicao.validade,
@@ -103,12 +105,21 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         })
         .from(estoquePosicao)
         .innerJoin(produtos, eq(produtos.id, estoquePosicao.produtoId))
+        .leftJoin(
+          locais,
+          and(
+            eq(locais.tenantId, estoquePosicao.tenantId),
+            eq(locais.filialId, estoquePosicao.filialId),
+            eq(locais.endereco, estoquePosicao.endereco),
+          ),
+        )
         .where(and(...conds))
         .orderBy(estoquePosicao.endereco, produtos.descricao, estoquePosicao.validade)
 
       return {
         data: rows.map((r) => ({
           ...r,
+          valor_unitario: toNum(r.valor_unitario, 0),
           qtd_caixas: toNum(r.qtd_caixas, 0),
           qtd_kg: toNum(r.qtd_kg, 0),
         })),
@@ -134,7 +145,15 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         eq(estoqueCaixas.filialId, ctx.filialId),
       ]
       if (query.status && query.status !== 'TODOS') {
-        conds.push(eq(estoqueCaixas.status, query.status.trim().toUpperCase()))
+        const statuses = query.status
+          .split(',')
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean)
+        if (statuses.length === 1) {
+          conds.push(eq(estoqueCaixas.status, statuses[0]))
+        } else if (statuses.length > 1) {
+          conds.push(inArray(estoqueCaixas.status, statuses))
+        }
       } else if (!query.status) {
         conds.push(eq(estoqueCaixas.status, 'DISPONIVEL'))
       }
@@ -156,10 +175,15 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           id: estoqueCaixas.id,
           ean_caixa: estoqueCaixas.eanCaixa,
           produto_id: estoqueCaixas.produtoId,
+          codigo: produtos.codigo,
+          descricao: produtos.descricao,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
           grupo: produtos.grupo,
           tipo_produto: produtos.tipoProduto,
+          status_curva: produtos.statusCurva,
+          valor_unitario: produtos.valorUnitario,
+          tipo_armazenamento: sql<string>`COALESCE(${locais.tipoArmazenamento}, 'SECO')`,
           palete_id: estoqueCaixas.paleteId,
           palete_codigo: paletes.codigo,
           endereco: estoqueCaixas.endereco,
@@ -185,17 +209,31 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           romaneio_reservado_id: estoqueCaixas.romaneioReservadoId,
           romaneio_reservado_codigo: estoqueCaixas.romaneioReservadoCodigo,
           cliente_reservado_nome: estoqueCaixas.clienteReservadoNome,
+          updated_at: estoqueCaixas.updatedAt,
           created_at: estoqueCaixas.createdAt,
         })
         .from(estoqueCaixas)
         .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
         .leftJoin(paletes, eq(paletes.id, estoqueCaixas.paleteId))
         .leftJoin(taras, eq(taras.id, estoqueCaixas.taraId))
+        .leftJoin(
+          locais,
+          and(
+            eq(locais.tenantId, estoqueCaixas.tenantId),
+            eq(locais.filialId, estoqueCaixas.filialId),
+            eq(locais.endereco, estoqueCaixas.endereco),
+          ),
+        )
         .where(and(...conds))
         .orderBy(desc(estoqueCaixas.createdAt))
         .limit(limit)
 
-      return { data: rows.map(normalizeCaixaRow) }
+      return {
+        data: rows.map((r) => ({
+          ...normalizeCaixaRow(r),
+          valor_unitario: toNum(r.valor_unitario, 0),
+        })),
+      }
     },
   )
 
@@ -2120,27 +2158,515 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
     },
   )
 
-  app.post('/api/ean-editor/:produtoId/eans', { preHandler: requirePermission(['ean_etiquetas', 'produtos']) }, async (req, reply) => {
+  app.post('/api/ean-editor/:produtoId/eans', { preHandler: requirePermission(['ean_etiquetas', 'produtos', 'recebimento', 'inventario_coletor']) }, async (req, reply) => {
     const ctx = req.authCtx!
     const produtoId = parseUuidOrBadRequest((req.params as { produtoId: string }).produtoId, 'produto_id')
     const body = req.body as { codigo_barras: string; tipo_regra?: string }
     const cod = String(body.codigo_barras || '').trim()
     if (!cod) throw new HttpError(400, 'Código de barras obrigatório.')
 
+    const dup = await conn.db
+      .select({ id: produtosEans.id })
+      .from(produtosEans)
+      .where(and(eq(produtosEans.tenantId, ctx.tenantId), eq(produtosEans.codigoBarras, cod)))
+      .limit(1)
+    if (dup.length > 0) {
+      throw new HttpError(409, 'Esta regra ou EAN já está vinculada a outro produto.')
+    }
+
     const id = uuidv7()
-    await conn.db
-      .insert(produtosEans)
-      .values({
-        id,
-        tenantId: ctx.tenantId,
-        produtoId,
-        codigoBarras: cod,
-        tipoRegra: body.tipo_regra || 'DUN14',
-      })
-      .onConflictDoNothing()
+    await conn.db.insert(produtosEans).values({
+      id,
+      tenantId: ctx.tenantId,
+      produtoId,
+      codigoBarras: cod,
+      tipoRegra: body.tipo_regra || 'EXATO',
+    })
 
     return reply.code(201).send({ success: true, id })
   })
+
+  app.get(
+    '/api/ean-editor/eans/:produtoId',
+    { preHandler: requirePermission(['ean_etiquetas', 'produtos'], { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const produtoId = parseUuidOrBadRequest((req.params as { produtoId: string }).produtoId, 'produto_id')
+      const rows = await conn.db
+        .select({
+          id: produtosEans.id,
+          produto_id: produtosEans.produtoId,
+          codigo_barras: produtosEans.codigoBarras,
+          tipo_regra: produtosEans.tipoRegra,
+          created_at: produtosEans.createdAt,
+        })
+        .from(produtosEans)
+        .where(and(eq(produtosEans.tenantId, ctx.tenantId), eq(produtosEans.produtoId, produtoId)))
+        .orderBy(desc(produtosEans.createdAt))
+      return { data: rows }
+    },
+  )
+
+  app.delete(
+    '/api/ean-editor/eans/:id',
+    { preHandler: requirePermission(['ean_etiquetas', 'produtos']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const id = parseUuidOrBadRequest((req.params as { id: string }).id, 'id')
+      await conn.db
+        .delete(produtosEans)
+        .where(and(eq(produtosEans.id, id), eq(produtosEans.tenantId, ctx.tenantId)))
+      return { success: true }
+    },
+  )
+
+  app.get(
+    '/api/ean-editor/caixas-int',
+    { preHandler: requirePermission(['ean_etiquetas', 'produtos', 'consulta_estoque'], { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const q = req.query as { filtroEndereco?: string; filtroProduto?: string }
+      const endPat = q.filtroEndereco?.trim() ? `%${q.filtroEndereco.trim().toUpperCase()}%` : null
+      const prodPat = q.filtroProduto?.trim() ? `%${q.filtroProduto.trim().toUpperCase()}%` : null
+
+      const rows = await conn.db
+        .select({
+          id: estoqueCaixas.id,
+          ean_caixa: estoqueCaixas.eanCaixa,
+          endereco: estoqueCaixas.endereco,
+          validade: estoqueCaixas.validade,
+          peso_kg: estoqueCaixas.pesoKg,
+          status: estoqueCaixas.status,
+          palete_id: estoqueCaixas.paleteId,
+          produto_id: estoqueCaixas.produtoId,
+          descricao: produtos.descricao,
+          codigo: produtos.codigo,
+          palete_codigo: paletes.codigo,
+        })
+        .from(estoqueCaixas)
+        .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .leftJoin(paletes, eq(paletes.id, estoqueCaixas.paleteId))
+        .where(
+          and(
+            eq(estoqueCaixas.tenantId, ctx.tenantId),
+            eq(estoqueCaixas.filialId, ctx.filialId),
+            eq(estoqueCaixas.status, 'DISPONIVEL'),
+            sql`(${estoqueCaixas.eanCaixa} LIKE 'INT-%' OR ${estoqueCaixas.eanCaixa} LIKE '0025%')`,
+            endPat ? sql`UPPER(COALESCE(${estoqueCaixas.endereco}, '')) LIKE ${endPat}` : sql`TRUE`,
+            prodPat
+              ? sql`(UPPER(${produtos.descricao}) LIKE ${prodPat} OR UPPER(COALESCE(${produtos.codigo}, '')) LIKE ${prodPat})`
+              : sql`TRUE`,
+          ),
+        )
+        .orderBy(produtos.descricao, estoqueCaixas.endereco)
+      return { data: rows.map((r) => ({ ...r, peso_kg: toNum(r.peso_kg, 0) })) }
+    },
+  )
+
+  app.patch(
+    '/api/estoque/caixas/:id/ean',
+    { preHandler: requirePermission(['ean_etiquetas', 'produtos']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const id = parseUuidOrBadRequest((req.params as { id: string }).id, 'caixa_id')
+      const novoEan = String((req.body as { ean_caixa?: string })?.ean_caixa || '').trim()
+      if (novoEan.length < 4) {
+        throw new HttpError(400, 'EAN inválido (mínimo 4 caracteres).')
+      }
+
+      const dup = await conn.db
+        .select({ id: estoqueCaixas.id })
+        .from(estoqueCaixas)
+        .where(
+          and(
+            eq(estoqueCaixas.tenantId, ctx.tenantId),
+            eq(estoqueCaixas.eanCaixa, novoEan),
+            sql`${estoqueCaixas.id} != ${id}`,
+          ),
+        )
+        .limit(1)
+      if (dup.length > 0) {
+        throw new HttpError(409, `EAN "${novoEan}" já está em uso por outra caixa.`)
+      }
+
+      await conn.db
+        .update(estoqueCaixas)
+        .set({ eanCaixa: novoEan, updatedAt: new Date() })
+        .where(and(eq(estoqueCaixas.id, id), eq(estoqueCaixas.tenantId, ctx.tenantId)))
+      return { success: true }
+    },
+  )
+
+  // ── CONSULTA OPERACIONAL (PRODUTO / ENDEREÇO / CONSOLIDADO / DE-PARA) ─────
+  app.get(
+    '/api/consulta/resumo/:produtoId',
+    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: false }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const produtoId = parseUuidOrBadRequest((req.params as { produtoId: string }).produtoId, 'produto_id')
+      const [cxs] = await conn.db
+        .select({
+          saldoCaixas: sql<number>`COUNT(*)::int`,
+          saldoKg: sql<string>`COALESCE(SUM(${estoqueCaixas.pesoKg}), 0)`,
+        })
+        .from(estoqueCaixas)
+        .where(
+          and(
+            eq(estoqueCaixas.tenantId, ctx.tenantId),
+            eq(estoqueCaixas.filialId, ctx.filialId),
+            eq(estoqueCaixas.produtoId, produtoId),
+            sql`${estoqueCaixas.status} IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')`,
+            sql`COALESCE(${estoqueCaixas.endereco}, '') NOT IN ('EXPEDICAO', 'PERDIDO')`,
+          ),
+        )
+      let saldoCaixas = Number(cxs?.saldoCaixas || 0)
+      let saldoKg = toNum(cxs?.saldoKg, 0)
+      if (saldoCaixas === 0 && saldoKg === 0) {
+        const [pos] = await conn.db
+          .select({
+            saldoCaixas: sql<string>`COALESCE(SUM(${estoquePosicao.qtdCaixas}), 0)`,
+            saldoKg: sql<string>`COALESCE(SUM(${estoquePosicao.qtdKg}), 0)`,
+          })
+          .from(estoquePosicao)
+          .where(
+            and(
+              eq(estoquePosicao.tenantId, ctx.tenantId),
+              eq(estoquePosicao.filialId, ctx.filialId),
+              eq(estoquePosicao.produtoId, produtoId),
+              sql`${estoquePosicao.endereco} NOT IN ('EXPEDICAO', 'PERDIDO')`,
+            ),
+          )
+        saldoCaixas = toNum(pos?.saldoCaixas, 0)
+        saldoKg = toNum(pos?.saldoKg, 0)
+      }
+
+      const [ent] = await conn.db
+        .select({ v: sql<string>`COALESCE(SUM(${movimentacoesLog.qtdCaixas}), 0)` })
+        .from(movimentacoesLog)
+        .where(
+          and(
+            eq(movimentacoesLog.tenantId, ctx.tenantId),
+            eq(movimentacoesLog.filialId, ctx.filialId),
+            eq(movimentacoesLog.produtoId, produtoId),
+            sql`${movimentacoesLog.tipo} IN ('ENTRADA', 'RECEBIMENTO')`,
+          ),
+        )
+      const [sai] = await conn.db
+        .select({ v: sql<string>`COALESCE(SUM(${movimentacoesLog.qtdCaixas}), 0)` })
+        .from(movimentacoesLog)
+        .where(
+          and(
+            eq(movimentacoesLog.tenantId, ctx.tenantId),
+            eq(movimentacoesLog.filialId, ctx.filialId),
+            eq(movimentacoesLog.produtoId, produtoId),
+            sql`${movimentacoesLog.tipo} IN ('DESPACHO', 'EXPEDICAO', 'SAIDA', 'SAIDA_PRODUCAO', 'AJUSTE_SAIDA')`,
+          ),
+        )
+
+      return {
+        saldoCaixas,
+        saldoKg,
+        entradasCaixas: toNum(ent?.v, 0),
+        saidasCaixas: toNum(sai?.v, 0),
+      }
+    },
+  )
+
+  app.get(
+    '/api/consulta/enderecos/:produtoId',
+    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: false }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const produtoId = parseUuidOrBadRequest((req.params as { produtoId: string }).produtoId, 'produto_id')
+      const rows = await conn.db
+        .select({
+          endereco: estoqueCaixas.endereco,
+          qtd_caixas: sql<number>`COUNT(*)::int`,
+          qtd_kg: sql<string>`COALESCE(SUM(${estoqueCaixas.pesoKg}), 0)`,
+        })
+        .from(estoqueCaixas)
+        .where(
+          and(
+            eq(estoqueCaixas.tenantId, ctx.tenantId),
+            eq(estoqueCaixas.filialId, ctx.filialId),
+            eq(estoqueCaixas.produtoId, produtoId),
+            sql`${estoqueCaixas.status} IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')`,
+            sql`COALESCE(${estoqueCaixas.endereco}, '') != ''`,
+          ),
+        )
+        .groupBy(estoqueCaixas.endereco)
+        .orderBy(estoqueCaixas.endereco)
+      if (rows.length > 0) {
+        return { data: rows.map((r) => ({ ...r, qtd_kg: toNum(r.qtd_kg, 0) })) }
+      }
+      const posRows = await conn.db
+        .select({
+          endereco: estoquePosicao.endereco,
+          qtd_caixas: sql<string>`COALESCE(SUM(${estoquePosicao.qtdCaixas}), 0)`,
+          qtd_kg: sql<string>`COALESCE(SUM(${estoquePosicao.qtdKg}), 0)`,
+        })
+        .from(estoquePosicao)
+        .where(
+          and(
+            eq(estoquePosicao.tenantId, ctx.tenantId),
+            eq(estoquePosicao.filialId, ctx.filialId),
+            eq(estoquePosicao.produtoId, produtoId),
+            sql`(${estoquePosicao.qtdCaixas} > 0 OR ${estoquePosicao.qtdKg} > 0)`,
+          ),
+        )
+        .groupBy(estoquePosicao.endereco)
+        .orderBy(estoquePosicao.endereco)
+      return {
+        data: posRows.map((r) => ({
+          ...r,
+          qtd_caixas: toNum(r.qtd_caixas, 0),
+          qtd_kg: toNum(r.qtd_kg, 0),
+        })),
+      }
+    },
+  )
+
+  app.get(
+    '/api/consulta/caixas/:produtoId/:endereco',
+    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const p = req.params as { produtoId: string; endereco: string }
+      const produtoId = parseUuidOrBadRequest(p.produtoId, 'produto_id')
+      const endereco = decodeURIComponent(p.endereco || '').trim().toUpperCase()
+      const rows = await conn.db
+        .select()
+        .from(estoqueCaixas)
+        .where(
+          and(
+            eq(estoqueCaixas.tenantId, ctx.tenantId),
+            eq(estoqueCaixas.filialId, ctx.filialId),
+            eq(estoqueCaixas.produtoId, produtoId),
+            eq(estoqueCaixas.endereco, endereco),
+            sql`${estoqueCaixas.status} IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')`,
+          ),
+        )
+        .orderBy(estoqueCaixas.validade)
+      return {
+        data: rows.map((c) => ({
+          ...c,
+          ean_caixa: c.eanCaixa,
+          produto_id: c.produtoId,
+          peso_kg: toNum(c.pesoKg, 0),
+          peso_bruto_kg: c.pesoBrutoKg != null ? toNum(c.pesoBrutoKg, 0) : null,
+          tara_kg: toNum(c.taraKg, 0),
+          qtd_pecas: c.qtdPecas,
+        })),
+      }
+    },
+  )
+
+  app.get(
+    '/api/consulta/historico/:produtoId',
+    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const produtoId = parseUuidOrBadRequest((req.params as { produtoId: string }).produtoId, 'produto_id')
+      const limit = Math.min(500, Math.max(1, Number((req.query as { limite?: string }).limite) || 200))
+      const rows = await conn.db
+        .select({
+          id: movimentacoesLog.id,
+          produto_id: movimentacoesLog.produtoId,
+          endereco_origem: movimentacoesLog.enderecoOrigem,
+          endereco_destino: movimentacoesLog.enderecoDestino,
+          lote: movimentacoesLog.lote,
+          qtd_caixas: movimentacoesLog.qtdCaixas,
+          qtd_kg: movimentacoesLog.qtdKg,
+          data_hora: movimentacoesLog.dataHora,
+          operador_nome: movimentacoesLog.operadorNome,
+          tipo: movimentacoesLog.tipo,
+          num_pedido: movimentacoesLog.numPedido,
+          cliente: movimentacoesLog.cliente,
+        })
+        .from(movimentacoesLog)
+        .where(
+          and(
+            eq(movimentacoesLog.tenantId, ctx.tenantId),
+            eq(movimentacoesLog.filialId, ctx.filialId),
+            eq(movimentacoesLog.produtoId, produtoId),
+          ),
+        )
+        .orderBy(desc(movimentacoesLog.dataHora))
+        .limit(limit)
+      return {
+        data: rows.map((r) => ({
+          ...r,
+          qtd_caixas: toNum(r.qtd_caixas, 0),
+          qtd_kg: toNum(r.qtd_kg, 0),
+        })),
+      }
+    },
+  )
+
+  app.get(
+    '/api/consulta/consolidado',
+    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: false }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const pid = (req.query as { produto_id?: string }).produto_id
+      const prodFilter = pid ? eq(estoqueCaixas.produtoId, parseUuidOrBadRequest(pid, 'produto_id')) : sql`TRUE`
+      const rows = await conn.db
+        .select({
+          codigo: produtos.codigo,
+          descricao: produtos.descricao,
+          total_kg: sql<string>`COALESCE(SUM(${estoqueCaixas.pesoKg}), 0)`,
+        })
+        .from(estoqueCaixas)
+        .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .where(
+          and(
+            eq(estoqueCaixas.tenantId, ctx.tenantId),
+            eq(estoqueCaixas.filialId, ctx.filialId),
+            sql`${estoqueCaixas.status} IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')`,
+            prodFilter,
+          ),
+        )
+        .groupBy(produtos.id)
+        .orderBy(produtos.descricao)
+      return { data: rows.map((r) => ({ ...r, total_kg: toNum(r.total_kg, 0) })) }
+    },
+  )
+
+  app.get(
+    '/api/consulta/endereco-fisico/:endereco',
+    { preHandler: requirePermission(PERM_EST_READ, { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const addr = decodeURIComponent((req.params as { endereco: string }).endereco || '')
+        .trim()
+        .toUpperCase()
+      const caixas = await conn.db
+        .select({
+          id: estoqueCaixas.id,
+          ean_caixa: estoqueCaixas.eanCaixa,
+          peso_kg: estoqueCaixas.pesoKg,
+          qtd_pecas: estoqueCaixas.qtdPecas,
+          validade: estoqueCaixas.validade,
+          lote: estoqueCaixas.lote,
+          status: estoqueCaixas.status,
+          pedido_reservado_codigo: estoqueCaixas.pedidoReservadoCodigo,
+          romaneio_reservado_codigo: estoqueCaixas.romaneioReservadoCodigo,
+          cliente_reservado_nome: estoqueCaixas.clienteReservadoNome,
+          codigo: produtos.codigo,
+          descricao: produtos.descricao,
+          status_curva: produtos.statusCurva,
+          grupo: produtos.grupo,
+          valor_unitario: produtos.valorUnitario,
+          palete_codigo: paletes.codigo,
+        })
+        .from(estoqueCaixas)
+        .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .leftJoin(paletes, eq(paletes.id, estoqueCaixas.paleteId))
+        .where(
+          and(
+            eq(estoqueCaixas.tenantId, ctx.tenantId),
+            eq(estoqueCaixas.filialId, ctx.filialId),
+            eq(estoqueCaixas.endereco, addr),
+            sql`${estoqueCaixas.status} IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')`,
+          ),
+        )
+        .orderBy(produtos.descricao, estoqueCaixas.validade)
+
+      if (caixas.length > 0) {
+        return {
+          data: caixas.map((c) => ({
+            ...c,
+            peso_kg: toNum(c.peso_kg, 0),
+            valor_unitario: toNum(c.valor_unitario, 0),
+          })),
+        }
+      }
+
+      const pos = await conn.db
+        .select({
+          id: estoquePosicao.id,
+          peso_kg: estoquePosicao.qtdKg,
+          validade: estoquePosicao.validade,
+          lote: estoquePosicao.lote,
+          codigo: produtos.codigo,
+          descricao: produtos.descricao,
+          status_curva: produtos.statusCurva,
+          grupo: produtos.grupo,
+          valor_unitario: produtos.valorUnitario,
+          qtd_caixas: estoquePosicao.qtdCaixas,
+        })
+        .from(estoquePosicao)
+        .innerJoin(produtos, eq(produtos.id, estoquePosicao.produtoId))
+        .where(
+          and(
+            eq(estoquePosicao.tenantId, ctx.tenantId),
+            eq(estoquePosicao.filialId, ctx.filialId),
+            eq(estoquePosicao.endereco, addr),
+            sql`(${estoquePosicao.qtdCaixas} > 0 OR ${estoquePosicao.qtdKg} > 0)`,
+          ),
+        )
+        .orderBy(produtos.descricao, estoquePosicao.validade)
+
+      return {
+        data: pos.map((p) => ({
+          ...p,
+          ean_caixa: null,
+          qtd_pecas: null,
+          status: 'DISPONIVEL',
+          palete_codigo: null,
+          peso_kg: toNum(p.peso_kg, 0),
+          qtd_caixas: toNum(p.qtd_caixas, 0),
+          valor_unitario: toNum(p.valor_unitario, 0),
+        })),
+      }
+    },
+  )
+
+  app.post(
+    '/api/estoque/mover-caixa-endereco',
+    { preHandler: requirePermission(['inventario_coletor', 'inventario_gestao', 'movimentacao']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const body = req.body as { ean_caixa: string; destino: string }
+      const ean = String(body.ean_caixa || '').trim()
+      const destino = String(body.destino || '').trim().toUpperCase()
+      if (!ean || !destino) throw new HttpError(400, 'EAN e destino são obrigatórios.')
+
+      await conn.db.transaction(async (tx) => {
+        const [cx] = await tx
+          .select()
+          .from(estoqueCaixas)
+          .where(
+            and(
+              eq(estoqueCaixas.tenantId, ctx.tenantId),
+              eq(estoqueCaixas.filialId, ctx.filialId),
+              eq(estoqueCaixas.eanCaixa, ean),
+            ),
+          )
+          .limit(1)
+        if (!cx) throw new HttpError(404, `Caixa "${ean}" não encontrada.`)
+        const origem = cx.endereco
+
+        await tx
+          .update(estoqueCaixas)
+          .set({ endereco: destino, paleteId: null, updatedAt: new Date() })
+          .where(eq(estoqueCaixas.id, cx.id))
+
+        await registrarHistoricoCaixa(tx, {
+          tenantId: ctx.tenantId,
+          caixaId: cx.id,
+          eanCaixa: cx.eanCaixa,
+          operacao: 'INVENTARIO_DE_PARA',
+          detalhes: `Movida durante inventário de ${origem || '-'} para ${destino}`,
+          operadorNome: ctx.operador.nome,
+        })
+
+        await recalcularPosicaoEnderecos(tx, ctx.tenantId, ctx.filialId, [origem, destino])
+      })
+
+      return { success: true }
+    },
+  )
 
   app.post(
     '/api/reimpressao/log',

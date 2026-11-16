@@ -1,4 +1,5 @@
 import { db } from '../lib/db'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient'
 import { montarEan16Interno } from '../utils/rastreabilidade'
 import { assertPermissao } from '../lib/authGuard'
 
@@ -25,6 +26,7 @@ async function tryDDL(sql, args = []) {
  * Idempotente e seguro para Turso HTTP e SQLite local.
  */
 export async function ensureRastreabilidadeSchema(force = false) {
+  if (isApiEnabled()) return
   if (_schemaReadyPromise && !force) return _schemaReadyPromise
 
   _schemaReadyPromise = (async () => {
@@ -175,6 +177,9 @@ export const tarasQueries = {
    * Lista taras cadastradas (por padrão apenas ativas para formulários operacionais).
    */
   async listar(apenasAtivas = true) {
+    if (isApiEnabled()) {
+      return (await apiRequest(`/api/cadastros/taras${apenasAtivas ? '?ativo=true' : ''}`)).data
+    }
     await assertPermissao(['taras', 'recebimento', 'inventario_coletor', 'inventario_gestao', 'desmembramento', 'retorno_producao', 'producao_saida'], { write: false, bloquearCliente: true })
     await ensureRastreabilidadeSchema()
     const where = apenasAtivas ? 'WHERE ativo = 1' : ''
@@ -188,6 +193,13 @@ export const tarasQueries = {
   },
 
   async criar({ nome, peso_kg, padrao = false }) {
+    if (isApiEnabled()) {
+      const res = await apiRequest('/api/cadastros/taras', {
+        method: 'POST',
+        body: { nome, peso_kg, padrao },
+      })
+      return res.id
+    }
     await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     const peso = Number(Number(peso_kg).toFixed(3))
@@ -209,6 +221,13 @@ export const tarasQueries = {
   },
 
   async atualizar(id, { nome, peso_kg, ativo, padrao }) {
+    if (isApiEnabled()) {
+      await apiRequest(`/api/cadastros/taras/${id}`, {
+        method: 'PUT',
+        body: { nome, peso_kg, ativo, padrao },
+      })
+      return
+    }
     await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     const peso = Number(Number(peso_kg).toFixed(3))
@@ -240,6 +259,10 @@ export const tarasQueries = {
   },
 
   async alternarAtivo(id, ativoAtual) {
+    if (isApiEnabled()) {
+      const res = await apiRequest(`/api/cadastros/taras/${id}/ativo`, { method: 'PATCH' })
+      return res.ativo
+    }
     await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     const novoAtivo = Number(ativoAtual) === 1 ? 0 : 1
@@ -251,6 +274,10 @@ export const tarasQueries = {
   },
 
   async definirPadrao(id) {
+    if (isApiEnabled()) {
+      await apiRequest(`/api/cadastros/taras/${id}/padrao`, { method: 'POST' })
+      return
+    }
     await assertPermissao('taras')
     await ensureRastreabilidadeSchema()
     await db.execute('UPDATE taras SET padrao = 0')
@@ -264,6 +291,13 @@ export const tarasQueries = {
    * Reserva e gera `quantidade` EANs únicos internos de 16 dígitos para a empresa (CODE128).
    */
   async gerarProximosEansInternos(quantidade = 1, codigoProduto = '') {
+    if (isApiEnabled()) {
+      const res = await apiRequest('/api/eans/internos', {
+        method: 'POST',
+        body: { quantidade, codigo_produto: codigoProduto },
+      })
+      return res.eans
+    }
     await assertPermissao(['desmembramento', 'producao_saida', 'retorno_producao', 'reimpressao', 'recebimento'])
     await ensureRastreabilidadeSchema()
     const qtd = Math.max(1, Number(quantidade) || 1)
@@ -313,6 +347,11 @@ export const tarasQueries = {
    * Busca caixa completa para reimpressão de etiqueta preservando o EAN original.
    */
   async buscarCaixaParaReimpressao(ean) {
+    if (isApiEnabled()) {
+      const clean = String(ean || '').trim()
+      if (!clean) throw new Error('Informe ou bipe o EAN da caixa.')
+      return (await apiRequest(`/api/estoque/caixa/${encodeURIComponent(clean)}`)).data
+    }
     await assertPermissao(['reimpressao', 'desmembramento', 'retorno_producao', 'producao_saida', 'ean_etiquetas', 'rastreabilidade'], { write: false, bloquearCliente: true })
     await ensureRastreabilidadeSchema()
     const clean = String(ean || '').trim()
@@ -345,6 +384,9 @@ export const tarasQueries = {
   },
 
   async listarCaixasRecentesParaEtiqueta(filtro = '', limite = 40) {
+    if (isApiEnabled()) {
+      return (await apiRequest(`/api/estoque/caixas/recentes${buildQueryString({ q: filtro, limit: limite })}`)).data
+    }
     await assertPermissao(['reimpressao', 'desmembramento', 'retorno_producao', 'producao_saida', 'ean_etiquetas', 'rastreabilidade'], { write: false, bloquearCliente: true })
     await ensureRastreabilidadeSchema()
     const q = `%${String(filtro || '').trim()}%`
@@ -395,6 +437,13 @@ export const tarasQueries = {
   },
 
   async registrarReimpressaoHistorico({ caixa_id, ean_caixa, origem_tipo, operador_nome }) {
+    if (isApiEnabled()) {
+      await apiRequest('/api/reimpressao/log', {
+        method: 'POST',
+        body: { caixa_id, ean_caixa, origem_tipo },
+      })
+      return
+    }
     await assertPermissao(['reimpressao', 'desmembramento', 'producao_saida', 'retorno_producao'])
     await ensureRastreabilidadeSchema()
     await db.execute({

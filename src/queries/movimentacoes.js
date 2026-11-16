@@ -1,4 +1,5 @@
 import { db } from '../lib/db.js';
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js';
 import * as inventariosQueries from './inventarios.js';
 import { ensureRastreabilidadeSchema } from './taras.js';
 import { gerarLotePorData } from '../utils/rastreabilidade.js';
@@ -9,6 +10,7 @@ import { assertPermissao } from '../lib/authGuard.js';
  * Previne dessincronização acumulada por somas/subtrações erradas e preserva lote/validade.
  */
 export async function recalcularPosicaoEnderecos(enderecos) {
+  if (isApiEnabled()) return;
   if (!enderecos || enderecos.length === 0) return;
   const listaEnd = [...new Set(enderecos.filter(Boolean))];
   if (listaEnd.length === 0) return;
@@ -42,6 +44,9 @@ export async function recalcularPosicaoEnderecos(enderecos) {
 // ── LPN (Paletes) e SSCC (Caixas Serializadas) ──
 
 export async function criarPalete() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/paletes', { method: 'POST' })).palete;
+  }
   await assertPermissao(['recebimento', 'movimentacao']);
   // Gera um código único estilo PLT-XXXX
   const resMax = await db.execute("SELECT MAX(id) as max_id FROM paletes");
@@ -74,8 +79,33 @@ export async function receberCaixaSerializada({
   validade,
   origem_tipo = 'RECEBIMENTO',
   operador_id,
-  operador_nome
+  operador_nome,
+  endereco
 }) {
+  if (isApiEnabled()) {
+    try {
+      const res = await apiRequest('/api/recebimento/caixa', {
+        method: 'POST',
+        body: {
+          ean_caixa,
+          produto_id,
+          palete_id: palete_id || null,
+          endereco,
+          peso_kg,
+          peso_bruto_kg,
+          tara_id: tara_id || null,
+          tara_kg,
+          qtd_pecas,
+          data_producao,
+          lote,
+          validade,
+        },
+      });
+      return { success: true, caixa_id: res.caixa?.id, caixa: res.caixa };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao('recebimento');
     await ensureRastreabilidadeSchema()
@@ -156,6 +186,13 @@ export async function receberCaixaSerializada({
 }
 
 export async function removerCaixaSerializada(caixa_id, operador_id, operador_nome) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/recebimento/caixa/${caixa_id}`, { method: 'DELETE' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao(['recebimento', 'deletar_historico']);
     const res = await db.execute({ sql: `SELECT * FROM estoque_caixas WHERE id = ?`, args: [caixa_id] });
@@ -184,6 +221,13 @@ export async function removerCaixaSerializada(caixa_id, operador_id, operador_no
 }
 
 export async function concluirPalete(palete_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/paletes/${palete_id}/concluir`, { method: 'POST' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao('recebimento');
     const resCount = await db.execute({
@@ -220,6 +264,13 @@ export async function concluirPalete(palete_id) {
 }
 
 export async function reabrirPalete(palete_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/paletes/${palete_id}/reabrir`, { method: 'POST' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao('recebimento');
     await db.execute({
@@ -234,6 +285,9 @@ export async function reabrirPalete(palete_id) {
 
 
 export async function listarCaixasDoPalete(palete_id) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/paletes/${palete_id}/caixas`)).data;
+  }
   await assertPermissao(['recebimento', 'recebimento_consultar', 'movimentacao', 'movimentacao_consultar', 'consulta_estoque'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
@@ -249,6 +303,9 @@ export async function listarCaixasDoPalete(palete_id) {
 }
 
 export async function listarPaletesAbertos() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/paletes?status=EM_MONTAGEM')).data;
+  }
   await assertPermissao(['recebimento', 'recebimento_consultar', 'movimentacao'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
@@ -264,6 +321,9 @@ export async function listarPaletesAbertos() {
 }
 
 export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {}) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/paletes${buildQueryString({ dataInicio, dataFim, status })}`)).data;
+  }
   await assertPermissao(['recebimento_consultar', 'recebimento', 'movimentacao_consultar', 'movimentacao_historico', 'movimentacao'], { write: false, bloquearCliente: true });
   let where = '1=1';
   const args = [];
@@ -303,6 +363,9 @@ export async function listarHistoricoPaletes({ dataInicio, dataFim, status } = {
 }
 
 export async function listarTodasCaixasDoPalete(palete_id) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/paletes/${palete_id}/caixas?todas=true`)).data;
+  }
   await assertPermissao(['recebimento_consultar', 'recebimento', 'movimentacao_consultar', 'movimentacao', 'consulta_estoque'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
@@ -328,6 +391,9 @@ export async function listarTodasCaixasDoPalete(palete_id) {
  * Retorna o tipo de entidade lida: PALETE, CAIXA, ou PRODUTO_GENERICO
  */
 export async function identificarCodigoMovimentacao(codigo) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/movimentacao/identificar/${encodeURIComponent(String(codigo || '').trim())}`);
+  }
   await assertPermissao(['movimentacao', 'movimentacao_consultar', 'consulta_endereco', 'consulta_estoque', 'inventario_coletor'], { write: false, bloquearCliente: true });
   // 1. Tentar como Palete
   if (codigo.startsWith('PLT-')) {
@@ -374,6 +440,16 @@ export async function identificarCodigoMovimentacao(codigo) {
 export async function transferirPalete({ palete_id, destino, operador_id, operador_nome }) {
   if (destino === 'REC' || destino === 'EXPEDICAO') {
     return { success: false, error: 'Proibido transferir diretamente para REC ou EXPEDICAO usando a Movimentação. Use as telas adequadas.' }
+  }
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/movimentacao/palete', {
+        method: 'POST',
+        body: { palete_id, destino },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }
 
   try {
@@ -435,6 +511,16 @@ export async function transferirPalete({ palete_id, destino, operador_id, operad
 export async function transferirEnderecoInteiro({ origem, destino, operador_id, operador_nome }) {
   if (destino === 'REC' || destino === 'EXPEDICAO') {
     return { success: false, error: 'Proibido transferir diretamente para REC ou EXPEDICAO.' };
+  }
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/movimentacao/endereco', {
+        method: 'POST',
+        body: { origem, destino },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }
 
   try {
@@ -501,6 +587,16 @@ export async function transferirEnderecoInteiro({ origem, destino, operador_id, 
 export async function transferirCaixasSSCC({ caixas_ids, destino, operador_id, operador_nome }) {
   if (destino === 'REC' || destino === 'EXPEDICAO') {
     return { success: false, error: 'Proibido transferir para REC/EXPEDICAO via Movimentação.' }
+  }
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/movimentacao/caixas', {
+        method: 'POST',
+        body: { caixas_ids, destino },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }
 
   try {
@@ -693,6 +789,9 @@ export async function confirmarDespacho(produto_id, lote, validade, operador_id)
  * Listar log de movimentações com filtros opcionais
  */
 export async function listarLog({ limit = 100, tipo, produto_id, data_inicio, data_fim, incluirInsumos } = {}) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/movimentacao/historico${buildQueryString({ limit, tipo, produto_id, data_inicio, data_fim, incluirInsumos })}`)).data;
+  }
   await assertPermissao(['movimentacao_historico', 'movimentacao_consultar', 'movimentacao', 'dashboard_executivo'], { write: false, bloquearCliente: true });
   let query = `
     SELECT
@@ -722,6 +821,9 @@ export async function listarLog({ limit = 100, tipo, produto_id, data_inicio, da
 }
 
 export async function listarExpedicao() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/estoque/expedicao')).data;
+  }
   await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'consulta_estoque', 'estoque_enderecos'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
@@ -983,6 +1085,13 @@ export async function fecharOrdemProducao({ ordem_id, peso_retornado }) {
 }
 
 export async function relatorioExecutivo(filtros = {}) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/relatorios/dashboard-executivo${buildQueryString({
+      incluirInsumos: filtros.incluirInsumos === true ? 'true' : 'false',
+      data_inicio: filtros.data_inicio,
+      data_fim: filtros.data_fim,
+    })}`);
+  }
   await assertPermissao(['dashboard_executivo', 'relatorios_estoque', 'relatorios_producao'], { write: false, bloquearCliente: true });
   const isEstritoInsumo = filtros.incluirInsumos === true
   const filterSQL = isEstritoInsumo ? " AND p.tipo_produto = 'Insumos'" : " AND p.tipo_produto != 'Insumos'";
@@ -1091,6 +1200,13 @@ export async function relatorioExecutivo(filtros = {}) {
 }
 
 export async function deletarLog(id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/movimentacao/historico/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao('deletar_historico');
     const res = await db.execute({
@@ -1229,6 +1345,17 @@ export async function saidaPorCaixaSSCC({ caixa_id, peso_saida_kg, num_pedido, c
  * Busca registros do log filtrando por tipo TRANSFERENCIA, com opções de filtro por endereço ou produto
  */
 export async function listarHistoricoTransferencias({ filtroEndereco = '', filtroProduto = '', dataInicio = '', dataFim = '', limit = 200 } = {}) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/movimentacao/historico${buildQueryString({
+      filtroEndereco,
+      filtroProduto,
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+      tipo: 'TRANSFERENCIA',
+      incluirInsumos: 'all',
+      limit,
+    })}`)).data;
+  }
   await assertPermissao(['movimentacao_historico', 'movimentacao_consultar', 'movimentacao', 'consulta_estoque'], { write: false, bloquearCliente: true });
   let where = `WHERE ml.tipo = 'TRANSFERENCIA'`
   const args = []

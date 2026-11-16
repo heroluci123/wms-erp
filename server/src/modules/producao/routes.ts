@@ -71,13 +71,21 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           peso_insumos: sql<string>`COALESCE((SELECT SUM(oi.peso_kg) FROM op_insumos oi WHERE oi.op_id = ${ordensProducao.id}), 0)`,
           qtd_retornos: sql<number>`(SELECT COUNT(*)::int FROM op_retornos oret WHERE oret.op_id = ${ordensProducao.id})`,
           peso_retornos: sql<string>`COALESCE((SELECT SUM(oret.peso_kg) FROM op_retornos oret WHERE oret.op_id = ${ordensProducao.id}), 0)`,
+          qtd_prev_entrada: sql<number>`(SELECT COUNT(*)::int FROM op_itens_previstos oip WHERE oip.op_id = ${ordensProducao.id} AND oip.tipo = 'ENTRADA')`,
+          qtd_prev_saida: sql<number>`(SELECT COUNT(*)::int FROM op_itens_previstos oip WHERE oip.op_id = ${ordensProducao.id} AND oip.tipo = 'SAIDA')`,
         })
         .from(ordensProducao)
         .where(
           and(
             eq(ordensProducao.tenantId, ctx.tenantId),
             eq(ordensProducao.filialId, ctx.filialId),
-            status && status !== 'TODAS' ? eq(ordensProducao.status, status) : sql`TRUE`,
+            status === 'ATIVAS'
+              ? sql`${ordensProducao.status} IN ('RASCUNHO', 'LIBERADA', 'ABERTA')`
+              : status === 'EXECUTAVEIS' || status === 'ABERTA'
+                ? sql`${ordensProducao.status} IN ('LIBERADA', 'ABERTA')`
+                : status && status !== 'TODAS'
+                  ? eq(ordensProducao.status, status)
+                  : sql`TRUE`,
           ),
         )
         .orderBy(desc(ordensProducao.createdAt))

@@ -1,4 +1,5 @@
 import { db } from '../lib/db.js'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js'
 import { ensureRastreabilidadeSchema, tarasQueries } from './taras.js'
 import { recalcularPosicaoEnderecos } from './movimentacoes.js'
 import { calcularPesoLiquido, gerarLotePorData, hojeIsoLocal } from '../utils/rastreabilidade.js'
@@ -6,6 +7,9 @@ import { assertPermissao } from '../lib/authGuard.js'
 import { isCliente } from '../utils/permissoes.js'
 
 export async function listarOPs(status = 'TODAS') {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/ops${buildQueryString({ status })}`)).data
+  }
   await assertPermissao(['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op', 'relatorios_producao', 'reimpressao'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   let query = `
@@ -40,6 +44,28 @@ export async function listarOPs(status = 'TODAS') {
 }
 
 export async function criarOP(arg1, operador_id_legacy, operador_nome_legacy) {
+  if (isApiEnabled()) {
+    const p = typeof arg1 === 'object' && arg1 !== null
+      ? arg1
+      : { nome: arg1, operador_id: operador_id_legacy, operador_nome: operador_nome_legacy }
+    try {
+      const res = await apiRequest('/api/ops', {
+        method: 'POST',
+        body: {
+          nome: p.nome || 'OP Sem Nome',
+          data_producao: p.data_producao || hojeIsoLocal(),
+          cliente: p.cliente || 'INTERNO',
+          endereco: p.endereco || 'PRODUCAO',
+          observacoes: p.observacoes || '',
+          status: p.liberarAgora === false ? 'RASCUNHO' : 'LIBERADA',
+          itensPrevistos: (p.itensPrevistos || []).filter((it) => it?.produto_id),
+        },
+      })
+      return { success: true, op: { id: res.id, codigo: res.codigo, nome: p.nome, status: res.status } }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   await assertPermissao('producao_criar_op')
   await ensureRastreabilidadeSchema()
 
@@ -121,6 +147,16 @@ export async function criarOP(arg1, operador_id_legacy, operador_nome_legacy) {
 }
 
 export async function atualizarOPConfig(op_id, { nome, data_producao, observacoes = '', status, itensPrevistos = [] }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/ops/${op_id}`, {
+        method: 'PUT',
+        body: { nome, data_producao, observacoes, status, itensPrevistos },
+      })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   await assertPermissao('producao_criar_op')
   await ensureRastreabilidadeSchema()
   const tx = await db.transaction('write')
@@ -183,6 +219,9 @@ export async function atualizarOPConfig(op_id, { nome, data_producao, observacoe
 }
 
 export async function liberarOP(op_id) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/ops/${op_id}/liberar`, { method: 'POST' })
+  }
   await assertPermissao('producao_criar_op')
   await ensureRastreabilidadeSchema()
   await db.execute({
@@ -193,6 +232,9 @@ export async function liberarOP(op_id) {
 }
 
 export async function listarProdutosComSaldoOP() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/ops/produtos-saldo')).data
+  }
   await assertPermissao(
     ['producao_criar_op', 'retorno_producao', 'producao_entrada', 'producao_saida'],
     { write: false, bloquearCliente: true }
@@ -238,6 +280,13 @@ export async function listarProdutosComSaldoOP() {
 }
 
 export async function detalhesOP(op_id) {
+  if (isApiEnabled()) {
+    try {
+      return (await apiRequest(`/api/ops/${op_id}`)).data
+    } catch {
+      return null
+    }
+  }
   await assertPermissao(['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op', 'relatorios_producao'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const opRes = await db.execute({ sql: `SELECT * FROM ordens_producao WHERE id = ?`, args: [op_id] })
@@ -318,6 +367,27 @@ export async function detalhesOP(op_id) {
 }
 
 export async function buscarCaixaPorEanParaOP(ean) {
+  if (isApiEnabled()) {
+    const clean = String(ean || '').trim()
+    if (!clean) return { valid: false, error: 'Informe ou bipe o EAN da caixa.' }
+    try {
+      const c = (await apiRequest(`/api/estoque/caixa/${encodeURIComponent(clean)}`)).data
+      if (!c) return { valid: false, error: `Caixa "${clean}" não encontrada.` }
+      if (c.status !== 'DISPONIVEL') return { valid: false, error: `Caixa está com status ${c.status}.` }
+      return {
+        valid: true,
+        caixa: {
+          ...c,
+          endereco: c.endereco || c.palete_endereco || 'REC',
+          lote: c.lote || (c.data_producao ? gerarLotePorData(c.data_producao) : ''),
+          tara_kg: Number(c.tara_kg || 0),
+          peso_bruto_kg: c.peso_bruto_kg != null ? Number(c.peso_bruto_kg) : Number((Number(c.peso_kg || 0) + Number(c.tara_kg || 0)).toFixed(3)),
+        },
+      }
+    } catch (err) {
+      return { valid: false, error: err.message }
+    }
+  }
   await assertPermissao(['producao_entrada', 'retorno_producao'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const clean = String(ean || '').trim()
@@ -360,6 +430,20 @@ export async function buscarCaixaPorEanParaOP(ean) {
 }
 
 export async function alocarInsumos(op_id, caixas, operador_id, operador_nome) {
+  if (isApiEnabled()) {
+    try {
+      for (const c of caixas || []) {
+        const res = await apiRequest(`/api/ops/${op_id}/entrar-caixa`, {
+          method: 'POST',
+          body: { ean: c.ean_caixa, forcarConfirmacao: true },
+        })
+        if (!res.success) return res
+      }
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   await assertPermissao(['producao_entrada', 'retorno_producao'])
   await ensureRastreabilidadeSchema()
   try {
@@ -443,6 +527,12 @@ export async function escanearEAlocarEntradaOP({
   operador_id = null,
   operador_nome = 'Operador',
 }) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/ops/${op_id}/entrar-caixa`, {
+      method: 'POST',
+      body: { ean, forcarConfirmacao },
+    })
+  }
   await assertPermissao(['producao_entrada', 'retorno_producao'])
   await ensureRastreabilidadeSchema()
 
@@ -721,6 +811,33 @@ export async function adicionarRetorno(
   operador_id,
   operador_nome
 ) {
+  if (isApiEnabled()) {
+    try {
+      const bruto = peso_bruto_kg != null ? Number(peso_bruto_kg) : Number((Number(peso_kg || 0) + Number(tara_kg || 0)).toFixed(3))
+      const res = await apiRequest(`/api/ops/${op_id}/retorno`, {
+        method: 'POST',
+        body: {
+          ean_caixa,
+          produto_id,
+          peso_bruto_kg: bruto,
+          tara_id: tara_id || null,
+          tara_kg: Number(tara_kg || 0),
+          qtd_pecas,
+          data_producao,
+          validade,
+        },
+      })
+      return {
+        success: true,
+        caixa_id: res.retorno?.caixa_id,
+        ean_caixa: res.retorno?.ean_caixa,
+        peso_kg: res.retorno?.peso_kg,
+        caixa: res.retorno,
+      }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   await assertPermissao(['producao_saida', 'retorno_producao'])
   await ensureRastreabilidadeSchema()
   try {
@@ -856,6 +973,13 @@ export async function adicionarRetorno(
 }
 
 export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/ops/${op_id}/item/${tipo}/${item_id}`, { method: 'DELETE' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(
       tipo === 'INSUMO'
@@ -897,6 +1021,11 @@ export async function removerItemOP(op_id, tipo, item_id, caixa_id) {
 }
 
 export async function verificarFEFO(produto_id, validadeAtual) {
+  if (isApiEnabled()) {
+    if (!validadeAtual) return null
+    const list = (await apiRequest(`/api/estoque/fefo${buildQueryString({ produto_id, validade: validadeAtual })}`)).data
+    return list?.[0] || null
+  }
   await assertPermissao(['producao_entrada', 'retorno_producao', 'producao_criar_op'], { write: false, bloquearCliente: true })
   if (!validadeAtual) return null
 
@@ -923,6 +1052,13 @@ export async function verificarFEFO(produto_id, validadeAtual) {
 }
 
 export async function finalizarOP(op_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/ops/${op_id}/finalizar`, { method: 'POST' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao('producao_criar_op')
     const queries = []
@@ -1019,6 +1155,13 @@ export async function finalizarOP(op_id) {
 }
 
 export async function cancelarOP(op_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/ops/${op_id}/cancelar`, { method: 'POST' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao('producao_criar_op')
     const opStats = await db.execute({
@@ -1041,6 +1184,13 @@ export async function cancelarOP(op_id) {
 }
 
 export async function reabrirOP(op_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/ops/${op_id}/reabrir`, { method: 'POST' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao('producao_criar_op')
     const opRes = await db.execute({ sql: `SELECT codigo FROM ordens_producao WHERE id = ?`, args: [op_id] })
@@ -1113,6 +1263,23 @@ export async function relatorioProdutoAcabadoPeriodo(dataInicio, dataFim) {
 }
 
 export async function listarDossiesProducao(filtros = {}) {
+  if (isApiEnabled()) {
+    const raw = (await apiRequest(`/api/ops/dossies${buildQueryString({
+      dataInicio: filtros.dataInicio,
+      dataFim: filtros.dataFim,
+      cliente: filtros.cliente,
+      endereco: filtros.endereco,
+      opId: filtros.opId,
+    })}`)).data || []
+    return raw.map((op) => ({
+      ...op,
+      total_entrada_kg: Number(op.peso_insumos || 0),
+      total_entrada_caixas: (op.insumos || []).length,
+      total_saida_kg: Number(op.peso_retornos || 0),
+      total_saida_bruto_kg: (op.retornos || []).reduce((s, r) => s + Number(r.peso_bruto_kg || r.peso_kg || 0), 0),
+      total_saida_caixas: (op.retornos || []).length,
+    }))
+  }
   const executor = await assertPermissao(['relatorios_producao', 'retorno_producao', 'producao_criar_op'], { write: false, bloquearCliente: false })
   const modoCliente = isCliente(executor)
   await ensureRastreabilidadeSchema()

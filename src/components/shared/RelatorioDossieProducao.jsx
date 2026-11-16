@@ -63,7 +63,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
         cliente: filtroCliente,
         endereco: enderecoFixo || filtroEndereco,
         busca,
-        opId: filtroOpId !== 'TODOS' ? Number(filtroOpId) : null,
+        opId: filtroOpId !== 'TODOS' ? (/^\d+$/.test(String(filtroOpId)) ? Number(filtroOpId) : filtroOpId) : null,
       });
       setDossies(lista);
       if (modoCliente && Array.isArray(lista)) {

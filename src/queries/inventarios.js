@@ -1,4 +1,5 @@
 import { db } from '../lib/db.js';
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js';
 import { ensureRastreabilidadeSchema } from './taras.js';
 import { gerarLotePorData } from '../utils/rastreabilidade.js';
 import { assertPermissao } from '../lib/authGuard.js';
@@ -13,6 +14,9 @@ const PERM_INV_READ = ['inventario_coletor', 'inventario_divergencias', 'inventa
 
 /** Retorna lista de endereços bloqueados (em inventário aberto) */
 export async function enderecosBloqueados() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/inventario/bloqueados')).data;
+  }
   await assertPermissao(['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial', 'movimentacao', 'desmembramento', 'recebimento', 'retorno_producao', 'saida', 'expedicao'], { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
@@ -26,6 +30,10 @@ export async function enderecosBloqueados() {
 
 /** Verifica se um endereço está bloqueado */
 export async function verificarEnderecoBloqueado(endereco) {
+  if (isApiEnabled()) {
+    const res = await apiRequest(`/api/inventario/verificar-bloqueio/${encodeURIComponent(String(endereco || '').trim().toUpperCase())}`);
+    return res.bloqueado ? (res.inventario || { endereco }) : null;
+  }
   await assertPermissao(['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial', 'movimentacao', 'desmembramento', 'recebimento', 'retorno_producao', 'saida', 'expedicao'], { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
@@ -43,18 +51,34 @@ export async function verificarEnderecoBloqueado(endereco) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function ciclos_listar() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/inventario/ciclos')).data;
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({ sql: `SELECT * FROM inventario_ciclos ORDER BY data_criacao DESC`, args: [] })
   return rows
 }
 
 export async function ciclos_buscarAtivo() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/inventario/ciclos/ativo')).data;
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({ sql: `SELECT * FROM inventario_ciclos WHERE status = 'Ativo' LIMIT 1`, args: [] })
   return rows[0]
 }
 
 export async function ciclos_criar({ nome, target_pct = 99.9 }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/inventario/ciclos', {
+        method: 'POST',
+        body: { nome, target_pct },
+      });
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
   try {
     await assertPermissao('inventario_gestao');
     const { rows: ativoRows } = await db.execute({ sql: `SELECT id FROM inventario_ciclos WHERE status = 'Ativo' LIMIT 1`, args: [] })
@@ -68,6 +92,16 @@ export async function ciclos_criar({ nome, target_pct = 99.9 }) {
 }
 
 export async function ciclos_encerrar({ ciclo_id, forcar = false }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/inventario/ciclos/${ciclo_id}/encerrar`, {
+        method: 'POST',
+        body: { forcar },
+      });
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
   await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
@@ -126,6 +160,27 @@ export async function registrarContagem({
   lote_contado = null,
   qtd_pecas_contada = null
 }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/inventario/contagem', {
+        method: 'POST',
+        body: {
+          item_id,
+          qtd_contada_caixas,
+          qtd_contada_kg,
+          validade_informada,
+          peso_bruto_contado_kg,
+          tara_id,
+          tara_kg,
+          data_producao_contada,
+          lote_contado,
+          qtd_pecas_contada,
+        },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao(['inventario_coletor', 'inventario_gestao', 'inventario_carga_inicial']);
     await ensureRastreabilidadeSchema()
@@ -198,6 +253,13 @@ export async function registrarContagem({
 }
 
 export async function recontarItem(item_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/inventario/item/${item_id}/recontar`, { method: 'POST' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao('inventario_gestao');
     await db.execute({ sql: `UPDATE inventario_itens SET qtd_contada_caixas = NULL, qtd_contada_kg = NULL, status_item = 'Pendente', contagem_atual = contagem_atual + 1 WHERE id = ?`, args: [item_id] })
@@ -208,6 +270,16 @@ export async function recontarItem(item_id) {
 // Recontar endereço inteiro — reseta TODOS os itens de um endereço para Pendente
 // O coletor vai carregar todos os itens deste endereço na próxima vez que bipá-lo
 export async function recontarEndereco(inventario_id, endereco) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/inventario/${inventario_id}/recontar-endereco`, {
+        method: 'POST',
+        body: { endereco },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   try {
     await assertPermissao('inventario_gestao');
     await db.execute({
@@ -227,6 +299,13 @@ export async function recontarEndereco(inventario_id, endereco) {
 }
 
 export async function validarEstoqueSemAjuste(item_id, operador_id, operador_nome) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/inventario/item/${item_id}/validar-sem-ajuste`, { method: 'POST' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
@@ -271,6 +350,9 @@ export async function validarEstoqueSemAjuste(item_id, operador_id, operador_nom
 }
 
 export async function ciclos_dashboard(ciclo_id) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/inventario/ciclos/${ciclo_id}/dashboard`);
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   // Todos os inventários finalizados do ciclo
   const { rows: inventariosFinalizados } = await db.execute({
@@ -358,6 +440,9 @@ export async function ciclos_dashboard(ciclo_id) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function listar() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/inventario')).data;
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
@@ -382,6 +467,13 @@ export async function listar() {
 
 // Busca um inventário pelo ID
 export async function buscar(inventario_id) {
+  if (isApiEnabled()) {
+    try {
+      return (await apiRequest(`/api/inventario/${inventario_id}`)).data;
+    } catch {
+      return null;
+    }
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `SELECT * FROM inventarios WHERE id = ?`,
@@ -392,6 +484,9 @@ export async function buscar(inventario_id) {
 
 // Lista todos os itens de um inventário com dados do produto
 export async function listarItens(inventario_id) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/inventario/${inventario_id}/itens`)).data;
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows } = await db.execute({
     sql: `
@@ -410,6 +505,15 @@ export async function listarItens(inventario_id) {
 
 // Conciliação para Carga Inicial
 export async function conciliarCargaInicial({ inventario_id, operador_id, operador_nome }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/inventario/${inventario_id}/conciliar-carga-inicial`, {
+        method: 'POST',
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('inventario_carga_inicial');
   await ensureRastreabilidadeSchema()
   const tx = await db.transaction('write')
@@ -506,6 +610,16 @@ export async function getProdutoVazio() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function criar({ tipo_filtro, identificador_filtro }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/inventario', {
+        method: 'POST',
+        body: { tipo: 'Ciclico', tipo_filtro, identificador_filtro },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
@@ -585,6 +699,16 @@ export async function criar({ tipo_filtro, identificador_filtro }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function criarGeral({ nome, zonas = [] }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/inventario', {
+        method: 'POST',
+        body: { tipo: 'Geral', nome, zonas },
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
@@ -631,6 +755,9 @@ export async function criarGeral({ nome, zonas = [] }) {
 }
 
 export async function listarZonas(inventario_id) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/inventario/${inventario_id}/zonas`)).data;
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows: zonas } = await db.execute({ sql: `SELECT * FROM inventario_zonas WHERE inventario_id = ? ORDER BY id`, args: [inventario_id] })
   const result = []
@@ -656,6 +783,16 @@ export async function listarZonas(inventario_id) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function criarCargaInicial() {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/inventario', {
+        method: 'POST',
+        body: { tipo: 'CargaInicial' },
+      });
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
   try {
     await assertPermissao('inventario_carga_inicial');
     const { rows: existeRows } = await db.execute({ sql: `SELECT id FROM inventarios WHERE tipo = 'CargaInicial' AND status NOT IN ('Finalizado OK','Cancelado') LIMIT 1`, args: [] })
@@ -678,6 +815,13 @@ export async function criarCargaInicial() {
 }
 
 export async function conciliar({ inventario_id, operador_id, operador_nome }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/inventario/${inventario_id}/conciliar`, { method: 'POST' });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
   await assertPermissao('inventario_gestao');
   const tx = await db.transaction('write')
   try {
@@ -876,12 +1020,22 @@ export async function conciliar({ inventario_id, operador_id, operador_nome }) {
 }
 
 export async function cancelar(id) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/inventario/${id}/cancelar`, { method: 'POST' });
+  }
   await assertPermissao('inventario_gestao');
   await db.execute({ sql: `UPDATE inventarios SET status = 'Cancelado', data_finalizacao = CURRENT_TIMESTAMP WHERE id = ?`, args: [id] })
   return { success: true }
 }
 
 export async function cancelarItem(item_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/inventario/item/${item_id}/cancelar`, { method: 'POST' });
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
   try {
     await assertPermissao('inventario_gestao');
     const { rows: itemRows } = await db.execute({ sql: `SELECT inventario_id FROM inventario_itens WHERE id = ?`, args: [item_id] })
@@ -905,6 +1059,9 @@ export async function cancelarItem(item_id) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function calcularIRA(inventario_id) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/inventario/${inventario_id}/ira`);
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   const { rows: itens } = await db.execute({
     sql: `
@@ -944,6 +1101,24 @@ export async function adicionarItemSurpresa({
   peso_bruto_contado_kg = null,
   qtd_pecas_contada = null
 }) {
+  if (isApiEnabled()) {
+    return apiRequest('/api/inventario/surpresa', {
+      method: 'POST',
+      body: {
+        inventario_id,
+        endereco,
+        produto_id,
+        validade,
+        ean_caixa,
+        lote,
+        data_producao_contada,
+        tara_id,
+        tara_kg,
+        peso_bruto_contado_kg,
+        qtd_pecas_contada,
+      },
+    });
+  }
   await assertPermissao(['inventario_coletor', 'inventario_gestao', 'inventario_carga_inicial']);
   await ensureRastreabilidadeSchema()
   // Se o endereço recebeu um item surpresa, ele não está mais vazio.
@@ -998,6 +1173,9 @@ export async function adicionarItemSurpresa({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function listarAjustesLog({ ciclo_id, inventario_id } = {}) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/inventario/ajustes-log${buildQueryString({ ciclo_id, inventario_id })}`)).data;
+  }
   await assertPermissao(PERM_INV_READ, { write: false, bloquearCliente: true });
   let sql = `
     SELECT al.*, p.codigo, p.descricao, p.tipo_produto

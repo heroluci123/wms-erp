@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { MapPin, RefreshCw, Package, FileDown } from 'lucide-react'
+import { apiRequest, isApiEnabled } from '../lib/apiClient.js'
 import { db } from '../lib/db.js'
 import { ensureRastreabilidadeSchema } from '../queries/taras.js'
 import { format, differenceInDays } from 'date-fns'
@@ -13,8 +14,12 @@ function downloadCSV(content) {
 }
 
 async function consultarEndereco(endereco) {
-  await ensureRastreabilidadeSchema()
   const addr = endereco.toUpperCase().trim()
+  if (isApiEnabled()) {
+    const res = await apiRequest(`/api/consulta/endereco-fisico/${encodeURIComponent(addr)}`)
+    return res.data
+  }
+  await ensureRastreabilidadeSchema()
   const { rows: caixas } = await db.execute({
     sql: `
       SELECT

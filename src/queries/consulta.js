@@ -1,4 +1,5 @@
 import { db } from '../lib/db.js';
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient.js';
 import { assertPermissao } from '../lib/authGuard.js';
 
 const PERM_CONSULTA_READ = ['consulta_estoque', 'estoque_enderecos', 'consulta_endereco', 'rastreabilidade', 'produtos', 'relatorios_estoque'];
@@ -9,6 +10,9 @@ const PERM_CONSULTA_READ = ['consulta_estoque', 'estoque_enderecos', 'consulta_e
  * @returns { saldoCaixas, saldoKg, entradasCaixas, saidasCaixas }
  */
 export async function buscarResumoProduto(produto_id) {
+  if (isApiEnabled()) {
+    return apiRequest(`/api/consulta/resumo/${produto_id}`);
+  }
   await assertPermissao(PERM_CONSULTA_READ, { write: false, bloquearCliente: false });
   const cxsRes = await db.execute({
     sql: `SELECT COUNT(*) as saldoCaixas, SUM(peso_kg) as saldoKg FROM estoque_caixas WHERE produto_id = ? AND status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO') AND (endereco IS NULL OR (endereco != 'EXPEDICAO' AND endereco != 'PERDIDO'))`,
@@ -48,6 +52,9 @@ export async function buscarResumoProduto(produto_id) {
  * @param {string} produto_id 
  */
 export async function buscarEnderecosPorProduto(produto_id) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/consulta/enderecos/${produto_id}`)).data;
+  }
   await assertPermissao(PERM_CONSULTA_READ, { write: false, bloquearCliente: false });
   const cxsRes = await db.execute({
     sql: `
@@ -80,6 +87,9 @@ export async function buscarEnderecosPorProduto(produto_id) {
  * @param {string} endereco 
  */
 export async function buscarCaixasPorEnderecoEProduto(produto_id, endereco) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/consulta/caixas/${produto_id}/${encodeURIComponent(endereco)}`)).data;
+  }
   await assertPermissao(['consulta_estoque', 'estoque_enderecos', 'consulta_endereco', 'rastreabilidade', 'movimentacao_historico', 'movimentacao'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
@@ -99,6 +109,9 @@ export async function buscarCaixasPorEnderecoEProduto(produto_id, endereco) {
  * @param {number} limite 
  */
 export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/consulta/historico/${produto_id}${buildQueryString({ limite })}`)).data;
+  }
   await assertPermissao(['consulta_estoque', 'estoque_enderecos', 'rastreabilidade', 'movimentacao_historico'], { write: false, bloquearCliente: true });
   const res = await db.execute({
     sql: `
@@ -114,6 +127,9 @@ export async function buscarHistoricoPorProduto(produto_id, limite = 500) {
 }
 
 export async function buscarEstoqueConsolidado(produto_id = null) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/consulta/consolidado${buildQueryString({ produto_id })}`)).data;
+  }
   await assertPermissao(PERM_CONSULTA_READ, { write: false, bloquearCliente: false });
   let where = "c.status IN ('DISPONIVEL', 'RESERVADA', 'BLOQUEADO')";
   const args = [];

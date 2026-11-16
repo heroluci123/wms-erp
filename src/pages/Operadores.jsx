@@ -956,7 +956,7 @@ export function Operadores() {
                   usuariosFiltrados.map((u) => {
                     const alvoMaster = isMaster(u)
                     const podeEditarAlvo = !alvoMaster || souMaster
-                    const mesmoUsuario = Number(u.id) === Number(usuarioAtual?.id)
+                    const mesmoUsuario = String(u.id) === String(usuarioAtual?.id)
 
                     return (
                       <tr key={u.id}>

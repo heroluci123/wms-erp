@@ -1,4 +1,5 @@
 import { db } from '../lib/db'
+import { apiRequest, buildQueryString, isApiEnabled } from '../lib/apiClient'
 import { recalcularPosicaoEnderecos } from './movimentacoes'
 import { ensureRastreabilidadeSchema } from './taras'
 import { assertPermissao } from '../lib/authGuard'
@@ -17,6 +18,9 @@ async function gerarProximoCodigoRomaneio() {
  * Lista romaneios de saída filtrando por status, datas e vínculo com pedido
  */
 export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataFim = null, previsaoEntrega = null) {
+  if (isApiEnabled()) {
+    return (await apiRequest(`/api/romaneios${buildQueryString({ status, dataInicio, dataFim, previsaoEntrega })}`)).data
+  }
   await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
   let sql = `
     SELECT
@@ -76,6 +80,9 @@ export async function listarRomaneios(status = 'TODOS', dataInicio = null, dataF
  * Lista pedidos liberados ou em separação disponíveis para o operador separar
  */
 export async function listarPedidosParaSeparacao() {
+  if (isApiEnabled()) {
+    return (await apiRequest('/api/saida/fila')).data
+  }
   await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
   const res = await db.execute(`
     SELECT
@@ -106,6 +113,13 @@ export async function listarPedidosParaSeparacao() {
  * Inicia ou retoma a separação de um pedido, criando/abrindo seu romaneio vinculado
  */
 export async function iniciarOuAbrirSeparacaoPedido(pedido_id, operador_id, operador_nome) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/saida/iniciar-pedido/${pedido_id}`, { method: 'POST' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   await assertPermissao(['saida', 'expedicao', 'pedidos'])
   const pedRes = await db.execute({ sql: 'SELECT * FROM pedidos WHERE id = ?', args: [pedido_id] })
   if (pedRes.rows.length === 0) {
@@ -156,6 +170,16 @@ export async function iniciarOuAbrirSeparacaoPedido(pedido_id, operador_id, oper
  * Cria um novo romaneio (usado também para romaneio avulso de emergência)
  */
 export async function criarRomaneio({ cliente, previsao_entrega, operador_id, operador_nome, pedido_id = null }) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest('/api/romaneios', {
+        method: 'POST',
+        body: { cliente, previsao_entrega, pedido_id },
+      })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const codigo = await gerarProximoCodigoRomaneio()
@@ -179,6 +203,76 @@ export async function criarRomaneio({ cliente, previsao_entrega, operador_id, op
  * Busca todos os detalhes do romaneio, suas caixas bipadas, conferência e checklist do pedido
  */
 export async function detalhesRomaneio(romaneio_id) {
+  if (isApiEnabled()) {
+    try {
+      const r = (await apiRequest(`/api/romaneios/${romaneio_id}`)).data
+      if (!r) return null
+      const itens = r.itens || []
+      const resumoMap = new Map()
+      let qtdConferidas = 0
+      let pesoConferido = 0
+      for (const it of itens) {
+        if (Number(it.conferido) === 1) {
+          qtdConferidas++
+          pesoConferido += Number(it.peso_kg || 0)
+        }
+        const cur = resumoMap.get(it.produto_id) || {
+          produto_id: it.produto_id,
+          produto_codigo: it.produto_codigo,
+          produto_descricao: it.produto_descricao,
+          qtd_caixas: 0,
+          qtd_conferidas: 0,
+          total_kg: 0,
+          peso_conferido: 0,
+        }
+        cur.qtd_caixas += 1
+        cur.total_kg = Number((cur.total_kg + Number(it.peso_kg || 0)).toFixed(3))
+        if (Number(it.conferido) === 1) {
+          cur.qtd_conferidas += 1
+          cur.peso_conferido = Number((cur.peso_conferido + Number(it.peso_kg || 0)).toFixed(3))
+        }
+        resumoMap.set(it.produto_id, cur)
+      }
+      const pIdsSet = new Set((r.pedido_itens || []).map((pi) => pi.produto_id))
+      const itensNorm = itens.map((it) => ({
+        ...it,
+        extra_fora_pedido: r.pedidoId && !pIdsSet.has(it.produto_id) ? 1 : 0,
+      }))
+      const pedidoItens = (r.pedido_itens || []).map((pi) => {
+        const kgSol = Number(pi.qtd_kg_solicitada || 0)
+        const kgSep = Number(pi.kg_separado || 0)
+        return {
+          ...pi,
+          kg_separado: kgSep,
+          kg_faltante: Math.max(0, Number((kgSol - kgSep).toFixed(3))),
+          limite_max_kg: Number((kgSol * 1.5).toFixed(3)),
+          pct_separado: kgSol > 0 ? Math.round((kgSep / kgSol) * 100) : 0,
+        }
+      })
+      return {
+        ...r,
+        pedido_id: r.pedidoId ?? r.pedido_id,
+        previsao_entrega: r.previsaoEntrega ?? r.previsao_entrega,
+        operador_nome: r.operadorNome ?? r.operador_nome,
+        operador_conferencia_nome: r.operadorConferenciaNome ?? r.operador_conferencia_nome,
+        operador_expedicao_nome: r.operadorExpedicaoNome ?? r.operador_expedicao_nome,
+        conferido_at: r.conferidoAt ?? r.conferido_at,
+        expedido_at: r.expedidoAt ?? r.expedido_at,
+        created_at: r.createdAt ?? r.created_at,
+        itens: itensNorm,
+        resumoProdutos: Array.from(resumoMap.values()),
+        pedidoItens,
+        conferenciasSummary: {
+          totalCaixas: itens.length,
+          qtdConferidas,
+          pesoConferido: Number(pesoConferido.toFixed(3)),
+          todasConferidas: itens.length > 0 && qtdConferidas === itens.length,
+        },
+      }
+    } catch {
+      return null
+    }
+  }
   await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
   const romRes = await db.execute({
@@ -327,6 +421,32 @@ export async function detalhesRomaneio(romaneio_id) {
  * Adiciona uma caixa ao romaneio em separação, validando regras do pedido (produto fora / +50% peso)
  */
 export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_nome, opcoes = {}) {
+  if (isApiEnabled()) {
+    try {
+      const confirmado = Boolean(opcoes.confirmado)
+      const res = await apiRequest(`/api/romaneios/${romaneio_id}/caixa`, {
+        method: 'POST',
+        body: {
+          caixa_id: caixa?.id,
+          ean_caixa: caixa?.ean_caixa,
+          confirmarExtra: confirmado || Boolean(opcoes.confirmarExtra),
+          confirmarExcesso: confirmado || Boolean(opcoes.confirmarExcesso),
+        },
+      })
+      if (res.requiresConfirmation) {
+        return {
+          success: false,
+          requiresConfirmation: true,
+          tipoConfirmacao: res.reason,
+          mensagem: res.error,
+          ...res,
+        }
+      }
+      return res
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
     await ensureRastreabilidadeSchema()
@@ -490,6 +610,13 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
  * Remove uma caixa do romaneio (apenas quando em MONTANDO) e devolve ao estoque
  */
 export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, peso_kg, validade, endereco, operador_id = null, operador_nome = 'Sistema') {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/romaneios/${romaneio_id}/item/${item_id}`, { method: 'DELETE' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
     await ensureRastreabilidadeSchema()
@@ -548,6 +675,13 @@ export async function removerCaixa(romaneio_id, item_id, caixa_id, produto_id, p
  * (A partir daqui já é possível imprimir o Romaneio de Embarque!)
  */
 export async function finalizarMontagem(romaneio_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/romaneios/${romaneio_id}/finalizar-montagem`, { method: 'POST' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
     await ensureRastreabilidadeSchema()
@@ -631,6 +765,13 @@ export const finalizarSeparacao = finalizarMontagem
  * Reabre um romaneio da expedição devolvendo-o para separação (zera conferências)
  */
 export async function reabrirRomaneio(romaneio_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/romaneios/${romaneio_id}/reabrir`, { method: 'POST' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
     const romRes = await db.execute({ sql: 'SELECT id, pedido_id, status FROM romaneios WHERE id = ?', args: [romaneio_id] })
@@ -663,6 +804,16 @@ export async function reabrirRomaneio(romaneio_id) {
  * Confere caixa a caixa via leitura de código de barras na aba Expedição
  */
 export async function conferirCaixaRomaneio(romaneio_id, codigoBipado, operador_id, operador_nome) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/romaneios/${romaneio_id}/conferir`, {
+        method: 'POST',
+        body: { codigo: codigoBipado },
+      })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['expedicao', 'saida'])
     const codigoLimpo = String(codigoBipado || '').trim()
@@ -782,6 +933,13 @@ export async function conferirCaixaRomaneio(romaneio_id, codigoBipado, operador_
  * Expide definitivamente o romaneio SOMENTE após 100% das caixas terem sido conferidas
  */
 export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/romaneios/${romaneio_id}/expedir`, { method: 'POST' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['expedicao', 'saida'])
     const romRes = await db.execute({
@@ -893,6 +1051,13 @@ export async function expedirRomaneio(romaneio_id, operador_id, operador_nome) {
  * Exclui um romaneio não expedido devolvendo todas as caixas ao estoque disponível
  */
 export async function excluirRomaneio(romaneio_id) {
+  if (isApiEnabled()) {
+    try {
+      return await apiRequest(`/api/romaneios/${romaneio_id}`, { method: 'DELETE' })
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }
   try {
     await assertPermissao(['saida', 'expedicao', 'pedidos'])
     await ensureRastreabilidadeSchema()
@@ -963,6 +1128,17 @@ export async function excluirRomaneio(romaneio_id) {
  * preservando exatamente o cliente cadastrado no pedido e sem alterar o estoque ou o EAN da caixa.
  */
 export async function listarEtiquetasReservaRomaneio(romaneio_id = null, { pedido_id = null } = {}) {
+  if (isApiEnabled()) {
+    let targetId = romaneio_id
+    if (!targetId && pedido_id) {
+      const ped = await apiRequest(`/api/pedidos/${pedido_id}`)
+      targetId = ped?.data?.romaneio_id
+    }
+    if (!targetId) {
+      return { success: false, error: 'Romaneio de separação não encontrado para emissão das etiquetas.' }
+    }
+    return apiRequest(`/api/romaneios/${targetId}/etiquetas`)
+  }
   await assertPermissao(['saida', 'expedicao', 'pedidos_consultar', 'pedidos'], { write: false, bloquearCliente: true })
   await ensureRastreabilidadeSchema()
 
