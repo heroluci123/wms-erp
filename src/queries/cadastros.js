@@ -171,6 +171,7 @@ export const cadastrosQueries = {
         centrosCusto: [],
         naturezasOperacao: [],
         matrizTributaria: [],
+        marchantes: [],
       }
     }
     return (await apiRequest('/api/cadastros/auxiliares')).data
@@ -236,6 +237,19 @@ export const cadastrosQueries = {
   async excluirMatrizTributaria(id) {
     exigirApi('Matriz Tributária')
     return apiRequest(`/api/cadastros/matriz-tributaria/${id}`, { method: 'DELETE' })
+  },
+
+  async salvarMarchante(dados) {
+    exigirApi('Marchantes')
+    if (dados.id) {
+      return apiRequest(`/api/cadastros/marchantes/${dados.id}`, { method: 'PUT', body: dados })
+    }
+    return apiRequest('/api/cadastros/marchantes', { method: 'POST', body: dados })
+  },
+
+  async excluirMarchante(id) {
+    exigirApi('Marchantes')
+    return apiRequest(`/api/cadastros/marchantes/${id}`, { method: 'DELETE' })
   },
 
   async sugerirCfop({ tipo_movimento = 'SAIDA', finalidade = 'REVENDA', uf_parceiro } = {}) {

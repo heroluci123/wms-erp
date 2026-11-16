@@ -51,7 +51,7 @@ export function Clientes() {
   const { toastSuccess, toastError } = useAppStore()
   const [clientes, setClientes] = useState([])
   const [vendedores, setVendedores] = useState([])
-  const [auxiliares, setAuxiliares] = useState({ formasPagamento: [], locaisCobranca: [] })
+  const [auxiliares, setAuxiliares] = useState({ formasPagamento: [], locaisCobranca: [], marchantes: [] })
   const [rotas, setRotas] = useState([])
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading] = useState(true)
@@ -85,12 +85,12 @@ export function Clientes() {
       const [cliRes, vendRes, auxRes, rotRes] = await Promise.all([
         cadastrosQueries.listarClientes(),
         cadastrosQueries.listarVendedores().catch(() => []),
-        cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [] })),
+        cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [], marchantes: [] })),
         cadastrosQueries.listarRotas().catch(() => []),
       ])
       setClientes(cliRes || [])
       setVendedores(vendRes || [])
-      setAuxiliares(auxRes || { formasPagamento: [], locaisCobranca: [] })
+      setAuxiliares(auxRes || { formasPagamento: [], locaisCobranca: [], marchantes: [] })
       setRotas(rotRes || [])
     } catch (err) {
       toastError('Erro ao carregar clientes', err.message)
@@ -122,8 +122,13 @@ export function Clientes() {
     })
   }, [clientes, busca, filtro])
 
+  const marchantePadraoDefault = useMemo(() => {
+    const lista = auxiliares.marchantes || []
+    return lista.find((m) => Number(m.is_padrao) === 1)?.nome || lista[0]?.nome || 'FRIGODIL'
+  }, [auxiliares.marchantes])
+
   const abrirNovo = () => {
-    setForm(FORM_INICIAL)
+    setForm({ ...FORM_INICIAL, marchante_padrao: marchantePadraoDefault })
     setModalOpen(true)
   }
 
@@ -147,7 +152,7 @@ export function Clientes() {
       vendedor_padrao_id: c.vendedor_padrao_id || '',
       forma_pagamento_padrao_id: c.forma_pagamento_padrao_id || '',
       local_cobranca_padrao_id: c.local_cobranca_padrao_id || '',
-      marchante_padrao: c.marchante_padrao || '',
+      marchante_padrao: c.marchante_padrao || marchantePadraoDefault,
       rota_padrao_nome: c.rota_padrao_nome || '',
       limite_credito: Number(c.limite_credito || 0),
       permite_pagamento_entrega: Number(c.permite_pagamento_entrega ?? 1),
@@ -549,7 +554,23 @@ export function Clientes() {
                 <div className="form-grid form-grid--3 mt-12">
                   <div>
                     <label className="form-label">Marchante Padrão</label>
-                    <input className="form-input" value={form.marchante_padrao} onChange={(e) => setForm({ ...form, marchante_padrao: e.target.value.toUpperCase() })} placeholder="Ex: FRIGODIL ALIMENTOS LTDA" />
+                    <select className="form-input" value={form.marchante_padrao || marchantePadraoDefault} onChange={(e) => setForm({ ...form, marchante_padrao: e.target.value })}>
+                      {(auxiliares.marchantes || []).length === 0 ? (
+                        <option value="FRIGODIL">001 — FRIGODIL</option>
+                      ) : (
+                        <>
+                          {(auxiliares.marchantes || []).map((m) => (
+                            <option key={m.id} value={m.nome}>
+                              {m.codigo} — {m.nome}
+                            </option>
+                          ))}
+                          {form.marchante_padrao &&
+                            !(auxiliares.marchantes || []).some((m) => m.nome === form.marchante_padrao) && (
+                              <option value={form.marchante_padrao}>{form.marchante_padrao}</option>
+                            )}
+                        </>
+                      )}
+                    </select>
                   </div>
                   <div>
                     <label className="form-label">Rota Padrão</label>

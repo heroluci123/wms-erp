@@ -327,22 +327,20 @@ function Sidebar() {
   }
 
   const temVisaoGeral = temAlgumaPermissao(operador, ['dashboard_executivo', 'estoque_enderecos', 'consulta_estoque', 'relatorios_estoque'])
+  const temCompras = temAlgumaPermissao(operador, ['compras', 'recebimento'])
+  const temFaturamento = temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos', 'financeiro_pedidos'])
+  const temGestaoOperacional = temAlgumaPermissao(operador, ['mapa_producao', 'producao_criar_op'])
   const temOperacao = temAlgumaPermissao(operador, [
     'recebimento',
     'recebimento_consultar',
-    'compras',
     'movimentacao',
     'movimentacao_consultar',
     'retorno_producao',
     'producao_entrada',
     'producao_saida',
     'producao_criar_op',
-    'mapa_producao',
     'desmembramento',
     'reimpressao',
-    'pedidos',
-    'financeiro_pedidos',
-    'whatsapp_inbox',
     'saida',
     'expedicao',
   ])
@@ -396,6 +394,40 @@ function Sidebar() {
         </NavLink>
       )}
       
+      {temCompras && (
+        <>
+          <div className="sidebar__section-label">Compras</div>
+          <NavLink to="/compras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+            <ShoppingBag size={18} /> Pedidos de Compra
+          </NavLink>
+        </>
+      )}
+
+      {temFaturamento && (
+        <>
+          <div className="sidebar__section-label">Faturamento</div>
+          {temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos']) && (
+            <NavLink to="/whatsapp-inbox" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <MessageSquare size={18} /> Entrada WhatsApp
+            </NavLink>
+          )}
+          {temAlgumaPermissao(operador, ['pedidos', 'financeiro_pedidos']) && (
+            <NavLink to="/pedidos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <ClipboardList size={18} /> Pedidos de Venda
+            </NavLink>
+          )}
+        </>
+      )}
+
+      {temGestaoOperacional && (
+        <>
+          <div className="sidebar__section-label">Gestão Operacional</div>
+          <NavLink to="/mapa-producao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+            <GitBranch size={18} /> Mapa de Produção
+          </NavLink>
+        </>
+      )}
+
       {temOperacao && (
         <div className="sidebar__section-label">Operação</div>
       )}
@@ -405,19 +437,9 @@ function Sidebar() {
           <Upload size={18} /> Recebimento (REC)
         </NavLink>
       )}
-      {temAlgumaPermissao(operador, ['compras', 'recebimento']) && (
-        <NavLink to="/compras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <ShoppingBag size={18} /> Pedidos de Compra
-        </NavLink>
-      )}
       {temAlgumaPermissao(operador, ['movimentacao', 'movimentacao_consultar']) && (
         <NavLink to="/movimentacao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ArrowRightLeft size={18} /> Movimentação Interna
-        </NavLink>
-      )}
-      {temAlgumaPermissao(operador, ['mapa_producao', 'producao_criar_op']) && (
-        <NavLink to="/mapa-producao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <GitBranch size={18} /> Mapa de Produção
         </NavLink>
       )}
       {temAlgumaPermissao(operador, ['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op']) && (
@@ -433,16 +455,6 @@ function Sidebar() {
       {temPermissao(operador, 'reimpressao') && (
         <NavLink to="/reimpressao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <Printer size={18} /> Reimpressão Etiquetas
-        </NavLink>
-      )}
-      {temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos']) && (
-        <NavLink to="/whatsapp-inbox" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <MessageSquare size={18} /> Entrada WhatsApp
-        </NavLink>
-      )}
-      {temAlgumaPermissao(operador, ['pedidos', 'financeiro_pedidos']) && (
-        <NavLink to="/pedidos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <ClipboardList size={18} /> Pedidos
         </NavLink>
       )}
       {temAlgumaPermissao(operador, ['saida', 'expedicao']) && (

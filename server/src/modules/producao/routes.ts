@@ -67,12 +67,12 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           liberada_em: ordensProducao.liberadaEm,
           created_at: ordensProducao.createdAt,
           updated_at: ordensProducao.updatedAt,
-          qtd_insumos: sql<number>`(SELECT COUNT(*)::int FROM op_insumos oi WHERE oi.op_id = ${ordensProducao.id})`,
-          peso_insumos: sql<string>`COALESCE((SELECT SUM(oi.peso_kg) FROM op_insumos oi WHERE oi.op_id = ${ordensProducao.id}), 0)`,
-          qtd_retornos: sql<number>`(SELECT COUNT(*)::int FROM op_retornos oret WHERE oret.op_id = ${ordensProducao.id})`,
-          peso_retornos: sql<string>`COALESCE((SELECT SUM(oret.peso_kg) FROM op_retornos oret WHERE oret.op_id = ${ordensProducao.id}), 0)`,
-          qtd_prev_entrada: sql<number>`(SELECT COUNT(*)::int FROM op_itens_previstos oip WHERE oip.op_id = ${ordensProducao.id} AND oip.tipo = 'ENTRADA')`,
-          qtd_prev_saida: sql<number>`(SELECT COUNT(*)::int FROM op_itens_previstos oip WHERE oip.op_id = ${ordensProducao.id} AND oip.tipo = 'SAIDA')`,
+          qtd_insumos: sql<number>`(SELECT COUNT(*)::int FROM op_insumos oi WHERE oi.op_id = "ordens_producao"."id")`,
+          peso_insumos: sql<string>`COALESCE((SELECT SUM(oi.peso_kg) FROM op_insumos oi WHERE oi.op_id = "ordens_producao"."id"), 0)`,
+          qtd_retornos: sql<number>`(SELECT COUNT(*)::int FROM op_retornos oret WHERE oret.op_id = "ordens_producao"."id")`,
+          peso_retornos: sql<string>`COALESCE((SELECT SUM(oret.peso_kg) FROM op_retornos oret WHERE oret.op_id = "ordens_producao"."id"), 0)`,
+          qtd_prev_entrada: sql<number>`(SELECT COUNT(*)::int FROM op_itens_previstos oip WHERE oip.op_id = "ordens_producao"."id" AND oip.tipo = 'ENTRADA')`,
+          qtd_prev_saida: sql<number>`(SELECT COUNT(*)::int FROM op_itens_previstos oip WHERE oip.op_id = "ordens_producao"."id" AND oip.tipo = 'SAIDA')`,
         })
         .from(ordensProducao)
         .where(

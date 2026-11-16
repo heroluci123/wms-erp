@@ -78,10 +78,10 @@ export function registerMapaProducaoRoutes(app: FastifyInstance, conn: DbConnect
           status: mapasProducao.status,
           observacoes: mapasProducao.observacoes,
           created_at: mapasProducao.createdAt,
-          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM mapas_producao_itens mpi WHERE mpi.mapa_id = ${mapasProducao.id})`,
-          total_previsto_kg: sql<string>`COALESCE((SELECT ROUND(SUM(mpi.qtd_prevista_kg), 3) FROM mapas_producao_itens mpi WHERE mpi.mapa_id = ${mapasProducao.id}), 0)`,
-          total_mp_kg: sql<string>`COALESCE((SELECT ROUND(SUM(mpi.qtd_mp_kg), 3) FROM mapas_producao_itens mpi WHERE mpi.mapa_id = ${mapasProducao.id}), 0)`,
-          qtd_ops: sql<number>`(SELECT COUNT(*)::int FROM ordens_producao op WHERE op.mapa_id = ${mapasProducao.id})`,
+          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM mapas_producao_itens mpi WHERE mpi.mapa_id = "mapas_producao"."id")`,
+          total_previsto_kg: sql<string>`COALESCE((SELECT ROUND(SUM(mpi.qtd_prevista_kg), 3) FROM mapas_producao_itens mpi WHERE mpi.mapa_id = "mapas_producao"."id"), 0)`,
+          total_mp_kg: sql<string>`COALESCE((SELECT ROUND(SUM(mpi.qtd_mp_kg), 3) FROM mapas_producao_itens mpi WHERE mpi.mapa_id = "mapas_producao"."id"), 0)`,
+          qtd_ops: sql<number>`(SELECT COUNT(*)::int FROM ordens_producao op WHERE op.mapa_id = "mapas_producao"."id")`,
         })
         .from(mapasProducao)
         .where(and(eq(mapasProducao.tenantId, ctx.tenantId), eq(mapasProducao.filialId, ctx.filialId)))

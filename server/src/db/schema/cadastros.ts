@@ -324,3 +324,19 @@ export const clienteProdutoEspec = pgTable(
   },
   (t) => [uniqueIndex('uq_cli_prod_espec').on(t.tenantId, t.clienteId, t.produtoId)]
 )
+
+export const marchantes = pgTable(
+  'marchantes',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    codigo: text('codigo').notNull(),
+    nome: text('nome').notNull(),
+    isPadrao: integer('is_padrao').notNull().default(0),
+    ativo: integer('ativo').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_marchantes_tenant_cod').on(t.tenantId, t.codigo)]
+)

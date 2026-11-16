@@ -6,6 +6,7 @@ import {
   estoqueCaixas,
   formasPagamento,
   locaisCobranca,
+  marchantes,
   naturezasOperacao,
   opItensPrevistos,
   ordensProducao,
@@ -167,15 +168,15 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           created_at: pedidos.createdAt,
           liberado_at: pedidos.liberadoAt,
           expedido_at: pedidos.expedidoAt,
-          vendedor_nome: sql<string | null>`(SELECT v.nome FROM vendedores v WHERE v.id = ${pedidos.vendedorId} LIMIT 1)`,
-          forma_pagamento_descricao: sql<string | null>`(SELECT fp.descricao FROM formas_pagamento fp WHERE fp.id = ${pedidos.formaPagamentoId} LIMIT 1)`,
-          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = ${pedidos.id})`,
-          total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = ${pedidos.id}), 0)`,
-          romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = ${pedidos.id} ORDER BY r.created_at DESC LIMIT 1)`,
-          romaneio_codigo: sql<string | null>`(SELECT r.codigo FROM romaneios r WHERE r.pedido_id = ${pedidos.id} ORDER BY r.created_at DESC LIMIT 1)`,
-          romaneio_status: sql<string | null>`(SELECT r.status FROM romaneios r WHERE r.pedido_id = ${pedidos.id} ORDER BY r.created_at DESC LIMIT 1)`,
-          total_kg_separado: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = ${pedidos.id}), 0)`,
-          total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = ${pedidos.id}), 0)`,
+          vendedor_nome: sql<string | null>`(SELECT v.nome FROM vendedores v WHERE v.id = "pedidos"."vendedor_id" LIMIT 1)`,
+          forma_pagamento_descricao: sql<string | null>`(SELECT fp.descricao FROM formas_pagamento fp WHERE fp.id = "pedidos"."forma_pagamento_id" LIMIT 1)`,
+          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id")`,
+          total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id"), 0)`,
+          romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+          romaneio_codigo: sql<string | null>`(SELECT r.codigo FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+          romaneio_status: sql<string | null>`(SELECT r.status FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+          total_kg_separado: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
+          total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
         })
         .from(pedidos)
         .where(and(...conds))
@@ -450,10 +451,19 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       itens: ItemPedidoInput[]
     }
 
-    const origPermitidas = new Set(['SUPPLY_CHAIN', 'FINANCEIRO', 'WHATSAPP', 'VENDEDOR', 'PORTAL', 'SISTEMA'])
-    const origRaw = String(body.origem_pedido || 'SUPPLY_CHAIN').trim().toUpperCase()
-    const origemPedido = origPermitidas.has(origRaw) ? origRaw : 'SUPPLY_CHAIN'
-    const setorSolicitante = String(body.setor_solicitante || origemPedido).trim().toUpperCase()
+    const userSetor = String(ctx.operador.setor || 'FATURAMENTO').trim()
+    const origPermitidas = new Set(['SUPPLY_CHAIN', 'FINANCEIRO', 'WHATSAPP', 'VENDEDOR', 'PORTAL', 'SISTEMA', 'FATURAMENTO'])
+    let origRaw = String(body.origem_pedido || '').trim().toUpperCase()
+    if (!origRaw) {
+      const sUp = userSetor.toUpperCase()
+      if (sUp.includes('FINANCEIR')) origRaw = 'FINANCEIRO'
+      else if (sUp.includes('VEND') || sUp.includes('COMERC')) origRaw = 'VENDEDOR'
+      else if (sUp.includes('WHATS')) origRaw = 'WHATSAPP'
+      else if (sUp.includes('SUPPLY') || sUp.includes('PCP') || sUp.includes('LOGIST')) origRaw = 'SUPPLY_CHAIN'
+      else origRaw = 'FATURAMENTO'
+    }
+    const origemPedido = origPermitidas.has(origRaw) ? origRaw : 'FATURAMENTO'
+    const setorSolicitante = String(body.setor_solicitante || userSetor || origemPedido).trim().toUpperCase()
     const temPermissaoLiberar = ctx.operador.permissoes?.pedidos === true || ctx.operador.nivel === 'MASTER'
     const forcarRascunho = origemPedido === 'FINANCEIRO' && (!temPermissaoLiberar || body.liberar !== true)
 
@@ -501,6 +511,17 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         0,
       )
 
+      let marchanteFinal = String(body.marchante || cliDefaults?.marchantePadrao || '').trim()
+      if (!marchanteFinal) {
+        const [defMarc] = await tx
+          .select({ nome: marchantes.nome })
+          .from(marchantes)
+          .where(and(eq(marchantes.tenantId, ctx.tenantId), eq(marchantes.ativo, 1)))
+          .orderBy(desc(marchantes.isPadrao))
+          .limit(1)
+        marchanteFinal = defMarc?.nome || 'FRIGODIL'
+      }
+
       const pedidoId = uuidv7()
       await tx.insert(pedidos).values({
         id: pedidoId,
@@ -520,7 +541,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           ? parseUuidOrBadRequest(body.local_cobranca_id, 'local_cobranca_id')
           : cliDefaults?.localCobrancaPadraoId || null,
         naturezaId: body.natureza_id ? parseUuidOrBadRequest(body.natureza_id, 'natureza_id') : null,
-        marchante: String(body.marchante || cliDefaults?.marchantePadrao || '').trim(),
+        marchante: marchanteFinal,
         pagamentoNaEntrega:
           body.pagamento_na_entrega != null
             ? body.pagamento_na_entrega
@@ -1060,11 +1081,11 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           previsao_entrega: pedidos.previsaoEntrega,
           status: pedidos.status,
           observacoes: pedidos.observacoes,
-          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = ${pedidos.id})`,
-          total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = ${pedidos.id}), 0)`,
-          romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = ${pedidos.id} AND r.status != 'EXPEDIDO' ORDER BY r.created_at DESC LIMIT 1)`,
-          romaneio_codigo: sql<string | null>`(SELECT r.codigo FROM romaneios r WHERE r.pedido_id = ${pedidos.id} AND r.status != 'EXPEDIDO' ORDER BY r.created_at DESC LIMIT 1)`,
-          romaneio_status: sql<string | null>`(SELECT r.status FROM romaneios r WHERE r.pedido_id = ${pedidos.id} AND r.status != 'EXPEDIDO' ORDER BY r.created_at DESC LIMIT 1)`,
+          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id")`,
+          total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id"), 0)`,
+          romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = "pedidos"."id" AND r.status != 'EXPEDIDO' ORDER BY r.created_at DESC LIMIT 1)`,
+          romaneio_codigo: sql<string | null>`(SELECT r.codigo FROM romaneios r WHERE r.pedido_id = "pedidos"."id" AND r.status != 'EXPEDIDO' ORDER BY r.created_at DESC LIMIT 1)`,
+          romaneio_status: sql<string | null>`(SELECT r.status FROM romaneios r WHERE r.pedido_id = "pedidos"."id" AND r.status != 'EXPEDIDO' ORDER BY r.created_at DESC LIMIT 1)`,
         })
         .from(pedidos)
         .where(

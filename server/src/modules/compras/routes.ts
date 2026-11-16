@@ -5,6 +5,7 @@ import {
   centrosCusto,
   estoqueCaixas,
   fornecedores,
+  marchantes,
   naturezasOperacao,
   pedidosCompra,
   pedidosCompraItens,
@@ -261,12 +262,12 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             previsao_entrega: pedidosCompra.previsaoEntrega,
             observacoes: pedidosCompra.observacoes,
             created_at: pedidosCompra.createdAt,
-            qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_compra_itens pci WHERE pci.pedido_compra_id = ${pedidosCompra.id})`,
-            total_kg_solicitada: sql<string>`COALESCE((SELECT ROUND(SUM(pci.qtd_kg_solicitada), 3) FROM pedidos_compra_itens pci WHERE pci.pedido_compra_id = ${pedidosCompra.id}), 0)`,
-            total_kg_recebida: sql<string>`COALESCE((SELECT ROUND(SUM(pci.qtd_kg_recebida), 3) FROM pedidos_compra_itens pci WHERE pci.pedido_compra_id = ${pedidosCompra.id}), 0)`,
-            recebimento_id: sql<string | null>`(SELECT r.id FROM recebimentos r WHERE r.pedido_compra_id = ${pedidosCompra.id} ORDER BY r.created_at DESC LIMIT 1)`,
-            recebimento_codigo: sql<string | null>`(SELECT r.codigo FROM recebimentos r WHERE r.pedido_compra_id = ${pedidosCompra.id} ORDER BY r.created_at DESC LIMIT 1)`,
-            status_validacao: sql<string | null>`(SELECT r.status_validacao FROM recebimentos r WHERE r.pedido_compra_id = ${pedidosCompra.id} ORDER BY r.created_at DESC LIMIT 1)`,
+            qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_compra_itens pci WHERE pci.pedido_compra_id = "pedidos_compra"."id")`,
+            total_kg_solicitada: sql<string>`COALESCE((SELECT ROUND(SUM(pci.qtd_kg_solicitada), 3) FROM pedidos_compra_itens pci WHERE pci.pedido_compra_id = "pedidos_compra"."id"), 0)`,
+            total_kg_recebida: sql<string>`COALESCE((SELECT ROUND(SUM(pci.qtd_kg_recebida), 3) FROM pedidos_compra_itens pci WHERE pci.pedido_compra_id = "pedidos_compra"."id"), 0)`,
+            recebimento_id: sql<string | null>`(SELECT r.id FROM recebimentos r WHERE r.pedido_compra_id = "pedidos_compra"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+            recebimento_codigo: sql<string | null>`(SELECT r.codigo FROM recebimentos r WHERE r.pedido_compra_id = "pedidos_compra"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+            status_validacao: sql<string | null>`(SELECT r.status_validacao FROM recebimentos r WHERE r.pedido_compra_id = "pedidos_compra"."id" ORDER BY r.created_at DESC LIMIT 1)`,
           })
           .from(pedidosCompra)
           .innerJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
@@ -439,6 +440,17 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       const id = uuidv7()
       const status = body.aprovar === false ? 'ABERTO' : 'APROVADO'
 
+      let marchanteFinal = String(body.marchante || '').trim()
+      if (!marchanteFinal) {
+        const [defMarc] = await tx
+          .select({ nome: marchantes.nome })
+          .from(marchantes)
+          .where(and(eq(marchantes.tenantId, ctx.tenantId), eq(marchantes.ativo, 1)))
+          .orderBy(desc(marchantes.isPadrao))
+          .limit(1)
+        marchanteFinal = defMarc?.nome || 'FRIGODIL'
+      }
+
       await tx.insert(pedidosCompra).values({
         id,
         tenantId: ctx.tenantId,
@@ -448,7 +460,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         naturezaId: prep.naturezaIdResolvida,
         centroCustoId: centroCustoIdFinal,
         compradorId: ctx.operador.id,
-        marchante: String(body.marchante || '').trim(),
+        marchante: marchanteFinal,
         freteValor: toDec(frete, 2),
         despesasValor: toDec(despesas, 2),
         valorTotal: toDec(valorTotal, 2),

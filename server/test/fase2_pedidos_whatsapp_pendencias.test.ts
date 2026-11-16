@@ -430,6 +430,48 @@ test('Fase 2: WhatsApp parser, Inbox -> Pedido, Parcelas, Clonar, Gerar OP e Cen
       `Esperava pendencia OP_POR_PEDIDO em PCP: ${JSON.stringify(pendPcpData)}`
     )
 
+    // 7B. Regressao: listagens com subqueries (sem ambiguidade SQL "id") + Marchante FRIGODIL + Rastreabilidade usuário
+    for (const ep of ['/api/pedidos?status=TODOS', '/api/ops', '/api/mapas-producao', '/api/inventario']) {
+      const rEp = await app.inject({ method: 'GET', url: ep, headers })
+      assert.equal(rEp.statusCode, 200, `GET ${ep} deveria retornar 200, veio ${rEp.statusCode}: ${rEp.body}`)
+    }
+
+    const rAux = await app.inject({ method: 'GET', url: '/api/cadastros/auxiliares', headers })
+    assert.equal(rAux.statusCode, 200)
+    const auxData = rAux.json().data
+    assert.ok(
+      Array.isArray(auxData.marchantes) &&
+        auxData.marchantes.some((m: any) => m.codigo === '001' && m.nome === 'FRIGODIL' && Number(m.is_padrao) === 1),
+      `Esperava marchante padrao 001 FRIGODIL em auxiliares: ${JSON.stringify(auxData.marchantes)}`,
+    )
+
+    const rMarcPost = await app.inject({
+      method: 'POST',
+      url: '/api/cadastros/marchantes',
+      headers,
+      payload: { codigo: '002', nome: 'FRIGO TESTE', is_padrao: false },
+    })
+    assert.equal(rMarcPost.statusCode, 201, `POST /api/cadastros/marchantes falhou: ${rMarcPost.body}`)
+
+    const rPedAuto = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Rastreabilidade Automatica',
+        liberar: false,
+        itens: [{ produto_id: itemOssobuco.produto_id, qtd_kg_solicitada: 5 }],
+      },
+    })
+    assert.equal(rPedAuto.statusCode, 201, `POST /api/pedidos automatico falhou: ${rPedAuto.body}`)
+    const pedAutoId = rPedAuto.json().id
+    const rPedAutoDet = await app.inject({ method: 'GET', url: `/api/pedidos/${pedAutoId}`, headers })
+    assert.equal(rPedAutoDet.statusCode, 200)
+    const pedAuto = rPedAutoDet.json().data
+    assert.equal(pedAuto.marchante, 'FRIGODIL')
+    assert.equal(pedAuto.criado_por_nome, 'Luciano')
+    assert.ok(String(pedAuto.setor_solicitante || '').length > 0)
+
     // 8. RBAC: usuario CLIENTE bloqueado (403)
     const resCliUser = await app.inject({
       method: 'POST',

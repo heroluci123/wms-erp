@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import {
@@ -11,6 +11,7 @@ import {
   formasPagamento,
   fornecedores,
   locaisCobranca,
+  marchantes,
   matrizTributaria,
   naturezasOperacao,
   operadores,
@@ -176,6 +177,12 @@ const MatrizTribSchema = z.object({
   reducao_base_icms_pct: z.coerce.number().min(0).max(100).default(0),
   aliq_icms_st: z.coerce.number().min(0).max(100).default(0),
   validado_por_contador: optStr(''),
+})
+
+const MarchanteSchema = z.object({
+  codigo: z.string().trim().min(1, 'Informe o código do marchante.'),
+  nome: z.string().trim().min(1, 'Informe o nome do marchante.'),
+  is_padrao: z.union([z.boolean(), z.number()]).optional().default(0),
 })
 
 function flag01(v: unknown, def = 0): number {
@@ -995,7 +1002,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     { preHandler: requirePermission(null, { write: false, bloquearCliente: true }) },
     async (req) => {
       const ctx = req.authCtx!
-      const [formas, bancos, centros, naturezas, matriz] = await Promise.all([
+      const [formas, bancos, centros, naturezas, matriz, marchantesList] = await Promise.all([
         conn.db
           .select()
           .from(formasPagamento)
@@ -1021,6 +1028,11 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           .from(matrizTributaria)
           .where(eq(matrizTributaria.tenantId, ctx.tenantId))
           .orderBy(asc(matrizTributaria.ncm)),
+        conn.db
+          .select()
+          .from(marchantes)
+          .where(and(eq(marchantes.tenantId, ctx.tenantId), eq(marchantes.ativo, 1)))
+          .orderBy(desc(marchantes.isPadrao), asc(marchantes.codigo)),
       ])
 
       return {
@@ -1058,10 +1070,70 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
             aliq_icms_st: Number(m.aliqIcmsSt || 0),
             validado_por_contador: m.validadoPorContador,
           })),
+          marchantes: marchantesList.map((m) => ({
+            id: m.id,
+            codigo: m.codigo,
+            nome: m.nome,
+            is_padrao: m.isPadrao,
+            ativo: m.ativo,
+          })),
         },
       }
     }
   )
+
+  app.post('/api/cadastros/marchantes', { preHandler: requirePermission('parametros_comerciais') }, async (req, reply) => {
+    const ctx = req.authCtx!
+    const parsed = MarchanteSchema.safeParse(req.body)
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
+    const d = parsed.data
+    const isPadrao = flag01(d.is_padrao, 0)
+    const id = uuidv7()
+    await conn.db.transaction(async (tx) => {
+      if (isPadrao === 1) {
+        await tx.update(marchantes).set({ isPadrao: 0 }).where(eq(marchantes.tenantId, ctx.tenantId))
+      }
+      await tx.insert(marchantes).values({
+        id,
+        tenantId: ctx.tenantId,
+        codigo: d.codigo.toUpperCase(),
+        nome: d.nome.toUpperCase(),
+        isPadrao,
+        ativo: 1,
+      })
+    })
+    return reply.status(201).send({ success: true, id })
+  })
+
+  app.put('/api/cadastros/marchantes/:id', { preHandler: requirePermission('parametros_comerciais') }, async (req) => {
+    const ctx = req.authCtx!
+    const id = String((req.params as { id: string }).id || '').trim()
+    const parsed = MarchanteSchema.safeParse(req.body)
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
+    const d = parsed.data
+    const isPadrao = flag01(d.is_padrao, 0)
+    await conn.db.transaction(async (tx) => {
+      if (isPadrao === 1) {
+        await tx.update(marchantes).set({ isPadrao: 0 }).where(eq(marchantes.tenantId, ctx.tenantId))
+      }
+      await tx
+        .update(marchantes)
+        .set({
+          codigo: d.codigo.toUpperCase(),
+          nome: d.nome.toUpperCase(),
+          isPadrao,
+        })
+        .where(and(eq(marchantes.id, id), eq(marchantes.tenantId, ctx.tenantId)))
+    })
+    return { success: true }
+  })
+
+  app.delete('/api/cadastros/marchantes/:id', { preHandler: requirePermission('parametros_comerciais') }, async (req) => {
+    const ctx = req.authCtx!
+    const id = String((req.params as { id: string }).id || '').trim()
+    await conn.db.update(marchantes).set({ ativo: 0 }).where(and(eq(marchantes.id, id), eq(marchantes.tenantId, ctx.tenantId)))
+    return { success: true }
+  })
 
   app.post('/api/cadastros/formas-pagamento', { preHandler: requirePermission('parametros_comerciais') }, async (req, reply) => {
     const ctx = req.authCtx!

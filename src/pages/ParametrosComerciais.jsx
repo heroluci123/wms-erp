@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Settings2, CreditCard, Landmark, FileSpreadsheet, Layers, Shield, Plus, Trash2, Calculator } from 'lucide-react'
+import { Settings2, CreditCard, Landmark, FileSpreadsheet, Layers, Shield, Plus, Trash2, Calculator, Tag } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
 import { cadastrosQueries } from '../queries/cadastros'
@@ -14,6 +14,7 @@ export function ParametrosComerciais() {
     centrosCusto: [],
     naturezasOperacao: [],
     matrizTributaria: [],
+    marchantes: [],
   })
   const [loading, setLoading] = useState(true)
 
@@ -21,6 +22,7 @@ export function ParametrosComerciais() {
   const [fpForm, setFpForm] = useState({ codigo: '', descricao: '', diasTexto: '14, 21', pagamento_na_entrega: false })
   const [bancoForm, setBancoForm] = useState({ codigo: '', nome: '' })
   const [ccForm, setCcForm] = useState({ codigo: '', descricao: '' })
+  const [marcForm, setMarcForm] = useState({ codigo: '', nome: '', is_padrao: false })
   const [natForm, setNatForm] = useState({
     tipo_movimento: 'SAIDA',
     finalidade: 'REVENDA',
@@ -119,6 +121,7 @@ export function ParametrosComerciais() {
           { id: 'bancos', label: 'Locais Cobrança / Bancos', icon: Landmark },
           { id: 'naturezas', label: 'Naturezas & CFOP', icon: FileSpreadsheet },
           { id: 'centros', label: 'Centros de Custo', icon: Layers },
+          { id: 'marchantes', label: 'Marchantes', icon: Tag },
           { id: 'matriz', label: 'Matriz Tributária (Contador)', icon: Shield },
         ].map((t) => {
           const Icon = t.icon
@@ -451,6 +454,95 @@ export function ParametrosComerciais() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {aba === 'marchantes' && (
+            <div className="grid-responsive">
+              <div className="card">
+                <h3 className="text-base font-bold mb-12">Novo Marchante</h3>
+                <form
+                  className="flex flex-col gap-12"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    executar(
+                      () => cadastrosQueries.salvarMarchante(marcForm),
+                      'Marchante salvo',
+                      `${marcForm.codigo} — ${marcForm.nome}`,
+                      () => setMarcForm({ codigo: '', nome: '', is_padrao: false })
+                    )
+                  }}
+                >
+                  <div className="form-grid form-grid--2">
+                    <div>
+                      <label className="form-label">Código *</label>
+                      <input className="form-input" required value={marcForm.codigo} onChange={(e) => setMarcForm({ ...marcForm, codigo: e.target.value.toUpperCase() })} placeholder="Ex: 002" />
+                    </div>
+                    <div>
+                      <label className="form-label">Nome / Razão *</label>
+                      <input className="form-input" required value={marcForm.nome} onChange={(e) => setMarcForm({ ...marcForm, nome: e.target.value.toUpperCase() })} placeholder="Ex: FRIGORÍFICO X" />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-8 text-sm cursor-pointer">
+                    <input type="checkbox" checked={marcForm.is_padrao} onChange={(e) => setMarcForm({ ...marcForm, is_padrao: e.target.checked })} />
+                    Definir como Marchante Padrão nos Pedidos
+                  </label>
+                  <button type="submit" className="btn btn--primary" disabled={!isApiEnabled()}>
+                    <Plus size={16} /> Salvar Marchante
+                  </button>
+                </form>
+              </div>
+              <div className="card">
+                <h3 className="text-base font-bold mb-12">Marchantes Cadastrados</h3>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Código</th>
+                        <th>Nome</th>
+                        <th>Padrão</th>
+                        <th style={{ textAlign: 'right' }}>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(aux.marchantes || []).map((m) => (
+                        <tr key={m.id}>
+                          <td className="td-mono font-bold">{m.codigo}</td>
+                          <td>{m.nome}</td>
+                          <td>
+                            {Number(m.is_padrao) === 1 ? (
+                              <span className="badge badge--success">PADRÃO</span>
+                            ) : (
+                              <button
+                                className="btn btn--ghost btn--sm"
+                                disabled={!isApiEnabled()}
+                                onClick={() =>
+                                  executar(
+                                    () => cadastrosQueries.salvarMarchante({ id: m.id, codigo: m.codigo, nome: m.nome, is_padrao: 1 }),
+                                    'Padrão atualizado',
+                                    `${m.nome} agora é o marchante padrão.`
+                                  )
+                                }
+                              >
+                                Tornar Padrão
+                              </button>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button
+                              className="btn btn--ghost btn--icon text-danger"
+                              disabled={!isApiEnabled()}
+                              onClick={() => executar(() => cadastrosQueries.excluirMarchante(m.id), 'Excluído', 'Marchante desativado.')}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

@@ -46,10 +46,12 @@ const STATUS_BADGE = {
 
 const ORIGEM_BADGE = {
   SUPPLY_CHAIN: { label: 'Supply Chain', cls: 'badge--info' },
+  FATURAMENTO: { label: 'Faturamento', cls: 'badge--info' },
   FINANCEIRO: { label: 'Financeiro', cls: 'badge--warning' },
   WHATSAPP: { label: 'WhatsApp', cls: 'badge--success' },
   VENDEDOR: { label: 'Vendedor', cls: 'badge--purple' },
   PORTAL: { label: 'Portal', cls: 'badge--neutral' },
+  SISTEMA: { label: 'Sistema', cls: 'badge--neutral' },
 }
 
 const normTxt = (v) =>
@@ -108,7 +110,7 @@ export function Pedidos() {
   const [produtos, setProdutos] = useState([])
   const [clientes, setClientes] = useState([])
   const [vendedores, setVendedores] = useState([])
-  const [auxiliares, setAuxiliares] = useState({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] })
+  const [auxiliares, setAuxiliares] = useState({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [], marchantes: [] })
   const [especificacoesCliente, setEspecificacoesCliente] = useState([])
   const [cfopSugerido, setCfopSugerido] = useState(null)
 
@@ -123,12 +125,12 @@ export function Pedidos() {
   const [editCodigo, setEditCodigo] = useState('')
   const [titulo, setTitulo] = useState('')
   const [clienteIdSelecionado, setClienteIdSelecionado] = useState(null)
-  const [origemPedido, setOrigemPedido] = useState(somenteFinanceiro ? 'FINANCEIRO' : 'SUPPLY_CHAIN')
+  const [origemWppForcada, setOrigemWppForcada] = useState(false)
   const [vendedorId, setVendedorId] = useState('')
   const [formaPagamentoId, setFormaPagamentoId] = useState('')
   const [localCobrancaId, setLocalCobrancaId] = useState('')
   const [naturezaId, setNaturezaId] = useState('')
-  const [marchante, setMarchante] = useState('')
+  const [marchante, setMarchante] = useState('FRIGODIL')
   const [pagamentoNaEntrega, setPagamentoNaEntrega] = useState(0)
   const [mostrarTrocaCliente, setMostrarTrocaCliente] = useState(false)
   const [modalNovoClienteAberto, setModalNovoClienteAberto] = useState(false)
@@ -193,13 +195,13 @@ export function Pedidos() {
         pedidosQueries.listarSaldosProdutosParaPedido(),
         pedidosQueries.listarClientes(),
         apiAtiva ? cadastrosQueries.listarVendedores().catch(() => []) : Promise.resolve([]),
-        apiAtiva ? cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] })) : Promise.resolve({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] }),
+        apiAtiva ? cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [], marchantes: [] })) : Promise.resolve({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [], marchantes: [] }),
       ])
       setPedidos(listaPed)
       setProdutos(listaProd)
       setClientes(listaCli)
       setVendedores(listaVend || [])
-      setAuxiliares(auxData || { formasPagamento: [], locaisCobranca: [], naturezasOperacao: [] })
+      setAuxiliares(auxData || { formasPagamento: [], locaisCobranca: [], naturezasOperacao: [], marchantes: [] })
       if (!clienteIdSelecionado && listaCli.length > 0) {
         const pad = listaCli.find((c) => Number(c.is_padrao) === 1) || listaCli[0]
         setClienteIdSelecionado(pad.id)
@@ -282,6 +284,11 @@ export function Pedidos() {
     [clientes]
   )
 
+  const marchantePadraoDefault = useMemo(() => {
+    const lista = auxiliares.marchantes || []
+    return lista.find((m) => Number(m.is_padrao) === 1)?.nome || lista[0]?.nome || 'FRIGODIL'
+  }, [auxiliares.marchantes])
+
   const clienteAtivo = useMemo(
     () => clientes.find((c) => String(c.id) === String(clienteIdSelecionado)) || clientePadrao,
     [clientes, clienteIdSelecionado, clientePadrao]
@@ -300,7 +307,7 @@ export function Pedidos() {
         setVendedorId(cli.vendedor_padrao_id || '')
         setFormaPagamentoId(cli.forma_pagamento_padrao_id || '')
         setLocalCobrancaId(cli.local_cobranca_padrao_id || '')
-        setMarchante(cli.marchante_padrao || '')
+        setMarchante(cli.marchante_padrao || marchantePadraoDefault)
         setPagamentoNaEntrega(Number(cli.permite_pagamento_entrega ?? 0))
         if (cfopRes?.natureza_id) setNaturezaId(cfopRes.natureza_id)
       }
@@ -318,12 +325,12 @@ export function Pedidos() {
     setEditCodigo('')
     setTitulo('')
     setClienteIdSelecionado(clientePadrao?.id || null)
-    setOrigemPedido(somenteFinanceiro ? 'FINANCEIRO' : 'SUPPLY_CHAIN')
+    setOrigemWppForcada(false)
     setVendedorId(clientePadrao?.vendedor_padrao_id || '')
     setFormaPagamentoId(clientePadrao?.forma_pagamento_padrao_id || '')
     setLocalCobrancaId(clientePadrao?.local_cobranca_padrao_id || '')
     setNaturezaId('')
-    setMarchante(clientePadrao?.marchante_padrao || '')
+    setMarchante(clientePadrao?.marchante_padrao || marchantePadraoDefault)
     setPagamentoNaEntrega(Number(clientePadrao?.permite_pagamento_entrega ?? 0))
     setMostrarTrocaCliente(false)
     setPrevisaoEntrega('')
@@ -523,12 +530,12 @@ export function Pedidos() {
       setEditCodigo(ped.codigo)
       setTitulo(ped.titulo || '')
       setClienteIdSelecionado(ped.cliente_id || clientePadrao?.id || null)
-      setOrigemPedido(ped.origem_pedido || 'SUPPLY_CHAIN')
+      setOrigemWppForcada(ped.origem_pedido === 'WHATSAPP')
       setVendedorId(ped.vendedor_id || '')
       setFormaPagamentoId(ped.forma_pagamento_id || '')
       setLocalCobrancaId(ped.local_cobranca_id || '')
       setNaturezaId(ped.natureza_id || '')
-      setMarchante(ped.marchante || '')
+      setMarchante(ped.marchante || marchantePadraoDefault)
       setPagamentoNaEntrega(Number(ped.pagamento_na_entrega || 0))
       if (apiAtiva && ped.cliente_id) {
         const cliObj = clientes.find((c) => String(c.id) === String(ped.cliente_id))
@@ -733,12 +740,12 @@ export function Pedidos() {
           forma_pagamento_id: formaPagamentoId || null,
           local_cobranca_id: localCobrancaId || null,
           natureza_id: naturezaId || null,
-          marchante,
+          marchante: marchante || marchantePadraoDefault,
           pagamento_na_entrega: pagamentoNaEntrega,
           previsao_entrega: previsaoEntrega || null,
           observacoes,
-          origem_pedido: somenteFinanceiro ? 'FINANCEIRO' : origemPedido,
-          setor_solicitante: somenteFinanceiro ? 'FINANCEIRO' : origemPedido,
+          origem_pedido: origemWppForcada ? 'WHATSAPP' : somenteFinanceiro ? 'FINANCEIRO' : undefined,
+          setor_solicitante: operador?.setor || undefined,
           itens: payloadItens,
           operador,
           liberar: somenteFinanceiro ? false : liberar,
@@ -798,7 +805,7 @@ export function Pedidos() {
       if (!titulo.trim()) {
         setTitulo(`Pedido WhatsApp — ${parsed.cliente_texto || 'Cliente'}`)
       }
-      setOrigemPedido('WHATSAPP')
+      setOrigemWppForcada(true)
       if (parsed.observacoes) {
         setObservacoes((prev) => [prev, parsed.observacoes].filter(Boolean).join(' | '))
       }
@@ -1132,7 +1139,7 @@ export function Pedidos() {
                           <td>
                             <div style={{ fontWeight: 700 }}>{ped.titulo}</div>
                             <div className="text-muted text-xs">
-                              {ped.cliente || 'BEEF CONTAINER LIMITADA'} • Criado em {fmtDataHora(ped.created_at)} por {ped.criado_por_nome || '-'}
+                              {ped.cliente || 'BEEF CONTAINER LIMITADA'} • Criado em {fmtDataHora(ped.created_at)} por <strong>{ped.criado_por_nome || '-'}</strong>{ped.setor_solicitante ? ` (${ped.setor_solicitante})` : ''}
                               {Number(ped.valor_total || 0) > 0 && (
                                 <strong style={{ color: '#4ade80', marginLeft: 8 }}>
                                   R$ {Number(ped.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1423,29 +1430,20 @@ export function Pedidos() {
                 marginBottom: '16px',
               }}
             >
-              <div className="text-xs font-bold uppercase text-primary mb-10" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+              <div className="text-xs font-bold uppercase text-primary mb-10" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
                 <span>Dados Comerciais, Cobrança &amp; Natureza / CFOP (Puxados do Cliente)</span>
-                {cfopSugerido && (
-                  <span className="badge badge--info font-mono">
-                    CFOP Automático: {cfopSugerido.cfop} {cfopSugerido.codigo_sub_operacao} ({cfopSugerido.dentro_estado ? 'Dentro UF' : 'Fora UF'})
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="badge badge--neutral" style={{ textTransform: 'none' }}>
+                    Emitente: {operador?.nome || 'Sistema'}{operador?.setor ? ` (${operador.setor})` : ''}
                   </span>
-                )}
+                  {cfopSugerido && (
+                    <span className="badge badge--info font-mono">
+                      CFOP Automático: {cfopSugerido.cfop} {cfopSugerido.codigo_sub_operacao} ({cfopSugerido.dentro_estado ? 'Dentro UF' : 'Fora UF'})
+                    </span>
+                  )}
+                </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '10px' }}>
-                <div>
-                  <label className="form-label">Origem do Pedido</label>
-                  <select
-                    className="form-input"
-                    value={origemPedido}
-                    disabled={somenteFinanceiro}
-                    onChange={(e) => setOrigemPedido(e.target.value)}
-                  >
-                    <option value="SUPPLY_CHAIN">Supply Chain (Padrão)</option>
-                    <option value="FINANCEIRO">Financeiro → Supply Chain</option>
-                    <option value="WHATSAPP">WhatsApp</option>
-                    <option value="VENDEDOR">Vendedor</option>
-                  </select>
-                </div>
                 <div>
                   <label className="form-label">Vendedor (Comissão)</label>
                   <select className="form-input" value={vendedorId} onChange={(e) => setVendedorId(e.target.value)}>
@@ -1488,7 +1486,23 @@ export function Pedidos() {
                 </div>
                 <div>
                   <label className="form-label">Marchante</label>
-                  <input className="form-input" value={marchante} onChange={(e) => setMarchante(e.target.value.toUpperCase())} placeholder="Ex: FRIGODIL" />
+                  <select className="form-input" value={marchante || marchantePadraoDefault} onChange={(e) => setMarchante(e.target.value)}>
+                    {(auxiliares.marchantes || []).length === 0 ? (
+                      <option value="FRIGODIL">001 — FRIGODIL</option>
+                    ) : (
+                      <>
+                        {(auxiliares.marchantes || []).map((m) => (
+                          <option key={m.id} value={m.nome}>
+                            {m.codigo} — {m.nome}
+                          </option>
+                        ))}
+                        {marchante &&
+                          !(auxiliares.marchantes || []).some((m) => m.nome === marchante) && (
+                            <option value={marchante}>{marchante}</option>
+                          )}
+                      </>
+                    )}
+                  </select>
                 </div>
               </div>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginTop: '10px', fontSize: '12.5px', cursor: 'pointer' }}>
@@ -2287,6 +2301,8 @@ export function Pedidos() {
                   Cliente: {pedidoDetalhe.cliente} • Status:{' '}
                   <strong>{STATUS_BADGE[pedidoDetalhe.status]?.label || pedidoDetalhe.status}</strong>
                   {pedidoDetalhe.romaneio_codigo ? ` • Romaneio: ${pedidoDetalhe.romaneio_codigo}` : ''}
+                  {pedidoDetalhe.marchante ? ` • Marchante: ${pedidoDetalhe.marchante}` : ''}
+                  {pedidoDetalhe.criado_por_nome ? ` • Emitido por ${pedidoDetalhe.criado_por_nome}${pedidoDetalhe.setor_solicitante ? ` (${pedidoDetalhe.setor_solicitante})` : ''}` : ''}
                 </div>
               </div>
               <button type="button" className="btn btn--secondary btn--sm" onClick={() => setPedidoDetalhe(null)}>

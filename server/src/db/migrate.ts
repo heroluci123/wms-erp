@@ -10,6 +10,7 @@ import {
   locaisCobranca,
   centrosCusto,
   naturezasOperacao,
+  marchantes,
   eanSequencias,
 } from './schema/index.js'
 import { uuidv7 } from '../utils/uuid.js'
@@ -311,6 +312,17 @@ CREATE TABLE IF NOT EXISTS matriz_tributaria (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_matriz_trib_tenant_ncm ON matriz_tributaria(tenant_id, ncm);
+
+CREATE TABLE IF NOT EXISTS marchantes (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  nome TEXT NOT NULL,
+  is_padrao INTEGER NOT NULL DEFAULT 0,
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_marchantes_tenant_cod ON marchantes(tenant_id, codigo);
 
 CREATE TABLE IF NOT EXISTS transportadoras (
   id UUID PRIMARY KEY,
@@ -1125,6 +1137,18 @@ export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefa
     .insert(centrosCusto)
     .values({ id: uuidv7(), tenantId, codigo: '557', descricao: 'COMPRA DE MERCADORIA' })
     .onConflictDoNothing()
+
+  const existingMarchantes = await db
+    .select({ id: marchantes.id })
+    .from(marchantes)
+    .where(eq(marchantes.tenantId, tenantId))
+    .limit(1)
+  if (existingMarchantes.length === 0) {
+    await db
+      .insert(marchantes)
+      .values({ id: uuidv7(), tenantId, codigo: '001', nome: 'FRIGODIL', isPadrao: 1, ativo: 1 })
+      .onConflictDoNothing()
+  }
 
   const existingNat = await db.select().from(naturezasOperacao).where(eq(naturezasOperacao.tenantId, tenantId))
   if (existingNat.length === 0) {

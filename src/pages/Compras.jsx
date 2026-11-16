@@ -61,7 +61,7 @@ export function Compras() {
 
   const [fornecedores, setFornecedores] = useState([])
   const [produtos, setProdutos] = useState([])
-  const [auxiliares, setAuxiliares] = useState({ centrosCusto: [], naturezasOperacao: [] })
+  const [auxiliares, setAuxiliares] = useState({ centrosCusto: [], naturezasOperacao: [], marchantes: [] })
 
   // Modal Criar PC
   const [modalNovo, setModalNovo] = useState(false)
@@ -69,7 +69,7 @@ export function Compras() {
   const [finalidade, setFinalidade] = useState('MATERIA_PRIMA')
   const [centroCustoId, setCentroCustoId] = useState('')
   const [cfopPreview, setCfopPreview] = useState(null)
-  const [marchante, setMarchante] = useState('')
+  const [marchante, setMarchante] = useState('FRIGODIL')
   const [freteValor, setFreteValor] = useState('')
   const [despesasValor, setDespesasValor] = useState('')
   const [previsaoEntrega, setPrevisaoEntrega] = useState('')
@@ -90,16 +90,18 @@ export function Compras() {
         comprasQueries.listarCompras({ status: filtroStatus, busca }),
         apiAtiva ? cadastrosQueries.listarFornecedores().catch(() => []) : Promise.resolve([]),
         produtosQueries.listar().catch(() => []),
-        apiAtiva ? cadastrosQueries.listarAuxiliares().catch(() => ({ centrosCusto: [], naturezasOperacao: [] })) : Promise.resolve({ centrosCusto: [], naturezasOperacao: [] }),
+        apiAtiva ? cadastrosQueries.listarAuxiliares().catch(() => ({ centrosCusto: [], naturezasOperacao: [], marchantes: [] })) : Promise.resolve({ centrosCusto: [], naturezasOperacao: [], marchantes: [] }),
       ])
       setCompras(resCompras.data || [])
       setTravaAtiva(Boolean(resCompras.trava_recebimento_sem_pc))
       setFornecedores(listForn || [])
       setProdutos(listProd || [])
-      setAuxiliares(aux || { centrosCusto: [], naturezasOperacao: [] })
+      setAuxiliares(aux || { centrosCusto: [], naturezasOperacao: [], marchantes: [] })
       if (!centroCustoId && aux?.centrosCusto?.length > 0) {
         setCentroCustoId(aux.centrosCusto[0].id)
       }
+      const marcPadrao = (aux?.marchantes || []).find((m) => Number(m.is_padrao) === 1)?.nome || aux?.marchantes?.[0]?.nome
+      if (marcPadrao) setMarchante((prev) => prev || marcPadrao)
     } catch (err) {
       toastError('Erro', err.message || 'Falha ao carregar compras.')
     } finally {
@@ -233,7 +235,8 @@ export function Compras() {
       toastSuccess('Pedido de Compra Criado', `${res.codigo} (${res.status}) criado com sucesso!`)
       setModalNovo(false)
       setItensForm([])
-      setMarchante('')
+      const marcPadrao = (auxiliares.marchantes || []).find((m) => Number(m.is_padrao) === 1)?.nome || auxiliares.marchantes?.[0]?.nome || 'FRIGODIL'
+      setMarchante(marcPadrao)
       setFreteValor('')
       setDespesasValor('')
       setObservacoes('')
@@ -517,7 +520,17 @@ export function Compras() {
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Marchante / Corretor</label>
-                  <input type="text" className="form-input" value={marchante} onChange={(e) => setMarchante(e.target.value)} placeholder="Opcional" />
+                  <select className="form-input" value={marchante} onChange={(e) => setMarchante(e.target.value)}>
+                    {(auxiliares.marchantes || []).length === 0 ? (
+                      <option value="FRIGODIL">001 — FRIGODIL</option>
+                    ) : (
+                      (auxiliares.marchantes || []).map((m) => (
+                        <option key={m.id} value={m.nome}>
+                          {m.codigo} — {m.nome}
+                        </option>
+                      ))
+                    )}
+                  </select>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Frete (R$)</label>

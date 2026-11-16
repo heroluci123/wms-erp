@@ -53,6 +53,9 @@ export async function buildApp(
     const status = e.statusCode && e.statusCode >= 400 ? e.statusCode : 500
     if (status >= 500) {
       app.log.error(err)
+      if (cfg.NODE_ENV !== 'production') {
+        console.error('[WMS-API ERR 500]', err)
+      }
     }
     return reply.status(status).send({
       success: false,

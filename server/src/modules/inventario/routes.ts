@@ -323,14 +323,14 @@ export function registerInventarioRoutes(app: FastifyInstance, conn: DbConnectio
           status: inventarios.status,
           data_criacao: inventarios.dataCriacao,
           data_finalizacao: inventarios.dataFinalizacao,
-          total_itens: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id})`,
-          contados: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item NOT IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
-          ok: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'OK')`,
-          itens_ok: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'OK')`,
-          divergentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'Aguardando Ajuste')`,
-          itens_divergentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item = 'Aguardando Ajuste')`,
-          pendentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
-          itens_pendentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = ${inventarios.id} AND ii.status_item IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
+          total_itens: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id")`,
+          contados: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id" AND ii.status_item NOT IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
+          ok: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id" AND ii.status_item = 'OK')`,
+          itens_ok: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id" AND ii.status_item = 'OK')`,
+          divergentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id" AND ii.status_item = 'Aguardando Ajuste')`,
+          itens_divergentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id" AND ii.status_item = 'Aguardando Ajuste')`,
+          pendentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id" AND ii.status_item IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
+          itens_pendentes: sql<number>`(SELECT COUNT(*)::int FROM inventario_itens ii WHERE ii.inventario_id = "inventarios"."id" AND ii.status_item IN ('Pendente', '2ª Contagem', '3ª Contagem'))`,
         })
         .from(inventarios)
         .where(and(eq(inventarios.tenantId, ctx.tenantId), eq(inventarios.filialId, ctx.filialId)))
