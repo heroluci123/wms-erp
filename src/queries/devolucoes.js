@@ -5,8 +5,9 @@ import { recalcularPosicaoEnderecos } from './movimentacoes'
 import { ensureRastreabilidadeSchema } from './taras'
 import { useAppStore } from '../store/appStore'
 
-const PERM_READ = ['devolucao', 'saida', 'expedicao', 'recebimento', 'pedidos', 'pedidos_consultar']
+const PERM_READ = ['devolucao', 'devolucao_fiscal', 'saida', 'expedicao', 'recebimento', 'pedidos', 'financeiro_pedidos']
 const PERM_WRITE = ['devolucao', 'saida', 'expedicao', 'recebimento']
+const PERM_FISCAL = ['devolucao_fiscal', 'pedidos', 'financeiro_pedidos']
 
 export const MOTIVOS_DEVOLUCAO = [
   {
@@ -234,7 +235,7 @@ export const devolucoesQueries = {
       ).data
     }
 
-    await assertPermissao(PERM_READ, { write: false, bloquearCliente: true })
+    await assertPermissao(PERM_FISCAL, { write: false, bloquearCliente: true })
     await ensureDevolucoesSchema()
 
     let where = '1=1'
@@ -477,7 +478,7 @@ export const devolucoesQueries = {
         body: { status_fiscal, numero_nf_devolucao, observacoes },
       })
     }
-    await assertPermissao(['pedidos', 'devolucao', 'financeiro_pedidos'])
+    await assertPermissao(PERM_FISCAL)
     await ensureDevolucoesSchema()
     const nextStatus = status_fiscal === 'DISPENSA_FISCAL' ? 'DISPENSA_FISCAL' : 'NF_DEVOLUCAO_EMITIDA'
     const nfNum = String(numero_nf_devolucao || '').trim()

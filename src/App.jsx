@@ -110,7 +110,7 @@ function App() {
           <Route path="whatsapp-inbox" element={<RequirePermissao permissoes={['whatsapp_inbox', 'pedidos']} element={<WhatsappInbox />} />} />
           <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos', 'financeiro_pedidos']} element={<Pedidos />} />} />
           <Route path="saida" element={<RequirePermissao permissoes={['saida', 'expedicao']} element={<Saida />} />} />
-          <Route path="devolucao" element={<RequirePermissao permissoes={['devolucao', 'saida', 'expedicao', 'recebimento', 'pedidos', 'pedidos_consultar']} element={<Devolucao />} />} />
+          <Route path="devolucao" element={<RequirePermissao permissoes={['devolucao', 'devolucao_fiscal', 'saida', 'expedicao', 'recebimento', 'pedidos', 'financeiro_pedidos']} element={<Devolucao />} />} />
 
           <Route path="inventario" element={<RequirePermissao permissoes={['inventario_coletor', 'inventario_divergencias', 'inventario_gestao', 'inventario_carga_inicial']} element={<Inventario />} />} />
           <Route path="inventario/coletor" element={<RequirePermissao permissoes={['inventario_coletor']} element={<InventarioOperador />} />} />

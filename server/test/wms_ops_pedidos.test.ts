@@ -649,6 +649,51 @@ test('WMS Parte 2C: Pedido -> Separacao (+50% e Extra) -> Conferencia -> Expedic
 
     const pendFatPos = await app.inject({ method: 'GET', url: '/api/pendencias?setor=FATURAMENTO&status=ATIVAS', headers })
     assert.ok(!(pendFatPos.json().data || []).some((p: any) => p.referencia_id === devBody.id))
+
+    // RBAC Operador padrao (ex: Eliel): acessa Registrar Devolucao (devolucao=true), NAO acessa Historico & Fiscal (devolucao_fiscal=false)
+    const opRes = await app.inject({
+      method: 'POST',
+      url: '/api/operadores',
+      headers,
+      payload: {
+        nome: 'Eliel Teste',
+        login: 'elielteste',
+        senha: '1234',
+        perfil: 'OPERADOR',
+        nivel: 'OPERACIONAL',
+        deve_trocar_senha: false,
+        permissoes: { saida: true, expedicao: true, recebimento: true, pedidos: false, pedidos_consultar: true },
+      },
+    })
+    assert.equal(opRes.statusCode, 201)
+    const opLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { login: 'elielteste', senha: '1234' },
+    })
+    assert.equal(opLogin.statusCode, 200)
+    const opJson = opLogin.json()
+    assert.equal(opJson.operador.permissoes.devolucao, true)
+    assert.equal(opJson.operador.permissoes.devolucao_fiscal, false)
+
+    const opHeaders = { authorization: `Bearer ${opJson.token}` }
+    const opBusca = await app.inject({
+      method: 'GET',
+      url: '/api/devolucoes/buscar-caixa?ean=7890003000011',
+      headers: opHeaders,
+    })
+    assert.notEqual(opBusca.statusCode, 403, 'Operador padrao deve ter permissao para bipar devolucao')
+
+    const opHist = await app.inject({ method: 'GET', url: '/api/devolucoes', headers: opHeaders })
+    assert.equal(opHist.statusCode, 403, 'Operador padrao nao deve acessar Historico & Fiscal de devolucoes')
+
+    const opFiscal = await app.inject({
+      method: 'POST',
+      url: `/api/devolucoes/${devBody.id}/tratar-fiscal`,
+      headers: opHeaders,
+      payload: { status_fiscal: 'DISPENSA_FISCAL' },
+    })
+    assert.equal(opFiscal.statusCode, 403)
   } finally {
     await app.close()
     await conn.close()

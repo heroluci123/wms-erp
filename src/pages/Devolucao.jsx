@@ -21,6 +21,7 @@ import { useAppStore } from '../store/appStore'
 import { temAlgumaPermissao } from '../utils/permissoes'
 import { devolucoesQueries, MOTIVOS_DEVOLUCAO } from '../queries/devolucoes'
 import * as locaisQueries from '../queries/locais'
+import { RomaneioDevolucaoPrint } from '../components/shared/RomaneioDevolucaoPrint'
 
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg`
@@ -51,18 +52,12 @@ const STATUS_FISCAL_BADGE = {
 
 export function Devolucao() {
   const { operador, toastSuccess, toastError, toastWarning, confirmar } = useAppStore()
-  const podeConsultar = temAlgumaPermissao(operador, [
-    'devolucao',
-    'saida',
-    'expedicao',
-    'recebimento',
-    'pedidos',
-    'pedidos_consultar',
-  ])
   const podeRegistrar = temAlgumaPermissao(operador, ['devolucao', 'saida', 'expedicao', 'recebimento'])
-  const podeTratarFiscal = temAlgumaPermissao(operador, ['pedidos', 'devolucao', 'financeiro_pedidos'])
+  const podeHistoricoFiscal = temAlgumaPermissao(operador, ['devolucao_fiscal', 'pedidos', 'financeiro_pedidos'])
+  const podeConsultar = podeRegistrar || podeHistoricoFiscal
+  const podeTratarFiscal = podeHistoricoFiscal
 
-  const [aba, setAba] = useState('REGISTRAR') // 'REGISTRAR' | 'HISTORICO'
+  const [aba, setAba] = useState(() => (podeRegistrar ? 'REGISTRAR' : 'HISTORICO')) // 'REGISTRAR' | 'HISTORICO'
   const [loading, setLoading] = useState(false)
 
   // Aba Bipar / Registrar
@@ -127,11 +122,13 @@ export function Devolucao() {
   }, [filtroBusca, filtroMotivo, filtroStatusFiscal, toastError])
 
   useEffect(() => {
-    if (podeConsultar) {
+    if (podeRegistrar) {
       carregarLocais()
+    }
+    if (podeHistoricoFiscal) {
       carregarHistorico()
     }
-  }, [podeConsultar, carregarLocais, carregarHistorico])
+  }, [podeRegistrar, podeHistoricoFiscal, carregarLocais, carregarHistorico])
 
   useEffect(() => {
     if (aba === 'REGISTRAR') {
@@ -246,7 +243,9 @@ export function Devolucao() {
         `Devolução ${res.codigo} registrada!`,
         `${res.qtd_caixas} caixa(s) retornada(s) para ${res.endereco_destino}.`,
       )
-      await carregarHistorico()
+      if (podeHistoricoFiscal) {
+        await carregarHistorico()
+      }
     } catch (err) {
       toastError('Erro ao finalizar devolução', err.message)
     } finally {
@@ -346,13 +345,15 @@ export function Devolucao() {
               <Barcode size={16} /> Registrar Devolução
             </button>
           )}
-          <button
-            type="button"
-            className={`btn ${aba === 'HISTORICO' ? 'btn--primary' : 'btn--secondary'}`}
-            onClick={() => setAba('HISTORICO')}
-          >
-            <FileText size={16} /> Histórico &amp; Fiscal ({historico.length})
-          </button>
+          {podeHistoricoFiscal && (
+            <button
+              type="button"
+              className={`btn ${aba === 'HISTORICO' ? 'btn--primary' : 'btn--secondary'}`}
+              onClick={() => setAba('HISTORICO')}
+            >
+              <FileText size={16} /> Histórico &amp; Fiscal ({historico.length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -411,7 +412,7 @@ export function Devolucao() {
                   className="btn btn--primary btn--sm"
                   onClick={() => setDevPrint(ultimaDevolucaoConcluida)}
                 >
-                  <Printer size={14} /> Imprimir Comprovante
+                  <Printer size={14} /> Imprimir Romaneio de Devolução
                 </button>
                 <button
                   type="button"
@@ -728,7 +729,7 @@ export function Devolucao() {
       )}
 
       {/* ABA HISTÓRICO & FISCAL */}
-      {aba === 'HISTORICO' && (
+      {aba === 'HISTORICO' && podeHistoricoFiscal && (
         <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* KPIs */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
@@ -865,7 +866,7 @@ export function Devolucao() {
                             className="btn btn--secondary btn--sm"
                             onClick={() => setDevPrint(dev)}
                           >
-                            <Printer size={13} /> Imprimir
+                            <Printer size={13} /> Romaneio de Devolução
                           </button>
                           {podeTratarFiscal && (
                             <button
@@ -1016,105 +1017,13 @@ export function Devolucao() {
         </div>
       )}
 
-      {/* MODAL COMPROVANTE DE DEVOLUÇÃO A4 */}
+      {/* ROMANEIO DE DEVOLUÇÃO A4 (IGUAL AO DE EMBARQUE, SEM ASSINATURA EXTERNA) */}
       {devPrint && (
-        <div
-          className="modal-overlay"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 98,
-            backgroundColor: 'rgba(5, 9, 18, 0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-        >
-          <div
-            className="card"
-            style={{
-              width: '95vw',
-              maxWidth: 880,
-              maxHeight: '92vh',
-              overflowY: 'auto',
-              padding: 24,
-              background: '#ffffff',
-              color: '#0f172a',
-            }}
-          >
-            <div className="flex justify-between items-center mb-12 no-print" style={{ marginBottom: 14 }}>
-              <strong>Comprovante de Devolução Física</strong>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" className="btn btn--primary btn--sm" onClick={() => window.print()}>
-                  <Printer size={14} /> Imprimir Agora
-                </button>
-                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setDevPrint(null)}>
-                  <X size={14} /> Fechar
-                </button>
-              </div>
-            </div>
-
-            <div style={{ borderBottom: '2px solid #0f172a', paddingBottom: 10, marginBottom: 14 }}>
-              <h2 style={{ margin: 0, fontSize: 18 }}>Protocolo de Devolução: {devPrint.codigo}</h2>
-              <div style={{ fontSize: 12, marginTop: 4 }}>
-                Data: <strong>{fmtDataHora(devPrint.created_at)}</strong> • Motivo:{' '}
-                <strong>{devPrint.motivo_label || devPrint.motivo}</strong> • Destino Estoque:{' '}
-                <strong>
-                  {devPrint.acao_estoque} ({devPrint.endereco_destino})
-                </strong>
-              </div>
-              <div style={{ fontSize: 12, marginTop: 4 }}>
-                Pedido(s) de Origem: <strong>{devPrint.pedido_codigo || '-'}</strong> • Cliente:{' '}
-                <strong>{devPrint.cliente_nome || '-'}</strong> • Recebido por:{' '}
-                <strong>{devPrint.operador_nome || '-'}</strong>
-              </div>
-              {devPrint.observacoes && (
-                <div style={{ fontSize: 12, marginTop: 4 }}>Obs.: {devPrint.observacoes}</div>
-              )}
-            </div>
-
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: '#e2e8f0', textAlign: 'left' }}>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>EAN Caixa</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Produto</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Pedido</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Lote / Validade</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6, textAlign: 'right' }}>Peso (kg)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(devPrint.itens || []).map((it) => (
-                  <tr key={it.id || it.ean_caixa}>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.ean_caixa}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6, fontWeight: 700 }}>
-                      {it.produto_codigo ? `[${it.produto_codigo}] ` : ''}
-                      {it.produto_descricao}
-                    </td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.pedido_codigo || '-'}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>
-                      {it.lote || '-'} / {fmtData(it.validade)}
-                    </td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6, textAlign: 'right', fontWeight: 700 }}>
-                      {fmtKg(it.peso_kg)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div style={{ marginTop: 22, display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <div>
-                Total: <strong>{devPrint.qtd_caixas} caixa(s)</strong> • <strong>{fmtKg(devPrint.peso_total_kg)}</strong> •{' '}
-                {fmtMoeda(devPrint.valor_estimado)}
-              </div>
-              <div style={{ borderTop: '1px solid #0f172a', paddingTop: 4, minWidth: 220, textAlign: 'center' }}>
-                Conferido / Assinatura Operação
-              </div>
-            </div>
-          </div>
-        </div>
+        <RomaneioDevolucaoPrint
+          devolucao={devPrint}
+          onClose={() => setDevPrint(null)}
+          autoPrint={true}
+        />
       )}
     </div>
   )

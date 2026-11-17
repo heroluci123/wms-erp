@@ -70,7 +70,8 @@ export const SETORES_PERMISSOES = [
       { key: 'pedidos_consultar', label: 'Consultar pedidos e status', desc: 'Visualizar carteira de pedidos, folhas de separação e romaneios.' },
       { key: 'saida', label: 'Bipar e registrar separação de pedidos', desc: 'Separar caixas bipadas na câmara para atender pedidos liberados.' },
       { key: 'expedicao', label: 'Conferência caixa a caixa e expedição', desc: 'Conferir e expedir pedidos com emissão do romaneio de embarque.' },
-      { key: 'devolucao', label: 'Devolução de caixas expedidas', desc: 'Bipar caixas retornadas, puxar pedido de origem, registrar motivo e reintegrar estoque ou quarentena.' },
+      { key: 'devolucao', label: 'Devolução de caixas expedidas (Operação)', desc: 'Bipar caixas retornadas na doca, vincular pedido de origem, escolher motivo e reintegrar ao estoque ou quarentena.' },
+      { key: 'devolucao_fiscal', label: 'Histórico & Fiscal de devoluções (Arquivo/NF)', desc: 'Acessar Histórico & Fiscal, imprimir Romaneio de Devolução para arquivo, liberar quarentena e baixar NF de devolução.' },
       { key: 'pedidos', label: 'Criar / Editar / Liberar pedidos', desc: 'Cadastrar novos pedidos, editar quantidades e liberar para câmara.' },
       { key: 'financeiro_pedidos', label: 'Lançar pedidos pelo Financeiro', desc: 'Permite ao Financeiro criar solicitações de pedido que caem na fila do Supply Chain.' },
       { key: 'whatsapp_inbox', label: 'Caixa de Entrada WhatsApp (Parser)', desc: 'Visualizar mensagens recebidas do WhatsApp e converter em pedidos.' },
@@ -151,6 +152,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'saida',
   'expedicao',
   'devolucao',
+  'devolucao_fiscal',
   'ean_etiquetas',
   'dashboard_executivo',
   'produtos',
@@ -351,8 +353,14 @@ export function sanitizarPermissoes(rawPermissoes = {}, nivel = 'OPERACIONAL', p
   if ((obj?.producao_criar_op || obj?.pedidos) && obj?.mapa_producao === undefined) {
     mapa.mapa_producao = true
   }
+  if ((obj?.saida || obj?.expedicao || obj?.recebimento) && obj?.devolucao === undefined) {
+    mapa.devolucao = true
+  }
+  if ((obj?.pedidos || obj?.financeiro_pedidos) && obj?.devolucao_fiscal === undefined) {
+    mapa.devolucao_fiscal = true
+  }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao']) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao', 'devolucao_fiscal']) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }
@@ -396,6 +404,10 @@ export function temPermissao(operador, chave) {
       return !!p.inventario_coletor || !!p.inventario_gestao
     case 'pedidos_consultar':
       return !!p.pedidos || !!p.saida || !!p.expedicao || isAdministradorOuSuperior(operador)
+    case 'devolucao':
+      return p.devolucao !== false && (!!p.saida || !!p.expedicao || !!p.recebimento || isAdministradorOuSuperior(operador))
+    case 'devolucao_fiscal':
+      return !!p.pedidos || !!p.financeiro_pedidos || isAdministradorOuSuperior(operador)
     case 'relatorios_producao':
     case 'relatorios_estoque':
       return !!p.produtos || !!p.dashboard_executivo || !!p[chave]

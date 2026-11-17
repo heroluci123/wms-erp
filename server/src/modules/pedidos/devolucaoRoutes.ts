@@ -25,8 +25,9 @@ import {
   toNum,
 } from '../wms/helpers.js'
 
-const PERM_DEV_READ = ['devolucao', 'saida', 'expedicao', 'recebimento', 'pedidos', 'pedidos_consultar']
+const PERM_DEV_READ = ['devolucao', 'devolucao_fiscal', 'saida', 'expedicao', 'recebimento', 'pedidos']
 const PERM_DEV_WRITE = ['devolucao', 'saida', 'expedicao', 'recebimento']
+const PERM_DEV_FISCAL = ['devolucao_fiscal', 'pedidos', 'financeiro_pedidos']
 
 export const MOTIVOS_DEVOLUCAO_LABEL: Record<string, string> = {
   DIVERGENCIA_PEDIDO: 'Divergência no Pedido',
@@ -188,7 +189,7 @@ export function registerDevolucaoRoutes(app: FastifyInstance, conn: DbConnection
   // Lista devoluções registradas (com filtros e itens)
   app.get(
     '/api/devolucoes',
-    { preHandler: requirePermission(PERM_DEV_READ, { write: false, bloquearCliente: true }) },
+    { preHandler: requirePermission(PERM_DEV_FISCAL, { write: false, bloquearCliente: true }) },
     async (req) => {
       const ctx = req.authCtx!
       const q = req.query as { status_fiscal?: string; motivo?: string; q?: string }
@@ -549,7 +550,7 @@ export function registerDevolucaoRoutes(app: FastifyInstance, conn: DbConnection
   // Faturamento marca a tratativa fiscal (nº NF de Devolução ou Dispensa) sem afetar o físico já reintegrado
   app.post(
     '/api/devolucoes/:id/tratar-fiscal',
-    { preHandler: requirePermission(['pedidos', 'devolucao', 'financeiro_pedidos']) },
+    { preHandler: requirePermission(PERM_DEV_FISCAL) },
     async (req) => {
       const ctx = req.authCtx!
       const devId = parseUuidOrBadRequest((req.params as { id: string }).id, 'devolucao_id')

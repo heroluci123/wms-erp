@@ -344,6 +344,7 @@ function Sidebar() {
     'saida',
     'expedicao',
     'devolucao',
+    'devolucao_fiscal',
   ])
   const temControle = temAlgumaPermissao(operador, [
     'relatorios_producao',
@@ -463,7 +464,7 @@ function Sidebar() {
           <LogOut size={18} /> Saída de Materiais
         </NavLink>
       )}
-      {temAlgumaPermissao(operador, ['devolucao', 'saida', 'expedicao', 'recebimento']) && (
+      {temAlgumaPermissao(operador, ['devolucao', 'devolucao_fiscal', 'saida', 'expedicao', 'recebimento']) && (
         <NavLink to="/devolucao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <RotateCcw size={18} /> Devolução de Caixas
         </NavLink>
