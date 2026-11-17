@@ -257,4 +257,23 @@ export const cadastrosQueries = {
     const qs = buildQueryString({ tipo_movimento, finalidade, uf_parceiro })
     return (await apiRequest(`/api/cadastros/cfop-sugestao${qs}`)).data
   },
+
+  // ── TIPOS DE VEÍCULO ──────────────────────────────────────────────────────
+  async listarTiposVeiculo() {
+    if (!isApiEnabled()) return []
+    return (await apiRequest('/api/cadastros/tipos-veiculo')).data || []
+  },
+
+  async salvarTipoVeiculo(dados) {
+    exigirApi('Tipos de Veículo')
+    if (dados.id) {
+      return apiRequest(`/api/cadastros/tipos-veiculo/${dados.id}`, { method: 'PUT', body: dados })
+    }
+    return apiRequest('/api/cadastros/tipos-veiculo', { method: 'POST', body: dados })
+  },
+
+  async excluirTipoVeiculo(id) {
+    exigirApi('Tipos de Veículo')
+    return apiRequest(`/api/cadastros/tipos-veiculo/${id}`, { method: 'DELETE' })
+  },
 }

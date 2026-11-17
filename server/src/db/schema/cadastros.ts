@@ -340,3 +340,21 @@ export const marchantes = pgTable(
   },
   (t) => [uniqueIndex('uq_marchantes_tenant_cod').on(t.tenantId, t.codigo)]
 )
+
+export const tiposVeiculo = pgTable(
+  'tipos_veiculo',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    nome: text('nome').notNull(),
+    categoria: text('categoria').notNull().default('UTILITARIO'), // UTILITARIO | VAN | CAMINHAO | CARRETA | OUTRO
+    capacidadeKg: numeric('capacidade_kg', { precision: 14, scale: 2 }).notNull().default('650'),
+    toleranciaPct: numeric('tolerancia_pct', { precision: 6, scale: 2 }).notNull().default('10'),
+    observacoes: text('observacoes').notNull().default(''),
+    ativo: integer('ativo').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_tipos_veiculo_tenant').on(t.tenantId, t.ativo)]
+)

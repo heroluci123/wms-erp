@@ -46,6 +46,7 @@ import { Compras } from './pages/Compras'
 import { MapaProducao } from './pages/MapaProducao'
 import { Devolucao } from './pages/Devolucao'
 import { Roteirizacao } from './pages/Roteirizacao'
+import { TiposVeiculo } from './pages/TiposVeiculo'
 import { MotoristaRastreio } from './pages/MotoristaRastreio'
 import { PedidoRastreio } from './pages/PedidoRastreio'
 
@@ -136,6 +137,7 @@ function App() {
           <Route path="fornecedores" element={<RequirePermissao permissoes={['fornecedores', 'recebimento']} element={<Fornecedores />} />} />
           <Route path="vendedores" element={<RequirePermissao permissoes={['vendedores', 'operadores']} element={<Vendedores />} />} />
           <Route path="transportadoras" element={<RequirePermissao permissoes={['transportadoras']} element={<TransportadorasRotas />} />} />
+          <Route path="tipos-veiculo" element={<RequirePermissao permissoes={['transportadoras', 'roteirizacao']} element={<TiposVeiculo />} />} />
           <Route path="filiais" element={<RequirePermissao permissoes={['empresas_filiais']} element={<EmpresasFiliais />} />} />
           <Route path="parametros-comerciais" element={<RequirePermissao permissoes={['parametros_comerciais']} element={<ParametrosComerciais />} />} />
         </Route>

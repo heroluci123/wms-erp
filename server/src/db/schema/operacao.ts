@@ -19,6 +19,7 @@ import {
   locaisCobranca,
   naturezasOperacao,
   taras,
+  tiposVeiculo,
 } from './cadastros.js'
 import { estoqueCaixas } from './estoque.js'
 
@@ -399,6 +400,8 @@ export const pedidos = pgTable(
     origemPedido: text('origem_pedido').notNull().default('SUPPLY_CHAIN'), // SUPPLY_CHAIN | FINANCEIRO | WHATSAPP | VENDEDOR | PORTAL | SISTEMA
     setorSolicitante: text('setor_solicitante').notNull().default('SUPPLY_CHAIN'),
     status: text('status').notNull().default('LIBERADO'),
+    numeroNf: text('numero_nf').notNull().default(''),
+    chaveNfe: text('chave_nfe').notNull().default(''),
     rastreioToken: text('rastreio_token'),
     criadoPorId: uuid('criado_por_id'),
     criadoPorNome: text('criado_por_nome'),
@@ -490,6 +493,11 @@ export const embarques = pgTable(
     titulo: text('titulo').notNull().default(''),
     rotaId: uuid('rota_id').references(() => rotas.id),
     transportadoraId: uuid('transportadora_id'),
+    tipoVeiculoId: uuid('tipo_veiculo_id').references(() => tiposVeiculo.id, { onDelete: 'set null' }),
+    capacidadeKg: numeric('capacidade_kg', { precision: 14, scale: 2 }),
+    toleranciaPct: numeric('tolerancia_pct', { precision: 6, scale: 2 }).notNull().default('10'),
+    horarioSaida: text('horario_saida').notNull().default(''),
+    temperaturaBau: numeric('temperatura_bau', { precision: 6, scale: 2 }),
     motoristaId: uuid('motorista_id').references(() => operadores.id),
     motoristaNome: text('motorista_nome').notNull().default(''),
     veiculoPlaca: text('veiculo_placa').notNull().default(''),

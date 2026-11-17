@@ -365,6 +365,7 @@ function Sidebar() {
     'fornecedores',
     'vendedores',
     'transportadoras',
+    'roteirizacao',
     'empresas_filiais',
     'parametros_comerciais',
   ])
@@ -542,6 +543,11 @@ function Sidebar() {
           {temPermissao(operador, 'transportadoras') && (
             <NavLink to="/transportadoras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
               <Route size={18} /> Rotas &amp; Transp.
+            </NavLink>
+          )}
+          {temAlgumaPermissao(operador, ['transportadoras', 'roteirizacao']) && (
+            <NavLink to="/tipos-veiculo" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Truck size={18} /> Tipos de Veículo
             </NavLink>
           )}
           {temPermissao(operador, 'empresas_filiais') && (

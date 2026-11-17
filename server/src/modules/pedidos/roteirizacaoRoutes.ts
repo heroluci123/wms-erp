@@ -13,6 +13,7 @@ import {
   romaneiosItens,
   rotas,
   tenants,
+  tiposVeiculo,
   transportadoras,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
@@ -41,6 +42,113 @@ function fmtDataBr(iso?: string | null) {
   const s = String(iso).slice(0, 10)
   const p = s.split('-')
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s
+}
+
+function calcPesoBrutoCaixa(pesoLiq: unknown, pesoBruto: unknown, taraKg: unknown): number {
+  const pb = toNum(pesoBruto, 0)
+  if (pb > 0) return pb
+  return toNum(pesoLiq, 0) + toNum(taraKg, 0)
+}
+
+async function calcularPesoCargaPedidos(
+  dbOrTx: Pick<DbConnection['db'], 'execute'>,
+  pedIds: string[],
+): Promise<number> {
+  if (pedIds.length === 0) return 0
+  const inSql = sql.join(pedIds.map((id) => sql`${id}::uuid`), sql`, `)
+  const res = await dbOrTx.execute(sql`
+    SELECT
+      p.id,
+      COALESCE((
+        SELECT SUM(
+          CASE WHEN ec.peso_bruto_kg IS NOT NULL AND ec.peso_bruto_kg > 0
+            THEN ec.peso_bruto_kg
+            ELSE COALESCE(ri.peso_kg, 0) + COALESCE(ec.tara_kg, 0)
+          END
+        )
+        FROM romaneios_itens ri
+        JOIN romaneios r ON r.id = ri.romaneio_id
+        JOIN estoque_caixas ec ON ec.id = ri.caixa_id
+        WHERE r.pedido_id = p.id
+      ), 0) AS bruto_sep,
+      COALESCE((
+        SELECT SUM(pi.qtd_kg_solicitada)
+        FROM pedidos_itens pi
+        WHERE pi.pedido_id = p.id
+      ), 0) AS kg_ped
+    FROM pedidos p
+    WHERE p.id IN (${inSql})
+  `)
+  let total = 0
+  for (const row of res.rows as Array<Record<string, unknown>>) {
+    const bruto = toNum(row.bruto_sep, 0)
+    const kgPed = toNum(row.kg_ped, 0)
+    total += bruto > 0 ? bruto : kgPed
+  }
+  return Number(total.toFixed(3))
+}
+
+async function resolverLimitesVeiculo(
+  dbOrTx: Pick<DbConnection['db'], 'select'>,
+  tenantId: string,
+  tipoVeiculoId?: string | null,
+  fallbackCap?: unknown,
+  fallbackTol?: unknown,
+) {
+  if (tipoVeiculoId) {
+    const [tv] = await dbOrTx
+      .select()
+      .from(tiposVeiculo)
+      .where(and(eq(tiposVeiculo.id, tipoVeiculoId), eq(tiposVeiculo.tenantId, tenantId)))
+      .limit(1)
+    if (!tv || tv.ativo === 0) {
+      throw new HttpError(400, 'Tipo de veículo selecionado não encontrado ou inativo no cadastro.')
+    }
+    const cap = toNum(tv.capacidadeKg, 0)
+    const tol = toNum(tv.toleranciaPct, 10)
+    return {
+      nome: tv.nome,
+      capacidade_kg: cap,
+      tolerancia_pct: tol,
+      capacidade_maxima_kg: Number((cap * (1 + tol / 100)).toFixed(2)),
+    }
+  }
+  const cap = toNum(fallbackCap, 0)
+  const tol = toNum(fallbackTol, 10)
+  return {
+    nome: 'Veículo',
+    capacidade_kg: cap,
+    tolerancia_pct: tol,
+    capacidade_maxima_kg: cap > 0 ? Number((cap * (1 + tol / 100)).toFixed(2)) : 0,
+  }
+}
+
+async function validarCapacidadeEmbarque(
+  dbOrTx: Pick<DbConnection['db'], 'select' | 'execute'>,
+  opts: {
+    tenantId: string
+    tipoVeiculoId?: string | null
+    capacidadeKg?: unknown
+    toleranciaPct?: unknown
+    pedIdsResultantes: string[]
+  },
+) {
+  const lim = await resolverLimitesVeiculo(
+    dbOrTx,
+    opts.tenantId,
+    opts.tipoVeiculoId,
+    opts.capacidadeKg,
+    opts.toleranciaPct,
+  )
+  if (!lim.capacidade_kg || lim.capacidade_kg <= 0 || opts.pedIdsResultantes.length === 0) return lim
+  const pesoCargaKg = await calcularPesoCargaPedidos(dbOrTx, opts.pedIdsResultantes)
+  if (pesoCargaKg > lim.capacidade_maxima_kg + 0.001) {
+    throw new HttpError(
+      409,
+      `Capacidade do veículo "${lim.nome}" excedida! Carga do roteiro (${pesoCargaKg.toFixed(2)} kg) ultrapassa o limite máximo com tolerância de +${lim.tolerancia_pct}% (${lim.capacidade_maxima_kg.toFixed(2)} kg).`,
+    )
+  }
+  return lim
 }
 
 export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnection): void {
@@ -75,6 +183,13 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             rota_regiao: rotas.regiao,
             transportadora_id: embarques.transportadoraId,
             transportadora_nome: transportadoras.nomeFantasia,
+            tipo_veiculo_id: embarques.tipoVeiculoId,
+            tipo_veiculo_nome: tiposVeiculo.nome,
+            tipo_veiculo_categoria: tiposVeiculo.categoria,
+            capacidade_kg: embarques.capacidadeKg,
+            tolerancia_pct: embarques.toleranciaPct,
+            horario_saida: embarques.horarioSaida,
+            temperatura_bau: embarques.temperaturaBau,
             motorista_id: embarques.motoristaId,
             motorista_nome: embarques.motoristaNome,
             veiculo_placa: embarques.veiculoPlaca,
@@ -90,6 +205,7 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           .from(embarques)
           .leftJoin(rotas, eq(rotas.id, embarques.rotaId))
           .leftJoin(transportadoras, eq(transportadoras.id, embarques.transportadoraId))
+          .leftJoin(tiposVeiculo, eq(tiposVeiculo.id, embarques.tipoVeiculoId))
           .where(and(...conds))
           .orderBy(desc(embarques.dataEmbarque), desc(embarques.createdAt))
           .limit(120),
@@ -117,23 +233,30 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             status_entrega: entregasTracking.statusEntrega,
             pedido_status: pedidos.status,
             valor_total: pedidos.valorTotal,
+            cliente_cidade: clientes.cidade,
             total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = ${pedidos.id}), 0)`,
           })
           .from(entregasTracking)
           .innerJoin(pedidos, eq(pedidos.id, entregasTracking.pedidoId))
+          .leftJoin(clientes, eq(clientes.id, pedidos.clienteId))
           .where(inArray(entregasTracking.embarqueId, embIds)),
         conn.db
           .select({
             embarque_id: romaneios.embarqueId,
+            pedido_id: romaneios.pedidoId,
             peso_kg: romaneiosItens.pesoKg,
+            peso_bruto_kg: estoqueCaixas.pesoBrutoKg,
+            tara_kg: estoqueCaixas.taraKg,
             carregado_veiculo: romaneiosItens.carregadoVeiculo,
             conferido: romaneiosItens.conferido,
           })
           .from(romaneiosItens)
           .innerJoin(romaneios, eq(romaneios.id, romaneiosItens.romaneioId))
+          .leftJoin(estoqueCaixas, eq(estoqueCaixas.id, romaneiosItens.caixaId))
           .where(inArray(romaneios.embarqueId, embIds)),
       ])
 
+      const brutoPorPed = new Map<string, number>()
       const statsMap = new Map<
         string,
         {
@@ -143,9 +266,11 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           pedidos_entregues: number
           peso_pedido_kg: number
           peso_real_kg: number
+          peso_bruto_kg: number
           valor_total: number
           total_caixas: number
           caixas_carregadas: number
+          cidades: Set<string>
         }
       >()
       const getStat = (id: string) => {
@@ -157,32 +282,44 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             pedidos_entregues: 0,
             peso_pedido_kg: 0,
             peso_real_kg: 0,
+            peso_bruto_kg: 0,
             valor_total: 0,
             total_caixas: 0,
             caixas_carregadas: 0,
+            cidades: new Set(),
           })
         }
         return statsMap.get(id)!
       }
 
+      for (const ri of romItensRows) {
+        if (!ri.embarque_id) continue
+        const st = getStat(ri.embarque_id)
+        const pb = calcPesoBrutoCaixa(ri.peso_kg, ri.peso_bruto_kg, ri.tara_kg)
+        st.total_caixas += 1
+        st.peso_real_kg += toNum(ri.peso_kg, 0)
+        st.peso_bruto_kg += pb
+        if (ri.pedido_id) {
+          brutoPorPed.set(ri.pedido_id, (brutoPorPed.get(ri.pedido_id) || 0) + pb)
+        }
+        if (Number(ri.carregado_veiculo) === 1 || Number(ri.conferido) === 1) {
+          st.caixas_carregadas += 1
+        }
+      }
+
+      const cargaPorEmb = new Map<string, number>()
       for (const s of stops) {
         const st = getStat(s.embarque_id)
         st.total_pedidos += 1
         if (STATUS_PEDIDO_PRONTO.includes(s.pedido_status)) st.pedidos_prontos += 1
         if (s.pedido_status === 'EXPEDIDO') st.pedidos_expedidos += 1
         if (s.status_entrega === 'ENTREGUE') st.pedidos_entregues += 1
-        st.peso_pedido_kg += toNum(s.total_kg_solicitado, 0)
+        const kgPed = toNum(s.total_kg_solicitado, 0)
+        st.peso_pedido_kg += kgPed
         st.valor_total += toNum(s.valor_total, 0)
-      }
-
-      for (const ri of romItensRows) {
-        if (!ri.embarque_id) continue
-        const st = getStat(ri.embarque_id)
-        st.total_caixas += 1
-        st.peso_real_kg += toNum(ri.peso_kg, 0)
-        if (Number(ri.carregado_veiculo) === 1 || Number(ri.conferido) === 1) {
-          st.caixas_carregadas += 1
-        }
+        if (s.cliente_cidade?.trim()) st.cidades.add(s.cliente_cidade.trim().toUpperCase())
+        const pbPed = brutoPorPed.get(s.pedido_id) || 0
+        cargaPorEmb.set(s.embarque_id, (cargaPorEmb.get(s.embarque_id) || 0) + (pbPed > 0 ? pbPed : kgPed))
       }
 
       return {
@@ -194,16 +331,25 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         },
         data: rows.map((r) => {
           const st = getStat(r.id)
-          const pesoFinal = st.peso_real_kg > 0 ? st.peso_real_kg : st.peso_pedido_kg
+          const cap = toNum(r.capacidade_kg, 0)
+          const tol = toNum(r.tolerancia_pct, 10)
+          const capMax = cap > 0 ? Number((cap * (1 + tol / 100)).toFixed(2)) : 0
+          const pesoCarga = cargaPorEmb.get(r.id) || (st.peso_real_kg > 0 ? st.peso_real_kg : st.peso_pedido_kg)
           return {
             ...r,
+            capacidade_kg: cap > 0 ? Number(cap.toFixed(2)) : null,
+            tolerancia_pct: Number(tol.toFixed(2)),
+            capacidade_maxima_kg: capMax || null,
+            temperatura_bau: r.temperatura_bau != null ? toNum(r.temperatura_bau, 0) : null,
+            cidades_count: st.cidades.size,
             total_pedidos: st.total_pedidos,
             pedidos_prontos: st.pedidos_prontos,
             pedidos_expedidos: st.pedidos_expedidos,
             pedidos_entregues: st.pedidos_entregues,
             total_caixas: st.total_caixas,
             caixas_carregadas: st.caixas_carregadas,
-            peso_total_kg: Number(pesoFinal.toFixed(2)),
+            peso_bruto_kg: Number(st.peso_bruto_kg.toFixed(2)),
+            peso_total_kg: Number(pesoCarga.toFixed(2)),
             valor_total: Number(st.valor_total.toFixed(2)),
           }
         }),
@@ -211,14 +357,32 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
     },
   )
 
-  // Pedidos elegíveis para montar ou adicionar em um roteiro
+  // Pedidos elegíveis para montar ou adicionar em um roteiro (filtrados estritamente pela data de embarque)
   app.get(
     '/api/roteirizacao/pedidos-disponiveis',
     { preHandler: requirePermission(PERM_ROT_GESTAO, { write: false, bloquearCliente: true }) },
     async (req) => {
       const ctx = req.authCtx!
-      const q = req.query as { embarque_id?: string }
+      const q = req.query as { embarque_id?: string; data_embarque?: string }
       const embarqueAtualId = q.embarque_id ? parseUuidOrBadRequest(q.embarque_id, 'embarque_id') : null
+      let dataFiltro = normalizarDataIso(q.data_embarque)
+      if (!dataFiltro && embarqueAtualId) {
+        const [embRef] = await conn.db
+          .select({ dataEmbarque: embarques.dataEmbarque })
+          .from(embarques)
+          .where(and(eq(embarques.id, embarqueAtualId), eq(embarques.tenantId, ctx.tenantId)))
+          .limit(1)
+        dataFiltro = embRef?.dataEmbarque ? String(embRef.dataEmbarque).slice(0, 10) : null
+      }
+
+      const pedConds = [
+        eq(pedidos.tenantId, ctx.tenantId),
+        eq(pedidos.filialId, ctx.filialId),
+        inArray(pedidos.status, ['LIBERADO', 'EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA', 'EXPEDIDO']),
+      ]
+      if (dataFiltro) {
+        pedConds.push(sql`${pedidos.previsaoEntrega} = ${dataFiltro}::date`)
+      }
 
       const [pedRows, ativosTracking] = await Promise.all([
         conn.db
@@ -239,17 +403,12 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = ${pedidos.id} ORDER BY r.created_at DESC LIMIT 1)`,
             romaneio_codigo: sql<string | null>`(SELECT r.codigo FROM romaneios r WHERE r.pedido_id = ${pedidos.id} ORDER BY r.created_at DESC LIMIT 1)`,
             total_kg_separado: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = ${pedidos.id}), 0)`,
+            total_bruto_separado: sql<string>`COALESCE((SELECT ROUND(SUM(CASE WHEN ec.peso_bruto_kg IS NOT NULL AND ec.peso_bruto_kg > 0 THEN ec.peso_bruto_kg ELSE COALESCE(ri.peso_kg, 0) + COALESCE(ec.tara_kg, 0) END), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id LEFT JOIN estoque_caixas ec ON ec.id = ri.caixa_id WHERE r.pedido_id = ${pedidos.id}), 0)`,
             total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = ${pedidos.id}), 0)`,
           })
           .from(pedidos)
           .leftJoin(clientes, eq(clientes.id, pedidos.clienteId))
-          .where(
-            and(
-              eq(pedidos.tenantId, ctx.tenantId),
-              eq(pedidos.filialId, ctx.filialId),
-              inArray(pedidos.status, ['LIBERADO', 'EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA', 'EXPEDIDO']),
-            ),
-          )
+          .where(and(...pedConds))
           .orderBy(desc(pedidos.previsaoEntrega), desc(pedidos.createdAt))
           .limit(200),
         conn.db
@@ -275,13 +434,17 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           const jaNesteEmbarque = Boolean(vinc && embarqueAtualId && vinc.embarque_id === embarqueAtualId)
           const emOutroEmbarque = Boolean(vinc && (!embarqueAtualId || vinc.embarque_id !== embarqueAtualId))
           const kgSep = toNum(p.total_kg_separado, 0)
+          const brutoSep = toNum(p.total_bruto_separado, 0)
+          const kgSolic = toNum(p.total_kg_solicitado, 0)
           const cxSep = Number(p.total_caixas_separadas || 0)
           const pronto = STATUS_PEDIDO_PRONTO.includes(p.status) && cxSep > 0
           return {
             ...p,
             valor_total: toNum(p.valor_total, 0),
-            total_kg_solicitado: toNum(p.total_kg_solicitado, 0),
+            total_kg_solicitado: kgSolic,
             total_kg_separado: kgSep,
+            total_bruto_separado: brutoSep,
+            peso_carga_kg: brutoSep > 0 ? brutoSep : kgSolic,
             total_caixas_separadas: cxSep,
             pronto_para_embarque: pronto,
             ja_neste_embarque: jaNesteEmbarque,
@@ -305,6 +468,8 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         titulo?: string
         rota_id?: string | null
         transportadora_id?: string | null
+        tipo_veiculo_id?: string | null
+        horario_saida?: string
         motorista_nome?: string
         veiculo_placa?: string
         modalidade_impressao?: 'OPCAO_B' | 'OPCAO_A'
@@ -314,6 +479,11 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       }
 
       const dataEmb = normalizarDataIso(body.data_embarque) || hojeIsoLocal()
+      const tipoVeiculoId = body.tipo_veiculo_id ? parseUuidOrBadRequest(body.tipo_veiculo_id, 'tipo_veiculo_id') : null
+      const pedIds = Array.isArray(body.pedido_ids)
+        ? Array.from(new Set(body.pedido_ids.map((id) => parseUuidOrBadRequest(id, 'pedido_id'))))
+        : []
+
       const features = await lerTenantFeatures(conn.db, ctx.tenantId)
       const modalidadePadrao =
         String(body.modalidade_impressao || features.impressao_romaneio_padrao || 'OPCAO_B') === 'OPCAO_A'
@@ -321,6 +491,12 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           : 'OPCAO_B'
 
       const created = await conn.db.transaction(async (tx) => {
+        const lim = await validarCapacidadeEmbarque(tx, {
+          tenantId: ctx.tenantId,
+          tipoVeiculoId,
+          pedIdsResultantes: pedIds,
+        })
+
         const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'EMBARQUE', 'EMB', 4)
         const embId = uuidv7()
         const qrToken = uuidv7()
@@ -336,6 +512,10 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           transportadoraId: body.transportadora_id
             ? parseUuidOrBadRequest(body.transportadora_id, 'transportadora_id')
             : null,
+          tipoVeiculoId,
+          capacidadeKg: lim.capacidade_kg > 0 ? String(lim.capacidade_kg) : null,
+          toleranciaPct: String(lim.tolerancia_pct ?? 10),
+          horarioSaida: String(body.horario_saida || '').trim(),
           motoristaNome: String(body.motorista_nome || '').trim(),
           veiculoPlaca: String(body.veiculo_placa || '').trim().toUpperCase(),
           modalidadeImpressao: modalidadePadrao,
@@ -345,10 +525,6 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           dataEmbarque: dataEmb,
           status: 'PLANEJADO',
         })
-
-        const pedIds = Array.isArray(body.pedido_ids)
-          ? Array.from(new Set(body.pedido_ids.map((id) => parseUuidOrBadRequest(id, 'pedido_id'))))
-          : []
 
         if (pedIds.length > 0) {
           const romRows = await tx
@@ -405,6 +581,13 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             rota_nome: rotas.nome,
             transportadora_id: embarques.transportadoraId,
             transportadora_nome: transportadoras.nomeFantasia,
+            tipo_veiculo_id: embarques.tipoVeiculoId,
+            tipo_veiculo_nome: tiposVeiculo.nome,
+            tipo_veiculo_categoria: tiposVeiculo.categoria,
+            capacidade_kg: embarques.capacidadeKg,
+            tolerancia_pct: embarques.toleranciaPct,
+            horario_saida: embarques.horarioSaida,
+            temperatura_bau: embarques.temperaturaBau,
             motorista_nome: embarques.motoristaNome,
             veiculo_placa: embarques.veiculoPlaca,
             modalidade_impressao: embarques.modalidadeImpressao,
@@ -419,6 +602,7 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           .from(embarques)
           .leftJoin(rotas, eq(rotas.id, embarques.rotaId))
           .leftJoin(transportadoras, eq(transportadoras.id, embarques.transportadoraId))
+          .leftJoin(tiposVeiculo, eq(tiposVeiculo.id, embarques.tipoVeiculoId))
           .where(and(eq(embarques.id, embId), eq(embarques.tenantId, ctx.tenantId)))
           .limit(1),
         lerTenantFeatures(conn.db, ctx.tenantId),
@@ -441,6 +625,8 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           pedido_codigo: pedidos.codigo,
           pedido_titulo: pedidos.titulo,
           pedido_status: pedidos.status,
+          numero_nf: pedidos.numeroNf,
+          pedido_observacoes: pedidos.observacoes,
           cliente_id: pedidos.clienteId,
           cliente: pedidos.cliente,
           previsao_entrega: pedidos.previsaoEntrega,
@@ -508,6 +694,8 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
                 produto_codigo: produtos.codigo,
                 produto_descricao: produtos.descricao,
                 peso_kg: romaneiosItens.pesoKg,
+                peso_bruto_kg: estoqueCaixas.pesoBrutoKg,
+                tara_kg: estoqueCaixas.taraKg,
                 conferido: romaneiosItens.conferido,
                 carregado_veiculo: romaneiosItens.carregadoVeiculo,
                 carregado_por: romaneiosItens.carregadoPor,
@@ -536,15 +724,28 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
 
       const produtosConsolidados = new Map<
         string,
-        { produto_id: string; codigo: string; descricao: string; kg_pedido: number; kg_real: number; caixas_total: number; caixas_carregadas: number }
+        {
+          produto_id: string
+          codigo: string
+          descricao: string
+          kg_pedido: number
+          kg_real: number
+          kg_bruto: number
+          caixas_total: number
+          caixas_carregadas: number
+        }
       >()
 
       let totalCaixas = 0
       let caixasCarregadas = 0
       let pesoPedidoTotal = 0
       let pesoRealTotal = 0
+      let pesoBrutoTotal = 0
+      let pesoCargaTotal = 0
       let valorTotal = 0
       let pedidosSemPesoReal = 0
+      const cidadesSet = new Set<string>()
+      const nfsSet = new Set<string>()
 
       const paradas = stopsRows.map((s) => {
         const rom = romByPed.get(s.pedido_id) || null
@@ -552,6 +753,7 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         const pItens = itensPorPed.get(s.pedido_id) || []
         const kgPedido = pItens.reduce((acc, i) => acc + toNum(i.qtd_kg_solicitada, 0), 0)
         const kgReal = cxs.reduce((acc, c) => acc + toNum(c.peso_kg, 0), 0)
+        const pesoBruto = cxs.reduce((acc, c) => acc + calcPesoBrutoCaixa(c.peso_kg, c.peso_bruto_kg, c.tara_kg), 0)
         const cxsCarregadasStop = cxs.filter((c) => Number(c.carregado_veiculo) === 1 || Number(c.conferido) === 1).length
         const temPesoReal = cxs.length > 0 && kgReal > 0 && STATUS_PEDIDO_PRONTO.includes(s.pedido_status)
 
@@ -560,7 +762,11 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         caixasCarregadas += cxsCarregadasStop
         pesoPedidoTotal += kgPedido
         pesoRealTotal += kgReal
+        pesoBrutoTotal += pesoBruto
+        pesoCargaTotal += pesoBruto > 0 ? pesoBruto : kgPedido
         valorTotal += toNum(s.valor_total, 0)
+        if (s.cliente_cidade?.trim()) cidadesSet.add(s.cliente_cidade.trim().toUpperCase())
+        if (s.numero_nf?.trim()) nfsSet.add(s.numero_nf.trim())
 
         for (const pi of pItens) {
           const cur = produtosConsolidados.get(pi.produto_id) || {
@@ -569,6 +775,7 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             descricao: pi.produto_descricao,
             kg_pedido: 0,
             kg_real: 0,
+            kg_bruto: 0,
             caixas_total: 0,
             caixas_carregadas: 0,
           }
@@ -582,10 +789,12 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             descricao: c.produto_descricao,
             kg_pedido: 0,
             kg_real: 0,
+            kg_bruto: 0,
             caixas_total: 0,
             caixas_carregadas: 0,
           }
           cur.kg_real += toNum(c.peso_kg, 0)
+          cur.kg_bruto += calcPesoBrutoCaixa(c.peso_kg, c.peso_bruto_kg, c.tara_kg)
           cur.caixas_total += 1
           if (Number(c.carregado_veiculo) === 1 || Number(c.conferido) === 1) cur.caixas_carregadas += 1
           produtosConsolidados.set(c.produto_id, cur)
@@ -608,8 +817,11 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           pedido_codigo: s.pedido_codigo,
           pedido_titulo: s.pedido_titulo,
           pedido_status: s.pedido_status,
+          numero_nf: s.numero_nf || '',
+          pedido_observacoes: s.pedido_observacoes || '',
           cliente: s.cliente,
           endereco_entrega: endFormatado || `${s.cliente_cidade || ''} ${s.cliente_uf || ''}`.trim() || '-',
+          cliente_cidade: s.cliente_cidade || '',
           cliente_telefone: s.cliente_telefone || '',
           previsao_entrega: s.previsao_entrega,
           pagamento_na_entrega: Number(s.pagamento_na_entrega || 0) === 1,
@@ -620,16 +832,24 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           romaneio_status: rom?.status || null,
           kg_pedido: Number(kgPedido.toFixed(3)),
           kg_real: Number(kgReal.toFixed(3)),
+          peso_bruto_kg: Number(pesoBruto.toFixed(3)),
           caixas_total: cxs.length,
           caixas_carregadas: cxsCarregadasStop,
           pronto_para_faturamento: temPesoReal,
           caixas: cxs.map((c) => ({
             ...c,
             peso_kg: toNum(c.peso_kg, 0),
+            peso_bruto_kg: Number(calcPesoBrutoCaixa(c.peso_kg, c.peso_bruto_kg, c.tara_kg).toFixed(3)),
             carregado: Number(c.carregado_veiculo) === 1 || Number(c.conferido) === 1,
           })),
         }
       })
+
+      const capNominal = emb.capacidade_kg != null ? toNum(emb.capacidade_kg, 0) : 0
+      const tolPct = toNum(emb.tolerancia_pct, 10)
+      const capMax = capNominal > 0 ? Number((capNominal * (1 + tolPct / 100)).toFixed(2)) : 0
+      const ocupacaoPct = capNominal > 0 ? Math.round((pesoCargaTotal / capNominal) * 100) : 0
+      const restanteKg = capNominal > 0 ? Number((capNominal - pesoCargaTotal).toFixed(2)) : 0
 
       return {
         success: true,
@@ -640,20 +860,34 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         },
         data: {
           ...emb,
+          capacidade_kg: capNominal > 0 ? Number(capNominal.toFixed(2)) : null,
+          tolerancia_pct: Number(tolPct.toFixed(2)),
+          capacidade_maxima_kg: capMax || null,
+          temperatura_bau: emb.temperatura_bau != null ? toNum(emb.temperatura_bau, 0) : null,
+          nfs_vinculadas: Array.from(nfsSet),
           paradas,
           produtos_consolidados: Array.from(produtosConsolidados.values()).map((p) => ({
             ...p,
             kg_pedido: Number(p.kg_pedido.toFixed(3)),
             kg_real: Number(p.kg_real.toFixed(3)),
+            kg_bruto: Number(p.kg_bruto.toFixed(3)),
           })),
           resumo: {
             total_pedidos: paradas.length,
+            cidades_count: cidadesSet.size,
             pedidos_sem_peso_real: pedidosSemPesoReal,
             pronto_para_impressao_oficial: paradas.length > 0 && pedidosSemPesoReal === 0,
             total_caixas: totalCaixas,
             caixas_carregadas: caixasCarregadas,
             peso_pedido_kg: Number(pesoPedidoTotal.toFixed(3)),
             peso_real_kg: Number(pesoRealTotal.toFixed(3)),
+            peso_bruto_kg: Number(pesoBrutoTotal.toFixed(3)),
+            peso_carga_kg: Number(pesoCargaTotal.toFixed(3)),
+            capacidade_kg: capNominal > 0 ? Number(capNominal.toFixed(2)) : null,
+            tolerancia_pct: Number(tolPct.toFixed(2)),
+            capacidade_maxima_kg: capMax || null,
+            ocupacao_pct: ocupacaoPct,
+            restante_kg: restanteKg,
             valor_total: Number(valorTotal.toFixed(2)),
           },
         },
@@ -661,7 +895,7 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
     },
   )
 
-  // Atualizar dados gerais do Embarque (placa, motorista, NF, modalidade Opção B/A, rota)
+  // Atualizar dados gerais do Embarque (placa, motorista, veículo, horário saída, temperatura, modalidade)
   app.put(
     '/api/roteirizacao/embarques/:id',
     { preHandler: requirePermission(PERM_ROT_GESTAO) },
@@ -673,6 +907,9 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         data_embarque?: string
         rota_id?: string | null
         transportadora_id?: string | null
+        tipo_veiculo_id?: string | null
+        horario_saida?: string
+        temperatura_bau?: number | string | null
         motorista_nome?: string
         veiculo_placa?: string
         modalidade_impressao?: 'OPCAO_B' | 'OPCAO_A'
@@ -680,46 +917,93 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         observacoes?: string
       }
 
-      const [atual] = await conn.db
-        .select()
-        .from(embarques)
-        .where(and(eq(embarques.id, embId), eq(embarques.tenantId, ctx.tenantId)))
-        .limit(1)
-      if (!atual) throw new HttpError(404, 'Embarque não encontrado.')
+      await conn.db.transaction(async (tx) => {
+        const [atual] = await tx
+          .select()
+          .from(embarques)
+          .where(and(eq(embarques.id, embId), eq(embarques.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!atual) throw new HttpError(404, 'Embarque não encontrado.')
 
-      await conn.db
-        .update(embarques)
-        .set({
-          titulo: body.titulo !== undefined ? String(body.titulo || '').trim() || atual.titulo : atual.titulo,
-          dataEmbarque:
-            body.data_embarque !== undefined ? normalizarDataIso(body.data_embarque) || atual.dataEmbarque : atual.dataEmbarque,
-          rotaId:
-            body.rota_id !== undefined ? (body.rota_id ? parseUuidOrBadRequest(body.rota_id, 'rota_id') : null) : atual.rotaId,
-          transportadoraId:
-            body.transportadora_id !== undefined
-              ? body.transportadora_id
-                ? parseUuidOrBadRequest(body.transportadora_id, 'transportadora_id')
-                : null
-              : atual.transportadoraId,
-          motoristaNome: body.motorista_nome !== undefined ? String(body.motorista_nome || '').trim() : atual.motoristaNome,
-          veiculoPlaca:
-            body.veiculo_placa !== undefined ? String(body.veiculo_placa || '').trim().toUpperCase() : atual.veiculoPlaca,
-          modalidadeImpressao:
-            body.modalidade_impressao !== undefined
-              ? body.modalidade_impressao === 'OPCAO_A'
-                ? 'OPCAO_A'
-                : 'OPCAO_B'
-              : atual.modalidadeImpressao,
-          numeroNfLote: body.numero_nf_lote !== undefined ? String(body.numero_nf_lote || '').trim() : atual.numeroNfLote,
-          observacoes: body.observacoes !== undefined ? String(body.observacoes || '').trim() : atual.observacoes,
-        })
-        .where(eq(embarques.id, embId))
+        const novoTvId =
+          body.tipo_veiculo_id !== undefined
+            ? body.tipo_veiculo_id
+              ? parseUuidOrBadRequest(body.tipo_veiculo_id, 'tipo_veiculo_id')
+              : null
+            : atual.tipoVeiculoId
+
+        let nextCap = atual.capacidadeKg
+        let nextTol = atual.toleranciaPct
+        if (novoTvId && (body.tipo_veiculo_id !== undefined || atual.capacidadeKg == null)) {
+          const paradasAtuais = await tx
+            .select({ pedidoId: entregasTracking.pedidoId })
+            .from(entregasTracking)
+            .where(eq(entregasTracking.embarqueId, embId))
+          const lim = await validarCapacidadeEmbarque(tx, {
+            tenantId: ctx.tenantId,
+            tipoVeiculoId: novoTvId,
+            pedIdsResultantes: paradasAtuais.map((p) => p.pedidoId),
+          })
+          nextCap = String(lim.capacidade_kg)
+          nextTol = String(lim.tolerancia_pct)
+        } else if (body.tipo_veiculo_id === null || body.tipo_veiculo_id === '') {
+          nextCap = null
+          nextTol = '10'
+        }
+
+        let nextTemp = atual.temperaturaBau
+        if (body.temperatura_bau !== undefined) {
+          if (body.temperatura_bau === null || String(body.temperatura_bau).trim() === '') {
+            nextTemp = null
+          } else {
+            const tv = Number(String(body.temperatura_bau).replace(',', '.'))
+            if (Number.isNaN(tv) || tv < -50 || tv > 50) {
+              throw new HttpError(400, 'Informe uma temperatura de baú válida (entre -50°C e 50°C).')
+            }
+            nextTemp = String(tv)
+          }
+        }
+
+        await tx
+          .update(embarques)
+          .set({
+            titulo: body.titulo !== undefined ? String(body.titulo || '').trim() || atual.titulo : atual.titulo,
+            dataEmbarque:
+              body.data_embarque !== undefined ? normalizarDataIso(body.data_embarque) || atual.dataEmbarque : atual.dataEmbarque,
+            rotaId:
+              body.rota_id !== undefined ? (body.rota_id ? parseUuidOrBadRequest(body.rota_id, 'rota_id') : null) : atual.rotaId,
+            transportadoraId:
+              body.transportadora_id !== undefined
+                ? body.transportadora_id
+                  ? parseUuidOrBadRequest(body.transportadora_id, 'transportadora_id')
+                  : null
+                : atual.transportadoraId,
+            tipoVeiculoId: novoTvId,
+            capacidadeKg: nextCap,
+            toleranciaPct: nextTol,
+            horarioSaida:
+              body.horario_saida !== undefined ? String(body.horario_saida || '').trim() : atual.horarioSaida,
+            temperaturaBau: nextTemp,
+            motoristaNome: body.motorista_nome !== undefined ? String(body.motorista_nome || '').trim() : atual.motoristaNome,
+            veiculoPlaca:
+              body.veiculo_placa !== undefined ? String(body.veiculo_placa || '').trim().toUpperCase() : atual.veiculoPlaca,
+            modalidadeImpressao:
+              body.modalidade_impressao !== undefined
+                ? body.modalidade_impressao === 'OPCAO_A'
+                  ? 'OPCAO_A'
+                  : 'OPCAO_B'
+                : atual.modalidadeImpressao,
+            numeroNfLote: body.numero_nf_lote !== undefined ? String(body.numero_nf_lote || '').trim() : atual.numeroNfLote,
+            observacoes: body.observacoes !== undefined ? String(body.observacoes || '').trim() : atual.observacoes,
+          })
+          .where(eq(embarques.id, embId))
+      })
 
       return { success: true }
     },
   )
 
-  // Adicionar pedidos/paradas ao embarque
+  // Adicionar pedidos/paradas ao embarque (valida capacidade máxima + tolerância do veículo)
   app.post(
     '/api/roteirizacao/embarques/:id/paradas',
     { preHandler: requirePermission(PERM_ROT_GESTAO) },
@@ -752,6 +1036,14 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         const existSet = new Set(existentes.map((x) => x.pedidoId))
         const novos = pedIds.filter((id) => !existSet.has(id))
         if (novos.length === 0) return
+
+        await validarCapacidadeEmbarque(tx, {
+          tenantId: ctx.tenantId,
+          tipoVeiculoId: emb.tipoVeiculoId,
+          capacidadeKg: emb.capacidadeKg,
+          toleranciaPct: emb.toleranciaPct,
+          pedIdsResultantes: [...Array.from(existSet), ...novos],
+        })
 
         const romRows = await tx
           .select({ id: romaneios.id, pedidoId: romaneios.pedidoId })
@@ -860,10 +1152,19 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
     async (req) => {
       const ctx = req.authCtx!
       const embId = parseUuidOrBadRequest((req.params as { id: string }).id, 'embarque_id')
-      const body = (req.body || {}) as { ean_caixa?: string }
+      const body = (req.body || {}) as { ean_caixa?: string; temperatura_bau?: number | string | null }
       const codigo = String(body.ean_caixa || '').trim()
       if (!codigo) throw new HttpError(400, 'Bipe ou informe o código EAN da caixa.')
       const semZeros = codigo.replace(/^0+/, '') || codigo
+
+      let tempInformada: string | undefined
+      if (body.temperatura_bau !== undefined && body.temperatura_bau !== null && String(body.temperatura_bau).trim() !== '') {
+        const tv = Number(String(body.temperatura_bau).replace(',', '.'))
+        if (Number.isNaN(tv) || tv < -50 || tv > 50) {
+          throw new HttpError(400, 'Informe uma temperatura de baú válida (entre -50°C e 50°C).')
+        }
+        tempInformada = String(tv)
+      }
 
       const resBipe = await conn.db.transaction(async (tx) => {
         const [emb] = await tx
@@ -943,16 +1244,18 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           operadorNome: ctx.operador.nome,
         })
 
+        const embPatch: Partial<typeof embarques.$inferInsert> = {}
         if (emb.status === 'PLANEJADO') {
-          await tx
-            .update(embarques)
-            .set({ status: 'EM_CARREGAMENTO', operadorCarregamentoNome: ctx.operador.nome })
-            .where(eq(embarques.id, embId))
+          embPatch.status = 'EM_CARREGAMENTO'
+          embPatch.operadorCarregamentoNome = ctx.operador.nome
         } else if (!emb.operadorCarregamentoNome) {
-          await tx
-            .update(embarques)
-            .set({ operadorCarregamentoNome: ctx.operador.nome })
-            .where(eq(embarques.id, embId))
+          embPatch.operadorCarregamentoNome = ctx.operador.nome
+        }
+        if (tempInformada !== undefined) {
+          embPatch.temperaturaBau = tempInformada
+        }
+        if (Object.keys(embPatch).length > 0) {
+          await tx.update(embarques).set(embPatch).where(eq(embarques.id, embId))
         }
 
         const parada = stops.find((s) => s.pedido_id === String(item.pedido_id))
@@ -964,10 +1267,35 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           pedido_codigo: parada?.pedido_codigo || '',
           cliente: parada?.cliente || '',
           ordem_parada: parada?.ordem_parada || 1,
+          temperatura_bau: tempInformada !== undefined ? toNum(tempInformada, 0) : emb.temperaturaBau != null ? toNum(emb.temperaturaBau, 0) : null,
         }
       })
 
       return { success: true, caixa: resBipe }
+    },
+  )
+
+  // Atualizar Temperatura do Baú pelo operador/supervisor durante carregamento
+  app.patch(
+    '/api/roteirizacao/embarques/:id/temperatura',
+    { preHandler: requirePermission(PERM_ROT_BIPAR) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const embId = parseUuidOrBadRequest((req.params as { id: string }).id, 'embarque_id')
+      const body = (req.body || {}) as { temperatura_bau?: number | string | null }
+      let nextTemp: string | null = null
+      if (body.temperatura_bau !== undefined && body.temperatura_bau !== null && String(body.temperatura_bau).trim() !== '') {
+        const tv = Number(String(body.temperatura_bau).replace(',', '.'))
+        if (Number.isNaN(tv) || tv < -50 || tv > 50) {
+          throw new HttpError(400, 'Informe uma temperatura de baú válida (entre -50°C e 50°C).')
+        }
+        nextTemp = String(tv)
+      }
+      await conn.db
+        .update(embarques)
+        .set({ temperaturaBau: nextTemp })
+        .where(and(eq(embarques.id, embId), eq(embarques.tenantId, ctx.tenantId)))
+      return { success: true, temperatura_bau: nextTemp !== null ? Number(nextTemp) : null }
     },
   )
 
@@ -1040,13 +1368,10 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         for (const st of stops) {
           const rom = romByPed.get(st.pedido_id)
           if (!rom) {
-            if (!body.ignorar_caixas_pendentes) {
-              throw new HttpError(
-                409,
-                `O pedido ${st.pedido_codigo} ainda não possui separação finalizada na câmara.`,
-              )
-            }
-            continue
+            throw new HttpError(
+              409,
+              `O pedido ${st.pedido_codigo} ainda não possui separação finalizada na câmara.`,
+            )
           }
           if (rom.status === 'EXPEDIDO') continue
 
@@ -1066,19 +1391,16 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             .innerJoin(estoqueCaixas, eq(estoqueCaixas.id, romaneiosItens.caixaId))
             .where(eq(romaneiosItens.romaneioId, rom.id))
 
-          if (itens.length === 0 && !body.ignorar_caixas_pendentes) {
+          if (itens.length === 0) {
             throw new HttpError(409, `O romaneio ${rom.codigo} (${st.pedido_codigo}) está sem caixas separadas.`)
           }
 
           const pendentes = itens.filter((i) => Number(i.carregadoVeiculo) !== 1 && Number(i.conferido) !== 1)
           if (pendentes.length > 0) {
-            if (!body.ignorar_caixas_pendentes) {
-              throw new HttpError(
-                409,
-                `Ainda faltam ${pendentes.length} caixa(s) para bipar no pedido ${st.pedido_codigo} (${rom.codigo}).`,
-              )
-            }
-            continue
+            throw new HttpError(
+              409,
+              `Não é possível despachar: ainda faltam ${pendentes.length} caixa(s) para bipar no pedido ${st.pedido_codigo} (${rom.codigo}).`,
+            )
           }
 
           const cIds = itens.map((i) => i.caixaId).filter(Boolean) as string[]
@@ -1198,6 +1520,19 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       const nextStatus = String(body.status_entrega || 'ENTREGUE').toUpperCase()
 
       await conn.db.transaction(async (tx) => {
+        const [emb] = await tx
+          .select()
+          .from(embarques)
+          .where(and(eq(embarques.id, embId), eq(embarques.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!emb) throw new HttpError(404, 'Embarque não encontrado.')
+        if (!['EM_ROTA', 'CONCLUIDO'].includes(emb.status)) {
+          throw new HttpError(
+            409,
+            'O acompanhamento/baixa de entregas só fica disponível após bipar todas as caixas e despachar o veículo.',
+          )
+        }
+
         const [ped] = await tx
           .select({ pagamentoNaEntrega: pedidos.pagamentoNaEntrega, codigo: pedidos.codigo })
           .from(pedidos)
@@ -1242,6 +1577,40 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             .set({ status: 'CONCLUIDO', concluidoEm: now })
             .where(eq(embarques.id, embId))
         }
+      })
+
+      return { success: true }
+    },
+  )
+
+  // Finalizar Rota no fim do dia (sem exigir baixa manual de todas as paradas)
+  app.post(
+    '/api/roteirizacao/embarques/:id/finalizar',
+    { preHandler: requirePermission(Array.from(new Set([...PERM_ROT_GESTAO, ...PERM_ROT_BIPAR]))) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const embId = parseUuidOrBadRequest((req.params as { id: string }).id, 'embarque_id')
+
+      await conn.db.transaction(async (tx) => {
+        const [emb] = await tx
+          .select()
+          .from(embarques)
+          .where(and(eq(embarques.id, embId), eq(embarques.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!emb) throw new HttpError(404, 'Embarque não encontrado.')
+        if (emb.status === 'CONCLUIDO') return
+        if (emb.status !== 'EM_ROTA') {
+          throw new HttpError(
+            409,
+            'Só é possível finalizar a rota após concluir o carregamento e despachar o veículo (status EM ROTA).',
+          )
+        }
+
+        const now = new Date()
+        await tx
+          .update(embarques)
+          .set({ status: 'CONCLUIDO', concluidoEm: now })
+          .where(eq(embarques.id, embId))
       })
 
       return { success: true }
@@ -1383,6 +1752,9 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       const [emb] = await tx.select().from(embarques).where(eq(embarques.qrToken, qrToken)).limit(1)
       if (!emb) throw new HttpError(404, 'Rota não encontrada.')
       await assertRastreioHabilitado(tx, emb.tenantId)
+      if (!['EM_ROTA', 'CONCLUIDO'].includes(emb.status)) {
+        throw new HttpError(409, 'Este embarque ainda não foi despachado da doca.')
+      }
 
       const now = new Date()
       await tx
@@ -1423,6 +1795,9 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       const [emb] = await tx.select().from(embarques).where(eq(embarques.qrToken, qrToken)).limit(1)
       if (!emb) throw new HttpError(404, 'Rota não encontrada.')
       await assertRastreioHabilitado(tx, emb.tenantId)
+      if (!['EM_ROTA', 'CONCLUIDO'].includes(emb.status)) {
+        throw new HttpError(409, 'Este embarque ainda não foi despachado da doca.')
+      }
 
       const [ped] = await tx
         .select({ pagamentoNaEntrega: pedidos.pagamentoNaEntrega, codigo: pedidos.codigo })

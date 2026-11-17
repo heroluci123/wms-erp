@@ -17,6 +17,7 @@ import {
   operadores,
   produtos,
   rotas,
+  tiposVeiculo,
   transportadoras,
   vendedores,
 } from '../../db/schema/index.js'
@@ -183,6 +184,14 @@ const MarchanteSchema = z.object({
   codigo: z.string().trim().min(1, 'Informe o código do marchante.'),
   nome: z.string().trim().min(1, 'Informe o nome do marchante.'),
   is_padrao: z.union([z.boolean(), z.number()]).optional().default(0),
+})
+
+const TipoVeiculoSchema = z.object({
+  nome: z.string().trim().min(1, 'Informe o nome / tipo do veículo (ex: Carro Pequeno, Van, Caminhão).'),
+  categoria: z.enum(['UTILITARIO', 'VAN', 'CAMINHAO', 'CARRETA', 'OUTRO']).default('UTILITARIO'),
+  capacidade_kg: z.coerce.number().positive('A capacidade em kg deve ser maior que zero.'),
+  tolerancia_pct: z.coerce.number().min(0).max(100).default(10),
+  observacoes: optStr(''),
 })
 
 function flag01(v: unknown, def = 0): number {
@@ -995,6 +1004,108 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     await conn.db.update(rotas).set({ ativo: 0 }).where(and(eq(rotas.id, id), eq(rotas.tenantId, ctx.tenantId)))
     return { success: true }
   })
+
+  // ── TIPOS DE VEÍCULO (CAPACIDADE / PESO MÁXIMO + TOLERÂNCIA) ────────────────
+  app.get(
+    '/api/cadastros/tipos-veiculo',
+    {
+      preHandler: requirePermission(
+        ['transportadoras', 'roteirizacao', 'roteirizacao_carregamento', 'pedidos', 'saida', 'expedicao'],
+        { write: false },
+      ),
+    },
+    async (req) => {
+      const ctx = req.authCtx!
+      const rows = await conn.db
+        .select({
+          id: tiposVeiculo.id,
+          nome: tiposVeiculo.nome,
+          categoria: tiposVeiculo.categoria,
+          capacidade_kg: tiposVeiculo.capacidadeKg,
+          tolerancia_pct: tiposVeiculo.toleranciaPct,
+          observacoes: tiposVeiculo.observacoes,
+          ativo: tiposVeiculo.ativo,
+          created_at: tiposVeiculo.createdAt,
+        })
+        .from(tiposVeiculo)
+        .where(and(eq(tiposVeiculo.tenantId, ctx.tenantId), eq(tiposVeiculo.ativo, 1)))
+        .orderBy(asc(tiposVeiculo.capacidadeKg), asc(tiposVeiculo.nome))
+
+      return {
+        success: true,
+        data: rows.map((r) => {
+          const cap = Number(r.capacidade_kg || 0)
+          const tol = Number(r.tolerancia_pct ?? 10)
+          return {
+            ...r,
+            capacidade_kg: Number(cap.toFixed(2)),
+            tolerancia_pct: Number(tol.toFixed(2)),
+            capacidade_maxima_kg: Number((cap * (1 + tol / 100)).toFixed(2)),
+          }
+        }),
+      }
+    },
+  )
+
+  app.post(
+    '/api/cadastros/tipos-veiculo',
+    { preHandler: requirePermission(['transportadoras', 'roteirizacao']) },
+    async (req, reply) => {
+      const ctx = req.authCtx!
+      const parsed = TipoVeiculoSchema.safeParse(req.body)
+      if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
+      const d = parsed.data
+      const id = uuidv7()
+      await conn.db.insert(tiposVeiculo).values({
+        id,
+        tenantId: ctx.tenantId,
+        nome: d.nome,
+        categoria: d.categoria,
+        capacidadeKg: String(d.capacidade_kg),
+        toleranciaPct: String(d.tolerancia_pct),
+        observacoes: d.observacoes,
+        ativo: 1,
+      })
+      return reply.status(201).send({ success: true, id })
+    },
+  )
+
+  app.put(
+    '/api/cadastros/tipos-veiculo/:id',
+    { preHandler: requirePermission(['transportadoras', 'roteirizacao']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const id = String((req.params as { id: string }).id || '').trim()
+      const parsed = TipoVeiculoSchema.safeParse(req.body)
+      if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
+      const d = parsed.data
+      await conn.db
+        .update(tiposVeiculo)
+        .set({
+          nome: d.nome,
+          categoria: d.categoria,
+          capacidadeKg: String(d.capacidade_kg),
+          toleranciaPct: String(d.tolerancia_pct),
+          observacoes: d.observacoes,
+        })
+        .where(and(eq(tiposVeiculo.id, id), eq(tiposVeiculo.tenantId, ctx.tenantId)))
+      return { success: true }
+    },
+  )
+
+  app.delete(
+    '/api/cadastros/tipos-veiculo/:id',
+    { preHandler: requirePermission(['transportadoras', 'roteirizacao']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const id = String((req.params as { id: string }).id || '').trim()
+      await conn.db
+        .update(tiposVeiculo)
+        .set({ ativo: 0 })
+        .where(and(eq(tiposVeiculo.id, id), eq(tiposVeiculo.tenantId, ctx.tenantId)))
+      return { success: true }
+    },
+  )
 
   // ── AUXILIARES COMERCIAIS / FISCAIS + CRUD ──────────────────────────────────
   app.get(

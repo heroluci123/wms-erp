@@ -69,10 +69,11 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
     assert.equal(cliRes.statusCode, 201)
     const cliId = cliRes.json().id as string
 
-    // Receber 2 caixas em estoque
+    // Receber 3 caixas em estoque (2 para 17/11 e 1 pesada de 740kg para testar filtro de data + teto 650kg+10% / van 1250kg)
     for (const [ean, pesoBruto] of [
       ['7890009000011', 21.0],
       ['7890009000028', 16.0],
+      ['7890009000035', 741.0],
     ] as const) {
       const rec = await app.inject({
         method: 'POST',
@@ -126,10 +127,27 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
     assert.equal(p2Res.statusCode, 201)
     const ped2Id = p2Res.json().id as string
 
-    // Separar caixas nos dois romaneios -> AGUARDANDO_EXPEDICAO (prontos para roteiro)
+    const p3Res = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Entrega Outro Dia Carga Pesada',
+        cliente_id: cliId,
+        previsao_entrega: '2026-11-25',
+        pagamento_na_entrega: 0,
+        liberar: true,
+        itens: [{ produto_id: prodId, qtd_kg_solicitada: 730, preco_unitario: 55 }],
+      },
+    })
+    assert.equal(p3Res.statusCode, 201)
+    const ped3Id = p3Res.json().id as string
+
+    // Separar caixas nos três romaneios -> AGUARDANDO_EXPEDICAO (prontos para roteiro)
     for (const [pedId, ean] of [
       [ped1Id, '7890009000011'],
       [ped2Id, '7890009000028'],
+      [ped3Id, '7890009000035'],
     ] as const) {
       const ini = await app.inject({ method: 'POST', url: `/api/saida/iniciar-pedido/${pedId}`, headers })
       assert.equal(ini.statusCode, 200)
@@ -151,12 +169,47 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
       assert.equal(fin.statusCode, 200)
     }
 
-    // 3. Verificar pedidos disponíveis para roteirização e criar Embarque (Opção B padrão)
-    const dispRes = await app.inject({ method: 'GET', url: '/api/roteirizacao/pedidos-disponiveis', headers })
+    // 3. Cadastro Tipos de Veículo + Filtro estrito por Data Embarque + Trava 650kg(+10%)
+    const tvListRes = await app.inject({ method: 'GET', url: '/api/cadastros/tipos-veiculo', headers })
+    assert.equal(tvListRes.statusCode, 200)
+    const tvList = tvListRes.json().data as Array<any>
+    assert.ok(tvList.length >= 2, 'Deve possuir os 2 veículos padrão semeados (650kg e 1250kg)')
+    const fiorino = tvList.find((v) => Number(v.capacidade_kg) === 650)
+    const van = tvList.find((v) => Number(v.capacidade_kg) === 1250)
+    assert.ok(fiorino && van)
+
+    // Cadastro personalizado via Comercial & Estrutura
+    const tvNovoRes = await app.inject({
+      method: 'POST',
+      url: '/api/cadastros/tipos-veiculo',
+      headers,
+      payload: { nome: 'Caminhão 3/4', categoria: 'CAMINHAO', capacidade_kg: 3500, tolerancia_pct: 10 },
+    })
+    assert.equal(tvNovoRes.statusCode, 201)
+
+    // Filtro por data_embarque=2026-11-17 deve trazer SOMENTE ped1 e ped2 (ocultar ped3 de 25/11)
+    const dispRes = await app.inject({
+      method: 'GET',
+      url: '/api/roteirizacao/pedidos-disponiveis?data_embarque=2026-11-17',
+      headers,
+    })
     assert.equal(dispRes.statusCode, 200)
     const disp = dispRes.json().data
     assert.equal(disp.length, 2)
     assert.ok(disp.every((d: any) => d.pronto_para_embarque === true))
+
+    // Bloqueia exceder limite do veículo + 10% (741kg > 715kg na Fiorino)
+    const embExcessoRes = await app.inject({
+      method: 'POST',
+      url: '/api/roteirizacao/embarques',
+      headers,
+      payload: {
+        data_embarque: '2026-11-25',
+        tipo_veiculo_id: fiorino.id,
+        pedido_ids: [ped3Id],
+      },
+    })
+    assert.equal(embExcessoRes.statusCode, 409)
 
     const embRes = await app.inject({
       method: 'POST',
@@ -164,6 +217,8 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
       headers,
       payload: {
         data_embarque: '2026-11-17',
+        tipo_veiculo_id: fiorino.id,
+        horario_saida: '05:30',
         pedido_ids: [ped1Id, ped2Id],
       },
     })
@@ -185,8 +240,27 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
     const detEmb = await app.inject({ method: 'GET', url: `/api/roteirizacao/embarques/${embId}`, headers })
     assert.equal(detEmb.statusCode, 200)
     assert.equal(detEmb.json().data.modalidade_impressao, 'OPCAO_B')
+    assert.equal(detEmb.json().data.horario_saida, '05:30')
+    assert.equal(detEmb.json().data.resumo.peso_bruto_kg, 37)
+    assert.equal(detEmb.json().data.resumo.cidades_count, 1)
     assert.equal(detEmb.json().data.paradas[0].pedido_id, ped2Id)
     assert.equal(detEmb.json().data.paradas[0].ordem_parada, 1)
+
+    // Não permite marcar entrega nem finalizar rota ANTES de despachar o veículo (409!)
+    const entregaPreBloq = await app.inject({
+      method: 'POST',
+      url: `/api/roteirizacao/embarques/${embId}/paradas/${ped1Id}/status`,
+      headers,
+      payload: { status_entrega: 'ENTREGUE' },
+    })
+    assert.equal(entregaPreBloq.statusCode, 409)
+
+    const finPreBloq = await app.inject({
+      method: 'POST',
+      url: `/api/roteirizacao/embarques/${embId}/finalizar`,
+      headers,
+    })
+    assert.equal(finPreBloq.statusCode, 409)
 
     // 4. Operador comum (bipagem liberada, gestão bloqueada)
     const opRes = await app.inject({
@@ -232,9 +306,19 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
       method: 'POST',
       url: `/api/roteirizacao/embarques/${embId}/carregar-caixa`,
       headers: opHeaders,
-      payload: { ean_caixa: '007890009000011' },
+      payload: { ean_caixa: '007890009000011', temperatura_bau: -18.5 },
     })
     assert.equal(bip1.statusCode, 200, `Bip 1 carregamento falhou: ${bip1.body}`)
+    assert.equal(bip1.json().caixa.temperatura_bau, -18.5)
+
+    // Despachar com caixa pendente -> BLOQUEADO (409)!
+    const despBloq = await app.inject({
+      method: 'POST',
+      url: `/api/roteirizacao/embarques/${embId}/despachar`,
+      headers: opHeaders,
+      payload: {},
+    })
+    assert.equal(despBloq.statusCode, 409)
 
     const bip2 = await app.inject({
       method: 'POST',
@@ -249,7 +333,7 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
       method: 'POST',
       url: `/api/roteirizacao/embarques/${embId}/despachar`,
       headers: opHeaders,
-      payload: { numero_nf_lote: 'NF-8801, NF-8802' },
+      payload: {},
     })
     assert.equal(desp.statusCode, 200, `Despachar embarque falhou: ${desp.body}`)
     assert.equal(desp.json().expedidosAgora, 2)
@@ -294,8 +378,49 @@ test('Fase 2 Parte 3: Roteirizacao, Reordenacao, Bipagem Unica Operador, Despach
 
     const detFinal = await app.inject({ method: 'GET', url: `/api/roteirizacao/embarques/${embId}`, headers })
     assert.equal(detFinal.json().data.status, 'CONCLUIDO')
+    assert.equal(detFinal.json().data.temperatura_bau, -18.5)
     assert.equal(detFinal.json().data.veiculo_placa, 'ABC-9X99')
     assert.equal(detFinal.json().data.motorista_nome, 'Carlos Motorista')
+
+    // 6. Testar rota na Van (1250kg) com ped3Id (741kg) + Finalizar Rota direto no fim do dia sem baixa manual parada-a-parada
+    const emb2Res = await app.inject({
+      method: 'POST',
+      url: '/api/roteirizacao/embarques',
+      headers,
+      payload: {
+        data_embarque: '2026-11-25',
+        tipo_veiculo_id: van.id,
+        pedido_ids: [ped3Id],
+      },
+    })
+    assert.equal(emb2Res.statusCode, 201)
+    const emb2Id = emb2Res.json().id as string
+
+    const bip3 = await app.inject({
+      method: 'POST',
+      url: `/api/roteirizacao/embarques/${emb2Id}/carregar-caixa`,
+      headers: opHeaders,
+      payload: { ean_caixa: '7890009000035' },
+    })
+    assert.equal(bip3.statusCode, 200)
+
+    const desp2 = await app.inject({
+      method: 'POST',
+      url: `/api/roteirizacao/embarques/${emb2Id}/despachar`,
+      headers: opHeaders,
+      payload: {},
+    })
+    assert.equal(desp2.statusCode, 200)
+
+    const finRota2 = await app.inject({
+      method: 'POST',
+      url: `/api/roteirizacao/embarques/${emb2Id}/finalizar`,
+      headers,
+    })
+    assert.equal(finRota2.statusCode, 200)
+
+    const detEmb2 = await app.inject({ method: 'GET', url: `/api/roteirizacao/embarques/${emb2Id}`, headers })
+    assert.equal(detEmb2.json().data.status, 'CONCLUIDO')
 
     // Rastreio público do pedido pelo cliente
     const pedTrackToken = detFinal.json().data.paradas.find((p: any) => p.pedido_id === ped1Id).rastreio_token

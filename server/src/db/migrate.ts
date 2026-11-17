@@ -11,6 +11,7 @@ import {
   centrosCusto,
   naturezasOperacao,
   marchantes,
+  tiposVeiculo,
   eanSequencias,
 } from './schema/index.js'
 import { uuidv7 } from '../utils/uuid.js'
@@ -340,6 +341,19 @@ CREATE TABLE IF NOT EXISTS transportadoras (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_transportadoras_tenant ON transportadoras(tenant_id);
+
+CREATE TABLE IF NOT EXISTS tipos_veiculo (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  nome TEXT NOT NULL,
+  categoria TEXT NOT NULL DEFAULT 'UTILITARIO',
+  capacidade_kg NUMERIC(14,2) NOT NULL DEFAULT 650,
+  tolerancia_pct NUMERIC(6,2) NOT NULL DEFAULT 10,
+  observacoes TEXT NOT NULL DEFAULT '',
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tipos_veiculo_tenant ON tipos_veiculo(tenant_id, ativo);
 
 CREATE TABLE IF NOT EXISTS fornecedores (
   id UUID PRIMARY KEY,
@@ -874,6 +888,8 @@ CREATE TABLE IF NOT EXISTS pedidos (
   origem_pedido TEXT NOT NULL DEFAULT 'SUPPLY_CHAIN',
   setor_solicitante TEXT NOT NULL DEFAULT 'SUPPLY_CHAIN',
   status TEXT NOT NULL DEFAULT 'LIBERADO',
+  numero_nf TEXT NOT NULL DEFAULT '',
+  chave_nfe TEXT NOT NULL DEFAULT '',
   rastreio_token TEXT,
   criado_por_id UUID,
   criado_por_nome TEXT,
@@ -938,6 +954,11 @@ CREATE TABLE IF NOT EXISTS embarques (
   titulo TEXT NOT NULL DEFAULT '',
   rota_id UUID REFERENCES rotas(id),
   transportadora_id UUID,
+  tipo_veiculo_id UUID REFERENCES tipos_veiculo(id) ON DELETE SET NULL,
+  capacidade_kg NUMERIC(14,2),
+  tolerancia_pct NUMERIC(6,2) NOT NULL DEFAULT 10,
+  horario_saida TEXT NOT NULL DEFAULT '',
+  temperatura_bau NUMERIC(6,2),
   motorista_id UUID REFERENCES operadores(id),
   motorista_nome TEXT NOT NULL DEFAULT '',
   veiculo_placa TEXT NOT NULL DEFAULT '',
@@ -1127,6 +1148,13 @@ ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS forma_pagamento_recebida 
 ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS valor_pago NUMERIC(14,2);
 ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS iniciado_em TIMESTAMPTZ;
 ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS chegou_em TIMESTAMPTZ;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS numero_nf TEXT NOT NULL DEFAULT '';
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS chave_nfe TEXT NOT NULL DEFAULT '';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS tipo_veiculo_id UUID REFERENCES tipos_veiculo(id) ON DELETE SET NULL;
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS capacidade_kg NUMERIC(14,2);
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS tolerancia_pct NUMERIC(6,2) NOT NULL DEFAULT 10;
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS horario_saida TEXT NOT NULL DEFAULT '';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS temperatura_bau NUMERIC(6,2);
 `
 
 export interface SeedDefaultsResult {
@@ -1285,6 +1313,36 @@ export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefa
       .insert(marchantes)
       .values({ id: uuidv7(), tenantId, codigo: '001', nome: 'FRIGODIL', isPadrao: 1, ativo: 1 })
       .onConflictDoNothing()
+  }
+
+  const existingTiposVeiculo = await db
+    .select({ id: tiposVeiculo.id })
+    .from(tiposVeiculo)
+    .where(eq(tiposVeiculo.tenantId, tenantId))
+    .limit(1)
+  if (existingTiposVeiculo.length === 0) {
+    await db.insert(tiposVeiculo).values([
+      {
+        id: uuidv7(),
+        tenantId,
+        nome: 'Carro Pequeno (Fiorino)',
+        categoria: 'UTILITARIO',
+        capacidadeKg: '650',
+        toleranciaPct: '10',
+        observacoes: 'Utilitário leve até 650 kg (máx. 715 kg com tolerância de 10%)',
+        ativo: 1,
+      },
+      {
+        id: uuidv7(),
+        tenantId,
+        nome: 'Carro Grande (Van)',
+        categoria: 'VAN',
+        capacidadeKg: '1250',
+        toleranciaPct: '10',
+        observacoes: 'Van / Baú médio até 1.250 kg (máx. 1.375 kg com tolerância de 10%)',
+        ativo: 1,
+      },
+    ])
   }
 
   const existingNat = await db.select().from(naturezasOperacao).where(eq(naturezasOperacao.tenantId, tenantId))

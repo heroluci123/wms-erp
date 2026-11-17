@@ -12,11 +12,13 @@ export const roteirizacaoQueries = {
     return await apiRequest(`/api/roteirizacao/embarques${buildQueryString({ status_grupo: statusGrupo })}`)
   },
 
-  async listarPedidosDisponiveis(embarqueId = null) {
+  async listarPedidosDisponiveis(opts = null) {
     requireApi()
-    return (
-      await apiRequest(`/api/roteirizacao/pedidos-disponiveis${buildQueryString({ embarque_id: embarqueId || undefined })}`)
-    ).data
+    const params =
+      opts && typeof opts === 'object'
+        ? { embarque_id: opts.embarque_id || undefined, data_embarque: opts.data_embarque || undefined }
+        : { embarque_id: opts || undefined }
+    return (await apiRequest(`/api/roteirizacao/pedidos-disponiveis${buildQueryString(params)}`)).data
   },
 
   async criarEmbarque(payload) {
@@ -62,11 +64,23 @@ export const roteirizacaoQueries = {
     })
   },
 
-  async carregarCaixa(embarqueId, eanCaixa) {
+  async carregarCaixa(embarqueId, eanCaixa, temperaturaBau = null) {
     requireApi()
+    const body = { ean_caixa: eanCaixa }
+    if (temperaturaBau !== null && temperaturaBau !== undefined && String(temperaturaBau).trim() !== '') {
+      body.temperatura_bau = temperaturaBau
+    }
     return await apiRequest(`/api/roteirizacao/embarques/${embarqueId}/carregar-caixa`, {
       method: 'POST',
-      body: { ean_caixa: eanCaixa },
+      body,
+    })
+  },
+
+  async atualizarTemperaturaBau(embarqueId, temperaturaBau) {
+    requireApi()
+    return await apiRequest(`/api/roteirizacao/embarques/${embarqueId}/temperatura`, {
+      method: 'PATCH',
+      body: { temperatura_bau: temperaturaBau },
     })
   },
 
@@ -91,6 +105,14 @@ export const roteirizacaoQueries = {
     return await apiRequest(`/api/roteirizacao/embarques/${embarqueId}/paradas/${pedidoId}/status`, {
       method: 'POST',
       body: payload,
+    })
+  },
+
+  async finalizarRota(embarqueId) {
+    requireApi()
+    return await apiRequest(`/api/roteirizacao/embarques/${embarqueId}/finalizar`, {
+      method: 'POST',
+      body: {},
     })
   },
 
