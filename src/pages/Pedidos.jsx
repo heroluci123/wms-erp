@@ -24,7 +24,10 @@ import {
   MessageSquare,
   DollarSign,
   Lock,
-  Unlock
+  Unlock,
+  Calendar,
+  ArrowUpDown,
+  RotateCcw
 } from 'lucide-react'
 import { pedidosQueries } from '../queries/pedidos'
 import { cadastrosQueries } from '../queries/cadastros'
@@ -92,6 +95,15 @@ const fmtData = (d) => {
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s
 }
 
+const isoHojeLocal = (offsetDias = 0) => {
+  const dt = new Date()
+  dt.setDate(dt.getDate() + offsetDias)
+  const y = dt.getFullYear()
+  const m = String(dt.getMonth() + 1).padStart(2, '0')
+  const d = String(dt.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 const fmtDataHora = (d) => {
   if (!d) return '-'
   const raw = String(d)
@@ -119,11 +131,22 @@ export function Pedidos() {
   const [especificacoesCliente, setEspecificacoesCliente] = useState([])
   const [cfopSugerido, setCfopSugerido] = useState(null)
 
-  // Filtros do Gerenciador
+  // Filtros do Gerenciador (padrão: Previsão de Entrega = Hoje + Amanhã)
   const [filtroStatus, setFiltroStatus] = useState('TODOS')
   const [filtroBusca, setFiltroBusca] = useState('')
-  const [dataInicio, setDataInicio] = useState('')
-  const [dataFim, setDataFim] = useState('')
+  const [buscaAplicada, setBuscaAplicada] = useState('')
+  const [presetData, setPresetData] = useState('HOJE_AMANHA') // 'HOJE_AMANHA' | 'HOJE' | 'AMANHA' | 'PROX_7' | 'TODAS' | 'SEM_PREVISAO' | 'CUSTOM'
+  const [campoData, setCampoData] = useState('PREVISAO') // 'PREVISAO' | 'CRIACAO'
+  const [dataInicio, setDataInicio] = useState(() => isoHojeLocal(0))
+  const [dataFim, setDataFim] = useState(() => isoHojeLocal(1))
+  const [semPrevisao, setSemPrevisao] = useState(false)
+  const [filtroVendedorId, setFiltroVendedorId] = useState('')
+  const [filtroFormaPagtoId, setFiltroFormaPagtoId] = useState('')
+  const [filtroSetor, setFiltroSetor] = useState('TODOS')
+  const [filtroPagtoEntrega, setFiltroPagtoEntrega] = useState(false)
+  const [ordenarPor, setOrdenarPor] = useState('CODIGO_DESC')
+  const [kpisGeraisApi, setKpisGeraisApi] = useState(null)
+  const [totalGeralApi, setTotalGeralApi] = useState(0)
 
   // Formulário Novo / Editar Pedido
   const [editId, setEditId] = useState(null)
@@ -187,22 +210,77 @@ export function Pedidos() {
     subtitulo: ''
   })
 
-  const carregarDados = async () => {
+  const aplicarPresetData = (preset) => {
+    setPresetData(preset)
+    setSemPrevisao(false)
+    setCampoData('PREVISAO')
+    if (preset === 'HOJE') {
+      const h = isoHojeLocal(0)
+      setDataInicio(h)
+      setDataFim(h)
+    } else if (preset === 'AMANHA') {
+      const a = isoHojeLocal(1)
+      setDataInicio(a)
+      setDataFim(a)
+    } else if (preset === 'HOJE_AMANHA') {
+      setDataInicio(isoHojeLocal(0))
+      setDataFim(isoHojeLocal(1))
+    } else if (preset === 'PROX_7') {
+      setDataInicio(isoHojeLocal(0))
+      setDataFim(isoHojeLocal(7))
+    } else if (preset === 'SEM_PREVISAO') {
+      setSemPrevisao(true)
+      setDataInicio('')
+      setDataFim('')
+    } else {
+      setPresetData('TODAS')
+      setDataInicio('')
+      setDataFim('')
+    }
+  }
+
+  const limparTodosFiltros = () => {
+    setFiltroStatus('TODOS')
+    setFiltroBusca('')
+    setBuscaAplicada('')
+    setFiltroVendedorId('')
+    setFiltroFormaPagtoId('')
+    setFiltroSetor('TODOS')
+    setFiltroPagtoEntrega(false)
+    setOrdenarPor('CODIGO_DESC')
+    setCampoData('PREVISAO')
+    setSemPrevisao(false)
+    setPresetData('TODAS')
+    setDataInicio('')
+    setDataFim('')
+  }
+
+  const carregarDados = async (buscaOverride) => {
     setLoading(true)
+    const termoBusca = buscaOverride !== undefined ? buscaOverride : buscaAplicada
     try {
-      const [listaPed, listaProd, listaCli, listaVend, auxData] = await Promise.all([
-        pedidosQueries.listarPedidos({
+      const [painelRes, listaProd, listaCli, listaVend, auxData] = await Promise.all([
+        pedidosQueries.listarPedidosPainel({
           status: filtroStatus,
-          busca: filtroBusca,
-          dataInicio: dataInicio || null,
-          dataFim: dataFim || null
+          busca: termoBusca,
+          campoData,
+          dataInicio: semPrevisao ? null : dataInicio || null,
+          dataFim: semPrevisao ? null : dataFim || null,
+          semPrevisao,
+          vendedorId: filtroVendedorId || null,
+          formaPagamentoId: filtroFormaPagtoId || null,
+          setor: filtroSetor,
+          pagamentoNaEntrega: filtroPagtoEntrega,
+          ordenarPor,
         }),
         pedidosQueries.listarSaldosProdutosParaPedido(),
         pedidosQueries.listarClientes(),
         apiAtiva ? cadastrosQueries.listarVendedores().catch(() => []) : Promise.resolve([]),
         apiAtiva ? cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [], marchantes: [] })) : Promise.resolve({ formasPagamento: [], locaisCobranca: [], naturezasOperacao: [], marchantes: [] }),
       ])
-      setPedidos(listaPed)
+      setPedidos(painelRes.data || [])
+      setKpisGeraisApi(painelRes.kpis_gerais || null)
+      setTotalGeralApi(Number(painelRes.total_geral ?? (painelRes.data || []).length))
       setProdutos(listaProd)
       setClientes(listaCli)
       setVendedores(listaVend || [])
@@ -219,10 +297,30 @@ export function Pedidos() {
   }
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setBuscaAplicada(filtroBusca)
+    }, 260)
+    return () => clearTimeout(timer)
+  }, [filtroBusca])
+
+  useEffect(() => {
     if (podeAcessarTela) {
       carregarDados()
     }
-  }, [podeAcessarTela, filtroStatus, dataInicio, dataFim])
+  }, [
+    podeAcessarTela,
+    filtroStatus,
+    buscaAplicada,
+    campoData,
+    dataInicio,
+    dataFim,
+    semPrevisao,
+    filtroVendedorId,
+    filtroFormaPagtoId,
+    filtroSetor,
+    filtroPagtoEntrega,
+    ordenarPor,
+  ])
 
   useEffect(() => {
     if (modalBuscaAberto) {
@@ -260,14 +358,39 @@ export function Pedidos() {
   }, [produtos, modalBuscaTexto, modalSomenteComSaldo])
 
   const kpis = useMemo(() => {
+    if (kpisGeraisApi) return kpisGeraisApi
     return {
+      total: pedidos.length,
       bloqueadosEstoque: pedidos.filter((p) => p.status === 'BLOQUEADO_ESTOQUE').length,
       liberados: pedidos.filter((p) => p.status === 'LIBERADO').length,
       emSeparacao: pedidos.filter((p) => p.status === 'EM_SEPARACAO').length,
       emConferencia: pedidos.filter((p) => ['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(p.status)).length,
       expedidos: pedidos.filter((p) => p.status === 'EXPEDIDO').length
     }
+  }, [kpisGeraisApi, pedidos])
+
+  const resumoFiltrado = useMemo(() => {
+    let totalKg = 0
+    let totalValor = 0
+    for (const p of pedidos) {
+      totalKg += Number(p.total_kg_solicitado || 0)
+      totalValor += Number(p.valor_total || 0)
+    }
+    return {
+      qtd: pedidos.length,
+      totalKg,
+      totalValor,
+    }
   }, [pedidos])
+
+  const toggleKpiStatus = (statusAlvo) => {
+    if (filtroStatus === statusAlvo) {
+      setFiltroStatus('TODOS')
+    } else {
+      setFiltroStatus(statusAlvo)
+      aplicarPresetData('TODAS')
+    }
+  }
 
   const limparCamposItem = (focarCodigo = false) => {
     setCodigoInput('')
@@ -778,9 +901,19 @@ export function Pedidos() {
           )
         }
       }
+      const prevSalva = previsaoEntrega || ''
+      const foraDoFiltroData =
+        semPrevisao ||
+        (campoData === 'PREVISAO' &&
+          ((dataInicio && (!prevSalva || prevSalva < dataInicio)) ||
+            (dataFim && (!prevSalva || prevSalva > dataFim))))
       resetarFormulario()
       setAba('GERENCIADOR')
-      await carregarDados()
+      if (foraDoFiltroData) {
+        aplicarPresetData('TODAS')
+      } else {
+        await carregarDados()
+      }
       if (imprimirApos && savedId && !travaDisparada) {
         await handleImprimirFolhaPedido(savedId)
       }
@@ -1068,51 +1201,110 @@ export function Pedidos() {
 
       {aba === 'GERENCIADOR' && (
         <>
-          {/* KPIs */}
+          {/* KPIs clicáveis (sempre globais) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-            <div className="card" style={{ padding: '14px', borderColor: kpis.bloqueadosEstoque > 0 ? 'var(--danger)' : undefined }}>
+            <button
+              type="button"
+              className="card"
+              onClick={() => toggleKpiStatus('BLOQUEADO_ESTOQUE')}
+              style={{
+                padding: '14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                borderColor: filtroStatus === 'BLOQUEADO_ESTOQUE' ? '#ef4444' : kpis.bloqueadosEstoque > 0 ? 'var(--danger)' : undefined,
+                boxShadow: filtroStatus === 'BLOQUEADO_ESTOQUE' ? '0 0 0 2px rgba(239,68,68,0.35)' : undefined,
+              }}
+            >
               <div className="text-muted text-xs flex items-center gap-6">
                 <Lock size={12} className="text-danger" /> Trava Estoque (Cadeado)
               </div>
               <div style={{ fontSize: '24px', fontWeight: 800, color: '#ef4444' }}>{kpis.bloqueadosEstoque}</div>
-            </div>
-            <div className="card" style={{ padding: '14px' }}>
+            </button>
+            <button
+              type="button"
+              className="card"
+              onClick={() => toggleKpiStatus('LIBERADO')}
+              style={{
+                padding: '14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                borderColor: filtroStatus === 'LIBERADO' ? '#38bdf8' : undefined,
+                boxShadow: filtroStatus === 'LIBERADO' ? '0 0 0 2px rgba(56,189,248,0.35)' : undefined,
+              }}
+            >
               <div className="text-muted text-xs">Liberados p/ Separação</div>
               <div style={{ fontSize: '24px', fontWeight: 800, color: '#38bdf8' }}>{kpis.liberados}</div>
-            </div>
-            <div className="card" style={{ padding: '14px' }}>
+            </button>
+            <button
+              type="button"
+              className="card"
+              onClick={() => toggleKpiStatus('EM_SEPARACAO')}
+              style={{
+                padding: '14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                borderColor: filtroStatus === 'EM_SEPARACAO' ? '#f59e0b' : undefined,
+                boxShadow: filtroStatus === 'EM_SEPARACAO' ? '0 0 0 2px rgba(245,158,11,0.35)' : undefined,
+              }}
+            >
               <div className="text-muted text-xs">Em Separação na Câmara</div>
               <div style={{ fontSize: '24px', fontWeight: 800, color: '#f59e0b' }}>{kpis.emSeparacao}</div>
-            </div>
-            <div className="card" style={{ padding: '14px' }}>
+            </button>
+            <button
+              type="button"
+              className="card"
+              onClick={() => toggleKpiStatus('PRONTOS_CONFERENCIA')}
+              style={{
+                padding: '14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                borderColor: filtroStatus === 'PRONTOS_CONFERENCIA' ? '#a78bfa' : undefined,
+                boxShadow: filtroStatus === 'PRONTOS_CONFERENCIA' ? '0 0 0 2px rgba(167,139,250,0.35)' : undefined,
+              }}
+            >
               <div className="text-muted text-xs">Prontos / Em Conferência</div>
               <div style={{ fontSize: '24px', fontWeight: 800, color: '#a78bfa' }}>{kpis.emConferencia}</div>
-            </div>
-            <div className="card" style={{ padding: '14px' }}>
+            </button>
+            <button
+              type="button"
+              className="card"
+              onClick={() => toggleKpiStatus('EXPEDIDO')}
+              style={{
+                padding: '14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                borderColor: filtroStatus === 'EXPEDIDO' ? '#22c55e' : undefined,
+                boxShadow: filtroStatus === 'EXPEDIDO' ? '0 0 0 2px rgba(34,197,94,0.35)' : undefined,
+              }}
+            >
               <div className="text-muted text-xs">Pedidos Expedidos</div>
               <div style={{ fontSize: '24px', fontWeight: 800, color: '#22c55e' }}>{kpis.expedidos}</div>
-            </div>
+            </button>
           </div>
 
-          {/* Filtros */}
-          <div className="card" style={{ marginBottom: '16px', padding: '14px' }}>
+          {/* Filtros Avançados & Ordenação */}
+          <div className="card" style={{ marginBottom: '16px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* Linha 1: Busca + Status + Vendedor + Setor + Pagamento + Ações */}
             <form
               onSubmit={(e) => {
                 e.preventDefault()
-                carregarDados()
+                setBuscaAplicada(filtroBusca)
+                carregarDados(filtroBusca)
               }}
               style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}
             >
               <div style={{ flex: '1 1 240px' }}>
-                <label className="form-label">Buscar Pedido / Título / Cliente</label>
-                <input
-                  className="form-input"
-                  placeholder="PED-0001, Título, BEEF CONTAINER..."
-                  value={filtroBusca}
-                  onChange={(e) => setFiltroBusca(e.target.value)}
-                />
+                <label className="form-label">Buscar por Cliente, Nº Pedido, Título ou Vendedor</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    className="form-input"
+                    placeholder="PED-0001, BEEF CONTAINER, Título..."
+                    value={filtroBusca}
+                    onChange={(e) => setFiltroBusca(e.target.value)}
+                  />
+                </div>
               </div>
-              <div style={{ flex: '0 1 210px' }}>
+              <div style={{ flex: '0 1 185px' }}>
                 <label className="form-label">Status</label>
                 <select className="form-input" value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
                   <option value="TODOS">Todos os Status</option>
@@ -1122,25 +1314,211 @@ export function Pedidos() {
                   <option value="EM_SEPARACAO">Em Separação</option>
                   <option value="AGUARDANDO_CONFERENCIA">Separação Finalizada</option>
                   <option value="EM_CONFERENCIA">Em Conferência</option>
+                  <option value="PRONTOS_CONFERENCIA">Prontos + Em Conferência</option>
                   <option value="EXPEDIDO">Expedido</option>
                   <option value="CANCELADO">Cancelado</option>
                 </select>
               </div>
-              <div>
-                <label className="form-label">De</label>
-                <input type="date" className="form-input" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} />
-              </div>
-              <div>
-                <label className="form-label">Até</label>
-                <input type="date" className="form-input" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
-              </div>
+              {apiAtiva && (
+                <>
+                  <div style={{ flex: '0 1 170px' }}>
+                    <label className="form-label">Vendedor</label>
+                    <select className="form-input" value={filtroVendedorId} onChange={(e) => setFiltroVendedorId(e.target.value)}>
+                      <option value="">Todos</option>
+                      {vendedores.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: '0 1 150px' }}>
+                    <label className="form-label">Setor / Origem</label>
+                    <select className="form-input" value={filtroSetor} onChange={(e) => setFiltroSetor(e.target.value)}>
+                      <option value="TODOS">Todos</option>
+                      <option value="FATURAMENTO">Faturamento</option>
+                      <option value="SUPPLY_CHAIN">Supply Chain</option>
+                      <option value="WHATSAPP">WhatsApp</option>
+                      <option value="FINANCEIRO">Financeiro</option>
+                      <option value="VENDEDOR">Vendedor</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: '0 1 170px' }}>
+                    <label className="form-label">Forma Pagamento</label>
+                    <select className="form-input" value={filtroFormaPagtoId} onChange={(e) => setFiltroFormaPagtoId(e.target.value)}>
+                      <option value="">Todas</option>
+                      {(auxiliares.formasPagamento || []).map((fp) => (
+                        <option key={fp.id} value={fp.id}>
+                          {fp.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
               <button type="submit" className="btn btn--primary" disabled={loading}>
                 <Search size={15} /> Filtrar
               </button>
-              <button type="button" className="btn btn--secondary" onClick={carregarDados} disabled={loading}>
+              <button type="button" className="btn btn--secondary" onClick={() => carregarDados()} disabled={loading}>
                 <RefreshCw size={15} /> Atualizar
               </button>
             </form>
+
+            {/* Linha 2: Previsão de Entrega (Chips + Intervalo) */}
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+                alignItems: 'center',
+                padding: '10px 12px',
+                background: 'rgba(15, 23, 42, 0.55)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '10px',
+              }}
+            >
+              <span className="text-xs font-bold flex items-center gap-6" style={{ color: '#93c5fd', letterSpacing: '0.03em' }}>
+                <Calendar size={14} /> PREVISÃO DE ENTREGA:
+              </span>
+              {[
+                { key: 'HOJE_AMANHA', label: 'Hoje + Amanhã' },
+                { key: 'HOJE', label: 'Hoje' },
+                { key: 'AMANHA', label: 'Amanhã' },
+                { key: 'PROX_7', label: 'Próx. 7 Dias' },
+                { key: 'TODAS', label: 'Todas' },
+                { key: 'SEM_PREVISAO', label: 'Sem Previsão' },
+              ].map((chip) => {
+                const ativo = presetData === chip.key
+                return (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    className={`btn btn--sm ${ativo ? 'btn--primary' : 'btn--secondary'}`}
+                    onClick={() => aplicarPresetData(chip.key)}
+                  >
+                    {chip.label}
+                  </button>
+                )
+              })}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexWrap: 'wrap' }}>
+                <select
+                  className="form-input"
+                  style={{ width: 'auto', padding: '5px 8px', fontSize: '12px' }}
+                  value={campoData}
+                  onChange={(e) => {
+                    setSemPrevisao(false)
+                    setPresetData('CUSTOM')
+                    setCampoData(e.target.value)
+                  }}
+                  title="Definir qual data será usada no intervalo De / Até"
+                >
+                  <option value="PREVISAO">Data: Previsão Entrega</option>
+                  <option value="CRIACAO">Data: Emissão / Pedido</option>
+                </select>
+                <span className="text-muted text-xs">De:</span>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 'auto', padding: '5px 8px', fontSize: '12px' }}
+                  value={dataInicio}
+                  onChange={(e) => {
+                    setSemPrevisao(false)
+                    setPresetData('CUSTOM')
+                    setDataInicio(e.target.value)
+                  }}
+                />
+                <span className="text-muted text-xs">Até:</span>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 'auto', padding: '5px 8px', fontSize: '12px' }}
+                  value={dataFim}
+                  onChange={(e) => {
+                    setSemPrevisao(false)
+                    setPresetData('CUSTOM')
+                    setDataFim(e.target.value)
+                  }}
+                />
+                <label className="text-xs flex items-center gap-4 cursor-pointer" style={{ marginLeft: '4px', whiteSpace: 'nowrap' }}>
+                  <input
+                    type="checkbox"
+                    checked={filtroPagtoEntrega}
+                    onChange={(e) => setFiltroPagtoEntrega(e.target.checked)}
+                  />
+                  Pagto na Entrega
+                </label>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={limparTodosFiltros}>
+                  <RotateCcw size={13} /> Limpar Filtros
+                </button>
+              </div>
+            </div>
+
+            {/* Linha 3: Ordenar Por (estilo referência) */}
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+                alignItems: 'center',
+                padding: '10px 12px',
+                background: 'rgba(15, 23, 42, 0.55)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '10px',
+              }}
+            >
+              <span className="text-xs font-bold flex items-center gap-6" style={{ color: '#cbd5e1', letterSpacing: '0.03em' }}>
+                <ArrowUpDown size={14} /> ORDENAR POR:
+              </span>
+              {[
+                { key: 'CODIGO_DESC', label: 'Nº Pedido (Maior → Menor)' },
+                { key: 'CODIGO_ASC', label: 'Nº Pedido (Menor → Maior)' },
+                { key: 'PESO_DESC', label: '⚖️ Maior Peso (kg)' },
+                { key: 'PESO_ASC', label: '⚖️ Menor Peso (kg)' },
+                { key: 'VALOR_DESC', label: '💰 Maior Valor (R$)' },
+                { key: 'VALOR_ASC', label: '💰 Menor Valor (R$)' },
+                { key: 'PREVISAO_ASC', label: '📅 Entrega Mais Próxima' },
+                { key: 'STATUS_PADRAO', label: '⚡ Padrão (Status)' },
+              ].map((ord) => {
+                const ativo = ordenarPor === ord.key
+                return (
+                  <button
+                    key={ord.key}
+                    type="button"
+                    className={`btn btn--sm ${ativo ? 'btn--primary' : 'btn--secondary'}`}
+                    onClick={() => setOrdenarPor(ord.key)}
+                  >
+                    {ord.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Resumo dos resultados filtrados */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '12px' }}>
+              <div className="text-muted">
+                Exibindo <strong style={{ color: '#f8fafc' }}>{resumoFiltrado.qtd}</strong> pedido(s)
+                {totalGeralApi > resumoFiltrado.qtd && (
+                  <span> de <strong style={{ color: '#f8fafc' }}>{totalGeralApi}</strong> no total</span>
+                )}
+                {' • '}
+                Peso Total: <strong style={{ color: '#38bdf8' }}>{fmtKg(resumoFiltrado.totalKg)}</strong>
+                {' • '}
+                Valor Total: <strong style={{ color: '#4ade80' }}>
+                  R$ {resumoFiltrado.totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </strong>
+              </div>
+              {(presetData !== 'TODAS' || filtroStatus !== 'TODOS' || filtroBusca || filtroVendedorId || filtroFormaPagtoId || filtroSetor !== 'TODOS' || filtroPagtoEntrega) &&
+                totalGeralApi > resumoFiltrado.qtd && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={limparTodosFiltros}
+                  >
+                    Mostrar todos os {totalGeralApi} pedidos
+                  </button>
+                )}
+            </div>
           </div>
 
           {/* Lista */}
@@ -1149,6 +1527,16 @@ export function Pedidos() {
               <div style={{ textAlign: 'center', padding: '40px 20px' }} className="text-muted">
                 <Package size={40} style={{ opacity: 0.4, margin: '0 auto 10px' }} />
                 <div>Nenhum pedido encontrado para os filtros atuais.</div>
+                {totalGeralApi > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    style={{ marginTop: '12px' }}
+                    onClick={limparTodosFiltros}
+                  >
+                    Limpar filtros e exibir todos os {totalGeralApi} pedidos
+                  </button>
+                )}
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>

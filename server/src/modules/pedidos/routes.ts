@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { DbConnection } from '../../db/client.js'
 import {
   clientes,
@@ -132,58 +132,186 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
     { preHandler: requirePermission(PERM_PED_READ, { write: false, bloquearCliente: true }) },
     async (req) => {
       const ctx = req.authCtx!
-      const q = req.query as { status?: string; q?: string }
+      const q = req.query as {
+        status?: string
+        q?: string
+        campo_data?: string
+        data_inicio?: string
+        data_fim?: string
+        dataInicio?: string
+        dataFim?: string
+        sem_previsao?: string
+        vendedor_id?: string
+        forma_pagamento_id?: string
+        setor?: string
+        pagamento_na_entrega?: string
+        ordenar_por?: string
+      }
 
       const conds = [eq(pedidos.tenantId, ctx.tenantId), eq(pedidos.filialId, ctx.filialId)]
-      if (q.status && q.status !== 'TODOS') {
-        conds.push(eq(pedidos.status, q.status.trim().toUpperCase()))
+      const statusNorm = (q.status || '').trim().toUpperCase()
+      if (statusNorm === 'PRONTOS_CONFERENCIA') {
+        conds.push(inArray(pedidos.status, ['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA']))
+      } else if (statusNorm && statusNorm !== 'TODOS') {
+        conds.push(eq(pedidos.status, statusNorm))
       }
+
       if (q.q && q.q.trim()) {
         const pat = `%${q.q.trim().toUpperCase()}%`
         conds.push(
-          sql`(UPPER(${pedidos.codigo}) LIKE ${pat} OR UPPER(${pedidos.titulo}) LIKE ${pat} OR UPPER(${pedidos.cliente}) LIKE ${pat})`,
+          sql`(
+            UPPER(COALESCE(${pedidos.codigo}, '')) LIKE ${pat}
+            OR UPPER(COALESCE(${pedidos.titulo}, '')) LIKE ${pat}
+            OR UPPER(COALESCE(${pedidos.cliente}, '')) LIKE ${pat}
+            OR UPPER(COALESCE(${pedidos.marchante}, '')) LIKE ${pat}
+            OR UPPER(COALESCE(${pedidos.criadoPorNome}, '')) LIKE ${pat}
+            OR EXISTS (
+              SELECT 1 FROM vendedores v
+              WHERE v.id = "pedidos"."vendedor_id" AND UPPER(v.nome) LIKE ${pat}
+            )
+          )`,
         )
       }
 
-      const rows = await conn.db
-        .select({
-          id: pedidos.id,
-          codigo: pedidos.codigo,
-          titulo: pedidos.titulo,
-          cliente_id: pedidos.clienteId,
-          cliente: pedidos.cliente,
-          vendedor_id: pedidos.vendedorId,
-          forma_pagamento_id: pedidos.formaPagamentoId,
-          local_cobranca_id: pedidos.localCobrancaId,
-          natureza_id: pedidos.naturezaId,
-          marchante: pedidos.marchante,
-          pagamento_na_entrega: pedidos.pagamentoNaEntrega,
-          previsao_entrega: pedidos.previsaoEntrega,
-          valor_total: pedidos.valorTotal,
-          observacoes: pedidos.observacoes,
-          origem_pedido: pedidos.origemPedido,
-          setor_solicitante: pedidos.setorSolicitante,
-          status: pedidos.status,
-          rastreio_token: pedidos.rastreioToken,
-          criado_por_nome: pedidos.criadoPorNome,
-          created_at: pedidos.createdAt,
-          liberado_at: pedidos.liberadoAt,
-          expedido_at: pedidos.expedidoAt,
-          vendedor_nome: sql<string | null>`(SELECT v.nome FROM vendedores v WHERE v.id = "pedidos"."vendedor_id" LIMIT 1)`,
-          forma_pagamento_descricao: sql<string | null>`(SELECT fp.descricao FROM formas_pagamento fp WHERE fp.id = "pedidos"."forma_pagamento_id" LIMIT 1)`,
-          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id")`,
-          total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id"), 0)`,
-          romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
-          romaneio_codigo: sql<string | null>`(SELECT r.codigo FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
-          romaneio_status: sql<string | null>`(SELECT r.status FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
-          total_kg_separado: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
-          total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
-          qtd_conferidas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id" AND ri.conferido = 1), 0)`,
-        })
-        .from(pedidos)
-        .where(and(...conds))
-        .orderBy(desc(pedidos.createdAt))
-        .limit(200)
+      if (q.sem_previsao === '1' || q.sem_previsao === 'true') {
+        conds.push(sql`${pedidos.previsaoEntrega} IS NULL`)
+      } else {
+        const di = normalizarDataIso(q.data_inicio || q.dataInicio)
+        const df = normalizarDataIso(q.data_fim || q.dataFim)
+        const campoData = (q.campo_data || 'PREVISAO').trim().toUpperCase()
+        if (campoData === 'CRIACAO') {
+          if (di) conds.push(sql`DATE(${pedidos.createdAt} AT TIME ZONE 'America/Sao_Paulo') >= ${di}::date`)
+          if (df) conds.push(sql`DATE(${pedidos.createdAt} AT TIME ZONE 'America/Sao_Paulo') <= ${df}::date`)
+        } else {
+          if (di) conds.push(sql`${pedidos.previsaoEntrega} >= ${di}::date`)
+          if (df) conds.push(sql`${pedidos.previsaoEntrega} <= ${df}::date`)
+        }
+      }
+
+      if (q.vendedor_id && q.vendedor_id.trim()) {
+        conds.push(eq(pedidos.vendedorId, parseUuidOrBadRequest(q.vendedor_id, 'vendedor_id')))
+      }
+      if (q.forma_pagamento_id && q.forma_pagamento_id.trim()) {
+        conds.push(eq(pedidos.formaPagamentoId, parseUuidOrBadRequest(q.forma_pagamento_id, 'forma_pagamento_id')))
+      }
+      if (q.setor && q.setor.trim() && q.setor.trim().toUpperCase() !== 'TODOS') {
+        const st = q.setor.trim().toUpperCase()
+        conds.push(
+          sql`(UPPER(COALESCE(${pedidos.setorSolicitante}, '')) = ${st} OR UPPER(COALESCE(${pedidos.origemPedido}, '')) = ${st})`,
+        )
+      }
+      if (q.pagamento_na_entrega === '1' || q.pagamento_na_entrega === 'true') {
+        conds.push(eq(pedidos.pagamentoNaEntrega, 1))
+      }
+
+      const pesoSub = sql`COALESCE((SELECT SUM(pi.qtd_kg_solicitada) FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id"), 0)`
+      const codigoNumExpr = sql`COALESCE(NULLIF(regexp_replace(${pedidos.codigo}, '[^0-9]', '', 'g'), '')::bigint, 0)`
+      const orderMode = (q.ordenar_por || 'CODIGO_DESC').trim().toUpperCase()
+
+      let orderExprs
+      switch (orderMode) {
+        case 'CODIGO_ASC':
+          orderExprs = [sql`${codigoNumExpr} ASC`, asc(pedidos.createdAt)]
+          break
+        case 'PESO_DESC':
+          orderExprs = [sql`${pesoSub} DESC`, desc(pedidos.createdAt)]
+          break
+        case 'PESO_ASC':
+          orderExprs = [sql`${pesoSub} ASC`, desc(pedidos.createdAt)]
+          break
+        case 'VALOR_DESC':
+          orderExprs = [desc(pedidos.valorTotal), desc(pedidos.createdAt)]
+          break
+        case 'VALOR_ASC':
+          orderExprs = [asc(pedidos.valorTotal), desc(pedidos.createdAt)]
+          break
+        case 'PREVISAO_ASC':
+          orderExprs = [sql`${pedidos.previsaoEntrega} ASC NULLS LAST`, desc(pedidos.createdAt)]
+          break
+        case 'STATUS_PADRAO':
+          orderExprs = [
+            sql`CASE ${pedidos.status}
+              WHEN 'BLOQUEADO_ESTOQUE' THEN 1
+              WHEN 'LIBERADO' THEN 2
+              WHEN 'EM_SEPARACAO' THEN 3
+              WHEN 'AGUARDANDO_CONFERENCIA' THEN 4
+              WHEN 'EM_CONFERENCIA' THEN 5
+              WHEN 'RASCUNHO' THEN 6
+              WHEN 'EXPEDIDO' THEN 7
+              ELSE 8
+            END ASC`,
+            desc(pedidos.createdAt),
+          ]
+          break
+        case 'CODIGO_DESC':
+        default:
+          orderExprs = [sql`${codigoNumExpr} DESC`, desc(pedidos.createdAt)]
+          break
+      }
+
+      const [rows, statusCounts] = await Promise.all([
+        conn.db
+          .select({
+            id: pedidos.id,
+            codigo: pedidos.codigo,
+            titulo: pedidos.titulo,
+            cliente_id: pedidos.clienteId,
+            cliente: pedidos.cliente,
+            vendedor_id: pedidos.vendedorId,
+            forma_pagamento_id: pedidos.formaPagamentoId,
+            local_cobranca_id: pedidos.localCobrancaId,
+            natureza_id: pedidos.naturezaId,
+            marchante: pedidos.marchante,
+            pagamento_na_entrega: pedidos.pagamentoNaEntrega,
+            previsao_entrega: pedidos.previsaoEntrega,
+            valor_total: pedidos.valorTotal,
+            observacoes: pedidos.observacoes,
+            origem_pedido: pedidos.origemPedido,
+            setor_solicitante: pedidos.setorSolicitante,
+            status: pedidos.status,
+            rastreio_token: pedidos.rastreioToken,
+            criado_por_nome: pedidos.criadoPorNome,
+            created_at: pedidos.createdAt,
+            liberado_at: pedidos.liberadoAt,
+            expedido_at: pedidos.expedidoAt,
+            vendedor_nome: sql<string | null>`(SELECT v.nome FROM vendedores v WHERE v.id = "pedidos"."vendedor_id" LIMIT 1)`,
+            forma_pagamento_descricao: sql<string | null>`(SELECT fp.descricao FROM formas_pagamento fp WHERE fp.id = "pedidos"."forma_pagamento_id" LIMIT 1)`,
+            qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id")`,
+            total_kg_solicitado: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id"), 0)`,
+            romaneio_id: sql<string | null>`(SELECT r.id FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+            romaneio_codigo: sql<string | null>`(SELECT r.codigo FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+            romaneio_status: sql<string | null>`(SELECT r.status FROM romaneios r WHERE r.pedido_id = "pedidos"."id" ORDER BY r.created_at DESC LIMIT 1)`,
+            total_kg_separado: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
+            total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
+            qtd_conferidas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id" AND ri.conferido = 1), 0)`,
+          })
+          .from(pedidos)
+          .where(and(...conds))
+          .orderBy(...orderExprs)
+          .limit(200),
+        conn.db
+          .select({
+            status: pedidos.status,
+            qtd: sql<number>`COUNT(*)::int`,
+          })
+          .from(pedidos)
+          .where(and(eq(pedidos.tenantId, ctx.tenantId), eq(pedidos.filialId, ctx.filialId)))
+          .groupBy(pedidos.status),
+      ])
+
+      const countMap = new Map(statusCounts.map((s) => [s.status, Number(s.qtd || 0)]))
+      const totalGeral = statusCounts.reduce((s, r) => s + Number(r.qtd || 0), 0)
+      const kpisGerais = {
+        total: totalGeral,
+        rascunho: countMap.get('RASCUNHO') || 0,
+        bloqueadosEstoque: countMap.get('BLOQUEADO_ESTOQUE') || 0,
+        liberados: countMap.get('LIBERADO') || 0,
+        emSeparacao: countMap.get('EM_SEPARACAO') || 0,
+        emConferencia:
+          (countMap.get('AGUARDANDO_CONFERENCIA') || 0) + (countMap.get('EM_CONFERENCIA') || 0),
+        expedidos: countMap.get('EXPEDIDO') || 0,
+        cancelados: countMap.get('CANCELADO') || 0,
+      }
 
       return {
         data: rows.map((r) => ({
@@ -192,6 +320,8 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           total_kg_solicitado: toNum(r.total_kg_solicitado, 0),
           total_kg_separado: toNum(r.total_kg_separado, 0),
         })),
+        kpis_gerais: kpisGerais,
+        total_geral: totalGeral,
       }
     },
   )

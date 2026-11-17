@@ -561,6 +561,70 @@ test('Fase 2: WhatsApp parser, Inbox -> Pedido, Parcelas, Clonar, Gerar OP e Cen
     assert.equal(resReEditLock.json().trava_estoque, true, 'Editar pedido ja LIBERADO aumentando qtd sem estoque deve disparar trava_estoque')
     assert.equal(resReEditLock.json().status, 'BLOQUEADO_ESTOQUE')
 
+    // 7D. Filtros por previsao_entrega, sem_previsao, ordenacao e kpis_gerais
+    const rPedDataA = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Filtro Data 25/11',
+        cliente_id: clienteId,
+        previsao_entrega: '2026-11-25',
+        liberar: false,
+        itens: [{ produto_id: itemOssobuco.produto_id, qtd_kg_solicitada: 40, preco_unitario: 100 }],
+      },
+    })
+    assert.equal(rPedDataA.statusCode, 201)
+    const rPedDataB = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Filtro Data 28/11',
+        cliente_id: clienteId,
+        previsao_entrega: '2026-11-28',
+        liberar: false,
+        itens: [{ produto_id: itemOssobuco.produto_id, qtd_kg_solicitada: 2, preco_unitario: 10 }],
+      },
+    })
+    assert.equal(rPedDataB.statusCode, 201)
+
+    const rFiltData = await app.inject({
+      method: 'GET',
+      url: '/api/pedidos?campo_data=PREVISAO&data_inicio=2026-11-25&data_fim=2026-11-25',
+      headers,
+    })
+    assert.equal(rFiltData.statusCode, 200)
+    const filtDataBody = rFiltData.json()
+    assert.equal(filtDataBody.data.length, 1, `Esperava exatamente 1 pedido em 25/11, veio: ${rFiltData.body}`)
+    assert.equal(filtDataBody.data[0].id, rPedDataA.json().id)
+    assert.ok(
+      Number(filtDataBody.kpis_gerais?.total || 0) >= 4,
+      `kpis_gerais.total devia refletir total global mesmo com filtro de data ativo: ${rFiltData.body}`,
+    )
+
+    const rSemPrev = await app.inject({
+      method: 'GET',
+      url: '/api/pedidos?sem_previsao=1',
+      headers,
+    })
+    assert.equal(rSemPrev.statusCode, 200)
+    assert.ok(rSemPrev.json().data.every((p: any) => !p.previsao_entrega))
+
+    const rOrdVal = await app.inject({ method: 'GET', url: '/api/pedidos?ordenar_por=VALOR_DESC', headers })
+    assert.equal(rOrdVal.statusCode, 200)
+    const vals = rOrdVal.json().data.map((p: any) => Number(p.valor_total || 0))
+    for (let i = 1; i < vals.length; i++) {
+      assert.ok(vals[i - 1] >= vals[i], `VALOR_DESC fora de ordem: ${vals[i - 1]} < ${vals[i]}`)
+    }
+
+    const rOrdPeso = await app.inject({ method: 'GET', url: '/api/pedidos?ordenar_por=PESO_DESC', headers })
+    assert.equal(rOrdPeso.statusCode, 200)
+    const pesos = rOrdPeso.json().data.map((p: any) => Number(p.total_kg_solicitado || 0))
+    for (let i = 1; i < pesos.length; i++) {
+      assert.ok(pesos[i - 1] >= pesos[i], `PESO_DESC fora de ordem: ${pesos[i - 1]} < ${pesos[i]}`)
+    }
+
     // 8. RBAC: usuario CLIENTE bloqueado (403)
     const resCliUser = await app.inject({
       method: 'POST',

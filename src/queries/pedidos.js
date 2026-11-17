@@ -168,34 +168,44 @@ export const pedidosQueries = {
     return res.rows
   },
 
-  /** Lista pedidos com totais solicitados, separados, conferidos e romaneio vinculado */
-  async listarPedidos(filtros = {}) {
+  /** Lista pedidos com totais solicitados, separados, conferidos, filtros completos e ordenação */
+  async listarPedidosPainel(filtros = {}) {
     if (isApiEnabled()) {
-      return (await apiRequest(`/api/pedidos${buildQueryString({
+      const res = await apiRequest(`/api/pedidos${buildQueryString({
         status: filtros.status && filtros.status !== 'TODOS' ? filtros.status : undefined,
-        q: filtros.busca || filtros.q,
-      })}`)).data
+        q: filtros.busca || filtros.q || undefined,
+        campo_data: filtros.campoData || 'PREVISAO',
+        data_inicio: filtros.dataInicio || undefined,
+        data_fim: filtros.dataFim || undefined,
+        sem_previsao: filtros.semPrevisao ? '1' : undefined,
+        vendedor_id: filtros.vendedorId || undefined,
+        forma_pagamento_id: filtros.formaPagamentoId || undefined,
+        setor: filtros.setor && filtros.setor !== 'TODOS' ? filtros.setor : undefined,
+        pagamento_na_entrega: filtros.pagamentoNaEntrega ? '1' : undefined,
+        ordenar_por: filtros.ordenarPor || 'CODIGO_DESC',
+      })}`)
+      return {
+        data: res.data || [],
+        kpis_gerais: res.kpis_gerais || null,
+        total_geral: Number(res.total_geral ?? (res.data || []).length),
+      }
     }
     await assertPermissao(['pedidos_consultar', 'pedidos', 'saida', 'expedicao'], { write: false, bloquearCliente: true })
     let where = '1=1'
     const args = []
 
     if (filtros.status && filtros.status !== 'TODOS') {
-      where += ' AND ped.status = ?'
-      args.push(filtros.status)
+      if (filtros.status === 'PRONTOS_CONFERENCIA') {
+        where += " AND ped.status IN ('AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA')"
+      } else {
+        where += ' AND ped.status = ?'
+        args.push(filtros.status)
+      }
     }
     if (filtros.busca && filtros.busca.trim()) {
       const q = `%${filtros.busca.trim()}%`
       where += ' AND (ped.codigo LIKE ? OR ped.titulo LIKE ? OR ped.cliente LIKE ? OR ped.criado_por_nome LIKE ?)'
       args.push(q, q, q, q)
-    }
-    if (filtros.dataInicio) {
-      where += ' AND DATE(ped.created_at) >= ?'
-      args.push(filtros.dataInicio)
-    }
-    if (filtros.dataFim) {
-      where += ' AND DATE(ped.created_at) <= ?'
-      args.push(filtros.dataFim)
     }
 
     const res = await db.execute({
@@ -225,7 +235,60 @@ export const pedidosQueries = {
       `,
       args
     })
-    return res.rows
+
+    let lista = res.rows || []
+    if (filtros.semPrevisao) {
+      lista = lista.filter((p) => !p.previsao_entrega)
+    } else if (filtros.dataInicio || filtros.dataFim) {
+      const usarCriacao = filtros.campoData === 'CRIACAO'
+      lista = lista.filter((p) => {
+        const raw = usarCriacao ? p.created_at : p.previsao_entrega
+        const iso = raw ? String(raw).slice(0, 10) : ''
+        if (!iso) return false
+        if (filtros.dataInicio && iso < filtros.dataInicio) return false
+        if (filtros.dataFim && iso > filtros.dataFim) return false
+        return true
+      })
+    }
+
+    const numCod = (c) => Number(String(c || '').replace(/\D/g, '') || 0)
+    const prioStatus = (s) => ({
+      BLOQUEADO_ESTOQUE: 1,
+      LIBERADO: 2,
+      EM_SEPARACAO: 3,
+      AGUARDANDO_CONFERENCIA: 4,
+      EM_CONFERENCIA: 5,
+      RASCUNHO: 6,
+      EXPEDIDO: 7,
+    }[s] || 8)
+
+    lista = [...lista].sort((a, b) => {
+      switch (filtros.ordenarPor) {
+        case 'CODIGO_ASC': return numCod(a.codigo) - numCod(b.codigo)
+        case 'PESO_DESC': return Number(b.total_kg_solicitado || 0) - Number(a.total_kg_solicitado || 0)
+        case 'PESO_ASC': return Number(a.total_kg_solicitado || 0) - Number(b.total_kg_solicitado || 0)
+        case 'VALOR_DESC': return Number(b.valor_total || 0) - Number(a.valor_total || 0)
+        case 'VALOR_ASC': return Number(a.valor_total || 0) - Number(b.valor_total || 0)
+        case 'PREVISAO_ASC':
+          return String(a.previsao_entrega || '9999-12-31').localeCompare(String(b.previsao_entrega || '9999-12-31'))
+        case 'STATUS_PADRAO':
+          return prioStatus(a.status) - prioStatus(b.status) || numCod(b.codigo) - numCod(a.codigo)
+        case 'CODIGO_DESC':
+        default:
+          return numCod(b.codigo) - numCod(a.codigo)
+      }
+    })
+
+    return {
+      data: lista,
+      kpis_gerais: null,
+      total_geral: (res.rows || []).length,
+    }
+  },
+
+  async listarPedidos(filtros = {}) {
+    const res = await this.listarPedidosPainel(filtros)
+    return res.data
   },
 
   /** Retorna pedido completo com itens, comparação solicitado vs separado e romaneio vinculado */
