@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Package, ArrowRightLeft, ClipboardList, LogOut, PackageOpen, MapPin, Search, Factory, Scissors, Printer, Users, PieChart, RotateCcw } from 'lucide-react'
+import { Package, ArrowRightLeft, ClipboardList, LogOut, PackageOpen, MapPin, Search, Factory, Scissors, Printer, Users, PieChart, RotateCcw, Truck } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { operadoresQueries } from '../queries/operadores'
 import { isCliente, temPermissao, temAlgumaPermissao } from '../utils/permissoes'
@@ -46,6 +46,13 @@ export function ColetorHome() {
       rota: '/saida',
       cor: '#f59e0b',
       permissoes: ['saida', 'expedicao'],
+    },
+    {
+      label: 'Carregamento\nRoteiros',
+      icon: <Truck size={44} />,
+      rota: '/roteirizacao',
+      cor: '#38bdf8',
+      permissoes: ['roteirizacao_carregamento', 'roteirizacao'],
     },
     {
       label: 'Devolução\nde Caixas',

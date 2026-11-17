@@ -328,7 +328,7 @@ function Sidebar() {
 
   const temVisaoGeral = temAlgumaPermissao(operador, ['dashboard_executivo', 'estoque_enderecos', 'consulta_estoque', 'relatorios_estoque'])
   const temCompras = temAlgumaPermissao(operador, ['compras', 'recebimento'])
-  const temFaturamento = temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos', 'financeiro_pedidos'])
+  const temFaturamento = temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos', 'financeiro_pedidos', 'roteirizacao'])
   const temGestaoOperacional = temAlgumaPermissao(operador, ['mapa_producao', 'producao_criar_op'])
   const temOperacao = temAlgumaPermissao(operador, [
     'recebimento',
@@ -343,6 +343,7 @@ function Sidebar() {
     'reimpressao',
     'saida',
     'expedicao',
+    'roteirizacao_carregamento',
     'devolucao',
     'devolucao_fiscal',
   ])
@@ -418,6 +419,11 @@ function Sidebar() {
               <ClipboardList size={18} /> Pedidos de Venda
             </NavLink>
           )}
+          {temAlgumaPermissao(operador, ['roteirizacao', 'pedidos', 'transportadoras']) && (
+            <NavLink to="/roteirizacao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Truck size={18} /> Roteirização / Embarques
+            </NavLink>
+          )}
         </>
       )}
 
@@ -462,6 +468,11 @@ function Sidebar() {
       {temAlgumaPermissao(operador, ['saida', 'expedicao']) && (
         <NavLink to="/saida" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <LogOut size={18} /> Saída de Materiais
+        </NavLink>
+      )}
+      {temPermissao(operador, 'roteirizacao_carregamento') && !temAlgumaPermissao(operador, ['roteirizacao', 'pedidos', 'transportadoras']) && (
+        <NavLink to="/roteirizacao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <Truck size={18} /> Carregamento / Roteiros
         </NavLink>
       )}
       {temAlgumaPermissao(operador, ['devolucao', 'devolucao_fiscal', 'saida', 'expedicao', 'recebimento']) && (

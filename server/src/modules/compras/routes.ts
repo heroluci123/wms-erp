@@ -107,7 +107,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
 
   app.patch(
     '/api/configuracoes/modulos',
-    { preHandler: requirePermission(['compras', 'configurar_sistema', 'parametros_comerciais']) },
+    { preHandler: requirePermission(['compras', 'roteirizacao', 'configurar_sistema', 'parametros_comerciais']) },
     async (req) => {
       const ctx = req.authCtx!
       const body = (req.body || {}) as {

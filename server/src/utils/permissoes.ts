@@ -20,6 +20,8 @@ export const TODAS_CHAVES_PERMISSAO = [
   'expedicao',
   'devolucao',
   'devolucao_fiscal',
+  'roteirizacao',
+  'roteirizacao_carregamento',
   'pedidos',
   'financeiro_pedidos',
   'whatsapp_inbox',
@@ -78,6 +80,8 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set<string>([
   'expedicao',
   'devolucao',
   'devolucao_fiscal',
+  'roteirizacao',
+  'roteirizacao_carregamento',
   'ean_etiquetas',
   'dashboard_executivo',
   'produtos',
@@ -120,6 +124,7 @@ export const PERMISSOES_PADRAO_OPERADOR: MapaPermissoes = {
   saida: true,
   expedicao: true,
   devolucao: true,
+  roteirizacao_carregamento: true,
   estoque_enderecos: true,
   consulta_estoque: true,
   rastreabilidade: true,
@@ -298,8 +303,14 @@ export function sanitizarPermissoes(
   if ((obj?.pedidos || obj?.financeiro_pedidos) && obj?.devolucao_fiscal === undefined) {
     mapa.devolucao_fiscal = true
   }
+  if ((obj?.pedidos || obj?.transportadoras) && obj?.roteirizacao === undefined) {
+    mapa.roteirizacao = true
+  }
+  if ((obj?.saida || obj?.expedicao) && obj?.roteirizacao_carregamento === undefined) {
+    mapa.roteirizacao_carregamento = true
+  }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao', 'devolucao_fiscal'] as const) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao', 'devolucao_fiscal', 'roteirizacao', 'roteirizacao_carregamento'] as const) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }
@@ -340,6 +351,13 @@ export function temPermissao(op: OperadorAuthContext | null | undefined, chave: 
       return p.devolucao !== false && (Boolean(p.saida || p.expedicao || p.recebimento) || isAdministradorOuSuperior(op))
     case 'devolucao_fiscal':
       return Boolean(p.pedidos || p.financeiro_pedidos) || isAdministradorOuSuperior(op)
+    case 'roteirizacao':
+      return Boolean(p.pedidos || p.transportadoras) || isAdministradorOuSuperior(op)
+    case 'roteirizacao_carregamento':
+      return (
+        p.roteirizacao_carregamento !== false &&
+        (Boolean(p.saida || p.expedicao || p.roteirizacao) || isAdministradorOuSuperior(op))
+      )
     case 'relatorios_producao':
     case 'relatorios_estoque':
       return Boolean(p.produtos || p.dashboard_executivo || p[chave])

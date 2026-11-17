@@ -16,6 +16,10 @@ export function isApiEnabled() {
   return Boolean(API_BASE)
 }
 
+export function getApiBaseUrl() {
+  return API_BASE
+}
+
 export function buildQueryString(params = {}) {
   const qs = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -27,13 +31,13 @@ export function buildQueryString(params = {}) {
   return str ? `?${str}` : ''
 }
 
-export async function apiRequest(path, { method = 'GET', body, tokenOverride } = {}) {
+export async function apiRequest(path, { method = 'GET', body, tokenOverride, skipAuth = false } = {}) {
   if (!API_BASE) {
     throw new Error('VITE_API_URL nao configurada para este ambiente.')
   }
 
   const state = useAppStore.getState()
-  const token = tokenOverride || state.jwtToken || state.sessionToken
+  const token = skipAuth ? null : tokenOverride || state.jwtToken || state.sessionToken
 
   const headers = {}
   if (body !== undefined) {
@@ -42,7 +46,7 @@ export async function apiRequest(path, { method = 'GET', body, tokenOverride } =
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }
-  if (state.filialAtivaId && !path.startsWith('/api/auth/')) {
+  if (!skipAuth && state.filialAtivaId && !path.startsWith('/api/auth/')) {
     headers['x-filial-id'] = state.filialAtivaId
   }
 
@@ -54,7 +58,7 @@ export async function apiRequest(path, { method = 'GET', body, tokenOverride } =
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    if (res.status === 401 && state.operador) {
+    if (!skipAuth && res.status === 401 && state.operador) {
       state.logout()
     }
     throw new Error(data?.error || `Erro na API (${res.status})`)

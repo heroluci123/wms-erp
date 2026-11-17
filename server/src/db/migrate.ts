@@ -935,11 +935,21 @@ CREATE TABLE IF NOT EXISTS embarques (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
   codigo TEXT NOT NULL,
+  titulo TEXT NOT NULL DEFAULT '',
   rota_id UUID REFERENCES rotas(id),
+  transportadora_id UUID,
   motorista_id UUID REFERENCES operadores(id),
+  motorista_nome TEXT NOT NULL DEFAULT '',
   veiculo_placa TEXT NOT NULL DEFAULT '',
+  modalidade_impressao TEXT NOT NULL DEFAULT 'OPCAO_B',
+  qr_token TEXT,
+  numero_nf_lote TEXT NOT NULL DEFAULT '',
+  observacoes TEXT NOT NULL DEFAULT '',
+  operador_carregamento_nome TEXT NOT NULL DEFAULT '',
   data_embarque DATE NOT NULL,
   status TEXT NOT NULL DEFAULT 'PLANEJADO',
+  iniciado_em TIMESTAMPTZ,
+  concluido_em TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_embarques_codigo ON embarques(tenant_id, codigo);
@@ -976,6 +986,9 @@ CREATE TABLE IF NOT EXISTS romaneios_itens (
   conferido INTEGER NOT NULL DEFAULT 0,
   conferido_at TIMESTAMPTZ,
   conferido_por TEXT,
+  carregado_veiculo INTEGER NOT NULL DEFAULT 0,
+  carregado_at TIMESTAMPTZ,
+  carregado_por TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_rom_itens_romaneio ON romaneios_itens(romaneio_id);
@@ -985,12 +998,17 @@ CREATE TABLE IF NOT EXISTS entregas_tracking (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   embarque_id UUID NOT NULL REFERENCES embarques(id) ON DELETE CASCADE,
   pedido_id UUID NOT NULL REFERENCES pedidos(id),
+  romaneio_id UUID,
   ordem_parada INTEGER NOT NULL DEFAULT 1,
   status_entrega TEXT NOT NULL DEFAULT 'PENDENTE',
   pagamento_confirmado INTEGER NOT NULL DEFAULT 0,
+  forma_pagamento_recebida TEXT NOT NULL DEFAULT '',
+  valor_pago NUMERIC(14,2),
   canhoto_foto_url TEXT,
   assinatura_url TEXT,
   observacao_motorista TEXT NOT NULL DEFAULT '',
+  iniciado_em TIMESTAMPTZ,
+  chegou_em TIMESTAMPTZ,
   concluido_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_tracking_embarque ON entregas_tracking(embarque_id);
@@ -1091,6 +1109,24 @@ ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS grupo_mapa TEXT NOT NU
 ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS observacao TEXT NOT NULL DEFAULT '';
 ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS qtd_realizada_kg NUMERIC(14,3) NOT NULL DEFAULT 0;
 ALTER TABLE mapas_producao_itens ADD COLUMN IF NOT EXISTS concluido INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS titulo TEXT NOT NULL DEFAULT '';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS transportadora_id UUID;
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS motorista_nome TEXT NOT NULL DEFAULT '';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS modalidade_impressao TEXT NOT NULL DEFAULT 'OPCAO_B';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS qr_token TEXT;
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS numero_nf_lote TEXT NOT NULL DEFAULT '';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS observacoes TEXT NOT NULL DEFAULT '';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS operador_carregamento_nome TEXT NOT NULL DEFAULT '';
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS iniciado_em TIMESTAMPTZ;
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS concluido_em TIMESTAMPTZ;
+ALTER TABLE romaneios_itens ADD COLUMN IF NOT EXISTS carregado_veiculo INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE romaneios_itens ADD COLUMN IF NOT EXISTS carregado_at TIMESTAMPTZ;
+ALTER TABLE romaneios_itens ADD COLUMN IF NOT EXISTS carregado_por TEXT;
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS romaneio_id UUID;
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS forma_pagamento_recebida TEXT NOT NULL DEFAULT '';
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS valor_pago NUMERIC(14,2);
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS iniciado_em TIMESTAMPTZ;
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS chegou_em TIMESTAMPTZ;
 `
 
 export interface SeedDefaultsResult {

@@ -28,7 +28,7 @@ const SETORES = [
   { id: 'SUPPLY_CHAIN', label: 'Supply Chain', cor: '#38bdf8', rota: '/pedidos' },
   { id: 'PCP', label: 'PCP / Produção', cor: '#f59e0b', rota: '/producao' },
   { id: 'CAMARA_FRIA', label: 'Câmara Fria', cor: '#22c55e', rota: '/saida' },
-  { id: 'LOGISTICA', label: 'Logística', cor: '#a78bfa', rota: '/saida' },
+  { id: 'LOGISTICA', label: 'Logística', cor: '#a78bfa', rota: '/roteirizacao' },
   { id: 'FATURAMENTO', label: 'Faturamento', cor: '#06b6d4', rota: '/pedidos' },
   { id: 'FINANCEIRO', label: 'Financeiro', cor: '#ec4899', rota: '/pedidos' },
 ]

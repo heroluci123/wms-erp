@@ -487,11 +487,21 @@ export const embarques = pgTable(
       .notNull()
       .references(() => filiais.id, { onDelete: 'cascade' }),
     codigo: text('codigo').notNull(),
+    titulo: text('titulo').notNull().default(''),
     rotaId: uuid('rota_id').references(() => rotas.id),
+    transportadoraId: uuid('transportadora_id'),
     motoristaId: uuid('motorista_id').references(() => operadores.id),
+    motoristaNome: text('motorista_nome').notNull().default(''),
     veiculoPlaca: text('veiculo_placa').notNull().default(''),
+    modalidadeImpressao: text('modalidade_impressao').notNull().default('OPCAO_B'), // OPCAO_B | OPCAO_A
+    qrToken: text('qr_token'),
+    numeroNfLote: text('numero_nf_lote').notNull().default(''),
+    observacoes: text('observacoes').notNull().default(''),
+    operadorCarregamentoNome: text('operador_carregamento_nome').notNull().default(''),
     dataEmbarque: date('data_embarque').notNull(),
-    status: text('status').notNull().default('PLANEJADO'), // PLANEJADO | EM_ROTA | CONCLUIDO
+    status: text('status').notNull().default('PLANEJADO'), // PLANEJADO | EM_CARREGAMENTO | EM_ROTA | CONCLUIDO | CANCELADO
+    iniciadoEm: timestamp('iniciado_em', { withTimezone: true }),
+    concluidoEm: timestamp('concluido_em', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('uq_embarques_codigo').on(t.tenantId, t.codigo)]
@@ -544,6 +554,9 @@ export const romaneiosItens = pgTable(
     conferido: integer('conferido').notNull().default(0),
     conferidoAt: timestamp('conferido_at', { withTimezone: true }),
     conferidoPor: text('conferido_por'),
+    carregadoVeiculo: integer('carregado_veiculo').notNull().default(0),
+    carregadoAt: timestamp('carregado_at', { withTimezone: true }),
+    carregadoPor: text('carregado_por'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('idx_rom_itens_romaneio').on(t.romaneioId)]
@@ -562,12 +575,17 @@ export const entregasTracking = pgTable(
     pedidoId: uuid('pedido_id')
       .notNull()
       .references(() => pedidos.id),
+    romaneioId: uuid('romaneio_id'),
     ordemParada: integer('ordem_parada').notNull().default(1),
     statusEntrega: text('status_entrega').notNull().default('PENDENTE'), // PENDENTE | A_CAMINHO | NO_CLIENTE | ENTREGUE | DEVOLVIDA
     pagamentoConfirmado: integer('pagamento_confirmado').notNull().default(0),
+    formaPagamentoRecebida: text('forma_pagamento_recebida').notNull().default(''),
+    valorPago: numeric('valor_pago', { precision: 14, scale: 2 }),
     canhotoFotoUrl: text('canhoto_foto_url'),
     assinaturaUrl: text('assinatura_url'),
     observacaoMotorista: text('observacao_motorista').notNull().default(''),
+    iniciadoEm: timestamp('iniciado_em', { withTimezone: true }),
+    chegouEm: timestamp('chegou_em', { withTimezone: true }),
     concluidoAt: timestamp('concluido_at', { withTimezone: true }),
   },
   (t) => [index('idx_tracking_embarque').on(t.embarqueId)]
