@@ -12,6 +12,7 @@ import {
   naturezasOperacao,
   marchantes,
   tiposVeiculo,
+  layoutsImportacaoTxt,
   eanSequencias,
 } from './schema/index.js'
 import { uuidv7 } from '../utils/uuid.js'
@@ -422,6 +423,37 @@ CREATE TABLE IF NOT EXISTS cliente_produto_espec (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_cli_prod_espec ON cliente_produto_espec(tenant_id, cliente_id, produto_id);
 
+CREATE TABLE IF NOT EXISTS fornecedor_produto_depara (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  fornecedor_id UUID NOT NULL REFERENCES fornecedores(id) ON DELETE CASCADE,
+  codigo_fornecedor TEXT NOT NULL,
+  descricao_fornecedor TEXT NOT NULL DEFAULT '',
+  ncm TEXT NOT NULL DEFAULT '',
+  produto_id UUID NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  fator_conversao NUMERIC(14,4) NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_depara_forn_cod ON fornecedor_produto_depara(tenant_id, fornecedor_id, codigo_fornecedor);
+CREATE INDEX IF NOT EXISTS idx_depara_prod ON fornecedor_produto_depara(tenant_id, produto_id);
+
+CREATE TABLE IF NOT EXISTS layouts_importacao_txt (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  fornecedor_id UUID REFERENCES fornecedores(id) ON DELETE SET NULL,
+  nome TEXT NOT NULL,
+  tipo_arquivo TEXT NOT NULL DEFAULT 'DELIMITADO',
+  delimitador TEXT NOT NULL DEFAULT ';',
+  saltar_linhas INTEGER NOT NULL DEFAULT 0,
+  formato_data TEXT NOT NULL DEFAULT 'DDMMYYYY',
+  decimal_ponto INTEGER NOT NULL DEFAULT 0,
+  mapeamento_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_layouts_txt_tenant ON layouts_importacao_txt(tenant_id, ativo);
+
 CREATE TABLE IF NOT EXISTS pedidos_compra (
   id UUID PRIMARY KEY,
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -430,6 +462,7 @@ CREATE TABLE IF NOT EXISTS pedidos_compra (
   fornecedor_id UUID NOT NULL REFERENCES fornecedores(id),
   natureza_id UUID REFERENCES naturezas_operacao(id),
   centro_custo_id UUID REFERENCES centros_custo(id),
+  forma_pagamento_id UUID REFERENCES formas_pagamento(id),
   comprador_id UUID REFERENCES operadores(id),
   marchante TEXT NOT NULL DEFAULT '',
   frete_valor NUMERIC(14,2) NOT NULL DEFAULT 0,
@@ -465,6 +498,16 @@ CREATE TABLE IF NOT EXISTS recebimentos (
   fornecedor_id UUID REFERENCES fornecedores(id),
   chave_nfe TEXT NOT NULL DEFAULT '',
   numero_nf TEXT NOT NULL DEFAULT '',
+  serie_nf TEXT NOT NULL DEFAULT '',
+  data_emissao_nf DATE,
+  valor_produtos_nf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_frete_nf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_outras_desp_nf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_desconto_nf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_total_nf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  xml_itens_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  xml_duplicatas_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  xml_conteudo TEXT NOT NULL DEFAULT '',
   xml_storage_key TEXT NOT NULL DEFAULT '',
   status_validacao TEXT NOT NULL DEFAULT 'AGUARDANDO_BIPAGEM',
   validado_por_id UUID,
@@ -472,6 +515,35 @@ CREATE TABLE IF NOT EXISTS recebimentos (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_recebimentos_codigo ON recebimentos(tenant_id, codigo);
+
+CREATE TABLE IF NOT EXISTS recebimento_pre_caixas (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  recebimento_id UUID REFERENCES recebimentos(id) ON DELETE CASCADE,
+  pedido_compra_id UUID REFERENCES pedidos_compra(id) ON DELETE SET NULL,
+  fornecedor_id UUID REFERENCES fornecedores(id) ON DELETE SET NULL,
+  ean_caixa TEXT NOT NULL,
+  codigo_produto_fornecedor TEXT NOT NULL DEFAULT '',
+  descricao_produto_fornecedor TEXT NOT NULL DEFAULT '',
+  produto_id UUID REFERENCES produtos(id) ON DELETE SET NULL,
+  peso_liquido_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  peso_bruto_kg NUMERIC(14,3),
+  tara_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  qtd_pecas INTEGER,
+  data_producao DATE,
+  validade DATE,
+  lote TEXT NOT NULL DEFAULT '',
+  documento_origem TEXT NOT NULL DEFAULT '',
+  arquivo_origem TEXT NOT NULL DEFAULT '',
+  custo_unitario_kg NUMERIC(14,4) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'PENDENTE',
+  caixa_estoque_id UUID,
+  bipada_em TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pre_caixas_tenant_ean ON recebimento_pre_caixas(tenant_id, ean_caixa);
+CREATE INDEX IF NOT EXISTS idx_pre_caixas_rec_status ON recebimento_pre_caixas(tenant_id, recebimento_id, status);
 
 CREATE TABLE IF NOT EXISTS paletes (
   id UUID PRIMARY KEY,
@@ -1155,6 +1227,17 @@ ALTER TABLE embarques ADD COLUMN IF NOT EXISTS capacidade_kg NUMERIC(14,2);
 ALTER TABLE embarques ADD COLUMN IF NOT EXISTS tolerancia_pct NUMERIC(6,2) NOT NULL DEFAULT 10;
 ALTER TABLE embarques ADD COLUMN IF NOT EXISTS horario_saida TEXT NOT NULL DEFAULT '';
 ALTER TABLE embarques ADD COLUMN IF NOT EXISTS temperatura_bau NUMERIC(6,2);
+ALTER TABLE pedidos_compra ADD COLUMN IF NOT EXISTS forma_pagamento_id UUID REFERENCES formas_pagamento(id);
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS serie_nf TEXT NOT NULL DEFAULT '';
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS data_emissao_nf DATE;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS valor_produtos_nf NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS valor_frete_nf NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS valor_outras_desp_nf NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS valor_desconto_nf NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS valor_total_nf NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS xml_itens_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS xml_duplicatas_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS xml_conteudo TEXT NOT NULL DEFAULT '';
 `
 
 export interface SeedDefaultsResult {
@@ -1343,6 +1426,38 @@ export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefa
         ativo: 1,
       },
     ])
+  }
+
+  const existingLayoutsTxt = await db
+    .select({ id: layoutsImportacaoTxt.id })
+    .from(layoutsImportacaoTxt)
+    .where(eq(layoutsImportacaoTxt.tenantId, tenantId))
+    .limit(1)
+  if (existingLayoutsTxt.length === 0) {
+    await db.insert(layoutsImportacaoTxt).values({
+      id: uuidv7(),
+      tenantId,
+      fornecedorId: null,
+      nome: 'Paula & Ribeiro / Frigodil (12 colunas ;)',
+      tipoArquivo: 'DELIMITADO',
+      delimitador: ';',
+      saltarLinhas: 0,
+      formatoData: 'DDMMYYYY',
+      decimalPonto: 0,
+      mapeamentoJson: {
+        origem_texto: 1,
+        romaneio_origem: 2,
+        ean: 3,
+        codigo_produto: 4,
+        descricao_produto: 5,
+        peso_liquido: 6,
+        qtd_pecas: 7,
+        data_producao: 8,
+        data_validade: 9,
+        documento_origem: 10,
+      },
+      ativo: 1,
+    })
   }
 
   const existingNat = await db.select().from(naturezasOperacao).where(eq(naturezasOperacao.tenantId, tenantId))

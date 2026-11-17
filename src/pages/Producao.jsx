@@ -3,9 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Factory, Plus, Check, Trash2, Unlock, BarChart2, ScanBarcode,
   AlertTriangle, Package, Printer, Edit3, ShieldAlert, ArrowDownToLine,
-  ArrowUpFromLine, RefreshCw, Play, FileText, Search, X, Lock, CheckCircle2, XCircle
+  ArrowUpFromLine, RefreshCw, Play, FileText, Search, X, Lock, CheckCircle2, XCircle,
+  DollarSign, TrendingUp, Award
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { isApiEnabled } from '../lib/apiClient.js'
 import { temPermissao } from '../utils/permissoes'
 import * as producaoQueries from '../queries/producao.js'
 import * as produtosQueries from '../queries/produtos.js'
@@ -403,7 +405,15 @@ export function Producao() {
   const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
   const isAdm = temPermissao(operador, 'producao_criar_op')
 
-  const [abaPrincipal, setAbaPrincipal] = useState('ativas') // 'ativas' | 'config' | 'fechadas' | 'relatorios'
+  const [abaPrincipal, setAbaPrincipal] = useState('ativas') // 'ativas' | 'config' | 'fechadas' | 'custos_analise' | 'relatorios'
+  const apiAtiva = isApiEnabled()
+  const [custosOp, setCustosOp] = useState(null)
+  const [loadingCustosOp, setLoadingCustosOp] = useState(false)
+  const [formCustosOp, setFormCustosOp] = useState({ custo_embalagens: '0', custo_mo_indireto: '0', precos_ref: {} })
+  const [analiseCustos, setAnaliseCustos] = useState({ ops: [], ranking_fornecedores: [] })
+  const [loadingAnaliseCustos, setLoadingAnaliseCustos] = useState(false)
+  const [filtroCustosInicio, setFiltroCustosInicio] = useState('')
+  const [filtroCustosFim, setFiltroCustosFim] = useState('')
   const [opsAtivas, setOpsAtivas] = useState([])
   const [opsFechadas, setOpsFechadas] = useState([])
   const [produtos, setProdutos] = useState([])
@@ -520,6 +530,23 @@ export function Producao() {
       if (!manterSubAba) {
         setSubAbaOp('entradas')
         setFeedbackEntrada(null)
+      }
+      if (apiAtiva) {
+        setCustosOp(null)
+        producaoQueries.obterCustosOp(det.id).then((c) => {
+          if (c) {
+            setCustosOp(c)
+            const prMap = {}
+            for (const ct of c.cortes || []) {
+              prMap[ct.produto_id] = String(ct.preco_venda_ref_kg ?? '')
+            }
+            setFormCustosOp({
+              custo_embalagens: String(c.custo_embalagens ?? 0),
+              custo_mo_indireto: String(c.custo_mo_indireto ?? 0),
+              precos_ref: prMap,
+            })
+          }
+        }).catch(() => {})
       }
 
       const padrao = resolverTaraSelecionada(taras, formSaida.tara_id)
@@ -1068,6 +1095,73 @@ export function Producao() {
     setAbaPrincipal('relatorios')
   }
 
+  const fmtMoedaPrd = (v) =>
+    Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  const carregarCustosOpSelecionada = async (opId) => {
+    if (!apiAtiva || !opId) return
+    setLoadingCustosOp(true)
+    try {
+      const c = await producaoQueries.obterCustosOp(opId)
+      if (c) {
+        setCustosOp(c)
+        const prMap = {}
+        for (const ct of c.cortes || []) {
+          prMap[ct.produto_id] = String(ct.preco_venda_ref_kg ?? '')
+        }
+        setFormCustosOp({
+          custo_embalagens: String(c.custo_embalagens ?? 0),
+          custo_mo_indireto: String(c.custo_mo_indireto ?? 0),
+          precos_ref: prMap,
+        })
+      }
+    } catch (err) {
+      toastError('Custos OP', err.message)
+    } finally {
+      setLoadingCustosOp(false)
+    }
+  }
+
+  const handleSalvarCustosOp = async (e) => {
+    e?.preventDefault()
+    if (!opSelecionada) return
+    const precosNum = {}
+    for (const [k, v] of Object.entries(formCustosOp.precos_ref || {})) {
+      const n = Number(String(v || '0').replace(',', '.'))
+      if (Number.isFinite(n) && n >= 0) precosNum[k] = n
+    }
+    setLoadingCustosOp(true)
+    try {
+      const res = await producaoQueries.atualizarCustosOp(opSelecionada.id, {
+        custo_embalagens: Number(String(formCustosOp.custo_embalagens || '0').replace(',', '.')) || 0,
+        custo_mo_indireto: Number(String(formCustosOp.custo_mo_indireto || '0').replace(',', '.')) || 0,
+        precos_ref: precosNum,
+      })
+      setCustosOp(res)
+      toastSuccess('Rateio Atualizado ✅', 'Custos NRV dos cortes e das caixas recalculados!')
+    } catch (err) {
+      toastError('Erro ao salvar custos', err.message)
+    } finally {
+      setLoadingCustosOp(false)
+    }
+  }
+
+  const carregarAnaliseCustosOps = async (di = filtroCustosInicio, df = filtroCustosFim) => {
+    if (!apiAtiva) return
+    setLoadingAnaliseCustos(true)
+    try {
+      const res = await producaoQueries.listarAnaliseCustosOps({
+        dataInicio: di || undefined,
+        dataFim: df || undefined,
+      })
+      setAnaliseCustos(res || { ops: [], ranking_fornecedores: [] })
+    } catch (err) {
+      toastError('Análise Custos', err.message)
+    } finally {
+      setLoadingAnaliseCustos(false)
+    }
+  }
+
   // Cálculos do resumo da OP aberta
   const resumoOp = useMemo(() => {
     if (!opSelecionada) return null
@@ -1148,6 +1242,20 @@ export function Producao() {
         >
           <Check size={15} /> OPs Finalizadas ({opsFechadas.length})
         </button>
+
+        {apiAtiva && (
+          <button
+            type="button"
+            className={`btn ${abaPrincipal === 'custos_analise' ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => {
+              setOpSelecionada(null)
+              setAbaPrincipal('custos_analise')
+              carregarAnaliseCustosOps()
+            }}
+          >
+            <TrendingUp size={15} /> Custos & Rendimento (Fornecedores)
+          </button>
+        )}
 
         <button
           type="button"
@@ -1265,12 +1373,12 @@ export function Producao() {
             )}
           </div>
 
-          {/* Seletor das 2 Sub-telas Operacionais */}
-          <div style={{ display: 'flex', gap: 10 }}>
+          {/* Seletor das Sub-telas Operacionais */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"
               className={`btn ${subAbaOp === 'entradas' ? 'btn--warning' : 'btn--secondary'}`}
-              style={{ flex: 1, justifyContent: 'center' }}
+              style={{ flex: 1, minWidth: 210, justifyContent: 'center' }}
               onClick={() => { setSubAbaOp('entradas'); setTimeout(() => entradaRef.current?.focus(), 80) }}
             >
               <ArrowDownToLine size={17} /> 1. Entradas na Produção ({resumoOp?.qtdIn || 0} cx)
@@ -1278,11 +1386,24 @@ export function Producao() {
             <button
               type="button"
               className={`btn ${subAbaOp === 'saidas' ? 'btn--success' : 'btn--secondary'}`}
-              style={{ flex: 1, justifyContent: 'center' }}
+              style={{ flex: 1, minWidth: 210, justifyContent: 'center' }}
               onClick={() => { setSubAbaOp('saidas'); setTimeout(() => pesoBrutoSaidaRef.current?.focus(), 80) }}
             >
               <ArrowUpFromLine size={17} /> 2. Saída da Produção & Etiquetas ({resumoOp?.qtdOut || 0} cx)
             </button>
+            {apiAtiva && (
+              <button
+                type="button"
+                className={`btn ${subAbaOp === 'custos' ? 'btn--primary' : 'btn--secondary'}`}
+                style={{ flex: 1, minWidth: 210, justifyContent: 'center' }}
+                onClick={() => {
+                  setSubAbaOp('custos')
+                  carregarCustosOpSelecionada(opSelecionada.id)
+                }}
+              >
+                <DollarSign size={17} /> 3. Custos & Rateio NRV
+              </button>
+            )}
           </div>
 
           {/* ── SUB-ABA 1: ENTRADAS NA PRODUÇÃO ───────────────────────────── */}
@@ -1676,6 +1797,182 @@ export function Producao() {
               </div>
             </div>
           )}
+
+          {/* ── SUB-ABA 3: MOTOR DE CUSTOS & RATEIO NRV ───────────────────── */}
+          {subAbaOp === 'custos' && apiAtiva && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {loadingCustosOp && !custosOp ? (
+                <div className="card">Calculando custos reais e rendimento industrial...</div>
+              ) : custosOp ? (
+                <>
+                  <div className="kpi-grid">
+                    <div className="kpi-card">
+                      <span className="kpi-card__label">Custo Matéria-Prima (MP)</span>
+                      <span className="kpi-card__value">{fmtMoedaPrd(custosOp.custo_mp_total)}</span>
+                    </div>
+                    <div className="kpi-card">
+                      <span className="kpi-card__label">Custo Total OP (+Emb/MO)</span>
+                      <span className="kpi-card__value text-warning">{fmtMoedaPrd(custosOp.custo_total_op)}</span>
+                    </div>
+                    <div className="kpi-card">
+                      <span className="kpi-card__label text-cyan">Custo Real Aproveitado / kg</span>
+                      <span className="kpi-card__value text-cyan">{fmtMoedaPrd(custosOp.custo_efetivo_aproveitado_kg)}/kg</span>
+                    </div>
+                    <div className="kpi-card">
+                      <span className="kpi-card__label text-success">Margem Bruta Estimada</span>
+                      <span className={`kpi-card__value ${custosOp.margem_bruta_rs >= 0 ? 'text-success' : 'text-danger'}`}>
+                        {fmtMoedaPrd(custosOp.margem_bruta_rs)} ({custosOp.margem_bruta_pct}%)
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Origem MP */}
+                  <div className="card">
+                    <h4 className="font-bold text-sm mb-10 flex items-center gap-8">
+                      <Package size={16} className="text-warning" /> Origem da Matéria-Prima Alocada na OP
+                    </h4>
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Fornecedor / Origem</th>
+                            <th>SIF / Lote</th>
+                            <th>Produto MP</th>
+                            <th style={{ textAlign: 'right' }}>Peso Entrada</th>
+                            <th style={{ textAlign: 'right' }}>Custo MP/kg</th>
+                            <th style={{ textAlign: 'right' }}>Total MP</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(custosOp.insumos_origem || []).map((orig, idx) => (
+                            <tr key={idx}>
+                              <td className="font-bold">{orig.fornecedor_nome}</td>
+                              <td className="font-mono text-xs">{orig.sif_origem || '-'} • {orig.lote || '-'}</td>
+                              <td className="text-sm">{orig.produto_descricao}</td>
+                              <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg2(orig.peso_kg)}</td>
+                              <td style={{ textAlign: 'right' }} className="font-mono">{fmtMoedaPrd(orig.custo_medio_kg)}</td>
+                              <td style={{ textAlign: 'right' }} className="font-bold">{fmtMoedaPrd(orig.custo_total)}</td>
+                            </tr>
+                          ))}
+                          {(custosOp.insumos_origem || []).length === 0 && (
+                            <tr><td colSpan={6} className="text-center p-16 text-muted">Nenhuma caixa de entrada bipada ainda.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Despesas OP + Tabela NRV por Corte */}
+                  <form onSubmit={handleSalvarCustosOp} className="card">
+                    <div className="flex justify-between items-center flex-wrap gap-10 mb-14">
+                      <div>
+                        <h4 className="font-bold text-sm flex items-center gap-8">
+                          <DollarSign size={16} className="text-success" /> Rateio de Custo Real por Corte ({custosOp.metodo_rateio === 'NRV' ? 'NRV — Proporcional ao Preço de Venda' : 'Proporcional ao Peso'})
+                        </h4>
+                        <p className="text-xs text-muted mt-4">
+                          Aparas creditam seu valor residual antes de ratear o custo líquido entre os cortes nobres.
+                        </p>
+                      </div>
+                      {isAdm && (
+                        <button type="submit" className="btn btn--primary btn--sm" disabled={loadingCustosOp}>
+                          <CheckCircle2 size={15} /> Salvar Custos & Recalcular NRV
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 16 }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Embalagens / Etiquetas / Sacos (R$)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="form-input"
+                          value={formCustosOp.custo_embalagens}
+                          onChange={(e) => setFormCustosOp((p) => ({ ...p, custo_embalagens: e.target.value }))}
+                          disabled={!isAdm}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Mão de Obra / Energia / Desossa (R$)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="form-input"
+                          value={formCustosOp.custo_mo_indireto}
+                          onChange={(e) => setFormCustosOp((p) => ({ ...p, custo_mo_indireto: e.target.value }))}
+                          disabled={!isAdm}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Receita Ref. Total Estimada</label>
+                        <div className="form-input font-bold text-success" style={{ background: 'var(--bg-1)' }}>
+                          {fmtMoedaPrd(custosOp.receita_estimada_total)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Corte / Produto Gerado</th>
+                            <th style={{ textAlign: 'right' }}>Peso Saída</th>
+                            <th style={{ textAlign: 'right' }}>% Rend. s/ MP</th>
+                            <th style={{ textAlign: 'right' }}>Preço Venda Ref./kg</th>
+                            <th style={{ textAlign: 'right' }}>Custo Real Alocado/kg</th>
+                            <th style={{ textAlign: 'right' }}>Custo Total</th>
+                            <th style={{ textAlign: 'right' }}>Margem Bruta</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(custosOp.cortes || []).map((c) => (
+                            <tr key={c.produto_id}>
+                              <td>
+                                <div className="font-bold text-sm">{c.produto_codigo} — {c.produto_descricao}</div>
+                                <div className="text-xs text-muted">{c.qtd_caixas} cx {c.eh_apara ? '• APARA (Crédito)' : ''}</div>
+                              </td>
+                              <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtKg2(c.peso_kg)}</td>
+                              <td style={{ textAlign: 'right' }} className="font-mono">{c.rendimento_sobre_mp_pct}%</td>
+                              <td style={{ textAlign: 'right' }}>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  className="form-input"
+                                  style={{ width: 95, textAlign: 'right', display: 'inline-block' }}
+                                  value={formCustosOp.precos_ref?.[c.produto_id] ?? c.preco_venda_ref_kg}
+                                  onChange={(e) =>
+                                    setFormCustosOp((p) => ({
+                                      ...p,
+                                      precos_ref: { ...p.precos_ref, [c.produto_id]: e.target.value },
+                                    }))
+                                  }
+                                  disabled={!isAdm}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'right' }} className="font-mono font-bold text-cyan">
+                                {fmtMoedaPrd(c.custo_alocado_kg)}
+                              </td>
+                              <td style={{ textAlign: 'right' }} className="font-mono">
+                                {fmtMoedaPrd(c.custo_total)}
+                              </td>
+                              <td style={{ textAlign: 'right' }} className={`font-bold ${c.margem_rs >= 0 ? 'text-success' : 'text-danger'}`}>
+                                {fmtMoedaPrd(c.margem_rs)} ({c.margem_pct}%)
+                              </td>
+                            </tr>
+                          ))}
+                          {(custosOp.cortes || []).length === 0 && (
+                            <tr><td colSpan={7} className="text-center p-16 text-muted">Nenhuma caixa de retorno lançada ainda.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </form>
+                </>
+              ) : (
+                <div className="card text-muted text-sm">Nenhum cálculo disponível ainda.</div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1967,6 +2264,147 @@ export function Producao() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ─── ABA CUSTOS & RENDIMENTO POR FORNECEDOR ───────────────────────── */}
+      {!opSelecionada && abaPrincipal === 'custos_analise' && apiAtiva && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div className="card">
+            <div className="flex justify-between items-end flex-wrap gap-12">
+              <div>
+                <h2 className="text-base font-bold flex items-center gap-8">
+                  <Award size={18} className="text-cyan" /> Ranking Real: Fornecedor × Rendimento × Custo Aproveitado/kg
+                </h2>
+                <p className="text-xs text-muted mt-4">
+                  Compare frigoríficos pelo rendimento real após desossa/beneficiamento e descubra quem realmente sai mais barato por kg aproveitado.
+                </p>
+              </div>
+              <div className="flex gap-8 items-end flex-wrap">
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">De</label>
+                  <input type="date" className="form-input" value={filtroCustosInicio} onChange={(e) => setFiltroCustosInicio(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Até</label>
+                  <input type="date" className="form-input" value={filtroCustosFim} onChange={(e) => setFiltroCustosFim(e.target.value)} />
+                </div>
+                <button type="button" className="btn btn--primary" disabled={loadingAnaliseCustos} onClick={() => carregarAnaliseCustosOps()}>
+                  <RefreshCw size={15} className={loadingAnaliseCustos ? 'animate-spin' : ''} /> Atualizar Análise
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela Ranking Fornecedores */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="p-14 border-b border-border font-bold text-sm">
+              1. Ranking de Eficiência por Fornecedor ({(analiseCustos.ranking_fornecedores || []).length})
+            </div>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Fornecedor / Frigorífico</th>
+                    <th style={{ textAlign: 'right' }}>OPs</th>
+                    <th style={{ textAlign: 'right' }}>Entrada MP</th>
+                    <th style={{ textAlign: 'right' }}>Aproveitado</th>
+                    <th style={{ textAlign: 'right' }}>Rendimento %</th>
+                    <th style={{ textAlign: 'right' }}>Quebra %</th>
+                    <th style={{ textAlign: 'right' }}>Custo MP/kg</th>
+                    <th style={{ textAlign: 'right' }}>Custo Real Aproveitado/kg</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(analiseCustos.ranking_fornecedores || []).map((f) => (
+                    <tr key={f.fornecedor_id}>
+                      <td className="font-bold">{f.fornecedor_nome}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono">{f.qtd_ops}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg2(f.peso_entrada_kg)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono text-success font-bold">{fmtKg2(f.peso_aproveitado_kg)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono font-bold text-cyan">{f.rendimento_medio_pct}%</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono text-danger">{f.perda_media_pct}%</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono">{fmtMoedaPrd(f.custo_medio_mp_kg)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono font-bold text-warning">
+                        {fmtMoedaPrd(f.custo_efetivo_aproveitado_kg)}
+                      </td>
+                    </tr>
+                  ))}
+                  {(analiseCustos.ranking_fornecedores || []).length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="text-center p-20 text-muted">
+                        Nenhuma OP finalizada com matéria-prima de fornecedor identificado neste período.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Tabela OPs Finalizadas com Rentabilidade */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="p-14 border-b border-border font-bold text-sm">
+              2. Margem & Custo Industrial das OPs Finalizadas ({(analiseCustos.ops || []).length})
+            </div>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>OP</th>
+                    <th>Data Prod.</th>
+                    <th style={{ textAlign: 'right' }}>Entrada</th>
+                    <th style={{ textAlign: 'right' }}>Saída</th>
+                    <th style={{ textAlign: 'right' }}>Rend. %</th>
+                    <th>Rateio</th>
+                    <th style={{ textAlign: 'right' }}>Custo Total</th>
+                    <th style={{ textAlign: 'right' }}>Receita Est.</th>
+                    <th style={{ textAlign: 'right' }}>Margem</th>
+                    <th style={{ textAlign: 'right' }}>Abrir</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(analiseCustos.ops || []).map((o) => (
+                    <tr key={o.op_id}>
+                      <td>
+                        <div className="font-mono font-bold text-cyan">{o.op_codigo}</div>
+                        <div className="text-xs text-muted">{o.op_nome}</div>
+                      </td>
+                      <td className="text-xs">{fmtDataBR(o.data_producao)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg2(o.peso_insumos_kg)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtKg2(o.peso_retornos_kg)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono font-bold text-cyan">{o.rendimento_pct}%</td>
+                      <td><span className="badge badge--neutral">{o.metodo_rateio}</span></td>
+                      <td style={{ textAlign: 'right' }} className="font-mono">{fmtMoedaPrd(o.custo_total_op)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono">{fmtMoedaPrd(o.receita_estimada_total)}</td>
+                      <td style={{ textAlign: 'right' }} className={`font-bold ${o.margem_bruta_rs >= 0 ? 'text-success' : 'text-danger'}`}>
+                        {fmtMoedaPrd(o.margem_bruta_rs)} ({o.margem_bruta_pct}%)
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="btn btn--secondary btn--sm"
+                          onClick={async () => {
+                            await abrirDetalhesOP(o.op_id, true)
+                            setSubAbaOp('custos')
+                          }}
+                        >
+                          Custos NRV
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {(analiseCustos.ops || []).length === 0 && (
+                    <tr>
+                      <td colSpan={10} className="text-center p-20 text-muted">
+                        Finalize ao menos uma Ordem de Produção para acompanhar o rateio NRV e margem bruta.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box, Unlock, Printer } from 'lucide-react'
+import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box, Unlock, Printer, FileText, RefreshCw } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { temPermissao } from '../utils/permissoes'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -461,7 +462,17 @@ export function Recebimento() {
   const apiAtiva = isApiEnabled()
   
   // Tabs
-  const [activeTab, setActiveTab] = useState('palete') // 'palete' | 'historico'
+  const [activeTab, setActiveTab] = useState('palete') // 'palete' | 'pre_caixas' | 'historico'
+
+  // Caixas pré-importadas via TXT (Recebimento Guiado)
+  const [preCaixas, setPreCaixas] = useState([])
+  const [preCaixasResumo, setPreCaixasResumo] = useState({ total: 0, pendentes: 0, bipadas: 0, peso_total_kg: 0, peso_bipada_kg: 0 })
+  const [filtroStatusPre, setFiltroStatusPre] = useState('PENDENTE')
+  const [eanPreScanner, setEanPreScanner] = useState('')
+  const [enderecoPre, setEnderecoPre] = useState('REC')
+  const [paletePreId, setPaletePreId] = useState('')
+  const [loadingPre, setLoadingPre] = useState(false)
+  const preScanRef = useRef(null)
   
   // Pedido de Compra vinculado na doca (ERP API)
   const [pcsDoca, setPcsDoca] = useState([])
@@ -504,10 +515,28 @@ export function Recebimento() {
     } catch { /* ignore */ }
   }, [apiAtiva])
 
+  const carregarPreCaixas = useCallback(async () => {
+    if (!apiAtiva) return
+    setLoadingPre(true)
+    try {
+      const res = await comprasQueries.listarPreCaixasRecebimento({
+        pedido_compra_id: pcSelecionadoId || undefined,
+        status: filtroStatusPre,
+      })
+      setPreCaixas(res?.data || [])
+      setPreCaixasResumo(res?.resumo || { total: 0, pendentes: 0, bipadas: 0, peso_total_kg: 0, peso_bipada_kg: 0 })
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingPre(false)
+    }
+  }, [apiAtiva, pcSelecionadoId, filtroStatusPre])
+
   // Carregar dados iniciais
   useEffect(() => {
     carregarPaletesAbertos()
     carregarPcsDoca()
+    carregarPreCaixas()
     tarasQueries.listar(true).then((lista) => {
       setTaras(lista)
       const padrao = resolverTaraSelecionada(lista, '')
@@ -515,7 +544,7 @@ export function Recebimento() {
         setBoxData(prev => prev.tara_id ? prev : { ...prev, tara_id: String(padrao.id) })
       }
     }).catch(() => {})
-  }, [carregarPcsDoca])
+  }, [carregarPcsDoca, carregarPreCaixas])
 
   const carregarPaletesAbertos = async () => {
     try {
@@ -597,6 +626,65 @@ export function Recebimento() {
     }
   };
 
+  const handleBiparPreCaixa = async (codigoRaw, { paleteIdOverride = paletePreId, enderecoOverride = enderecoPre } = {}) => {
+    const cod = String(codigoRaw || eanPreScanner || '').trim()
+    if (!cod) return
+    try {
+      const res = await comprasQueries.biparPreCaixa({
+        ean_caixa: cod,
+        pedido_compra_id: pcSelecionadoId || null,
+        palete_id: paleteIdOverride || null,
+        endereco: enderecoOverride || 'REC',
+      })
+      const cx = res.caixa
+      toastSuccess(
+        'Pré-Caixa Efetivada ✅',
+        `${cx.produto_descricao} • ${Number(cx.peso_kg || 0).toFixed(2)} kg${cx.qtd_pecas ? ` (${cx.qtd_pecas} pç)` : ''}`,
+      )
+      setEanPreScanner('')
+      carregarPreCaixas()
+      carregarPcsDoca()
+      if (paleteAtivo && paleteIdOverride === paleteAtivo.id) {
+        selecionarPalete(paleteAtivo)
+        carregarPaletesAbertos()
+      }
+      return true
+    } catch (err) {
+      toastError('Bipagem Pré-Caixa', err.message)
+      return false
+    } finally {
+      setTimeout(() => preScanRef.current?.focus(), 80)
+    }
+  }
+
+  const handleConfirmarLotePreCaixas = async () => {
+    const pendentesIds = preCaixas.filter((c) => c.status === 'PENDENTE').map((c) => c.id)
+    if (pendentesIds.length === 0) return toastWarning('Nada pendente', 'Não há pré-caixas pendentes nesta seleção.')
+    const ok = await useAppStore.getState().confirmar({
+      title: 'Confirmar Pré-Caixas em Lote',
+      message: `Efetivar direto no endereço ${enderecoPre || 'REC'} todas as ${pendentesIds.length} caixa(s) pendente(s) listadas?`,
+      type: 'confirm',
+      confirmLabel: 'Confirmar Lote',
+    })
+    if (!ok) return
+    try {
+      const res = await comprasQueries.confirmarPreCaixasLote({
+        pre_caixa_ids: pendentesIds,
+        endereco: enderecoPre || 'REC',
+        palete_id: paletePreId || null,
+      })
+      toastSuccess('Lote Confirmado ✅', `${res.confirmadas} caixa(s) (${fmtKg2(res.peso_kg)}) inseridas no estoque!`)
+      carregarPreCaixas()
+      carregarPcsDoca()
+      if (paleteAtivo) {
+        selecionarPalete(paleteAtivo)
+        carregarPaletesAbertos()
+      }
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
   // --- Fluxo de Bipagem da Caixa (SSCC) ---
   const { inputRef: codigoRef, handleKeyDown: handleCodigoKeyDown } = useBarcodeScanner({
     onScan: async (val) => {
@@ -611,6 +699,24 @@ export function Recebimento() {
           setEanBipado('')
           setTimeout(() => codigoRef.current?.focus(), 100)
           return
+        }
+
+        if (apiAtiva) {
+          const valSemZero = String(val).trim().replace(/^0+/, '')
+          const matchPre = preCaixas.find(
+            (p) =>
+              p.status === 'PENDENTE' &&
+              (p.ean_caixa === val || String(p.ean_caixa || '').replace(/^0+/, '') === valSemZero),
+          )
+          if (matchPre) {
+            await handleBiparPreCaixa(val, {
+              paleteIdOverride: paleteAtivo.id,
+              enderecoOverride: paleteAtivo.endereco_atual || 'REC',
+            })
+            setEanBipado('')
+            setTimeout(() => codigoRef.current?.focus(), 100)
+            return
+          }
         }
 
         const resultado = await produtosQueries.buscarPorCodigoComInfo(val)
@@ -715,7 +821,7 @@ export function Recebimento() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
         <button
           className={`btn ${activeTab === 'palete' ? 'btn--primary' : 'btn--ghost'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
@@ -727,6 +833,22 @@ export function Recebimento() {
         >
           <Layers size={16} /> Recebimento c/ Palete
         </button>
+        {apiAtiva && (
+          <button
+            className={`btn ${activeTab === 'pre_caixas' ? 'btn--primary' : 'btn--ghost'}`}
+            style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
+            onClick={() => {
+              setActiveTab('pre_caixas')
+              carregarPreCaixas()
+              setTimeout(() => preScanRef.current?.focus(), 100)
+            }}
+          >
+            <FileText size={16} /> Caixas Pré-Importadas (Só Bipar)
+            {preCaixasResumo.pendentes > 0 && (
+              <span className="badge badge--warning" style={{ marginLeft: 6 }}>{preCaixasResumo.pendentes}</span>
+            )}
+          </button>
+        )}
         <button
           className={`btn ${activeTab === 'historico' ? 'btn--primary' : 'btn--ghost'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
@@ -969,6 +1091,167 @@ export function Recebimento() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB: Caixas Pré-Importadas (Só Bipar via TXT) */}
+      {activeTab === 'pre_caixas' && apiAtiva && (
+        <div className="flex flex-col gap-16">
+          <div className="card">
+            <div className="flex justify-between items-start flex-wrap gap-12 mb-12">
+              <div>
+                <h2 className="text-base font-bold flex items-center gap-8 text-cyan">
+                  <ScanBarcode size={18} /> Recebimento Guiado de Caixas Pré-Importadas (.TXT)
+                </h2>
+                <p className="text-xs text-muted mt-4">
+                  Como peso, peças, validade, lote e custo já vieram dos arquivos TXT, <strong>basta bipar o código de barras da etiqueta</strong> para efetivar a entrada no estoque!
+                </p>
+              </div>
+              <div className="flex gap-8">
+                <button type="button" className="btn btn--ghost btn--sm" onClick={carregarPreCaixas} disabled={loadingPre}>
+                  <RefreshCw size={14} className={loadingPre ? 'animate-spin' : ''} /> Atualizar
+                </button>
+                {(temPermissao(operador, 'recebimento') || temPermissao(operador, 'compras')) && preCaixas.some((c) => c.status === 'PENDENTE') && (
+                  <button type="button" className="btn btn--info btn--sm" onClick={handleConfirmarLotePreCaixas}>
+                    <CheckCircle2 size={14} /> Confirmar Restantes em Lote ({preCaixas.filter((c) => c.status === 'PENDENTE').length})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginBottom: 14 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Filtrar Pedido de Compra</label>
+                <select className="form-input" value={pcSelecionadoId} onChange={(e) => setPcSelecionadoId(e.target.value)}>
+                  <option value="">Todos os Lotes / Recebimentos</option>
+                  {pcsDoca.map((pc) => (
+                    <option key={pc.id} value={pc.id}>
+                      {pc.codigo} — {pc.fornecedor_nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Status</label>
+                <select className="form-input" value={filtroStatusPre} onChange={(e) => setFiltroStatusPre(e.target.value)}>
+                  <option value="PENDENTE">Pendentes na Doca</option>
+                  <option value="BIPADA">Já Bipadas</option>
+                  <option value="TODOS">Todas</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Palete LPN (Opcional)</label>
+                <select className="form-input" value={paletePreId} onChange={(e) => setPaletePreId(e.target.value)}>
+                  <option value="">Sem palete (direto no endereço)</option>
+                  {paletesAbertos.map((p) => (
+                    <option key={p.id} value={p.id}>{p.codigo} ({p.qtd_caixas || 0} cx)</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Endereço Destino</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={enderecoPre}
+                  onChange={(e) => setEnderecoPre(e.target.value.toUpperCase())}
+                  placeholder="REC"
+                />
+              </div>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                handleBiparPreCaixa(eanPreScanner)
+              }}
+              className="flex gap-8 items-center mb-16"
+            >
+              <input
+                ref={preScanRef}
+                type="text"
+                className="form-input form-input--scanner"
+                style={{ flex: 1 }}
+                placeholder="Bipe ou digite o código de barras da etiqueta pré-importada e aperte Enter..."
+                value={eanPreScanner}
+                onChange={(e) => setEanPreScanner(e.target.value)}
+              />
+              <button type="submit" className="btn btn--primary">
+                <Check size={16} /> Bipar Caixa
+              </button>
+            </form>
+
+            <div className="flex gap-16 flex-wrap text-xs p-10 rounded" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+              <span>Total carregadas: <strong>{preCaixasResumo.total} cx</strong> ({fmtKg2(preCaixasResumo.peso_total_kg)})</span>
+              <span className="text-warning">Pendentes (faltam bipar): <strong>{preCaixasResumo.pendentes} cx</strong></span>
+              <span className="text-success">Bipadas no estoque: <strong>{preCaixasResumo.bipadas} cx</strong> ({fmtKg2(preCaixasResumo.peso_bipada_kg)})</span>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>EAN / Etiqueta</th>
+                    <th>Produto</th>
+                    <th>Origem / NF</th>
+                    <th style={{ textAlign: 'right' }}>Peso Líq.</th>
+                    <th style={{ textAlign: 'right' }}>Peças</th>
+                    <th>Lote / Validade</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preCaixas.map((c) => (
+                    <tr key={c.id}>
+                      <td className="font-mono font-bold text-cyan">{c.ean_caixa}</td>
+                      <td>
+                        <div className="font-bold text-sm">{c.produto_codigo} — {c.produto_descricao}</div>
+                        <div className="text-xs text-muted">{c.fornecedor_nome || ''} {c.pedido_compra_codigo ? `• ${c.pedido_compra_codigo}` : ''}</div>
+                      </td>
+                      <td className="text-xs text-muted">
+                        <div>{c.documento_origem || c.numero_nf || '-'}</div>
+                        <div>{c.arquivo_origem || '-'}</div>
+                      </td>
+                      <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtKg2(c.peso_liquido_kg)}</td>
+                      <td style={{ textAlign: 'right' }} className="font-mono">{c.qtd_pecas ?? '-'}</td>
+                      <td className="text-xs font-mono">
+                        <div>{c.lote || '-'}</div>
+                        <div className="text-muted">{c.validade ? fmtDataBR(c.validade) : '-'}</div>
+                      </td>
+                      <td>
+                        {c.status === 'BIPADA' ? (
+                          <span className="badge badge--success">Bipada ✅</span>
+                        ) : (
+                          <span className="badge badge--warning">Pendente Doca</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {c.status === 'PENDENTE' && (
+                          <button
+                            type="button"
+                            className="btn btn--primary btn--sm"
+                            onClick={() => handleBiparPreCaixa(c.ean_caixa)}
+                          >
+                            <Check size={13} /> Bipar Agora
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {preCaixas.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="text-center p-24 text-muted">
+                        Nenhuma caixa pré-importada encontrada para este filtro. Importe os arquivos `.txt` na tela de Compras!
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

@@ -76,4 +76,68 @@ export const comprasQueries = {
       body: payload,
     })
   },
+
+  // ── LAYOUTS TXT, DE-PARA, XML NF-E, PRÉ-CAIXAS DOCA ───────────────────────
+  async listarLayoutsTxt() {
+    if (!isApiEnabled()) return []
+    return (await apiRequest('/api/compras/layouts-txt')).data || []
+  },
+
+  async salvarLayoutTxt(payload) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest('/api/compras/layouts-txt', { method: 'POST', body: payload })
+  },
+
+  async excluirLayoutTxt(id) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest(`/api/compras/layouts-txt/${id}`, { method: 'DELETE' })
+  },
+
+  async listarDepara(fornecedorId = null) {
+    if (!isApiEnabled()) return []
+    return (await apiRequest(`/api/compras/depara${buildQueryString({ fornecedor_id: fornecedorId || undefined })}`)).data || []
+  },
+
+  async salvarDepara(fornecedorId, vinculos) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest('/api/compras/depara', {
+      method: 'POST',
+      body: { fornecedor_id: fornecedorId, vinculos },
+    })
+  },
+
+  async excluirDepara(id) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest(`/api/compras/depara/${id}`, { method: 'DELETE' })
+  },
+
+  async previewXmlNfe(payload) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest('/api/compras/xml/parse-preview', { method: 'POST', body: payload })
+  },
+
+  async previewTxtLote(payload) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest('/api/compras/txt/parse-preview', { method: 'POST', body: payload })
+  },
+
+  async importarLoteEntrada(payload) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest('/api/compras/importar-lote', { method: 'POST', body: payload })
+  },
+
+  async listarPreCaixasRecebimento(params = {}) {
+    if (!isApiEnabled()) return { resumo: { total: 0, pendentes: 0, bipadas: 0 }, data: [] }
+    return apiRequest(`/api/recebimento/pre-caixas${buildQueryString(params)}`)
+  },
+
+  async biparPreCaixa(payload) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest('/api/recebimento/bipar-pre-caixa', { method: 'POST', body: payload })
+  },
+
+  async confirmarPreCaixasLote(payload) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest('/api/recebimento/confirmar-pre-caixas-lote', { method: 'POST', body: payload })
+  },
 }

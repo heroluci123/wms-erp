@@ -13,6 +13,13 @@ import {
   AlertTriangle,
   Truck,
   X,
+  Upload,
+  FileText,
+  FileCode2,
+  ArrowRightLeft,
+  Settings2,
+  Boxes,
+  Check,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { temPermissao } from '../utils/permissoes'
@@ -47,12 +54,22 @@ const STATUS_VAL_BADGE = {
   VALIDADO: { label: 'Validado ✅', cls: 'badge--success' },
 }
 
+function readFileAsTextSmart(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error(`Falha ao ler arquivo ${file.name}`))
+    reader.readAsText(file, 'UTF-8')
+  })
+}
+
 export function Compras() {
   const location = useLocation()
-  const { operador, toastSuccess, toastError, toastWarning } = useAppStore()
+  const { operador, toastSuccess, toastError, toastWarning, confirmar } = useAppStore()
   const podeEscrever = temPermissao(operador, 'compras')
   const apiAtiva = isApiEnabled()
 
+  const [abaAtiva, setAbaAtiva] = useState('pedidos') // 'pedidos' | 'importar' | 'depara'
   const [loading, setLoading] = useState(false)
   const [compras, setCompras] = useState([])
   const [travaAtiva, setTravaAtiva] = useState(false)
@@ -61,13 +78,21 @@ export function Compras() {
 
   const [fornecedores, setFornecedores] = useState([])
   const [produtos, setProdutos] = useState([])
-  const [auxiliares, setAuxiliares] = useState({ centrosCusto: [], naturezasOperacao: [], marchantes: [] })
+  const [auxiliares, setAuxiliares] = useState({
+    centrosCusto: [],
+    naturezasOperacao: [],
+    marchantes: [],
+    formasPagamento: [],
+  })
+  const [layoutsTxt, setLayoutsTxt] = useState([])
+  const [deparas, setDeparas] = useState([])
 
-  // Modal Criar PC
+  // Modal Criar PC (corrigido centralizado com grid responsivo)
   const [modalNovo, setModalNovo] = useState(false)
   const [fornecedorId, setFornecedorId] = useState('')
   const [finalidade, setFinalidade] = useState('MATERIA_PRIMA')
   const [centroCustoId, setCentroCustoId] = useState('')
+  const [formaPagamentoId, setFormaPagamentoId] = useState('')
   const [cfopPreview, setCfopPreview] = useState(null)
   const [marchante, setMarchante] = useState('FRIGODIL')
   const [freteValor, setFreteValor] = useState('')
@@ -83,37 +108,89 @@ export function Compras() {
   // Modal Detalhe / Validação 3-Way
   const [detalhe, setDetalhe] = useState(null)
 
+  // Aba Importar Lote (Múltiplos TXTs e/ou XML NF-e)
+  const [impPcId, setImpPcId] = useState('')
+  const [impFornId, setImpFornId] = useState('')
+  const [impAutoCadForn, setImpAutoCadForn] = useState(true)
+  const [impLayoutId, setImpLayoutId] = useState('')
+  const [impModoEntrada, setImpModoEntrada] = useState('PRE_RECEBIMENTO')
+  const [impEnderecoDireto, setImpEnderecoDireto] = useState('REC')
+  const [impXmlText, setImpXmlText] = useState('')
+  const [impXmlFileName, setImpXmlFileName] = useState('')
+  const [impXmlPreview, setImpXmlPreview] = useState(null)
+  const [impTxtArquivos, setImpTxtArquivos] = useState([]) // [{ nome, conteudo }]
+  const [impTxtPreview, setImpTxtPreview] = useState(null)
+  const [impDeparaEdits, setImpDeparaEdits] = useState({}) // { [codigoForn]: produtoId }
+  const [impExecutando, setImpExecutando] = useState(false)
+  const [impResultado, setImpResultado] = useState(null)
+
+  // Aba De-Para & Layouts TXT
+  const [filtroFornDepara, setFiltroFornDepara] = useState('')
+  const [novoDpFornId, setNovoDpFornId] = useState('')
+  const [novoDpCod, setNovoDpCod] = useState('')
+  const [novoDpDesc, setNovoDpDesc] = useState('')
+  const [novoDpProdId, setNovoDpProdId] = useState('')
+  const [modalNovoLayout, setModalNovoLayout] = useState(false)
+  const [layForm, setLayForm] = useState({
+    nome: '',
+    fornecedor_id: '',
+    delimitador: ';',
+    saltar_linhas: 0,
+    formato_data: 'DDMMYYYY',
+    decimal_ponto: false,
+    col_ean: 3,
+    col_cod: 4,
+    col_desc: 5,
+    col_peso: 6,
+    col_pecas: 7,
+    col_prod: 8,
+    col_val: 9,
+    col_romaneio: 2,
+    col_doc: 10,
+  })
+
   const carregar = useCallback(async () => {
     setLoading(true)
     try {
-      const [resCompras, listForn, listProd, aux] = await Promise.all([
+      const [resCompras, listForn, listProd, aux, lays, dps] = await Promise.all([
         comprasQueries.listarCompras({ status: filtroStatus, busca }),
         apiAtiva ? cadastrosQueries.listarFornecedores().catch(() => []) : Promise.resolve([]),
         produtosQueries.listar().catch(() => []),
-        apiAtiva ? cadastrosQueries.listarAuxiliares().catch(() => ({ centrosCusto: [], naturezasOperacao: [], marchantes: [] })) : Promise.resolve({ centrosCusto: [], naturezasOperacao: [], marchantes: [] }),
+        apiAtiva
+          ? cadastrosQueries
+              .listarAuxiliares()
+              .catch(() => ({ centrosCusto: [], naturezasOperacao: [], marchantes: [], formasPagamento: [] }))
+          : Promise.resolve({ centrosCusto: [], naturezasOperacao: [], marchantes: [], formasPagamento: [] }),
+        apiAtiva ? comprasQueries.listarLayoutsTxt().catch(() => []) : Promise.resolve([]),
+        apiAtiva ? comprasQueries.listarDepara().catch(() => []) : Promise.resolve([]),
       ])
       setCompras(resCompras.data || [])
       setTravaAtiva(Boolean(resCompras.trava_recebimento_sem_pc))
       setFornecedores(listForn || [])
       setProdutos(listProd || [])
-      setAuxiliares(aux || { centrosCusto: [], naturezasOperacao: [], marchantes: [] })
+      setAuxiliares(aux || { centrosCusto: [], naturezasOperacao: [], marchantes: [], formasPagamento: [] })
+      setLayoutsTxt(lays || [])
+      setDeparas(dps || [])
       if (!centroCustoId && aux?.centrosCusto?.length > 0) {
         setCentroCustoId(aux.centrosCusto[0].id)
       }
-      const marcPadrao = (aux?.marchantes || []).find((m) => Number(m.is_padrao) === 1)?.nome || aux?.marchantes?.[0]?.nome
+      if (!impLayoutId && lays?.length > 0) {
+        setImpLayoutId(lays[0].id)
+      }
+      const marcPadrao =
+        (aux?.marchantes || []).find((m) => Number(m.is_padrao) === 1)?.nome || aux?.marchantes?.[0]?.nome
       if (marcPadrao) setMarchante((prev) => prev || marcPadrao)
     } catch (err) {
       toastError('Erro', err.message || 'Falha ao carregar compras.')
     } finally {
       setLoading(false)
     }
-  }, [apiAtiva, filtroStatus, busca, toastError])
+  }, [apiAtiva, filtroStatus, busca, toastError, centroCustoId, impLayoutId])
 
   useEffect(() => {
     carregar()
   }, [carregar])
 
-  // Prefill vindo da Sugestão de Compras (/estoque-minimo)
   useEffect(() => {
     const pre = location.state?.prefillItens
     if (Array.isArray(pre) && pre.length > 0) {
@@ -130,7 +207,6 @@ export function Compras() {
     }
   }, [location.state])
 
-  // Sugestão automática de CFOP Entrada ao selecionar fornecedor ou finalidade
   useEffect(() => {
     if (!apiAtiva || !fornecedorId) {
       setCfopPreview(null)
@@ -223,6 +299,7 @@ export function Compras() {
         fornecedor_id: fornecedorId,
         finalidade,
         centro_custo_id: centroCustoId || null,
+        forma_pagamento_id: formaPagamentoId || null,
         natureza_id: cfopPreview?.natureza_id || null,
         marchante,
         frete_valor: Number(String(freteValor || '0').replace(',', '.')) || 0,
@@ -235,7 +312,11 @@ export function Compras() {
       toastSuccess('Pedido de Compra Criado', `${res.codigo} (${res.status}) criado com sucesso!`)
       setModalNovo(false)
       setItensForm([])
-      const marcPadrao = (auxiliares.marchantes || []).find((m) => Number(m.is_padrao) === 1)?.nome || auxiliares.marchantes?.[0]?.nome || 'FRIGODIL'
+      setFormaPagamentoId('')
+      const marcPadrao =
+        (auxiliares.marchantes || []).find((m) => Number(m.is_padrao) === 1)?.nome ||
+        auxiliares.marchantes?.[0]?.nome ||
+        'FRIGODIL'
       setMarchante(marcPadrao)
       setFreteValor('')
       setDespesasValor('')
@@ -278,10 +359,330 @@ export function Compras() {
   }
 
   const handleCancelar = async (id) => {
+    const ok = await confirmar({
+      title: 'Cancelar Pedido de Compra',
+      message: 'Deseja realmente cancelar este Pedido de Compra?',
+      type: 'error',
+      confirmLabel: 'Sim, Cancelar PC',
+    })
+    if (!ok) return
     try {
       await comprasQueries.cancelarCompra(id)
       toastSuccess('Cancelado', 'Pedido de Compra cancelado.')
       setDetalhe(null)
+      carregar()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  // ── IMPORTAÇÃO EM LOTE (TXT(s) e/ou XML NF-e) ───────────────────────────────
+  const rodarPreviewXml = useCallback(
+    async (xmlStr, fornIdOverride = impFornId, pcIdOverride = impPcId) => {
+      if (!xmlStr?.trim()) {
+        setImpXmlPreview(null)
+        return
+      }
+      try {
+        const res = await comprasQueries.previewXmlNfe({
+          xml_conteudo: xmlStr,
+          fornecedor_id: fornIdOverride || null,
+          pedido_compra_id: pcIdOverride || null,
+        })
+        setImpXmlPreview(res)
+        if (res.fornecedor_encontrado?.id && !fornIdOverride) {
+          setImpFornId(res.fornecedor_encontrado.id)
+        }
+        const preEdits = {}
+        for (const it of res.nfe?.itens || []) {
+          if (it.produto_sugerido_id && it.codigo_fornecedor) {
+            preEdits[it.codigo_fornecedor] = it.produto_sugerido_id
+          }
+        }
+        setImpDeparaEdits((prev) => ({ ...preEdits, ...prev }))
+      } catch (err) {
+        toastError('Erro ao ler XML NF-e', err.message)
+      }
+    },
+    [impFornId, impPcId, toastError],
+  )
+
+  const rodarPreviewTxts = useCallback(
+    async (arquivos, layoutIdOverride = impLayoutId, fornIdOverride = impFornId, pcIdOverride = impPcId) => {
+      if (!arquivos || arquivos.length === 0) {
+        setImpTxtPreview(null)
+        return
+      }
+      try {
+        const res = await comprasQueries.previewTxtLote({
+          arquivos,
+          layout_id: layoutIdOverride || null,
+          fornecedor_id: fornIdOverride || null,
+          pedido_compra_id: pcIdOverride || null,
+        })
+        setImpTxtPreview(res)
+        const preEdits = {}
+        for (const g of res.codigos_encontrados || []) {
+          if (g.produto_id && g.codigo_fornecedor) {
+            preEdits[g.codigo_fornecedor] = g.produto_id
+          }
+        }
+        setImpDeparaEdits((prev) => ({ ...preEdits, ...prev }))
+      } catch (err) {
+        toastError('Erro ao ler TXTs', err.message)
+      }
+    },
+    [impLayoutId, impFornId, impPcId, toastError],
+  )
+
+  const handleSelecionarXmlFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      const text = await readFileAsTextSmart(file)
+      setImpXmlFileName(file.name)
+      setImpXmlText(text)
+      setImpResultado(null)
+      await rodarPreviewXml(text)
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleSelecionarTxtFiles = async (e) => {
+    const fileList = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (fileList.length === 0) return
+    try {
+      const novos = await Promise.all(
+        fileList.map(async (f) => ({
+          nome: f.name,
+          conteudo: await readFileAsTextSmart(f),
+        })),
+      )
+      const combinados = [...impTxtArquivos]
+      for (const n of novos) {
+        const idx = combinados.findIndex((x) => x.nome === n.nome)
+        if (idx >= 0) combinados[idx] = n
+        else combinados.push(n)
+      }
+      setImpTxtArquivos(combinados)
+      setImpResultado(null)
+      await rodarPreviewTxts(combinados)
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleSelecionarPcImportacao = async (pcId) => {
+    setImpPcId(pcId)
+    const pc = compras.find((x) => x.id === pcId)
+    const fornId = pc?.fornecedor_id || impFornId
+    if (pc?.fornecedor_id) setImpFornId(pc.fornecedor_id)
+    if (impXmlText) await rodarPreviewXml(impXmlText, fornId, pcId)
+    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, impLayoutId, fornId, pcId)
+  }
+
+  const codigosConsolidados = useMemo(() => {
+    const map = new Map()
+    for (const g of impTxtPreview?.codigos_encontrados || []) {
+      map.set(g.codigo_fornecedor, {
+        codigo_fornecedor: g.codigo_fornecedor,
+        descricao_fornecedor: g.descricao_fornecedor,
+        ncm: '',
+        qtd_caixas: g.qtd_caixas,
+        qtd_novas: g.qtd_novas,
+        peso_kg: g.peso_kg,
+        produto_id_sugerido: g.produto_id,
+        origem_vinculo: g.origem_vinculo,
+        fonte: 'TXT',
+      })
+    }
+    for (const it of impXmlPreview?.nfe?.itens || []) {
+      const existing = map.get(it.codigo_fornecedor)
+      if (existing) {
+        existing.ncm = it.ncm || ''
+        existing.fonte = 'TXT + XML'
+        if (!existing.produto_id_sugerido && it.produto_sugerido_id) {
+          existing.produto_id_sugerido = it.produto_sugerido_id
+          existing.origem_vinculo = it.origem_vinculo
+        }
+      } else {
+        map.set(it.codigo_fornecedor, {
+          codigo_fornecedor: it.codigo_fornecedor,
+          descricao_fornecedor: it.descricao,
+          ncm: it.ncm || '',
+          qtd_caixas: 0,
+          qtd_novas: 0,
+          peso_kg: it.quantidade,
+          produto_id_sugerido: it.produto_sugerido_id,
+          origem_vinculo: it.origem_vinculo,
+          fonte: 'XML',
+        })
+      }
+    }
+    return Array.from(map.values())
+  }, [impTxtPreview, impXmlPreview])
+
+  const codigosPendentesDepara = useMemo(() => {
+    return codigosConsolidados.filter((c) => !(impDeparaEdits[c.codigo_fornecedor] || c.produto_id_sugerido))
+  }, [codigosConsolidados, impDeparaEdits])
+
+  const handleExecutarImportacao = async () => {
+    if (!impXmlText.trim() && impTxtArquivos.length === 0) {
+      return toastWarning('Arquivos', 'Selecione os arquivos TXT das etiquetas e/ou o XML da NF-e.')
+    }
+    if (!impFornId && !impPcId && (!impXmlText.trim() || !impAutoCadForn)) {
+      return toastWarning(
+        'Fornecedor obrigatório',
+        'Selecione o Pedido de Compra, ou escolha o Fornecedor acima para salvar o De-Para.',
+      )
+    }
+    if (impTxtArquivos.length > 0 && codigosPendentesDepara.length > 0) {
+      return toastWarning(
+        'Mapeamento De-Para pendente',
+        `Faltam ${codigosPendentesDepara.length} código(s) do fornecedor para vincular ao produto interno do WMS.`,
+      )
+    }
+
+    const vinculos = codigosConsolidados
+      .map((c) => {
+        const pid = impDeparaEdits[c.codigo_fornecedor] || c.produto_id_sugerido
+        if (!pid) return null
+        return {
+          codigo_fornecedor: c.codigo_fornecedor,
+          descricao_fornecedor: c.descricao_fornecedor,
+          ncm: c.ncm || '',
+          produto_id: pid,
+        }
+      })
+      .filter(Boolean)
+
+    setImpExecutando(true)
+    try {
+      const res = await comprasQueries.importarLoteEntrada({
+        pedido_compra_id: impPcId || null,
+        fornecedor_id: impFornId || null,
+        auto_cadastrar_fornecedor: impAutoCadForn,
+        xml_conteudo: impXmlText || undefined,
+        txts: impTxtArquivos,
+        layout_id: impLayoutId || null,
+        depara_vinculos: vinculos,
+        modo_entrada: impModoEntrada,
+        endereco_direto: impEnderecoDireto || 'REC',
+      })
+      setImpResultado(res)
+      toastSuccess(
+        'Importação Concluída ✅',
+        res.modo_entrada === 'PRE_RECEBIMENTO'
+          ? `${res.caixas_importadas} caixa(s) enviadas para pré-recebimento na doca (${res.recebimento_codigo})!`
+          : `${res.caixas_importadas} caixa(s) lançadas diretamente em estoque (${impEnderecoDireto})!`,
+      )
+      carregar()
+    } catch (err) {
+      toastError('Falha ao importar lote', err.message)
+    } finally {
+      setImpExecutando(false)
+    }
+  }
+
+  const handleLimparImportacao = () => {
+    setImpXmlText('')
+    setImpXmlFileName('')
+    setImpXmlPreview(null)
+    setImpTxtArquivos([])
+    setImpTxtPreview(null)
+    setImpDeparaEdits({})
+    setImpResultado(null)
+  }
+
+  // ── DE-PARA MANUAL E LAYOUTS TXT ────────────────────────────────────────────
+  const handleSalvarNovoDepara = async (e) => {
+    e.preventDefault()
+    if (!novoDpFornId || !novoDpCod.trim() || !novoDpProdId) {
+      return toastWarning('De-Para', 'Informe fornecedor, código no fornecedor e produto WMS.')
+    }
+    try {
+      await comprasQueries.salvarDepara(novoDpFornId, [
+        {
+          codigo_fornecedor: novoDpCod.trim(),
+          descricao_fornecedor: novoDpDesc.trim(),
+          produto_id: novoDpProdId,
+        },
+      ])
+      toastSuccess('Vínculo De-Para Salvo', `${novoDpCod.trim()} vinculado com sucesso!`)
+      setNovoDpCod('')
+      setNovoDpDesc('')
+      setNovoDpProdId('')
+      carregar()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleExcluirDepara = async (id) => {
+    const ok = await confirmar({
+      title: 'Remover Vínculo De-Para',
+      message: 'Deseja excluir este mapeamento de código?',
+      type: 'error',
+      confirmLabel: 'Excluir',
+    })
+    if (!ok) return
+    try {
+      await comprasQueries.excluirDepara(id)
+      toastSuccess('Removido', 'Vínculo excluído.')
+      carregar()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleSalvarLayoutTxt = async (e) => {
+    e.preventDefault()
+    if (!layForm.nome.trim()) return toastWarning('Layout', 'Informe o nome do layout.')
+    try {
+      await comprasQueries.salvarLayoutTxt({
+        nome: layForm.nome.trim(),
+        fornecedor_id: layForm.fornecedor_id || null,
+        tipo_arquivo: 'DELIMITADO',
+        delimitador: layForm.delimitador || ';',
+        saltar_linhas: Number(layForm.saltar_linhas || 0),
+        formato_data: layForm.formato_data || 'DDMMYYYY',
+        decimal_ponto: Boolean(layForm.decimal_ponto),
+        mapeamento_json: {
+          origem_texto: 1,
+          romaneio_origem: Number(layForm.col_romaneio || 2),
+          ean: Number(layForm.col_ean || 3),
+          codigo_produto: Number(layForm.col_cod || 4),
+          descricao_produto: Number(layForm.col_desc || 5),
+          peso_liquido: Number(layForm.col_peso || 6),
+          qtd_pecas: Number(layForm.col_pecas || 7),
+          data_producao: Number(layForm.col_prod || 8),
+          data_validade: Number(layForm.col_val || 9),
+          documento_origem: Number(layForm.col_doc || 10),
+        },
+      })
+      toastSuccess('Layout TXT Criado', `Layout "${layForm.nome}" salvo!`)
+      setModalNovoLayout(false)
+      setLayForm((p) => ({ ...p, nome: '' }))
+      carregar()
+    } catch (err) {
+      toastError('Erro', err.message)
+    }
+  }
+
+  const handleExcluirLayout = async (id) => {
+    const ok = await confirmar({
+      title: 'Desativar Layout TXT',
+      message: 'Remover este modelo de layout da lista de importação?',
+      type: 'error',
+      confirmLabel: 'Remover',
+    })
+    if (!ok) return
+    try {
+      await comprasQueries.excluirLayoutTxt(id)
+      toastSuccess('Removido', 'Layout desativado.')
       carregar()
     } catch (err) {
       toastError('Erro', err.message)
@@ -293,12 +694,17 @@ export function Compras() {
     (Number(String(freteValor || '0').replace(',', '.')) || 0) +
     (Number(String(despesasValor || '0').replace(',', '.')) || 0)
 
+  const deparasFiltrados = useMemo(() => {
+    if (!filtroFornDepara) return deparas
+    return deparas.filter((d) => d.fornecedor_id === filtroFornDepara)
+  }, [deparas, filtroFornDepara])
+
   if (!apiAtiva) {
     return (
       <div className="card p-24">
-        <h2 className="text-lg font-bold mb-8">Pedidos de Compra (Modo ERP API)</h2>
+        <h2 className="text-lg font-bold mb-8">Pedidos de Compra & Entrada XML / TXT (Modo ERP API)</h2>
         <p className="text-sm text-muted">
-          Você está conectado no modo legado Turso. Ative o Backend API PostgreSQL (`VITE_API_URL`) para gerenciar Pedidos de Compra, trava obrigatória na doca e conferência 3-Way.
+          Ative o Backend API PostgreSQL (`VITE_API_URL`) para gerenciar Pedidos de Compra, importação em lote de TXTs / XML NF-e, De-Para automático e trava na doca.
         </p>
       </div>
     )
@@ -309,10 +715,10 @@ export function Compras() {
       <div className="page-header mb-16">
         <div>
           <h1 className="page-header__title flex items-center gap-10">
-            <ShoppingBag size={24} className="text-primary" /> Pedidos de Compra & Trava de Recebimento
+            <ShoppingBag size={24} className="text-primary" /> Compras, Pré-Recebimento & Importação XML/TXT
           </h1>
           <p className="page-header__subtitle">
-            Controle de compras de matéria-prima, CFOP automático por UF, vínculo obrigatório na doca e validação 3-Way
+            Pedidos de Compra, Importação em Lote de Etiquetas (.txt) sem obrigatoriedade de XML, NF-e de Entrada e De-Para permanente
           </p>
         </div>
         <div className="flex gap-8 flex-wrap">
@@ -331,138 +737,705 @@ export function Compras() {
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Atualizar
           </button>
           {podeEscrever && (
-            <button type="button" className="btn btn--primary" onClick={() => setModalNovo(true)}>
-              <Plus size={16} /> Novo Pedido de Compra
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn btn--info"
+                onClick={() => setAbaAtiva('importar')}
+              >
+                <Upload size={16} /> Importar TXTs / XML
+              </button>
+              <button type="button" className="btn btn--primary" onClick={() => setModalNovo(true)}>
+                <Plus size={16} /> Novo Pedido de Compra
+              </button>
+            </>
           )}
         </div>
       </div>
 
-      {/* KPIs */}
-      <div className="kpi-grid mb-16">
-        <div className="kpi-card">
-          <span className="kpi-card__label">Em Aberto (Aguardando Aprovação)</span>
-          <span className="kpi-card__value">{kpis.abertos}</span>
-        </div>
-        <div className="kpi-card">
-          <span className="kpi-card__label text-info">Liberados para Doca</span>
-          <span className="kpi-card__value text-info">{kpis.aprovados}</span>
-        </div>
-        <div className="kpi-card" style={{ borderColor: kpis.validacao > 0 ? 'var(--warning)' : undefined }}>
-          <span className="kpi-card__label text-warning">Aguardando Validação 3-Way</span>
-          <span className="kpi-card__value text-warning">{kpis.validacao}</span>
-        </div>
-        <div className="kpi-card">
-          <span className="kpi-card__label text-success">Recebidos / Validados</span>
-          <span className="kpi-card__value text-success">{kpis.recebidos}</span>
-        </div>
+      {/* Navegação por Abas */}
+      <div className="flex gap-8 flex-wrap mb-16">
+        <button
+          type="button"
+          className={`btn ${abaAtiva === 'pedidos' ? 'btn--primary' : 'btn--ghost'}`}
+          onClick={() => setAbaAtiva('pedidos')}
+        >
+          <ShoppingBag size={15} /> Pedidos de Compra ({compras.length})
+        </button>
+        <button
+          type="button"
+          className={`btn ${abaAtiva === 'importar' ? 'btn--primary' : 'btn--ghost'}`}
+          onClick={() => setAbaAtiva('importar')}
+        >
+          <Upload size={15} /> Importar Lote (TXTs / XML NF-e)
+        </button>
+        <button
+          type="button"
+          className={`btn ${abaAtiva === 'depara' ? 'btn--primary' : 'btn--ghost'}`}
+          onClick={() => setAbaAtiva('depara')}
+        >
+          <ArrowRightLeft size={15} /> De-Para Fornecedor & Layouts TXT ({deparas.length})
+        </button>
       </div>
 
-      {/* Filtros */}
-      <div className="card mb-16">
-        <div className="flex gap-12 flex-wrap items-end">
-          <div className="form-group" style={{ flex: 2, minWidth: 220, marginBottom: 0 }}>
-            <label className="form-label">Buscar Pedido / Fornecedor / Marchante</label>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="PC-0001, JBS, Minerva..."
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
+      {/* ABA 1: PEDIDOS DE COMPRA */}
+      {abaAtiva === 'pedidos' && (
+        <>
+          <div className="kpi-grid mb-16">
+            <div className="kpi-card">
+              <span className="kpi-card__label">Em Aberto (Aguardando Aprovação)</span>
+              <span className="kpi-card__value">{kpis.abertos}</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-card__label text-info">Liberados para Doca</span>
+              <span className="kpi-card__value text-info">{kpis.aprovados}</span>
+            </div>
+            <div className="kpi-card" style={{ borderColor: kpis.validacao > 0 ? 'var(--warning)' : undefined }}>
+              <span className="kpi-card__label text-warning">Aguardando Validação 3-Way</span>
+              <span className="kpi-card__value text-warning">{kpis.validacao}</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-card__label text-success">Recebidos / Validados</span>
+              <span className="kpi-card__value text-success">{kpis.recebidos}</span>
+            </div>
           </div>
-          <div className="form-group" style={{ flex: 1, minWidth: 180, marginBottom: 0 }}>
-            <label className="form-label">Status</label>
-            <select className="form-input" value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
-              <option value="TODOS">Todos os Status</option>
-              <option value="ABERTO">Em Aberto</option>
-              <option value="APROVADO">Aprovado p/ Doca</option>
-              <option value="PARCIAL">Recebimento Parcial</option>
-              <option value="RECEBIDO">Recebido / Fechado</option>
-              <option value="CANCELADO">Cancelado</option>
-            </select>
-          </div>
-          <button type="button" className="btn btn--primary" onClick={carregar}>
-            Filtrar
-          </button>
-        </div>
-      </div>
 
-      {/* Lista */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Código</th>
-                <th>Fornecedor / SIF</th>
-                <th>Marchante / Centro Custo</th>
-                <th>Previsão</th>
-                <th style={{ textAlign: 'right' }}>Solicitado</th>
-                <th style={{ textAlign: 'right' }}>Bipado Doca</th>
-                <th style={{ textAlign: 'right' }}>Valor Total</th>
-                <th>Status / 3-Way</th>
-                <th style={{ textAlign: 'right' }}>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {compras.map((c) => {
-                const st = STATUS_PC_BADGE[c.status] || { label: c.status, cls: 'badge--neutral' }
-                const sv = c.status_validacao ? STATUS_VAL_BADGE[c.status_validacao] : null
-                return (
-                  <tr key={c.id}>
-                    <td className="font-mono font-bold text-primary">{c.codigo}</td>
-                    <td>
-                      <div className="font-bold">{c.fornecedor_nome}</div>
-                      <div className="text-xs text-muted">
-                        UF {c.fornecedor_uf} {c.fornecedor_sif ? `• SIF ${c.fornecedor_sif}` : ''}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="text-sm">{c.marchante || '-'}</div>
-                      <div className="text-xs text-muted">{c.centro_custo_descricao || '-'}</div>
-                    </td>
-                    <td className="text-sm">{fmtData(c.previsao_entrega)}</td>
-                    <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg(c.total_kg_solicitada)}</td>
-                    <td style={{ textAlign: 'right' }} className="font-mono font-bold text-cyan">{fmtKg(c.total_kg_recebida)}</td>
-                    <td style={{ textAlign: 'right' }} className="font-bold text-success">{fmtMoeda(c.valor_total)}</td>
-                    <td>
-                      <div className="flex flex-col gap-4">
-                        <span className={`badge ${st.cls}`}>{st.label}</span>
-                        {sv && <span className={`badge ${sv.cls}`}>{sv.label}</span>}
-                      </div>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="flex justify-end gap-6">
-                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => abrirDetalhe(c.id)}>
-                          <Eye size={14} /> Abrir
-                        </button>
-                        {podeEscrever && c.status === 'ABERTO' && (
-                          <button type="button" className="btn btn--info btn--sm" onClick={() => handleAprovar(c.id)}>
-                            <CheckCircle2 size={14} /> Aprovar
+          <div className="card mb-16">
+            <div className="flex gap-12 flex-wrap items-end">
+              <div className="form-group" style={{ flex: 2, minWidth: 220, marginBottom: 0 }}>
+                <label className="form-label">Buscar Pedido / Fornecedor / Marchante</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="PC-0001, JBS, Frigodil..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                />
+              </div>
+              <div className="form-group" style={{ flex: 1, minWidth: 180, marginBottom: 0 }}>
+                <label className="form-label">Status</label>
+                <select className="form-input" value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
+                  <option value="TODOS">Todos os Status</option>
+                  <option value="ABERTO">Em Aberto</option>
+                  <option value="APROVADO">Aprovado p/ Doca</option>
+                  <option value="PARCIAL">Recebimento Parcial</option>
+                  <option value="RECEBIDO">Recebido / Fechado</option>
+                  <option value="CANCELADO">Cancelado</option>
+                </select>
+              </div>
+              <button type="button" className="btn btn--primary" onClick={carregar}>
+                Filtrar
+              </button>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Fornecedor / SIF</th>
+                    <th>Marchante / Centro Custo</th>
+                    <th>Previsão</th>
+                    <th style={{ textAlign: 'right' }}>Solicitado</th>
+                    <th style={{ textAlign: 'right' }}>Bipado Doca</th>
+                    <th style={{ textAlign: 'right' }}>Valor Total</th>
+                    <th>Status / 3-Way</th>
+                    <th style={{ textAlign: 'right' }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {compras.map((c) => {
+                    const st = STATUS_PC_BADGE[c.status] || { label: c.status, cls: 'badge--neutral' }
+                    const sv = c.status_validacao ? STATUS_VAL_BADGE[c.status_validacao] : null
+                    return (
+                      <tr key={c.id}>
+                        <td className="font-mono font-bold text-primary">{c.codigo}</td>
+                        <td>
+                          <div className="font-bold">{c.fornecedor_nome}</div>
+                          <div className="text-xs text-muted">
+                            UF {c.fornecedor_uf} {c.fornecedor_sif ? `• SIF ${c.fornecedor_sif}` : ''}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="text-sm">{c.marchante || '-'}</div>
+                          <div className="text-xs text-muted">{c.centro_custo_descricao || '-'}</div>
+                        </td>
+                        <td className="text-sm">{fmtData(c.previsao_entrega)}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg(c.total_kg_solicitada)}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono font-bold text-cyan">{fmtKg(c.total_kg_recebida)}</td>
+                        <td style={{ textAlign: 'right' }} className="font-bold text-success">{fmtMoeda(c.valor_total)}</td>
+                        <td>
+                          <div className="flex flex-col gap-4">
+                            <span className={`badge ${st.cls}`}>{st.label}</span>
+                            {sv && <span className={`badge ${sv.cls}`}>{sv.label}</span>}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div className="flex justify-end gap-6">
+                            <button type="button" className="btn btn--ghost btn--sm" onClick={() => abrirDetalhe(c.id)}>
+                              <Eye size={14} /> Abrir
+                            </button>
+                            {podeEscrever && !['RECEBIDO', 'CANCELADO'].includes(c.status) && (
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--sm text-cyan"
+                                title="Importar arquivos TXT/XML vinculados a este Pedido"
+                                onClick={() => {
+                                  handleSelecionarPcImportacao(c.id)
+                                  setAbaAtiva('importar')
+                                }}
+                              >
+                                <Upload size={14} /> TXT/XML
+                              </button>
+                            )}
+                            {podeEscrever && c.status === 'ABERTO' && (
+                              <button type="button" className="btn btn--info btn--sm" onClick={() => handleAprovar(c.id)}>
+                                <CheckCircle2 size={14} /> Aprovar
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {compras.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="text-center p-24 text-muted">
+                        Nenhum Pedido de Compra encontrado.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ABA 2: IMPORTAR LOTE (MÚLTIPLOS TXTs + XML OPCIONAL) */}
+      {abaAtiva === 'importar' && (
+        <div className="flex flex-col gap-16">
+          <div className="card">
+            <div className="flex justify-between items-start flex-wrap gap-12 mb-16 pb-12 border-b border-border">
+              <div>
+                <h2 className="text-base font-bold flex items-center gap-8">
+                  <Upload size={18} className="text-info" /> Importação em Lote: Arquivos TXT de Etiquetas & XML NF-e
+                </h2>
+                <p className="text-xs text-muted mt-4">
+                  <strong>Flexível:</strong> Você pode enviar <strong>apenas múltiplos .txt</strong> de etiquetas (puxando preço do Pedido de Compra),
+                  ou combinar <strong>TXTs + XML da NF-e</strong> (custo real + frete + duplicatas), ou <strong>só XML</strong> para embalagens/insumos.
+                </p>
+              </div>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={handleLimparImportacao}>
+                Limpar Arquivos
+              </button>
+            </div>
+
+            {/* Vínculo PC / Fornecedor / Layout / Modo */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 12,
+                marginBottom: 16,
+              }}
+            >
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">1. Pedido de Compra (Opcional — Traz Preços)</label>
+                <select
+                  className="form-input"
+                  value={impPcId}
+                  onChange={(e) => handleSelecionarPcImportacao(e.target.value)}
+                >
+                  <option value="">-- Sem Pedido de Compra vinculado --</option>
+                  {compras
+                    .filter((c) => !['CANCELADO', 'RECEBIDO'].includes(c.status))
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.codigo} — {c.fornecedor_nome} ({fmtKg(c.total_kg_solicitada)})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">2. Fornecedor / Frigorífico (p/ De-Para)</label>
+                <select
+                  className="form-input"
+                  value={impFornId}
+                  onChange={async (e) => {
+                    const fid = e.target.value
+                    setImpFornId(fid)
+                    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, impLayoutId, fid, impPcId)
+                    if (impXmlText) await rodarPreviewXml(impXmlText, fid, impPcId)
+                  }}
+                >
+                  <option value="">Auto-detectar do XML ou PC...</option>
+                  {fornecedores.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.nome_fantasia} ({f.cnpj_cpf})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">3. Layout Leitura TXT</label>
+                <select
+                  className="form-input"
+                  value={impLayoutId}
+                  onChange={async (e) => {
+                    const lid = e.target.value
+                    setImpLayoutId(lid)
+                    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, lid, impFornId, impPcId)
+                  }}
+                >
+                  {layoutsTxt.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.nome} ({l.delimitador})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">4. Destino das Caixas ao Importar</label>
+                <select
+                  className="form-input"
+                  value={impModoEntrada}
+                  onChange={(e) => setImpModoEntrada(e.target.value)}
+                >
+                  <option value="PRE_RECEBIMENTO">Pré-Recebimento Doca (Só Bipar Caixas)</option>
+                  <option value="DIRETO_ESTOQUE">Lançar Direto em Estoque (Sem Bipar)</option>
+                </select>
+              </div>
+            </div>
+
+            {impModoEntrada === 'DIRETO_ESTOQUE' && (
+              <div className="p-12 rounded mb-16 flex items-center gap-12 flex-wrap" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)' }}>
+                <span className="text-xs font-bold text-success">Endereço de destino direto:</span>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ width: 180 }}
+                  value={impEnderecoDireto}
+                  onChange={(e) => setImpEnderecoDireto(e.target.value.toUpperCase())}
+                  placeholder="REC"
+                />
+                <span className="text-xs text-muted">Todas as caixas inéditas dos TXTs entrarão imediatamente com saldo DISPONÍVEL neste endereço.</span>
+              </div>
+            )}
+
+            {/* Zona de Seleção: Múltiplos TXTs + XML Opcional */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+              {/* Card TXTs */}
+              <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px dashed var(--info)' }}>
+                <div className="flex justify-between items-center mb-10">
+                  <div className="font-bold text-sm flex items-center gap-8 text-info">
+                    <FileText size={17} /> Arquivos .TXT de Etiquetas (Vários de uma vez)
+                  </div>
+                  <label className="btn btn--info btn--sm cursor-pointer">
+                    <Upload size={14} /> Selecionar TXT(s)
+                    <input
+                      type="file"
+                      accept=".txt,.csv,text/plain"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={handleSelecionarTxtFiles}
+                    />
+                  </label>
+                </div>
+                {impTxtArquivos.length === 0 ? (
+                  <p className="text-xs text-muted">
+                    Selecione 1 ou mais arquivos <code>.txt</code> enviados pelo frigorífico (ex.: <code>ETIQUETAS_*.txt</code>). O sistema junta tudo e remove etiquetas duplicadas pelo EAN.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-6">
+                    <div className="flex flex-wrap gap-6">
+                      {impTxtArquivos.map((arq) => (
+                        <span key={arq.nome} className="badge badge--info flex items-center gap-4">
+                          {arq.nome}
+                          <button
+                            type="button"
+                            className="cursor-pointer"
+                            style={{ background: 'none', border: 'none', color: 'inherit', padding: 0 }}
+                            onClick={async () => {
+                              const rest = impTxtArquivos.filter((x) => x.nome !== arq.nome)
+                              setImpTxtArquivos(rest)
+                              await rodarPreviewTxts(rest)
+                            }}
+                          >
+                            ×
                           </button>
+                        </span>
+                      ))}
+                    </div>
+                    {impTxtPreview?.resumo && (
+                      <div className="grid-2 text-xs mt-6 p-10 rounded" style={{ background: 'var(--bg-2)' }}>
+                        <div>Caixas únicas: <strong className="text-cyan">{impTxtPreview.resumo.total_unicas}</strong></div>
+                        <div>Caixas novas: <strong className="text-success">{impTxtPreview.resumo.caixas_novas}</strong></div>
+                        <div>Peso líquido total: <strong>{fmtKg(impTxtPreview.resumo.total_peso_kg)}</strong></div>
+                        <div>Total de peças: <strong>{impTxtPreview.resumo.total_pecas}</strong></div>
+                        {impTxtPreview.resumo.duplicadas_ignoradas > 0 && (
+                          <div className="text-warning">Duplicadas nos TXTs: {impTxtPreview.resumo.duplicadas_ignoradas}</div>
+                        )}
+                        {impTxtPreview.resumo.ja_no_sistema > 0 && (
+                          <div className="text-muted">Já existiam no sistema: {impTxtPreview.resumo.ja_no_sistema}</div>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                )
-              })}
-              {compras.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="text-center p-24 text-muted">
-                    Nenhum Pedido de Compra encontrado.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-      {/* Modal Novo Pedido de Compra */}
+              {/* Card XML NF-e (Opcional) */}
+              <div className="p-16 rounded" style={{ background: 'var(--bg-1)', border: '1px dashed var(--border)' }}>
+                <div className="flex justify-between items-center mb-10">
+                  <div className="font-bold text-sm flex items-center gap-8">
+                    <FileCode2 size={17} className="text-success" /> XML NF-e de Entrada <span className="badge badge--neutral">Opcional</span>
+                  </div>
+                  <label className="btn btn--ghost btn--sm cursor-pointer">
+                    <Upload size={14} /> Selecionar .XML
+                    <input
+                      type="file"
+                      accept=".xml,text/xml,application/xml"
+                      style={{ display: 'none' }}
+                      onChange={handleSelecionarXmlFile}
+                    />
+                  </label>
+                </div>
+
+                {!impXmlPreview ? (
+                  <div className="flex flex-col gap-6">
+                    <p className="text-xs text-muted">
+                      Não é obrigatório se você só quiser importar os TXTs. Quando enviado, traz custos exatos por item, rateio de frete/ST, CNPJ e duplicatas.
+                    </p>
+                    <label className="flex items-center gap-6 text-xs cursor-pointer mt-4">
+                      <input
+                        type="checkbox"
+                        checked={impAutoCadForn}
+                        onChange={(e) => setImpAutoCadForn(e.target.checked)}
+                      />
+                      Cadastrar fornecedor automaticamente pelo CNPJ do XML se não existir
+                    </label>
+                  </div>
+                ) : (
+                  <div className="text-xs flex flex-col gap-6 p-10 rounded" style={{ background: 'var(--bg-2)' }}>
+                    <div className="flex justify-between">
+                      <strong>NF {impXmlPreview.nfe.numero_nf} (Série {impXmlPreview.nfe.serie})</strong>
+                      <span className="text-success font-bold">{fmtMoeda(impXmlPreview.nfe.totais.valor_nf)}</span>
+                    </div>
+                    <div className="text-muted">
+                      {impXmlFileName} • {impXmlPreview.nfe.emitente.nome_fantasia || impXmlPreview.nfe.emitente.razao_social} ({impXmlPreview.nfe.emitente.cnpj})
+                    </div>
+                    <div className="flex gap-12 flex-wrap">
+                      <span>Produtos: <strong>{fmtMoeda(impXmlPreview.nfe.totais.valor_produtos)}</strong></span>
+                      <span>Frete: <strong>{fmtMoeda(impXmlPreview.nfe.totais.valor_frete)}</strong></span>
+                      <span>Parcelas/Dup: <strong>{(impXmlPreview.nfe.duplicatas || []).length}</strong></span>
+                    </div>
+                    {!impXmlPreview.fornecedor_encontrado && (
+                      <div className="text-warning font-bold">
+                        Fornecedor não encontrado no cadastro {impAutoCadForn ? '(será criado automaticamente pelo CNPJ)' : '(selecione manualmente acima)'}.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela De-Para de Códigos Encontrados */}
+          {codigosConsolidados.length > 0 && (
+            <div className="card">
+              <div className="flex justify-between items-center flex-wrap gap-8 mb-12">
+                <div>
+                  <h3 className="text-base font-bold flex items-center gap-8">
+                    <ArrowRightLeft size={17} className="text-primary" /> Conferência De-Para de Produtos ({codigosConsolidados.length} código(s))
+                  </h3>
+                  <p className="text-xs text-muted">
+                    Vínculos feitos aqui são gravados permanentemente no cadastro deste fornecedor — na próxima carga entram automático!
+                  </p>
+                </div>
+                {codigosPendentesDepara.length > 0 ? (
+                  <span className="badge badge--warning">{codigosPendentesDepara.length} sem vínculo</span>
+                ) : (
+                  <span className="badge badge--success">Todos vinculados ✅</span>
+                )}
+              </div>
+
+              <div className="table-wrap mb-16">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Origem</th>
+                      <th>Cód. Fornecedor</th>
+                      <th>Descrição no Arquivo</th>
+                      <th style={{ textAlign: 'right' }}>Caixas / Peso</th>
+                      <th>Produto Interno WMS *</th>
+                      <th>Status Vínculo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {codigosConsolidados.map((c) => {
+                      const pidSel = impDeparaEdits[c.codigo_fornecedor] ?? c.produto_id_sugerido ?? ''
+                      return (
+                        <tr key={c.codigo_fornecedor}>
+                          <td><span className="badge badge--neutral">{c.fonte}</span></td>
+                          <td className="font-mono font-bold text-cyan">{c.codigo_fornecedor}</td>
+                          <td className="text-sm">{c.descricao_fornecedor}</td>
+                          <td style={{ textAlign: 'right' }} className="font-mono text-xs">
+                            {c.qtd_caixas > 0 ? `${c.qtd_caixas} cx • ` : ''}{fmtKg(c.peso_kg)}
+                          </td>
+                          <td style={{ minWidth: 260 }}>
+                            <select
+                              className="form-input"
+                              value={pidSel}
+                              onChange={(e) =>
+                                setImpDeparaEdits((prev) => ({
+                                  ...prev,
+                                  [c.codigo_fornecedor]: e.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">-- Selecionar produto interno --</option>
+                              {produtosOrdenados.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.codigo} — {p.descricao}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            {pidSel ? (
+                              <span className="badge badge--success">
+                                <Check size={12} /> {c.origem_vinculo === 'DEPARA' ? 'De-Para Salvo' : c.origem_vinculo === 'CODIGO_PRODUTO' ? 'Cód. Igual' : 'Vinculado'}
+                              </span>
+                            ) : (
+                              <span className="badge badge--warning">Mapear Produto</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Duplicatas do XML caso presentes */}
+              {impXmlPreview?.nfe?.duplicatas?.length > 0 && (
+                <div className="p-12 rounded mb-16" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+                  <div className="text-xs font-bold uppercase text-muted mb-8">Duplicatas / Parcelas Lidas do XML NF-e</div>
+                  <div className="flex flex-wrap gap-8">
+                    {impXmlPreview.nfe.duplicatas.map((d, idx) => (
+                      <div key={idx} className="badge badge--info">
+                        Parc. {d.numero || idx + 1}: {fmtData(d.vencimento)} — {fmtMoeda(d.valor)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end items-center gap-12">
+                {impResultado && (
+                  <div className="text-sm text-success font-bold flex items-center gap-6">
+                    <Boxes size={16} /> Lote importado: {impResultado.recebimento_codigo} ({impResultado.caixas_importadas} cx • {fmtKg(impResultado.peso_total_importado_kg)})
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={impExecutando}
+                  onClick={handleExecutarImportacao}
+                >
+                  <CheckCircle2 size={16} />
+                  {impExecutando
+                    ? 'Importando Lote...'
+                    : impModoEntrada === 'PRE_RECEBIMENTO'
+                      ? 'Confirmar Importação → Liberar Doca (Só Bipar)'
+                      : 'Confirmar Importação Direta no Estoque'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Só XML sem códigos de TXT */}
+          {codigosConsolidados.length === 0 && impXmlText && impXmlPreview && (
+            <div className="card flex justify-end">
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={impExecutando}
+                onClick={handleExecutarImportacao}
+              >
+                <CheckCircle2 size={16} /> Importar NF-e XML
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ABA 3: DE-PARA & LAYOUTS TXT */}
+      {abaAtiva === 'depara' && (
+        <div className="flex flex-col gap-16">
+          {/* Cadastro De-Para */}
+          <div className="card">
+            <div className="flex justify-between items-center flex-wrap gap-12 mb-12">
+              <h2 className="text-base font-bold flex items-center gap-8">
+                <ArrowRightLeft size={18} className="text-primary" /> Tabela De-Para Permanente (Fornecedor → Produto WMS)
+              </h2>
+              <select
+                className="form-input"
+                style={{ width: 260 }}
+                value={filtroFornDepara}
+                onChange={(e) => setFiltroFornDepara(e.target.value)}
+              >
+                <option value="">Todos os Fornecedores</option>
+                {fornecedores.map((f) => (
+                  <option key={f.id} value={f.id}>{f.nome_fantasia}</option>
+                ))}
+              </select>
+            </div>
+
+            {podeEscrever && (
+              <form
+                onSubmit={handleSalvarNovoDepara}
+                className="p-12 rounded mb-16"
+                style={{
+                  background: 'var(--bg-1)',
+                  border: '1px solid var(--border)',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                  gap: 10,
+                  alignItems: 'end',
+                }}
+              >
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Fornecedor *</label>
+                  <select className="form-input" value={novoDpFornId} onChange={(e) => setNovoDpFornId(e.target.value)}>
+                    <option value="">Selecione...</option>
+                    {fornecedores.map((f) => (
+                      <option key={f.id} value={f.id}>{f.nome_fantasia}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Cód. no Fornecedor *</label>
+                  <input type="text" className="form-input" placeholder="Ex: 75" value={novoDpCod} onChange={(e) => setNovoDpCod(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Descrição Forn. (Opcional)</label>
+                  <input type="text" className="form-input" placeholder="PEIXINHO (T7)" value={novoDpDesc} onChange={(e) => setNovoDpDesc(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Produto Interno WMS *</label>
+                  <select className="form-input" value={novoDpProdId} onChange={(e) => setNovoDpProdId(e.target.value)}>
+                    <option value="">Selecione...</option>
+                    {produtosOrdenados.map((p) => (
+                      <option key={p.id} value={p.id}>{p.codigo} — {p.descricao}</option>
+                    ))}
+                  </select>
+                </div>
+                <button type="submit" className="btn btn--info">
+                  <Plus size={15} /> Vincular
+                </button>
+              </form>
+            )}
+
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Fornecedor</th>
+                    <th>Cód. Fornecedor</th>
+                    <th>Desc. Origem</th>
+                    <th>Produto Interno WMS</th>
+                    <th style={{ textAlign: 'right' }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deparasFiltrados.map((d) => (
+                    <tr key={d.id}>
+                      <td className="font-bold">{d.fornecedor_nome}</td>
+                      <td className="font-mono text-cyan font-bold">{d.codigo_fornecedor}</td>
+                      <td className="text-muted text-sm">{d.descricao_fornecedor || '-'}</td>
+                      <td><strong>{d.produto_codigo}</strong> — {d.produto_descricao}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {podeEscrever && (
+                          <button type="button" className="btn btn--ghost btn--sm text-danger" onClick={() => handleExcluirDepara(d.id)}>
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {deparasFiltrados.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="text-center p-20 text-muted">Nenhum vínculo De-Para cadastrado ainda.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Cadastro Layouts TXT */}
+          <div className="card">
+            <div className="flex justify-between items-center mb-12">
+              <h2 className="text-base font-bold flex items-center gap-8">
+                <Settings2 size={18} className="text-info" /> Layouts de Arquivos TXT (Frigoríficos)
+              </h2>
+              {podeEscrever && (
+                <button type="button" className="btn btn--info btn--sm" onClick={() => setModalNovoLayout(true)}>
+                  <Plus size={14} /> Novo Layout TXT
+                </button>
+              )}
+            </div>
+
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Nome do Layout</th>
+                    <th>Delimitador</th>
+                    <th>Data / Decimal</th>
+                    <th>Colunas Mapeadas (1-indexed)</th>
+                    <th style={{ textAlign: 'right' }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {layoutsTxt.map((l) => (
+                    <tr key={l.id}>
+                      <td className="font-bold">{l.nome}</td>
+                      <td className="font-mono">{l.delimitador}</td>
+                      <td className="text-xs">{l.formato_data} • {Number(l.decimal_ponto) === 1 ? 'Ponto (.)' : 'Vírgula (,)'}</td>
+                      <td className="text-xs font-mono text-muted">
+                        EAN:{l.mapeamento_json?.ean} | Cód:{l.mapeamento_json?.codigo_produto} | Peso:{l.mapeamento_json?.peso_liquido} | Pçs:{l.mapeamento_json?.qtd_pecas} | Val:{l.mapeamento_json?.data_validade}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {podeEscrever && (
+                          <button type="button" className="btn btn--ghost btn--sm text-danger" onClick={() => handleExcluirLayout(l.id)}>
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CENTRALIZADO: NOVO PEDIDO DE COMPRA */}
       {modalNovo && (
-        <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setModalNovo(false)}>
-          <div className="card modal-card" style={{ maxWidth: 820, width: '96%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalNovo(false)}>
+          <div
+            className="modal"
+            style={{ maxWidth: 980, width: '96%', maxHeight: '92vh', overflowY: 'auto' }}
+          >
             <div className="flex justify-between items-center pb-12 mb-16 border-b border-border">
               <h2 className="text-lg font-bold flex items-center gap-8">
                 <ShoppingBag size={18} className="text-primary" /> Novo Pedido de Compra
@@ -473,7 +1446,7 @@ export function Compras() {
             </div>
 
             <form onSubmit={handleSalvarCompra} className="flex flex-col gap-16">
-              <div className="form-grid form-grid--3" style={{ gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
                 <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
                   <label className="form-label">Fornecedor / Frigorífico *</label>
                   <select
@@ -506,7 +1479,7 @@ export function Compras() {
                 </div>
               )}
 
-              <div className="form-grid form-grid--4" style={{ gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: 12 }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Centro de Custo</label>
                   <select className="form-input" value={centroCustoId} onChange={(e) => setCentroCustoId(e.target.value)}>
@@ -514,6 +1487,17 @@ export function Compras() {
                     {(auxiliares.centrosCusto || []).map((cc) => (
                       <option key={cc.id} value={cc.id}>
                         {cc.codigo} — {cc.descricao}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Forma Pagto Combinada</label>
+                  <select className="form-input" value={formaPagamentoId} onChange={(e) => setFormaPagamentoId(e.target.value)}>
+                    <option value="">-- A definir na NF --</option>
+                    {(auxiliares.formasPagamento || []).map((fp) => (
+                      <option key={fp.id} value={fp.id}>
+                        {fp.codigo} — {fp.descricao}
                       </option>
                     ))}
                   </select>
@@ -533,6 +1517,13 @@ export function Compras() {
                   </select>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Previsão Entrega</label>
+                  <input type="date" className="form-input" value={previsaoEntrega} onChange={(e) => setPrevisaoEntrega(e.target.value)} />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 12 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Frete (R$)</label>
                   <input type="number" step="0.01" className="form-input" value={freteValor} onChange={(e) => setFreteValor(e.target.value)} placeholder="0,00" />
                 </div>
@@ -540,31 +1531,28 @@ export function Compras() {
                   <label className="form-label">Despesas Acess. (R$)</label>
                   <input type="number" step="0.01" className="form-input" value={despesasValor} onChange={(e) => setDespesasValor(e.target.value)} placeholder="0,00" />
                 </div>
-              </div>
-
-              <div className="form-grid form-grid--2" style={{ gap: 12 }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Previsão Entrega</label>
-                  <input type="date" className="form-input" value={previsaoEntrega} onChange={(e) => setPrevisaoEntrega(e.target.value)} />
-                </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Observações</label>
-                  <input type="text" className="form-input" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} placeholder="Placa, condição de pagamento combinada..." />
+                  <input type="text" className="form-input" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} placeholder="Placa, prazo negociado..." />
                 </div>
               </div>
 
               {/* Adicionar Itens */}
-              <div className="p-12 rounded" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-                <div className="text-xs font-bold uppercase text-muted mb-8">Itens do Pedido de Compra</div>
+              <div className="p-14 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+                <div className="text-xs font-bold uppercase text-muted mb-10">Itens do Pedido de Compra</div>
                 <div className="flex gap-8 flex-wrap items-end mb-12">
-                  <div className="form-group" style={{ flex: 2, minWidth: 220, marginBottom: 0 }}>
+                  <div className="form-group" style={{ flex: 2, minWidth: 240, marginBottom: 0 }}>
                     <label className="form-label">Matéria-Prima / Produto</label>
-                    <select className="form-input" value={prodAddId} onChange={(e) => {
-                      const pid = e.target.value
-                      setProdAddId(pid)
-                      const p = produtos.find((x) => x.id === pid)
-                      if (p && !precoAdd) setPrecoAdd(String(p.custo_medio_kg || p.valor_unitario || ''))
-                    }}>
+                    <select
+                      className="form-input"
+                      value={prodAddId}
+                      onChange={(e) => {
+                        const pid = e.target.value
+                        setProdAddId(pid)
+                        const p = produtos.find((x) => x.id === pid)
+                        if (p) setPrecoAdd(String(p.custo_medio_kg || p.valor_unitario || ''))
+                      }}
+                    >
                       <option value="">Selecione...</option>
                       {produtosOrdenados.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -573,7 +1561,7 @@ export function Compras() {
                       ))}
                     </select>
                   </div>
-                  <div className="form-group" style={{ width: 120, marginBottom: 0 }}>
+                  <div className="form-group" style={{ width: 130, marginBottom: 0 }}>
                     <label className="form-label">Qtd (kg)</label>
                     <input type="number" step="0.001" className="form-input" value={qtdAdd} onChange={(e) => setQtdAdd(e.target.value)} placeholder="500" />
                   </div>
@@ -607,7 +1595,7 @@ export function Compras() {
                                 type="number"
                                 step="0.001"
                                 className="form-input"
-                                style={{ width: 100, textAlign: 'right', display: 'inline-block' }}
+                                style={{ width: 105, textAlign: 'right', display: 'inline-block' }}
                                 value={it.qtd_kg_solicitada}
                                 onChange={(e) => {
                                   const v = Number(e.target.value || 0)
@@ -620,7 +1608,7 @@ export function Compras() {
                                 type="number"
                                 step="0.01"
                                 className="form-input"
-                                style={{ width: 100, textAlign: 'right', display: 'inline-block' }}
+                                style={{ width: 105, textAlign: 'right', display: 'inline-block' }}
                                 value={it.preco_unitario_kg}
                                 onChange={(e) => {
                                   const v = Number(e.target.value || 0)
@@ -644,7 +1632,7 @@ export function Compras() {
                 )}
               </div>
 
-              <div className="flex justify-between items-center flex-wrap gap-12">
+              <div className="flex justify-between items-center flex-wrap gap-12 pt-8 border-t border-border">
                 <label className="flex items-center gap-8 text-sm cursor-pointer">
                   <input type="checkbox" checked={aprovarAoCriar} onChange={(e) => setAprovarAoCriar(e.target.checked)} />
                   Já salvar <strong>Aprovado</strong> (liberar direto para a doca receber)
@@ -668,10 +1656,10 @@ export function Compras() {
         </div>
       )}
 
-      {/* Modal Detalhe & Validação 3-Way */}
+      {/* MODAL DETALHE & VALIDAÇÃO 3-WAY */}
       {detalhe && (
-        <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setDetalhe(null)}>
-          <div className="card modal-card" style={{ maxWidth: 820, width: '96%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDetalhe(null)}>
+          <div className="modal" style={{ maxWidth: 920, width: '96%', maxHeight: '92vh', overflowY: 'auto' }}>
             <div className="flex justify-between items-center pb-12 mb-16 border-b border-border">
               <div>
                 <h2 className="text-lg font-bold flex items-center gap-8">
@@ -686,6 +1674,16 @@ export function Compras() {
                 <X size={18} />
               </button>
             </div>
+
+            {detalhe.pre_caixas_resumo?.total > 0 && (
+              <div className="p-12 rounded mb-16 flex justify-between items-center flex-wrap gap-8 text-xs" style={{ background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.35)' }}>
+                <div>
+                  <strong className="text-cyan">Pré-Importação TXT na Doca:</strong>{' '}
+                  {detalhe.pre_caixas_resumo.bipadas}/{detalhe.pre_caixas_resumo.total} caixas bipadas ({detalhe.pre_caixas_resumo.pendentes} pendentes)
+                </div>
+                <span className="font-mono font-bold text-cyan">{fmtKg(detalhe.pre_caixas_resumo.peso_total_kg)}</span>
+              </div>
+            )}
 
             <div className="table-wrap mb-16">
               <table className="table">
@@ -730,6 +1728,20 @@ export function Compras() {
                 Frete: <strong>{fmtMoeda(detalhe.frete_valor)}</strong> • Despesas: <strong>{fmtMoeda(detalhe.despesas_valor)}</strong> • Total: <strong className="text-success">{fmtMoeda(detalhe.valor_total)}</strong>
               </div>
               <div className="flex gap-8">
+                {podeEscrever && !['RECEBIDO', 'CANCELADO'].includes(detalhe.status) && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => {
+                      const id = detalhe.id
+                      setDetalhe(null)
+                      handleSelecionarPcImportacao(id)
+                      setAbaAtiva('importar')
+                    }}
+                  >
+                    <Upload size={15} /> Importar TXTs / XML
+                  </button>
+                )}
                 {podeEscrever && detalhe.status === 'ABERTO' && (
                   <button type="button" className="btn btn--info" onClick={() => handleAprovar(detalhe.id)}>
                     <CheckCircle2 size={15} /> Aprovar p/ Doca
@@ -747,6 +1759,88 @@ export function Compras() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NOVO LAYOUT TXT */}
+      {modalNovoLayout && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalNovoLayout(false)}>
+          <div className="modal" style={{ maxWidth: 680, width: '96%' }}>
+            <div className="flex justify-between items-center pb-12 mb-16 border-b border-border">
+              <h2 className="text-lg font-bold flex items-center gap-8">
+                <Settings2 size={18} className="text-info" /> Cadastrar Layout de TXT (Frigorífico)
+              </h2>
+              <button type="button" className="btn-icon" onClick={() => setModalNovoLayout(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSalvarLayoutTxt} className="flex flex-col gap-12">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Nome do Layout *</label>
+                <input type="text" className="form-input" placeholder="Ex: Paula & Ribeiro / Minerva 10 colunas" value={layForm.nome} onChange={(e) => setLayForm((p) => ({ ...p, nome: e.target.value }))} required />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Delimitador</label>
+                  <input type="text" className="form-input" value={layForm.delimitador} onChange={(e) => setLayForm((p) => ({ ...p, delimitador: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Saltar Linhas</label>
+                  <input type="number" min="0" className="form-input" value={layForm.saltar_linhas} onChange={(e) => setLayForm((p) => ({ ...p, saltar_linhas: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Formato Data</label>
+                  <input type="text" className="form-input" value={layForm.formato_data} onChange={(e) => setLayForm((p) => ({ ...p, formato_data: e.target.value }))} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Cód. Barras (EAN)</label>
+                  <input type="number" className="form-input" value={layForm.col_ean} onChange={(e) => setLayForm((p) => ({ ...p, col_ean: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Cód. Produto</label>
+                  <input type="number" className="form-input" value={layForm.col_cod} onChange={(e) => setLayForm((p) => ({ ...p, col_cod: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Descrição</label>
+                  <input type="number" className="form-input" value={layForm.col_desc} onChange={(e) => setLayForm((p) => ({ ...p, col_desc: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Peso Líquido</label>
+                  <input type="number" className="form-input" value={layForm.col_peso} onChange={(e) => setLayForm((p) => ({ ...p, col_peso: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Qtd Peças</label>
+                  <input type="number" className="form-input" value={layForm.col_pecas} onChange={(e) => setLayForm((p) => ({ ...p, col_pecas: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Data Produção</label>
+                  <input type="number" className="form-input" value={layForm.col_prod} onChange={(e) => setLayForm((p) => ({ ...p, col_prod: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Data Validade</label>
+                  <input type="number" className="form-input" value={layForm.col_val} onChange={(e) => setLayForm((p) => ({ ...p, col_val: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Romaneio</label>
+                  <input type="number" className="form-input" value={layForm.col_romaneio} onChange={(e) => setLayForm((p) => ({ ...p, col_romaneio: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Col. Carga / NF</label>
+                  <input type="number" className="form-input" value={layForm.col_doc} onChange={(e) => setLayForm((p) => ({ ...p, col_doc: e.target.value }))} />
+                </div>
+              </div>
+              <label className="flex items-center gap-8 text-xs cursor-pointer">
+                <input type="checkbox" checked={layForm.decimal_ponto} onChange={(e) => setLayForm((p) => ({ ...p, decimal_ponto: e.target.checked }))} />
+                Decimal separado por ponto (<code>.</code>) em vez de vírgula (<code>,</code>)
+              </label>
+              <div className="flex justify-end gap-8 pt-8">
+                <button type="button" className="btn btn--ghost" onClick={() => setModalNovoLayout(false)}>Cancelar</button>
+                <button type="submit" className="btn btn--primary">Salvar Layout</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -1478,3 +1478,18 @@ export async function listarDossiesProducao(filtros = {}) {
 
   return dossies
 }
+
+export async function obterCustosOp(opId) {
+  if (!isApiEnabled()) return null
+  return (await apiRequest(`/api/ops/${opId}/custos-resumo`)).data
+}
+
+export async function atualizarCustosOp(opId, payload) {
+  if (!isApiEnabled()) throw new Error('Cálculo de custos requer API central PostgreSQL.')
+  return (await apiRequest(`/api/ops/${opId}/custos`, { method: 'PATCH', body: payload })).data
+}
+
+export async function listarAnaliseCustosOps({ dataInicio, dataFim } = {}) {
+  if (!isApiEnabled()) return { ops: [], ranking_fornecedores: [] }
+  return (await apiRequest(`/api/ops/analise-custos${buildQueryString({ dataInicio, dataFim })}`)).data
+}

@@ -15,6 +15,7 @@ import { registerRelatoriosRoutes } from './modules/relatorios/routes.js'
 import { registerPendenciasRoutes } from './modules/pendencias/routes.js'
 import { registerWhatsappRoutes } from './modules/whatsapp/routes.js'
 import { registerComprasRoutes } from './modules/compras/routes.js'
+import { registerNfeTxtRoutes } from './modules/compras/nfeTxtRoutes.js'
 import { registerMapaProducaoRoutes } from './modules/producao/mapaRoutes.js'
 import { registerDevolucaoRoutes } from './modules/pedidos/devolucaoRoutes.js'
 import { registerRoteirizacaoRoutes } from './modules/pedidos/roteirizacaoRoutes.js'
@@ -26,6 +27,7 @@ export async function buildApp(
   const cfg = { ...env, ...customEnv }
   const app = Fastify({
     logger: cfg.NODE_ENV === 'production',
+    bodyLimit: 10 * 1024 * 1024,
   })
 
   const allowedOrigins = cfg.CORS_ORIGIN.split(',')
@@ -86,6 +88,7 @@ export async function buildApp(
   registerPendenciasRoutes(app, conn)
   registerWhatsappRoutes(app, conn)
   registerComprasRoutes(app, conn)
+  registerNfeTxtRoutes(app, conn)
   registerMapaProducaoRoutes(app, conn)
   registerDevolucaoRoutes(app, conn)
   registerRoteirizacaoRoutes(app, conn)

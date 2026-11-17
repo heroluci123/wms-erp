@@ -6,6 +6,7 @@ import {
   numeric,
   date,
   timestamp,
+  jsonb,
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
@@ -15,6 +16,7 @@ import {
   produtos,
   fornecedores,
   centrosCusto,
+  formasPagamento,
   naturezasOperacao,
   taras,
 } from './cadastros.js'
@@ -35,6 +37,7 @@ export const pedidosCompra = pgTable(
       .references(() => fornecedores.id),
     naturezaId: uuid('natureza_id').references(() => naturezasOperacao.id),
     centroCustoId: uuid('centro_custo_id').references(() => centrosCusto.id),
+    formaPagamentoId: uuid('forma_pagamento_id').references(() => formasPagamento.id),
     compradorId: uuid('comprador_id').references(() => operadores.id),
     marchante: text('marchante').notNull().default(''),
     freteValor: numeric('frete_valor', { precision: 14, scale: 2 }).notNull().default('0'),
@@ -88,6 +91,16 @@ export const recebimentos = pgTable(
     fornecedorId: uuid('fornecedor_id').references(() => fornecedores.id),
     chaveNfe: text('chave_nfe').notNull().default(''),
     numeroNf: text('numero_nf').notNull().default(''),
+    serieNf: text('serie_nf').notNull().default(''),
+    dataEmissaoNf: date('data_emissao_nf'),
+    valorProdutosNf: numeric('valor_produtos_nf', { precision: 14, scale: 2 }).notNull().default('0'),
+    valorFreteNf: numeric('valor_frete_nf', { precision: 14, scale: 2 }).notNull().default('0'),
+    valorOutrasDespNf: numeric('valor_outras_desp_nf', { precision: 14, scale: 2 }).notNull().default('0'),
+    valorDescontoNf: numeric('valor_desconto_nf', { precision: 14, scale: 2 }).notNull().default('0'),
+    valorTotalNf: numeric('valor_total_nf', { precision: 14, scale: 2 }).notNull().default('0'),
+    xmlItensJson: jsonb('xml_itens_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    xmlDuplicatasJson: jsonb('xml_duplicatas_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    xmlConteudo: text('xml_conteudo').notNull().default(''),
     xmlStorageKey: text('xml_storage_key').notNull().default(''),
     statusValidacao: text('status_validacao').notNull().default('AGUARDANDO_BIPAGEM'), // AGUARDANDO_BIPAGEM | AGUARDANDO_VALIDACAO_SISTEMICA | DIVERGENTE | VALIDADO
     validadoPorId: uuid('validado_por_id'),
@@ -95,6 +108,44 @@ export const recebimentos = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('uq_recebimentos_codigo').on(t.tenantId, t.codigo)]
+)
+
+export const recebimentoPreCaixas = pgTable(
+  'recebimento_pre_caixas',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    recebimentoId: uuid('recebimento_id').references(() => recebimentos.id, { onDelete: 'cascade' }),
+    pedidoCompraId: uuid('pedido_compra_id').references(() => pedidosCompra.id, { onDelete: 'set null' }),
+    fornecedorId: uuid('fornecedor_id').references(() => fornecedores.id, { onDelete: 'set null' }),
+    eanCaixa: text('ean_caixa').notNull(),
+    codigoProdutoFornecedor: text('codigo_produto_fornecedor').notNull().default(''),
+    descricaoProdutoFornecedor: text('descricao_produto_fornecedor').notNull().default(''),
+    produtoId: uuid('produto_id').references(() => produtos.id, { onDelete: 'set null' }),
+    pesoLiquidoKg: numeric('peso_liquido_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    pesoBrutoKg: numeric('peso_bruto_kg', { precision: 14, scale: 3 }),
+    taraKg: numeric('tara_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    qtdPecas: integer('qtd_pecas'),
+    dataProducao: date('data_producao'),
+    validade: date('validade'),
+    lote: text('lote').notNull().default(''),
+    documentoOrigem: text('documento_origem').notNull().default(''),
+    arquivoOrigem: text('arquivo_origem').notNull().default(''),
+    custoUnitarioKg: numeric('custo_unitario_kg', { precision: 14, scale: 4 }).notNull().default('0'),
+    status: text('status').notNull().default('PENDENTE'), // PENDENTE | BIPADA | DIVERGENTE
+    caixaEstoqueId: uuid('caixa_estoque_id'),
+    bipadaEm: timestamp('bipada_em', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_pre_caixas_tenant_ean').on(t.tenantId, t.eanCaixa),
+    index('idx_pre_caixas_rec_status').on(t.tenantId, t.recebimentoId, t.status),
+  ]
 )
 
 export const paletes = pgTable(

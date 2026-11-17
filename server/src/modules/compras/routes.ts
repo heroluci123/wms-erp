@@ -4,6 +4,7 @@ import type { DbConnection } from '../../db/client.js'
 import {
   centrosCusto,
   estoqueCaixas,
+  formasPagamento,
   fornecedores,
   marchantes,
   naturezasOperacao,
@@ -11,6 +12,7 @@ import {
   pedidosCompraItens,
   pendenciasSetor,
   produtos,
+  recebimentoPreCaixas,
   recebimentos,
   tenants,
 } from '../../db/schema/index.js'
@@ -255,6 +257,8 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             natureza_descricao: naturezasOperacao.descricao,
             centro_custo_id: pedidosCompra.centroCustoId,
             centro_custo_descricao: centrosCusto.descricao,
+            forma_pagamento_id: pedidosCompra.formaPagamentoId,
+            forma_pagamento_descricao: formasPagamento.descricao,
             marchante: pedidosCompra.marchante,
             frete_valor: pedidosCompra.freteValor,
             despesas_valor: pedidosCompra.despesasValor,
@@ -273,6 +277,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           .innerJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
           .leftJoin(naturezasOperacao, eq(naturezasOperacao.id, pedidosCompra.naturezaId))
           .leftJoin(centrosCusto, eq(centrosCusto.id, pedidosCompra.centroCustoId))
+          .leftJoin(formasPagamento, eq(formasPagamento.id, pedidosCompra.formaPagamentoId))
           .where(and(...conds))
           .orderBy(desc(pedidosCompra.createdAt)),
       ])
@@ -312,6 +317,8 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           natureza_descricao: naturezasOperacao.descricao,
           centro_custo_id: pedidosCompra.centroCustoId,
           centro_custo_descricao: centrosCusto.descricao,
+          forma_pagamento_id: pedidosCompra.formaPagamentoId,
+          forma_pagamento_descricao: formasPagamento.descricao,
           marchante: pedidosCompra.marchante,
           frete_valor: pedidosCompra.freteValor,
           despesas_valor: pedidosCompra.despesasValor,
@@ -324,6 +331,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         .innerJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
         .leftJoin(naturezasOperacao, eq(naturezasOperacao.id, pedidosCompra.naturezaId))
         .leftJoin(centrosCusto, eq(centrosCusto.id, pedidosCompra.centroCustoId))
+        .leftJoin(formasPagamento, eq(formasPagamento.id, pedidosCompra.formaPagamentoId))
         .where(and(eq(pedidosCompra.id, id), eq(pedidosCompra.tenantId, ctx.tenantId)))
         .limit(1)
       if (!pc) throw new HttpError(404, 'Pedido de Compra não encontrado.')
@@ -352,18 +360,25 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       ])
 
       const recPrincipal = recs[0] || null
-      const caixasBipadas = recPrincipal
-        ? await conn.db
-            .select({
-              id: estoqueCaixas.id,
-              ean_caixa: estoqueCaixas.eanCaixa,
-              produto_id: estoqueCaixas.produtoId,
-              peso_kg: estoqueCaixas.pesoKg,
-              lote: estoqueCaixas.lote,
-            })
-            .from(estoqueCaixas)
-            .where(eq(estoqueCaixas.recebimentoId, recPrincipal.id))
-        : []
+      const [caixasBipadas, preCaixasRows] = await Promise.all([
+        recPrincipal
+          ? conn.db
+              .select({
+                id: estoqueCaixas.id,
+                ean_caixa: estoqueCaixas.eanCaixa,
+                produto_id: estoqueCaixas.produtoId,
+                peso_kg: estoqueCaixas.pesoKg,
+                lote: estoqueCaixas.lote,
+                custo_unitario_kg: estoqueCaixas.custoUnitarioKg,
+              })
+              .from(estoqueCaixas)
+              .where(eq(estoqueCaixas.recebimentoId, recPrincipal.id))
+          : Promise.resolve([]),
+        conn.db
+          .select({ status: recebimentoPreCaixas.status, peso: recebimentoPreCaixas.pesoLiquidoKg })
+          .from(recebimentoPreCaixas)
+          .where(and(eq(recebimentoPreCaixas.pedidoCompraId, id), eq(recebimentoPreCaixas.tenantId, ctx.tenantId))),
+      ])
 
       return {
         success: true,
@@ -379,7 +394,17 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             qtd_kg_recebida: toNum(it.qtd_kg_recebida, 0),
           })),
           recebimento: recPrincipal,
-          caixas_bipadas: caixasBipadas.map((c) => ({ ...c, peso_kg: toNum(c.peso_kg, 0) })),
+          pre_caixas_resumo: {
+            total: preCaixasRows.length,
+            pendentes: preCaixasRows.filter((p) => p.status === 'PENDENTE').length,
+            bipadas: preCaixasRows.filter((p) => p.status === 'BIPADA').length,
+            peso_total_kg: Number(preCaixasRows.reduce((s, p) => s + toNum(p.peso, 0), 0).toFixed(3)),
+          },
+          caixas_bipadas: caixasBipadas.map((c) => ({
+            ...c,
+            peso_kg: toNum(c.peso_kg, 0),
+            custo_unitario_kg: toNum(c.custo_unitario_kg, 0),
+          })),
         },
       }
     },
@@ -392,6 +417,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       natureza_id?: string | null
       finalidade?: string
       centro_custo_id?: string | null
+      forma_pagamento_id?: string | null
       marchante?: string
       frete_valor?: number
       despesas_valor?: number
@@ -459,6 +485,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         fornecedorId,
         naturezaId: prep.naturezaIdResolvida,
         centroCustoId: centroCustoIdFinal,
+        formaPagamentoId: body.forma_pagamento_id ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id') : null,
         compradorId: ctx.operador.id,
         marchante: marchanteFinal,
         freteValor: toDec(frete, 2),

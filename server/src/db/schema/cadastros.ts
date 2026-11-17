@@ -358,3 +358,50 @@ export const tiposVeiculo = pgTable(
   },
   (t) => [index('idx_tipos_veiculo_tenant').on(t.tenantId, t.ativo)]
 )
+
+export const fornecedorProdutoDepara = pgTable(
+  'fornecedor_produto_depara',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    fornecedorId: uuid('fornecedor_id')
+      .notNull()
+      .references(() => fornecedores.id, { onDelete: 'cascade' }),
+    codigoFornecedor: text('codigo_fornecedor').notNull(),
+    descricaoFornecedor: text('descricao_fornecedor').notNull().default(''),
+    ncm: text('ncm').notNull().default(''),
+    produtoId: uuid('produto_id')
+      .notNull()
+      .references(() => produtos.id, { onDelete: 'cascade' }),
+    fatorConversao: numeric('fator_conversao', { precision: 14, scale: 4 }).notNull().default('1'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_depara_forn_cod').on(t.tenantId, t.fornecedorId, t.codigoFornecedor),
+    index('idx_depara_prod').on(t.tenantId, t.produtoId),
+  ]
+)
+
+export const layoutsImportacaoTxt = pgTable(
+  'layouts_importacao_txt',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    fornecedorId: uuid('fornecedor_id').references(() => fornecedores.id, { onDelete: 'set null' }),
+    nome: text('nome').notNull(),
+    tipoArquivo: text('tipo_arquivo').notNull().default('DELIMITADO'), // DELIMITADO | POSICIONAL
+    delimitador: text('delimitador').notNull().default(';'),
+    saltarLinhas: integer('saltar_linhas').notNull().default(0),
+    formatoData: text('formato_data').notNull().default('DDMMYYYY'), // DDMMYYYY | DD/MM/YYYY | YYYY-MM-DD
+    decimalPonto: integer('decimal_ponto').notNull().default(0),
+    mapeamentoJson: jsonb('mapeamento_json').$type<Record<string, number>>().notNull().default({}),
+    ativo: integer('ativo').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_layouts_txt_tenant').on(t.tenantId, t.ativo)]
+)

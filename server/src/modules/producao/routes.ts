@@ -4,6 +4,7 @@ import type { DbConnection } from '../../db/client.js'
 import {
   caixasHistorico,
   estoqueCaixas,
+  fornecedores,
   opInsumos,
   opItensPrevistos,
   opRetornos,
@@ -13,6 +14,7 @@ import {
   produtos,
   taras,
 } from '../../db/schema/index.js'
+import { calcularEPersistirCustosOp, resolverPrecoVendaRefKg } from './costEngine.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
 import {
@@ -63,6 +65,9 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           observacoes: ordensProducao.observacoes,
           rendimento_pct: ordensProducao.rendimentoPct,
           perda_pct: ordensProducao.perdaPct,
+          custo_mp_total: ordensProducao.custoMpTotal,
+          custo_embalagens: ordensProducao.custoEmbalagens,
+          custo_mo_indireto: ordensProducao.custoMoIndireto,
           reaberta: ordensProducao.reaberta,
           liberada_em: ordensProducao.liberadaEm,
           created_at: ordensProducao.createdAt,
@@ -98,6 +103,9 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           peso_retornos: toNum(r.peso_retornos, 0),
           rendimento_pct: r.rendimento_pct != null ? toNum(r.rendimento_pct, 0) : null,
           perda_pct: r.perda_pct != null ? toNum(r.perda_pct, 0) : null,
+          custo_mp_total: toNum(r.custo_mp_total, 0),
+          custo_embalagens: toNum(r.custo_embalagens, 0),
+          custo_mo_indireto: toNum(r.custo_mo_indireto, 0),
         })),
       }
     },
@@ -591,7 +599,7 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
         }
 
         const caixaRes = await tx.execute(sql`
-          SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao, pal.endereco_atual AS palete_endereco
+          SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao, p.custo_medio_kg AS produto_custo_medio_kg, pal.endereco_atual AS palete_endereco
           FROM estoque_caixas ec
           JOIN produtos p ON p.id = ec.produto_id
           LEFT JOIN paletes pal ON pal.id = ec.palete_id
@@ -607,6 +615,8 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
               produto_id: string
               produto_codigo: string
               produto_descricao: string
+              produto_custo_medio_kg: string | null
+              custo_unitario_kg: string | null
               palete_id: string | null
               palete_endereco: string | null
               endereco: string | null
@@ -726,6 +736,10 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
         const pesoCaixa = toNum(cRaw.peso_kg, 0)
         const brutoCaixa =
           cRaw.peso_bruto_kg != null ? toNum(cRaw.peso_bruto_kg, 0) : Number((pesoCaixa + taraCaixa).toFixed(3))
+        const custoInsumoKg =
+          toNum(cRaw.custo_unitario_kg, 0) > 0
+            ? toNum(cRaw.custo_unitario_kg, 0)
+            : toNum(cRaw.produto_custo_medio_kg, 0)
 
         await tx
           .update(estoqueCaixas)
@@ -750,6 +764,7 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           dataProducao: cRaw.data_producao,
           lote: loteCaixa,
           qtdPecas: cRaw.qtd_pecas,
+          custoUnitarioKg: toDec(custoInsumoKg, 4),
           operadorNome: ctx.operador.nome,
         })
 
@@ -818,6 +833,7 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
         validade?: string
         qtd_pecas: number
         ean_caixa?: string
+        preco_venda_ref_kg?: number
       }
 
       const produtoId = parseUuidOrBadRequest(body.produto_id, 'produto_id')
@@ -834,11 +850,21 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
         }
 
         const [prod] = await tx
-          .select({ id: produtos.id, codigo: produtos.codigo, descricao: produtos.descricao })
+          .select({
+            id: produtos.id,
+            codigo: produtos.codigo,
+            descricao: produtos.descricao,
+            valorUnitario: produtos.valorUnitario,
+          })
           .from(produtos)
           .where(and(eq(produtos.id, produtoId), eq(produtos.tenantId, ctx.tenantId)))
           .limit(1)
         if (!prod) throw new HttpError(404, 'Produto de retorno não encontrado.')
+
+        const precoRef =
+          body.preco_venda_ref_kg != null && toNum(body.preco_venda_ref_kg, 0) > 0
+            ? toNum(body.preco_venda_ref_kg, 0)
+            : await resolverPrecoVendaRefKg(tx, ctx.tenantId, prod.id, prod.valorUnitario)
 
         const { taraId, taraKg } = await resolverTaraPeso(tx, ctx.tenantId, body.tara_id, body.tara_kg)
         const pesagem = validarPesagemTaraPayload({
@@ -897,6 +923,7 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           validade: pesagem.validade,
           lote: pesagem.lote,
           qtdPecas: pesagem.qtdPecas,
+          precoVendaRefKg: toDec(precoRef, 4),
           operadorNome: ctx.operador.nome,
         })
 
@@ -1194,16 +1221,169 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
       const ends = [op.codigo, op.endereco, ...insumos.map((i) => i.endereco)]
       await recalcularPosicaoEnderecos(tx, ctx.tenantId, ctx.filialId, ends)
 
+      const custosResumo = await calcularEPersistirCustosOp(tx, ctx.tenantId, opId, { persistir: true })
+
       return {
         rendimento_pct: rendimentoPct,
         perda_pct: perdaPct,
         total_insumos_kg: Number(totalInsumos.toFixed(3)),
         total_retornos_kg: Number(totalRetornos.toFixed(3)),
+        custos_resumo: custosResumo,
       }
     })
 
     return { success: true, ...resumo }
   })
+
+  // Análise comparativa multi-OP + Ranking Fornecedor x Rendimento x Custo Aproveitado/kg
+  app.get(
+    '/api/ops/analise-custos',
+    { preHandler: requirePermission([...PERM_OP_READ, 'relatorios_producao'], { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const q = req.query as { dataInicio?: string; dataFim?: string }
+
+      const conds = [
+        eq(ordensProducao.tenantId, ctx.tenantId),
+        eq(ordensProducao.filialId, ctx.filialId),
+        eq(ordensProducao.status, 'FECHADA'),
+      ]
+      if (q.dataInicio && q.dataFim) {
+        conds.push(
+          sql`DATE(COALESCE(${ordensProducao.dataProducao}, ${ordensProducao.createdAt}::date)) BETWEEN ${q.dataInicio} AND ${q.dataFim}`,
+        )
+      }
+
+      const opsRows = await conn.db
+        .select({ id: ordensProducao.id })
+        .from(ordensProducao)
+        .where(and(...conds))
+        .orderBy(desc(ordensProducao.createdAt))
+        .limit(60)
+
+      const opAnalises = []
+      const fornAcc = new Map<
+        string,
+        {
+          fornecedor_id: string
+          fornecedor_nome: string
+          ops_set: Set<string>
+          peso_entrada_kg: number
+          custo_mp_total: number
+          peso_retorno_ponderado: number
+        }
+      >()
+
+      for (const o of opsRows) {
+        const res = await calcularEPersistirCustosOp(conn.db, ctx.tenantId, o.id, { persistir: false })
+        opAnalises.push(res)
+
+        if (res.peso_insumos_kg > 0) {
+          for (const orig of res.insumos_origem) {
+            if (!orig.fornecedor_id) continue
+            const cur = fornAcc.get(orig.fornecedor_id) || {
+              fornecedor_id: orig.fornecedor_id,
+              fornecedor_nome: orig.fornecedor_nome,
+              ops_set: new Set<string>(),
+              peso_entrada_kg: 0,
+              custo_mp_total: 0,
+              peso_retorno_ponderado: 0,
+            }
+            cur.ops_set.add(res.op_id)
+            cur.peso_entrada_kg += orig.peso_kg
+            cur.custo_mp_total += orig.custo_total
+            cur.peso_retorno_ponderado += (orig.peso_kg / res.peso_insumos_kg) * res.peso_retornos_kg
+            fornAcc.set(orig.fornecedor_id, cur)
+          }
+        }
+      }
+
+      const rankingFornecedores = Array.from(fornAcc.values())
+        .map((f) => {
+          const rend = f.peso_entrada_kg > 0 ? Number(((f.peso_retorno_ponderado / f.peso_entrada_kg) * 100).toFixed(2)) : 0
+          const custoMpKg = f.peso_entrada_kg > 0 ? Number((f.custo_mp_total / f.peso_entrada_kg).toFixed(4)) : 0
+          const custoAproveitadoKg =
+            f.peso_retorno_ponderado > 0 ? Number((f.custo_mp_total / f.peso_retorno_ponderado).toFixed(4)) : 0
+          return {
+            fornecedor_id: f.fornecedor_id,
+            fornecedor_nome: f.fornecedor_nome,
+            qtd_ops: f.ops_set.size,
+            peso_entrada_kg: Number(f.peso_entrada_kg.toFixed(3)),
+            peso_aproveitado_kg: Number(f.peso_retorno_ponderado.toFixed(3)),
+            rendimento_medio_pct: rend,
+            perda_media_pct: Number((100 - rend).toFixed(2)),
+            custo_mp_total: Number(f.custo_mp_total.toFixed(2)),
+            custo_medio_mp_kg: custoMpKg,
+            custo_efetivo_aproveitado_kg: custoAproveitadoKg,
+          }
+        })
+        .sort((a, b) => b.rendimento_medio_pct - a.rendimento_medio_pct)
+
+      return {
+        success: true,
+        data: {
+          ops: opAnalises,
+          ranking_fornecedores: rankingFornecedores,
+        },
+      }
+    },
+  )
+
+  app.get(
+    '/api/ops/:id/custos-resumo',
+    { preHandler: requirePermission([...PERM_OP_READ, 'relatorios_producao'], { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const opId = parseUuidOrBadRequest((req.params as { id: string }).id, 'op_id')
+      const resumo = await calcularEPersistirCustosOp(conn.db, ctx.tenantId, opId, { persistir: false })
+      return { success: true, data: resumo }
+    },
+  )
+
+  app.patch(
+    '/api/ops/:id/custos',
+    { preHandler: requirePermission(['producao_criar_op', 'compras', 'retorno_producao']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const opId = parseUuidOrBadRequest((req.params as { id: string }).id, 'op_id')
+      const body = (req.body || {}) as {
+        custo_embalagens?: number
+        custo_mo_indireto?: number
+        precos_ref?: Record<string, number>
+      }
+
+      const resumo = await conn.db.transaction(async (tx) => {
+        const [op] = await tx
+          .select()
+          .from(ordensProducao)
+          .where(and(eq(ordensProducao.id, opId), eq(ordensProducao.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!op) throw new HttpError(404, 'Ordem de Produção não encontrada.')
+
+        await tx
+          .update(ordensProducao)
+          .set({
+            custoEmbalagens:
+              body.custo_embalagens !== undefined
+                ? toDec(Math.max(0, toNum(body.custo_embalagens, 0)), 2)
+                : op.custoEmbalagens,
+            custoMoIndireto:
+              body.custo_mo_indireto !== undefined
+                ? toDec(Math.max(0, toNum(body.custo_mo_indireto, 0)), 2)
+                : op.custoMoIndireto,
+            updatedAt: new Date(),
+          })
+          .where(eq(ordensProducao.id, opId))
+
+        return await calcularEPersistirCustosOp(tx, ctx.tenantId, opId, {
+          persistir: true,
+          precosRefOverride: body.precos_ref,
+        })
+      })
+
+      return { success: true, data: resumo }
+    },
+  )
 
   app.post('/api/ops/:id/cancelar', { preHandler: requirePermission('producao_criar_op') }, async (req) => {
     const ctx = req.authCtx!
