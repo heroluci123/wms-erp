@@ -1022,6 +1022,57 @@ CREATE TABLE IF NOT EXISTS sync_operations_log (
   processado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_op_idempotency ON sync_operations_log(tenant_id, operation_id);
+
+CREATE TABLE IF NOT EXISTS devolucoes (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  motivo TEXT NOT NULL,
+  acao_estoque TEXT NOT NULL DEFAULT 'DISPONIVEL',
+  endereco_destino TEXT NOT NULL DEFAULT 'REC',
+  pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL,
+  pedido_codigo TEXT NOT NULL DEFAULT '',
+  romaneio_id UUID REFERENCES romaneios(id) ON DELETE SET NULL,
+  romaneio_codigo TEXT NOT NULL DEFAULT '',
+  cliente_nome TEXT NOT NULL DEFAULT '',
+  observacoes TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'CONCLUIDA_FISICA',
+  status_fiscal TEXT NOT NULL DEFAULT 'PENDENTE_FATURAMENTO',
+  numero_nf_devolucao TEXT NOT NULL DEFAULT '',
+  qtd_caixas INTEGER NOT NULL DEFAULT 0,
+  peso_total_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  valor_estimado NUMERIC(14,2) NOT NULL DEFAULT 0,
+  operador_id UUID,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  fiscal_tratado_por_nome TEXT NOT NULL DEFAULT '',
+  fiscal_tratado_em TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_devolucoes_tenant_codigo ON devolucoes(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_devolucoes_tenant_filial ON devolucoes(tenant_id, filial_id, status_fiscal);
+
+CREATE TABLE IF NOT EXISTS devolucao_itens (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  devolucao_id UUID NOT NULL REFERENCES devolucoes(id) ON DELETE CASCADE,
+  caixa_id UUID NOT NULL REFERENCES estoque_caixas(id),
+  ean_caixa TEXT NOT NULL,
+  produto_id UUID NOT NULL REFERENCES produtos(id),
+  produto_codigo TEXT NOT NULL DEFAULT '',
+  produto_descricao TEXT NOT NULL DEFAULT '',
+  lote TEXT NOT NULL DEFAULT '',
+  validade DATE,
+  peso_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  preco_unitario NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pedido_id UUID,
+  pedido_codigo TEXT NOT NULL DEFAULT '',
+  romaneio_id UUID,
+  romaneio_codigo TEXT NOT NULL DEFAULT '',
+  cliente_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dev_itens_dev ON devolucao_itens(devolucao_id);
 `
 
 const POST_MIGRATIONS_SQL = `

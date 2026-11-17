@@ -70,6 +70,7 @@ export const SETORES_PERMISSOES = [
       { key: 'pedidos_consultar', label: 'Consultar pedidos e status', desc: 'Visualizar carteira de pedidos, folhas de separação e romaneios.' },
       { key: 'saida', label: 'Bipar e registrar separação de pedidos', desc: 'Separar caixas bipadas na câmara para atender pedidos liberados.' },
       { key: 'expedicao', label: 'Conferência caixa a caixa e expedição', desc: 'Conferir e expedir pedidos com emissão do romaneio de embarque.' },
+      { key: 'devolucao', label: 'Devolução de caixas expedidas', desc: 'Bipar caixas retornadas, puxar pedido de origem, registrar motivo e reintegrar estoque ou quarentena.' },
       { key: 'pedidos', label: 'Criar / Editar / Liberar pedidos', desc: 'Cadastrar novos pedidos, editar quantidades e liberar para câmara.' },
       { key: 'financeiro_pedidos', label: 'Lançar pedidos pelo Financeiro', desc: 'Permite ao Financeiro criar solicitações de pedido que caem na fila do Supply Chain.' },
       { key: 'whatsapp_inbox', label: 'Caixa de Entrada WhatsApp (Parser)', desc: 'Visualizar mensagens recebidas do WhatsApp e converter em pedidos.' },
@@ -149,6 +150,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'whatsapp_inbox',
   'saida',
   'expedicao',
+  'devolucao',
   'ean_etiquetas',
   'dashboard_executivo',
   'produtos',
@@ -197,6 +199,7 @@ export const PERMISSOES_PADRAO_OPERADOR = {
   pedidos_consultar: true,
   saida: true,
   expedicao: true,
+  devolucao: true,
   // Consultas operacionais
   estoque_enderecos: true,
   consulta_estoque: true,

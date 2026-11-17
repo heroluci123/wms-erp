@@ -612,3 +612,74 @@ export const syncOperationsLog = pgTable(
   },
   (t) => [uniqueIndex('uq_sync_op_idempotency').on(t.tenantId, t.operationId)]
 )
+
+export const devolucoes = pgTable(
+  'devolucoes',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    codigo: text('codigo').notNull(),
+    motivo: text('motivo').notNull(), // VALIDADE | DIVERGENCIA_PEDIDO | LOCAL_FECHADO | AVARIA | OUTROS
+    acaoEstoque: text('acao_estoque').notNull().default('DISPONIVEL'), // DISPONIVEL | BLOQUEADO
+    enderecoDestino: text('endereco_destino').notNull().default('REC'),
+    pedidoId: uuid('pedido_id').references(() => pedidos.id, { onDelete: 'set null' }),
+    pedidoCodigo: text('pedido_codigo').notNull().default(''),
+    romaneioId: uuid('romaneio_id').references(() => romaneios.id, { onDelete: 'set null' }),
+    romaneioCodigo: text('romaneio_codigo').notNull().default(''),
+    clienteNome: text('cliente_nome').notNull().default(''),
+    observacoes: text('observacoes').notNull().default(''),
+    status: text('status').notNull().default('CONCLUIDA_FISICA'),
+    statusFiscal: text('status_fiscal').notNull().default('PENDENTE_FATURAMENTO'), // PENDENTE_FATURAMENTO | NF_DEVOLUCAO_EMITIDA | DISPENSA_FISCAL
+    numeroNfDevolucao: text('numero_nf_devolucao').notNull().default(''),
+    qtdCaixas: integer('qtd_caixas').notNull().default(0),
+    pesoTotalKg: numeric('peso_total_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    valorEstimado: numeric('valor_estimado', { precision: 14, scale: 2 }).notNull().default('0'),
+    operadorId: uuid('operador_id'),
+    operadorNome: text('operador_nome').notNull().default(''),
+    fiscalTratadoPorNome: text('fiscal_tratado_por_nome').notNull().default(''),
+    fiscalTratadoEm: timestamp('fiscal_tratado_em', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_devolucoes_tenant_codigo').on(t.tenantId, t.codigo),
+    index('idx_devolucoes_tenant_filial').on(t.tenantId, t.filialId, t.statusFiscal),
+  ]
+)
+
+export const devolucaoItens = pgTable(
+  'devolucao_itens',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    devolucaoId: uuid('devolucao_id')
+      .notNull()
+      .references(() => devolucoes.id, { onDelete: 'cascade' }),
+    caixaId: uuid('caixa_id')
+      .notNull()
+      .references(() => estoqueCaixas.id),
+    eanCaixa: text('ean_caixa').notNull(),
+    produtoId: uuid('produto_id')
+      .notNull()
+      .references(() => produtos.id),
+    produtoCodigo: text('produto_codigo').notNull().default(''),
+    produtoDescricao: text('produto_descricao').notNull().default(''),
+    lote: text('lote').notNull().default(''),
+    validade: date('validade'),
+    pesoKg: numeric('peso_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    precoUnitario: numeric('preco_unitario', { precision: 14, scale: 2 }).notNull().default('0'),
+    pedidoId: uuid('pedido_id'),
+    pedidoCodigo: text('pedido_codigo').notNull().default(''),
+    romaneioId: uuid('romaneio_id'),
+    romaneioCodigo: text('romaneio_codigo').notNull().default(''),
+    clienteNome: text('cliente_nome').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_dev_itens_dev').on(t.devolucaoId)]
+)

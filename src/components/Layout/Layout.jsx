@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -343,6 +343,7 @@ function Sidebar() {
     'reimpressao',
     'saida',
     'expedicao',
+    'devolucao',
   ])
   const temControle = temAlgumaPermissao(operador, [
     'relatorios_producao',
@@ -460,6 +461,11 @@ function Sidebar() {
       {temAlgumaPermissao(operador, ['saida', 'expedicao']) && (
         <NavLink to="/saida" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <LogOut size={18} /> Saída de Materiais
+        </NavLink>
+      )}
+      {temAlgumaPermissao(operador, ['devolucao', 'saida', 'expedicao', 'recebimento']) && (
+        <NavLink to="/devolucao" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+          <RotateCcw size={18} /> Devolução de Caixas
         </NavLink>
       )}
 

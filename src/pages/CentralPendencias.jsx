@@ -111,6 +111,7 @@ export function CentralPendencias() {
     if (p.tipo_pendencia === 'PEDIDO_WHATSAPP' && p.referencia_tabela === 'whatsapp_inbox') return '/whatsapp-inbox'
     if (p.tipo_pendencia === 'VALIDACAO_RECEBIMENTO' || p.referencia_tabela === 'pedidos_compra') return '/compras'
     if (p.tipo_pendencia === 'OP_DE_MAPA' || p.referencia_tabela === 'mapas_producao') return '/mapa-producao'
+    if (p.tipo_pendencia === 'DEVOLUCAO_FISCAL' || p.referencia_tabela === 'devolucoes') return '/devolucao'
     if (p.referencia_tabela === 'pedidos') return '/pedidos'
     if (p.referencia_tabela === 'ordens_producao') return '/producao'
     const s = SETORES.find((x) => x.id === p.setor_destino)

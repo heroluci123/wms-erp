@@ -567,6 +567,88 @@ test('WMS Parte 2C: Pedido -> Separacao (+50% e Extra) -> Conferencia -> Expedic
     assert.equal(execDepois.statusCode, 200)
     assert.equal(execDepois.json().romaneios.length, 1)
     assert.equal(execDepois.json().romaneios[0].operador_expedicao_nome, null)
+
+    // 4. Devolução de Caixa Expedida (Físico -> Quarentena/Disponível + Pendência Fiscal Desacoplada)
+    const devDispCheck = await app.inject({
+      method: 'GET',
+      url: '/api/devolucoes/buscar-caixa?ean=7890003000028',
+      headers,
+    })
+    assert.equal(devDispCheck.statusCode, 409, 'Caixa ainda DISPONIVEL nao deve ser aceita como devolucao')
+
+    const devBusca = await app.inject({
+      method: 'GET',
+      url: '/api/devolucoes/buscar-caixa?ean=007890003000011',
+      headers,
+    })
+    assert.equal(devBusca.statusCode, 200, `Buscar caixa expedida falhou: ${devBusca.body}`)
+    const cxDev = devBusca.json().caixa
+    assert.equal(cxDev.pedido_id, pedidoId)
+    assert.equal(cxDev.romaneio_id, romId)
+    assert.equal(cxDev.cliente_nome, 'GALLE RESTAURANTE BAR LTDA')
+    assert.equal(Number(cxDev.preco_unitario), 38.9)
+
+    const resDev = await app.inject({
+      method: 'POST',
+      url: '/api/devolucoes',
+      headers,
+      payload: {
+        eans: ['7890003000011'],
+        motivo: 'VALIDADE',
+        acao_estoque: 'BLOQUEADO',
+        endereco_destino: 'B-02-01',
+        observacoes: 'Duas caixas retornadas na rota por validade curta',
+      },
+    })
+    assert.equal(resDev.statusCode, 201, `Finalizar devolucao falhou: ${resDev.body}`)
+    const devBody = resDev.json()
+    assert.ok(String(devBody.codigo || '').startsWith('DEV-'))
+    assert.equal(devBody.qtd_caixas, 1)
+    assert.equal(devBody.acao_estoque, 'BLOQUEADO')
+
+    // Pedido original continua EXPEDIDO (fisico e fiscal desacoplados!)
+    const pedPosDev = await app.inject({ method: 'GET', url: `/api/pedidos/${pedidoId}`, headers })
+    assert.equal(pedPosDev.json().data.status, 'EXPEDIDO')
+
+    // Pendencia para FATURAMENTO criada automaticamente
+    const pendFat = await app.inject({ method: 'GET', url: '/api/pendencias?setor=FATURAMENTO', headers })
+    assert.equal(pendFat.statusCode, 200)
+    assert.ok(
+      (pendFat.json().data || []).some((p: any) => p.tipo_pendencia === 'DEVOLUCAO_FISCAL' && p.referencia_id === devBody.id),
+      `Esperava pendencia DEVOLUCAO_FISCAL em FATURAMENTO: ${pendFat.body}`,
+    )
+
+    // Liberar caixa da quarentena (BLOQUEADO -> DISPONIVEL)
+    const resLibQuar = await app.inject({
+      method: 'POST',
+      url: `/api/devolucoes/caixas/${cxDev.id}/liberar-quarentena`,
+      headers,
+      payload: { endereco_destino: 'B-02-01' },
+    })
+    assert.equal(resLibQuar.statusCode, 200, `Liberar quarentena falhou: ${resLibQuar.body}`)
+
+    // Baixa fiscal pelo Faturamento -> conclui pendencia DEVOLUCAO_FISCAL
+    const resTratarFiscal = await app.inject({
+      method: 'POST',
+      url: `/api/devolucoes/${devBody.id}/tratar-fiscal`,
+      headers,
+      payload: {
+        status_fiscal: 'NF_DEVOLUCAO_EMITIDA',
+        numero_nf_devolucao: '0004589',
+      },
+    })
+    assert.equal(resTratarFiscal.statusCode, 200)
+
+    const listaDev = await app.inject({ method: 'GET', url: '/api/devolucoes', headers })
+    assert.equal(listaDev.statusCode, 200)
+    const devItem = listaDev.json().data.find((d: any) => d.id === devBody.id)
+    assert.ok(devItem)
+    assert.equal(devItem.status_fiscal, 'NF_DEVOLUCAO_EMITIDA')
+    assert.equal(devItem.numero_nf_devolucao, '0004589')
+    assert.equal(devItem.itens[0].caixa_status_atual, 'DISPONIVEL')
+
+    const pendFatPos = await app.inject({ method: 'GET', url: '/api/pendencias?setor=FATURAMENTO&status=ATIVAS', headers })
+    assert.ok(!(pendFatPos.json().data || []).some((p: any) => p.referencia_id === devBody.id))
   } finally {
     await app.close()
     await conn.close()
