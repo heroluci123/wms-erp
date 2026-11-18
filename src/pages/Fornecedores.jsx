@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { Truck, Plus, Search, Edit2, Trash2, X, Save, ShieldCheck, Building2 } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Truck, Plus, Search, Edit2, Trash2, X, Save, ShieldCheck, Building2, Power } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
 import { cadastrosQueries } from '../queries/cadastros'
@@ -7,6 +7,11 @@ import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanne
 import { ModalDialog } from '../components/shared/ModalDialog'
 import { ConsultaCnpjModal } from '../components/shared/ConsultaCnpjModal'
 import { formatarCnpjInput } from '../utils/cnpj'
+import {
+  encontrarCodigoDuplicadoLocal,
+  obterProximoCodigoDisponivel,
+  sugerirProximoCodigoLocal,
+} from '../utils/codigoCadastro'
 
 const FORM_INICIAL = {
   id: null,
@@ -36,16 +41,25 @@ export function Fornecedores() {
   const [lista, setLista] = useState([])
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
+  const [statusFiltro, setStatusFiltro] = useState('ATIVOS')
   const [modalOpen, setModalOpen] = useState(false)
   const [cnpjModalOpen, setCnpjModalOpen] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [form, setForm] = useState(FORM_INICIAL)
-  const [confirmDlg, setConfirmDlg] = useState({ isOpen: false, target: null })
+  const [confirmDlg, setConfirmDlg] = useState({
+    isOpen: false,
+    type: 'confirm',
+    title: '',
+    message: '',
+    confirmLabel: 'Confirmar',
+    target: null,
+  })
+  const codigoEditadoRef = useRef(false)
 
   const carregar = useCallback(async () => {
     setLoading(true)
     try {
-      const rows = await cadastrosQueries.listarFornecedores()
+      const rows = await cadastrosQueries.listarFornecedores({ incluirInativos: true })
       setLista(rows || [])
     } catch (err) {
       toastError('Erro ao carregar fornecedores', err.message)
@@ -58,25 +72,61 @@ export function Fornecedores() {
     carregar()
   }, [carregar])
 
+  const contadoresStatus = useMemo(() => {
+    const ativos = lista.filter((f) => Number(f.ativo) !== 0).length
+    return { ativos, inativos: lista.length - ativos, todos: lista.length }
+  }, [lista])
+
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase()
-    if (!q) return lista
-    return lista.filter(
-      (f) =>
+    return lista.filter((f) => {
+      const ativo = Number(f.ativo) !== 0
+      if (statusFiltro === 'ATIVOS' && !ativo) return false
+      if (statusFiltro === 'INATIVOS' && ativo) return false
+      if (!q) return true
+      return (
+        String(f.codigo || '').toLowerCase().includes(q) ||
         String(f.razao_social || '').toLowerCase().includes(q) ||
         String(f.nome_fantasia || '').toLowerCase().includes(q) ||
         String(f.cnpj_cpf || '').toLowerCase().includes(q) ||
         String(f.registro_sanitario_sif || '').toLowerCase().includes(q)
-    )
-  }, [lista, busca])
+      )
+    })
+  }, [lista, busca, statusFiltro])
+
+  const preencherCodigoAutomaticoSeNovo = useCallback(async () => {
+    const codServidor = await obterProximoCodigoDisponivel('fornecedor', lista)
+    if (!codigoEditadoRef.current) {
+      setForm((prev) => (prev.id ? prev : { ...prev, codigo: codServidor }))
+    }
+  }, [lista])
+
+  const abrirNovoFornecedor = () => {
+    codigoEditadoRef.current = false
+    setForm({ ...FORM_INICIAL, codigo: sugerirProximoCodigoLocal(lista) })
+    setModalOpen(true)
+    preencherCodigoAutomaticoSeNovo()
+  }
 
   const handleSalvar = async (e) => {
     e.preventDefault()
     if (!form.razao_social.trim()) return toastError('Obrigatório', 'Informe a Razão Social do fornecedor.')
+    const codDigitado = String(form.codigo || '').trim()
+    if (form.id && !codDigitado) {
+      return toastError('Código obrigatório', 'Informe o código do fornecedor.')
+    }
+    if (codDigitado) {
+      const dup = encontrarCodigoDuplicadoLocal(lista, codDigitado, form.id)
+      if (dup) {
+        const suf = Number(dup.ativo) === 0 ? ' (cadastro inativo no histórico)' : ''
+        return toastError('Código duplicado', `Já existe outro fornecedor (${dup.razao_social}) com o código "${codDigitado}"${suf}.`)
+      }
+    }
     setSalvando(true)
     try {
       await cadastrosQueries.salvarFornecedor({
         ...form,
+        codigo: codDigitado,
         prazo_entrega_dias: Number(form.prazo_entrega_dias || 0),
       })
       toastSuccess('Fornecedor salvo', `${form.razao_social} cadastrado/atualizado.`)
@@ -94,15 +144,23 @@ export function Fornecedores() {
       ? lista.find((f) => String(f.id) === String(existingRegistro.id)) || null
       : null
 
+    if (!modalOpen && !baseExistente) {
+      codigoEditadoRef.current = false
+    }
+    const codAtual = modalOpen && !baseExistente ? String(form?.codigo || '').trim() : ''
+    const precisaAutoCodigo = !baseExistente && (!modalOpen || (!form?.id && !codAtual)) && !codigoEditadoRef.current
+    const codFallback = sugerirProximoCodigoLocal(lista)
+
     setForm((prev) => {
       const base = baseExistente
         ? { ...FORM_INICIAL, ...baseExistente, prazo_entrega_dias: Number(baseExistente.prazo_entrega_dias ?? 5) }
         : prev?.id || modalOpen
           ? prev
-          : { ...FORM_INICIAL }
+          : { ...FORM_INICIAL, codigo: codFallback }
 
       return {
         ...base,
+        codigo: !base.id && !String(base.codigo || '').trim() ? codFallback : base.codigo,
         razao_social: dadosReceita.razao_social || base.razao_social,
         nome_fantasia: dadosReceita.nome_fantasia || dadosReceita.razao_social || base.nome_fantasia,
         cnpj_cpf: dadosReceita.cnpj_formatado || dadosReceita.cnpj || base.cnpj_cpf,
@@ -123,6 +181,9 @@ export function Fornecedores() {
     })
     setCnpjModalOpen(false)
     setModalOpen(true)
+    if (precisaAutoCodigo) {
+      preencherCodigoAutomaticoSeNovo()
+    }
     toastSuccess('Dados importados da Receita ✅', 'Confira os campos (como SIF e prazo) e salve o fornecedor.')
   }
 
@@ -178,10 +239,7 @@ export function Fornecedores() {
           </button>
           <button
             className="btn btn--primary"
-            onClick={() => {
-              setForm(FORM_INICIAL)
-              setModalOpen(true)
-            }}
+            onClick={abrirNovoFornecedor}
             disabled={!isApiEnabled()}
           >
             <Plus size={18} /> Novo Fornecedor
@@ -192,18 +250,33 @@ export function Fornecedores() {
       <ApiModeRequiredBanner modulo="Fornecedores" />
 
       <div className="table-container">
-        <div className="table-toolbar">
+        <div className="table-toolbar" style={{ flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: 420 }}>
             <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               className="form-input"
               style={{ paddingLeft: 36 }}
-              placeholder="Buscar por razão social, CNPJ ou SIF..."
+              placeholder="Buscar por código, razão social, CNPJ ou SIF..."
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
-          <span className="text-xs text-muted">{filtrados.length} fornecedor(es)</span>
+          <div className="flex gap-8 flex-wrap items-center">
+            {[
+              { id: 'ATIVOS', label: `Ativos (${contadoresStatus.ativos})` },
+              { id: 'INATIVOS', label: `Inativos (${contadoresStatus.inativos})` },
+              { id: 'TODOS', label: `Todos (${contadoresStatus.todos})` },
+            ].map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`btn btn--sm ${statusFiltro === s.id ? 'btn--primary' : 'btn--ghost'}`}
+                onClick={() => setStatusFiltro(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div style={{ overflowX: 'auto' }}>
@@ -234,7 +307,19 @@ export function Fornecedores() {
                     <tr key={f.id}>
                       <td className="td-mono">{f.codigo || '-'}</td>
                       <td>
-                        <div className="font-bold">{f.razao_social}</div>
+                        <div className="font-bold flex items-center gap-6 flex-wrap">
+                          <span>{f.razao_social}</span>
+                          {Number(f.ativo) === 0 && (
+                            <span className="badge badge--warning" style={{ fontSize: 10 }}>
+                              Inativo{f.dias_inativo != null ? ` (${f.dias_inativo}d)` : ''}
+                            </span>
+                          )}
+                          {f.tem_contas_financeiras && (
+                            <span className="badge badge--danger" style={{ fontSize: 10 }}>
+                              Contas a Pagar
+                            </span>
+                          )}
+                        </div>
                         <div className="td-muted">{f.nome_fantasia !== f.razao_social ? f.nome_fantasia : f.telefone || '-'}</div>
                       </td>
                       <td>
@@ -262,6 +347,7 @@ export function Fornecedores() {
                             className="btn btn--ghost btn--icon"
                             disabled={!isApiEnabled()}
                             onClick={() => {
+                              codigoEditadoRef.current = false
                               setForm({
                                 id: f.id,
                                 codigo: f.codigo || '',
@@ -286,13 +372,57 @@ export function Fornecedores() {
                               })
                               setModalOpen(true)
                             }}
+                            title="Editar Fornecedor"
                           >
                             <Edit2 size={15} />
                           </button>
                           <button
+                            className={`btn btn--ghost btn--icon ${Number(f.ativo) === 0 ? 'text-success' : 'text-warning'}`}
+                            disabled={!isApiEnabled()}
+                            title={Number(f.ativo) === 0 ? 'Reativar Fornecedor' : 'Inativar Fornecedor'}
+                            onClick={async () => {
+                              try {
+                                const ativando = Number(f.ativo) === 0
+                                await cadastrosQueries.alterarAtivoFornecedor(f.id, ativando)
+                                toastSuccess(
+                                  ativando ? 'Fornecedor reativado' : 'Fornecedor inativado',
+                                  ativando
+                                    ? `${f.razao_social} voltou para o catálogo ativo.`
+                                    : `${f.razao_social} foi inativado e permanece no histórico.`,
+                                )
+                                carregar()
+                              } catch (err) {
+                                toastError('Erro', err.message)
+                              }
+                            }}
+                          >
+                            <Power size={15} />
+                          </button>
+                          <button
                             className="btn btn--ghost btn--icon text-danger"
                             disabled={!isApiEnabled()}
-                            onClick={() => setConfirmDlg({ isOpen: true, target: f })}
+                            title={f.motivo_bloqueio_exclusao || 'Apagar definitivamente do registro'}
+                            onClick={() => {
+                              if (f.pode_excluir_definitivo === false) {
+                                setConfirmDlg({
+                                  isOpen: true,
+                                  type: 'alert',
+                                  title: 'Exclusão Bloqueada',
+                                  message: f.motivo_bloqueio_exclusao || 'Este fornecedor não atende às regras para ser apagado do registro.',
+                                  confirmLabel: 'Entendi',
+                                  target: null,
+                                })
+                                return
+                              }
+                              setConfirmDlg({
+                                isOpen: true,
+                                type: 'confirm',
+                                title: 'Apagar Fornecedor do Registro',
+                                message: `Deseja apagar definitivamente "${f.razao_social}" do banco de dados? Esta ação é irreversível.`,
+                                confirmLabel: 'Sim, apagar do registro',
+                                target: f,
+                              })
+                            }}
                           >
                             <Trash2 size={15} />
                           </button>
@@ -326,7 +456,16 @@ export function Fornecedores() {
               <div className="form-grid form-grid--3">
                 <div>
                   <label className="form-label">Código</label>
-                  <input className="form-input" value={form.codigo} onChange={(e) => setForm({ ...form, codigo: e.target.value })} />
+                  <input
+                    className="form-input"
+                    value={form.codigo}
+                    placeholder="Automático"
+                    title="Gerado automaticamente. Apague para digitar outro código manualmente."
+                    onChange={(e) => {
+                      codigoEditadoRef.current = true
+                      setForm({ ...form, codigo: e.target.value })
+                    }}
+                  />
                 </div>
                 <div style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Razão Social *</label>
@@ -456,21 +595,26 @@ export function Fornecedores() {
 
       <ModalDialog
         isOpen={confirmDlg.isOpen}
-        type="confirm"
-        title="Desativar Fornecedor"
-        message={`Deseja desativar "${confirmDlg.target?.razao_social || ''}"?`}
-        onClose={() => setConfirmDlg({ isOpen: false, target: null })}
-        confirmLabel="Sim, desativar"
-        onConfirm={async () => {
-          try {
-            await cadastrosQueries.excluirFornecedor(confirmDlg.target.id)
-            toastSuccess('Fornecedor removido', 'Registro desativado.')
-            setConfirmDlg({ isOpen: false, target: null })
-            carregar()
-          } catch (err) {
-            toastError('Erro', err.message)
-          }
-        }}
+        type={confirmDlg.type || 'confirm'}
+        title={confirmDlg.title || 'Apagar Fornecedor'}
+        message={confirmDlg.message || ''}
+        onClose={() => setConfirmDlg((d) => ({ ...d, isOpen: false, target: null }))}
+        confirmLabel={confirmDlg.confirmLabel || 'Confirmar'}
+        onConfirm={
+          confirmDlg.type === 'confirm' && confirmDlg.target
+            ? async () => {
+                try {
+                  await cadastrosQueries.excluirFornecedor(confirmDlg.target.id)
+                  toastSuccess('Fornecedor apagado', 'Cadastro removido definitivamente do registro.')
+                  setConfirmDlg((d) => ({ ...d, isOpen: false, target: null }))
+                  carregar()
+                } catch (err) {
+                  setConfirmDlg((d) => ({ ...d, isOpen: false, target: null }))
+                  toastError('Exclusão bloqueada', err.message)
+                }
+              }
+            : null
+        }
       />
     </div>
   )

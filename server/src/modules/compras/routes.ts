@@ -171,7 +171,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           valor_total: pedidosCompra.valorTotal,
         })
         .from(pedidosCompra)
-        .innerJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
+        .leftJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
         .where(
           and(
             eq(pedidosCompra.tenantId, ctx.tenantId),
@@ -182,7 +182,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         .orderBy(desc(pedidosCompra.createdAt))
 
       const pcIds = pcs.map((p) => p.id)
-      const fornIds = Array.from(new Set(pcs.map((p) => p.fornecedor_id)))
+      const fornIds = Array.from(new Set(pcs.map((p) => p.fornecedor_id).filter((id): id is string => Boolean(id))))
       const [itensRes, recRes, prePoolRes] = await Promise.all([
         pcIds.length > 0
           ? conn.db
@@ -341,7 +341,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             status_validacao: sql<string | null>`(SELECT r.status_validacao FROM recebimentos r WHERE r.pedido_compra_id = "pedidos_compra"."id" ORDER BY r.created_at DESC LIMIT 1)`,
           })
           .from(pedidosCompra)
-          .innerJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
+          .leftJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
           .leftJoin(naturezasOperacao, eq(naturezasOperacao.id, pedidosCompra.naturezaId))
           .leftJoin(centrosCusto, eq(centrosCusto.id, pedidosCompra.centroCustoId))
           .leftJoin(formasPagamento, eq(formasPagamento.id, pedidosCompra.formaPagamentoId))
@@ -395,7 +395,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           created_at: pedidosCompra.createdAt,
         })
         .from(pedidosCompra)
-        .innerJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
+        .leftJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
         .leftJoin(naturezasOperacao, eq(naturezasOperacao.id, pedidosCompra.naturezaId))
         .leftJoin(centrosCusto, eq(centrosCusto.id, pedidosCompra.centroCustoId))
         .leftJoin(formasPagamento, eq(formasPagamento.id, pedidosCompra.formaPagamentoId))

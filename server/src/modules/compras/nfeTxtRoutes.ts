@@ -32,6 +32,7 @@ import {
 } from '../wms/helpers.js'
 import { parseNfeXml } from './nfeXmlParser.js'
 import { parseTxtEtiquetasBatch } from './txtEtiquetasParser.js'
+import { gerarProximoCodigoCadastro } from '../cadastros/codigoHelper.js'
 
 const LayoutTxtSchema = z.object({
   nome: z.string().trim().min(1, 'Informe o nome do layout.'),
@@ -774,9 +775,11 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
             allForn.find((f) => f.cnpjCpf.replace(/\D/g, '') === xmlParsed.emitente.cnpj) || null
           if (!fornecedorRow && body.auto_cadastrar_fornecedor) {
             const newFornId = uuidv7()
+            const autoCodigo = await gerarProximoCodigoCadastro(tx, ctx.tenantId, 'fornecedor')
             await tx.insert(fornecedores).values({
               id: newFornId,
               tenantId: ctx.tenantId,
+              codigo: autoCodigo,
               razaoSocial: xmlParsed.emitente.razao_social || 'FORNECEDOR XML NFE',
               nomeFantasia: xmlParsed.emitente.nome_fantasia || xmlParsed.emitente.razao_social || 'FORNECEDOR XML',
               cnpjCpf: xmlParsed.emitente.cnpj,
@@ -1095,7 +1098,7 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
           .from(pedidosCompra)
           .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
           .limit(1)
-        if (pcRow) {
+        if (pcRow && pcRow.fornecedorId) {
           conds.push(
             or(
               eq(recebimentoPreCaixas.pedidoCompraId, pcId),
@@ -1217,7 +1220,9 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
                 eq(recebimentoPreCaixas.status, 'PENDENTE'),
                 or(
                   eq(recebimentoPreCaixas.pedidoCompraId, pc.id),
-                  and(isNull(recebimentoPreCaixas.pedidoCompraId), eq(recebimentoPreCaixas.fornecedorId, pc.fornecedorId)),
+                  ...(pc.fornecedorId
+                    ? [and(isNull(recebimentoPreCaixas.pedidoCompraId), eq(recebimentoPreCaixas.fornecedorId, pc.fornecedorId))]
+                    : []),
                 )!,
               ),
             )
@@ -1253,7 +1258,9 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
           conds.push(
             or(
               eq(recebimentoPreCaixas.pedidoCompraId, pcRow.id),
-              and(isNull(recebimentoPreCaixas.pedidoCompraId), eq(recebimentoPreCaixas.fornecedorId, pcRow.fornecedorId)),
+              ...(pcRow.fornecedorId
+                ? [and(isNull(recebimentoPreCaixas.pedidoCompraId), eq(recebimentoPreCaixas.fornecedorId, pcRow.fornecedorId))]
+                : []),
             )!,
           )
         } else if (body.recebimento_id) {

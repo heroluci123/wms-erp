@@ -2,6 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Check, Tag, Sparkles } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import * as produtosQueries from '../../queries/produtos.js';
+import {
+  encontrarCodigoDuplicadoLocal,
+  obterProximoCodigoDisponivel,
+  sugerirProximoCodigoLocal,
+} from '../../utils/codigoCadastro';
 
 /**
  * Modal de Cadastro Dinâmico de EAN
@@ -32,6 +37,7 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
   const [sufixoLen, setSufixoLen] = useState(6);
 
   const searchInputRef = useRef(null);
+  const codigoNovoEditadoRef = useRef(false);
 
   const ean = codigoDesconhecido || '';
   const isEanLongo = ean.length >= 8;
@@ -117,11 +123,17 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
       // Se for curto, podemos usar como código ou ean exato.
       const produtoArgs = { ...formNovo, valor_unitario: 0 };
       if (!isEanLongo && !produtoArgs.codigo) produtoArgs.codigo = ean;
+      if (produtoArgs.codigo) {
+        const dup = encontrarCodigoDuplicadoLocal(produtosList, produtoArgs.codigo);
+        if (dup) {
+          return toastError('Código duplicado', `Já existe outro produto (${dup.descricao}) com o código "${produtoArgs.codigo.trim()}".`);
+        }
+      }
 
       const resCriar = await produtosQueries.criar(produtoArgs);
       if (!resCriar.success) return toastError('Erro ao criar', resCriar.error);
 
-      const novoProdutoObj = { id: resCriar.id, ...produtoArgs };
+      const novoProdutoObj = { id: resCriar.id, ...produtoArgs, codigo: resCriar.codigo || produtoArgs.codigo };
       
       let tipo, regra;
       if (isEanLongo) {
@@ -295,9 +307,17 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
               {podeCadastrar && (
                 <div style={{ marginTop: 16, textAlign: 'center' }}>
                   <span className="text-muted text-sm">O produto não está na lista? </span>
-                  <button className="btn btn--ghost btn--sm text-primary" onClick={() => {
-                    setFormNovo({ descricao: '', codigo: isEanLongo ? '' : ean, unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima', status_curva: 'C' });
+                  <button className="btn btn--ghost btn--sm text-primary" onClick={async () => {
+                    codigoNovoEditadoRef.current = false;
+                    const codInicial = isEanLongo ? sugerirProximoCodigoLocal(produtosList) : ean;
+                    setFormNovo({ descricao: '', codigo: codInicial, unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima', status_curva: 'C' });
                     setModo('novo');
+                    if (isEanLongo) {
+                      const codServ = await obterProximoCodigoDisponivel('produto', produtosList);
+                      if (!codigoNovoEditadoRef.current) {
+                        setFormNovo((prev) => ({ ...prev, codigo: codServ }));
+                      }
+                    }
                   }}>
                     Cadastrar novo produto
                   </button>
@@ -324,7 +344,10 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
                 <div className="form-grid form-grid--2 mb-12">
                   <div className="form-group">
                     <label className="form-label">Código Interno</label>
-                    <input type="text" className="form-input" value={formNovo.codigo} onChange={e => setFormNovo({...formNovo, codigo: e.target.value})} />
+                    <input type="text" className="form-input" placeholder="Automático" value={formNovo.codigo} onChange={e => {
+                      codigoNovoEditadoRef.current = true;
+                      setFormNovo({...formNovo, codigo: e.target.value});
+                    }} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Unidade</label>

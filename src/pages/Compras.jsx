@@ -29,6 +29,7 @@ import { comprasQueries } from '../queries/compras'
 import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos.js'
 import { RelatorioRecebimentoPrint } from '../components/shared/RelatorioRecebimentoPrint'
+import { SeletorItemCompra } from '../components/compras/SeletorItemCompra'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -103,9 +104,6 @@ export function Compras() {
   const [observacoes, setObservacoes] = useState('')
   const [aprovarAoCriar, setAprovarAoCriar] = useState(true)
   const [itensForm, setItensForm] = useState([])
-  const [prodAddId, setProdAddId] = useState('')
-  const [qtdAdd, setQtdAdd] = useState('')
-  const [precoAdd, setPrecoAdd] = useState('')
 
   // Modal Detalhe / Validação 3-Way / Relatório
   const [detalhe, setDetalhe] = useState(null)
@@ -259,39 +257,39 @@ export function Compras() {
     }
   }
 
-  const handleAddItemForm = () => {
-    if (!prodAddId) return toastWarning('Item', 'Selecione um produto.')
-    const qtd = Number(String(qtdAdd).replace(',', '.'))
-    if (!Number.isFinite(qtd) || qtd <= 0) return toastWarning('Item', 'Informe a quantidade (kg) maior que zero.')
-    const preco = Math.max(0, Number(String(precoAdd || '0').replace(',', '.')) || 0)
-    const prod = produtos.find((p) => p.id === prodAddId)
-    if (!prod) return
-
+  const handleIncluirItemSelecionado = ({
+    produto,
+    qtd_kg_solicitada,
+    preco_unitario_kg,
+    codigo_fornecedor_usado,
+  }) => {
+    if (!produto) return
+    const qtd = Number(qtd_kg_solicitada || 0)
+    const preco = Math.max(0, Number(preco_unitario_kg || 0))
     setItensForm((prev) => {
-      const idx = prev.findIndex((i) => i.produto_id === prod.id)
+      const idx = prev.findIndex((i) => i.produto_id === produto.id)
       if (idx >= 0) {
         const clone = [...prev]
         clone[idx] = {
           ...clone[idx],
           qtd_kg_solicitada: Number((clone[idx].qtd_kg_solicitada + qtd).toFixed(3)),
           preco_unitario_kg: preco > 0 ? preco : clone[idx].preco_unitario_kg,
+          codigo_fornecedor_usado: codigo_fornecedor_usado || clone[idx].codigo_fornecedor_usado,
         }
         return clone
       }
       return [
         ...prev,
         {
-          produto_id: prod.id,
-          produto_codigo: prod.codigo,
-          produto_descricao: prod.descricao,
+          produto_id: produto.id,
+          produto_codigo: produto.codigo,
+          produto_descricao: produto.descricao,
           qtd_kg_solicitada: qtd,
-          preco_unitario_kg: preco || Number(prod.custo_medio_kg || 0),
+          preco_unitario_kg: preco || Number(produto.custo_medio_kg || 0),
+          codigo_fornecedor_usado: codigo_fornecedor_usado || null,
         },
       ]
     })
-    setProdAddId('')
-    setQtdAdd('')
-    setPrecoAdd('')
   }
 
   const handleSalvarCompra = async (e) => {
@@ -1416,7 +1414,7 @@ export function Compras() {
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalNovo(false)}>
           <div
             className="modal"
-            style={{ maxWidth: 980, width: '96%', maxHeight: '92vh', overflowY: 'auto' }}
+            style={{ maxWidth: 1080, width: '96%', maxHeight: '92vh', overflowY: 'auto' }}
           >
             <div className="flex justify-between items-center pb-12 mb-16 border-b border-border">
               <h2 className="text-lg font-bold flex items-center gap-8">
@@ -1519,45 +1517,24 @@ export function Compras() {
                 </div>
               </div>
 
-              {/* Adicionar Itens */}
-              <div className="p-14 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-                <div className="text-xs font-bold uppercase text-muted mb-10">Itens do Pedido de Compra</div>
-                <div className="flex gap-8 flex-wrap items-end mb-12">
-                  <div className="form-group" style={{ flex: 2, minWidth: 240, marginBottom: 0 }}>
-                    <label className="form-label">Matéria-Prima / Produto</label>
-                    <select
-                      className="form-input"
-                      value={prodAddId}
-                      onChange={(e) => {
-                        const pid = e.target.value
-                        setProdAddId(pid)
-                        const p = produtos.find((x) => x.id === pid)
-                        if (p) setPrecoAdd(String(p.custo_medio_kg || p.valor_unitario || ''))
-                      }}
-                    >
-                      <option value="">Selecione...</option>
-                      {produtosOrdenados.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.codigo} — {p.descricao}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ width: 130, marginBottom: 0 }}>
-                    <label className="form-label">Qtd (kg)</label>
-                    <input type="number" step="0.001" className="form-input" value={qtdAdd} onChange={(e) => setQtdAdd(e.target.value)} placeholder="500" />
-                  </div>
-                  <div className="form-group" style={{ width: 130, marginBottom: 0 }}>
-                    <label className="form-label">Preço/kg (R$)</label>
-                    <input type="number" step="0.01" className="form-input" value={precoAdd} onChange={(e) => setPrecoAdd(e.target.value)} placeholder="25,00" />
-                  </div>
-                  <button type="button" className="btn btn--info" onClick={handleAddItemForm}>
-                    <Plus size={15} /> Incluir
-                  </button>
-                </div>
+              {/* Adicionar Itens (Código / Descrição Autocomplete / Lupa / De-Para) */}
+              <div className="flex flex-col gap-12">
+                <SeletorItemCompra
+                  produtos={produtosOrdenados}
+                  deparas={deparas}
+                  fornecedorId={fornecedorId}
+                  fornecedorNome={
+                    fornecedores.find((f) => String(f.id) === String(fornecedorId))?.nome_fantasia || ''
+                  }
+                  onIncluirItem={handleIncluirItemSelecionado}
+                  onAviso={(titulo, msg) => toastWarning(titulo, msg)}
+                />
 
                 {itensForm.length > 0 && (
-                  <div className="table-wrap">
+                  <div className="table-wrap p-10 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+                    <div className="text-xs font-bold uppercase text-muted mb-8">
+                      Itens do Pedido de Compra ({itensForm.length})
+                    </div>
                     <table className="table">
                       <thead>
                         <tr>
@@ -1571,7 +1548,16 @@ export function Compras() {
                       <tbody>
                         {itensForm.map((it, idx) => (
                           <tr key={it.produto_id}>
-                            <td><strong>{it.produto_codigo}</strong> — {it.produto_descricao}</td>
+                            <td>
+                              <div>
+                                <strong className="font-mono text-cyan">{it.produto_codigo}</strong> — {it.produto_descricao}
+                              </div>
+                              {it.codigo_fornecedor_usado && (
+                                <div className="text-xs text-muted">
+                                  Lançado via De-Para Cód. Fornecedor: <span className="font-mono">{it.codigo_fornecedor_usado}</span>
+                                </div>
+                              )}
+                            </td>
                             <td style={{ textAlign: 'right' }}>
                               <input
                                 type="number"

@@ -2,6 +2,11 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Plus, Search, Edit2, Trash2, X, Download, Save, Box, Layers } from 'lucide-react'
 import * as produtosQueries from '../queries/produtos'
 import { ModalDialog } from '../components/shared/ModalDialog'
+import {
+  encontrarCodigoDuplicadoLocal,
+  obterProximoCodigoDisponivel,
+  sugerirProximoCodigoLocal,
+} from '../utils/codigoCadastro'
 
 const CurvaBadge = ({ curva }) => {
   const cores = {
@@ -35,6 +40,7 @@ export function Produtos() {
   const [savedRowId, setSavedRowId] = useState(null)
   const tableRef = useRef(null)
   const scrollYRef = useRef(0)
+  const codigoEditadoRef = useRef(false)
   const [formData, setFormData] = useState({
     id: null,
     codigo: '',
@@ -76,6 +82,18 @@ export function Produtos() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     const editedId = formData.id
+    const codDigitado = String(formData.codigo || '').trim()
+    if (editedId && !codDigitado) {
+      showAlert('Código obrigatório', 'Informe o código interno do produto.')
+      return
+    }
+    if (codDigitado) {
+      const dup = encontrarCodigoDuplicadoLocal(produtos, codDigitado, editedId)
+      if (dup) {
+        showAlert('Código já cadastrado', `Já existe outro produto (${dup.descricao}) com o código "${codDigitado}".`)
+        return
+      }
+    }
     const payload = {
       ...formData,
       arvore_vinculos:
@@ -145,7 +163,20 @@ export function Produtos() {
       pais_ids: p.pais_ids ? p.pais_ids.toString().split(',').map(s => s.trim()).filter(Boolean).map(v => /^\d+$/.test(v) ? Number(v) : v) : [],
       rendimentos_map: rendMap,
     })
+    codigoEditadoRef.current = false
     setIsEditing(true)
+  }
+
+  const abrirNovoProduto = async () => {
+    resetForm()
+    codigoEditadoRef.current = false
+    const codLocal = sugerirProximoCodigoLocal(produtos)
+    setFormData((prev) => ({ ...prev, codigo: codLocal }))
+    setIsEditing(true)
+    const codServidor = await obterProximoCodigoDisponivel('produto', produtos)
+    if (!codigoEditadoRef.current) {
+      setFormData((prev) => (prev.id ? prev : { ...prev, codigo: codServidor }))
+    }
   }
 
   const handleDelete = async (id, nome) => {
@@ -234,7 +265,7 @@ export function Produtos() {
           <button className="btn btn--secondary" onClick={exportarCSV}>
             <Download size={18} /> Exportar CSV
           </button>
-          <button className="btn btn--primary" onClick={() => setIsEditing(true)}>
+          <button className="btn btn--primary" onClick={abrirNovoProduto}>
             <Plus size={18} /> Novo Produto
           </button>
         </div>
@@ -420,8 +451,19 @@ export function Produtos() {
                   <h3 className="text-sm font-bold text-primary mb-16 border-b border-border pb-8 uppercase">Dados Gerais</h3>
                   <div className="flex gap-16 mb-16 flex-wrap">
                     <div className="form-group w-[180px] shrink-0">
-                      <label className="form-label">Código Interno (SKU) *</label>
-                      <input type="text" className="form-input" value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value})} required placeholder="Ex: 10232" />
+                      <label className="form-label">Código Interno (SKU)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={formData.codigo}
+                        onChange={(e) => {
+                          codigoEditadoRef.current = true
+                          setFormData({ ...formData, codigo: e.target.value })
+                        }}
+                        required={Boolean(formData.id)}
+                        placeholder="Automático"
+                        title="Gerado automaticamente. Apague para informar outro código manualmente."
+                      />
                     </div>
                     <div className="form-group w-[150px] shrink-0">
                       <label className="form-label">Código Auxiliar</label>

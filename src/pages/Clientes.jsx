@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Building2,
   Plus,
@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Ban,
   Star,
+  Power,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
@@ -21,6 +22,11 @@ import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanne
 import { ModalDialog } from '../components/shared/ModalDialog'
 import { ConsultaCnpjModal } from '../components/shared/ConsultaCnpjModal'
 import { formatarCnpjInput } from '../utils/cnpj'
+import {
+  encontrarCodigoDuplicadoLocal,
+  obterProximoCodigoDisponivel,
+  sugerirProximoCodigoLocal,
+} from '../utils/codigoCadastro'
 
 const FORM_INICIAL = {
   id: null,
@@ -59,12 +65,14 @@ export function Clientes() {
   const [loading, setLoading] = useState(true)
 
   const [busca, setBusca] = useState('')
+  const [statusFiltro, setStatusFiltro] = useState('ATIVOS')
   const [filtro, setFiltro] = useState('TODOS')
 
   const [modalOpen, setModalOpen] = useState(false)
   const [cnpjModalOpen, setCnpjModalOpen] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [form, setForm] = useState(FORM_INICIAL)
+  const codigoEditadoRef = useRef(false)
 
   // Modal Especificacoes por Produto (código aux cliente, corte, reclamações)
   const [clienteEspec, setClienteEspec] = useState(null)
@@ -80,13 +88,20 @@ export function Clientes() {
     alerta_descricao: '',
   })
 
-  const [confirmDlg, setConfirmDlg] = useState({ isOpen: false, title: '', message: '', onConfirm: null })
+  const [confirmDlg, setConfirmDlg] = useState({
+    isOpen: false,
+    type: 'confirm',
+    title: '',
+    message: '',
+    confirmLabel: 'Confirmar',
+    onConfirm: null,
+  })
 
   const carregar = useCallback(async () => {
     setLoading(true)
     try {
       const [cliRes, vendRes, auxRes, rotRes] = await Promise.all([
-        cadastrosQueries.listarClientes(),
+        cadastrosQueries.listarClientes({ incluirInativos: true }),
         cadastrosQueries.listarVendedores().catch(() => []),
         cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [], marchantes: [] })),
         cadastrosQueries.listarRotas().catch(() => []),
@@ -106,9 +121,18 @@ export function Clientes() {
     carregar()
   }, [carregar])
 
+  const contadoresStatus = useMemo(() => {
+    const ativos = clientes.filter((c) => Number(c.ativo) !== 0).length
+    return { ativos, inativos: clientes.length - ativos, todos: clientes.length }
+  }, [clientes])
+
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase()
     return clientes.filter((c) => {
+      const ativo = Number(c.ativo) !== 0
+      if (statusFiltro === 'ATIVOS' && !ativo) return false
+      if (statusFiltro === 'INATIVOS' && ativo) return false
+
       const matchBusca =
         !q ||
         String(c.razao_social || '').toLowerCase().includes(q) ||
@@ -123,19 +147,33 @@ export function Clientes() {
       if (filtro === 'COM_ALERTAS') return Number(c.qtd_alertas || 0) > 0
       return true
     })
-  }, [clientes, busca, filtro])
+  }, [clientes, busca, filtro, statusFiltro])
 
   const marchantePadraoDefault = useMemo(() => {
     const lista = auxiliares.marchantes || []
     return lista.find((m) => Number(m.is_padrao) === 1)?.nome || lista[0]?.nome || 'FRIGODIL'
   }, [auxiliares.marchantes])
 
+  const preencherCodigoAutomaticoSeNovo = useCallback(async () => {
+    const codServidor = await obterProximoCodigoDisponivel('cliente', clientes)
+    if (!codigoEditadoRef.current) {
+      setForm((prev) => (prev.id ? prev : { ...prev, codigo: codServidor }))
+    }
+  }, [clientes])
+
   const abrirNovo = () => {
-    setForm({ ...FORM_INICIAL, marchante_padrao: marchantePadraoDefault })
+    codigoEditadoRef.current = false
+    setForm({
+      ...FORM_INICIAL,
+      codigo: sugerirProximoCodigoLocal(clientes),
+      marchante_padrao: marchantePadraoDefault,
+    })
     setModalOpen(true)
+    preencherCodigoAutomaticoSeNovo()
   }
 
   const abrirEditar = (c) => {
+    codigoEditadoRef.current = false
     setForm({
       id: c.id,
       codigo: c.codigo || '',
@@ -170,10 +208,22 @@ export function Clientes() {
     if (!form.razao_social.trim()) {
       return toastError('Campo obrigatório', 'Informe a Razão Social do cliente.')
     }
+    const codDigitado = String(form.codigo || '').trim()
+    if (form.id && !codDigitado) {
+      return toastError('Código obrigatório', 'Informe o código do cliente.')
+    }
+    if (codDigitado) {
+      const dup = encontrarCodigoDuplicadoLocal(clientes, codDigitado, form.id)
+      if (dup) {
+        const suf = Number(dup.ativo) === 0 ? ' (cadastro inativo no histórico)' : ''
+        return toastError('Código duplicado', `Já existe outro cliente (${dup.razao_social}) com o código "${codDigitado}"${suf}.`)
+      }
+    }
     setSalvando(true)
     try {
       await cadastrosQueries.salvarCliente({
         ...form,
+        codigo: codDigitado,
         vendedor_padrao_id: form.vendedor_padrao_id || null,
         forma_pagamento_padrao_id: form.forma_pagamento_padrao_id || null,
         local_cobranca_padrao_id: form.local_cobranca_padrao_id || null,
@@ -189,19 +239,49 @@ export function Clientes() {
     }
   }
 
+  const handleAlternarAtivo = async (c) => {
+    const ativando = Number(c.ativo) === 0
+    try {
+      await cadastrosQueries.alterarAtivoCliente(c.id, ativando)
+      toastSuccess(
+        ativando ? 'Cliente reativado' : 'Cliente inativado',
+        ativando
+          ? `${c.razao_social} voltou para o catálogo ativo.`
+          : `${c.razao_social} foi inativado e permanece no histórico.`,
+      )
+      await carregar()
+    } catch (err) {
+      toastError('Erro ao atualizar status', err.message)
+    }
+  }
+
   const handleExcluir = (c) => {
+    if (c.pode_excluir_definitivo === false) {
+      setConfirmDlg({
+        isOpen: true,
+        type: 'alert',
+        title: 'Exclusão Bloqueada',
+        message: c.motivo_bloqueio_exclusao || 'Este cliente não atende às regras para ser apagado do registro.',
+        confirmLabel: 'Entendi',
+        onConfirm: null,
+      })
+      return
+    }
     setConfirmDlg({
       isOpen: true,
-      title: 'Desativar Cliente',
-      message: `Deseja desativar "${c.razao_social}" do catálogo ativo?`,
+      type: 'confirm',
+      title: 'Apagar Cliente do Registro',
+      message: `Deseja apagar definitivamente "${c.razao_social}" do banco de dados? Esta ação é irreversível.`,
+      confirmLabel: 'Sim, apagar do registro',
       onConfirm: async () => {
         try {
           await cadastrosQueries.excluirCliente(c.id)
-          toastSuccess('Cliente removido', `${c.razao_social} foi desativado.`)
+          toastSuccess('Cliente apagado', `${c.razao_social} foi removido definitivamente do registro.`)
           setConfirmDlg((d) => ({ ...d, isOpen: false }))
           await carregar()
         } catch (err) {
-          toastError('Erro ao desativar', err.message)
+          setConfirmDlg((d) => ({ ...d, isOpen: false }))
+          toastError('Exclusão bloqueada', err.message)
         }
       },
     })
@@ -282,15 +362,23 @@ export function Clientes() {
       ? clientes.find((c) => String(c.id) === String(existingRegistro.id)) || null
       : null
 
+    if (!modalOpen && !baseExistente) {
+      codigoEditadoRef.current = false
+    }
+    const codAtual = modalOpen && !baseExistente ? String(form?.codigo || '').trim() : ''
+    const precisaAutoCodigo = !baseExistente && (!modalOpen || (!form?.id && !codAtual)) && !codigoEditadoRef.current
+    const codFallback = sugerirProximoCodigoLocal(clientes)
+
     setForm((prev) => {
       const base = baseExistente
         ? { ...FORM_INICIAL, ...baseExistente, marchante_padrao: baseExistente.marchante_padrao || marchantePadraoDefault }
         : prev?.id || modalOpen
           ? prev
-          : { ...FORM_INICIAL, marchante_padrao: marchantePadraoDefault }
+          : { ...FORM_INICIAL, codigo: codFallback, marchante_padrao: marchantePadraoDefault }
 
       return {
         ...base,
+        codigo: !base.id && !String(base.codigo || '').trim() ? codFallback : base.codigo,
         razao_social: dadosReceita.razao_social || base.razao_social,
         nome_fantasia: dadosReceita.nome_fantasia || dadosReceita.razao_social || base.nome_fantasia,
         cnpj_cpf: dadosReceita.cnpj_formatado || dadosReceita.cnpj || base.cnpj_cpf,
@@ -307,6 +395,9 @@ export function Clientes() {
     })
     setCnpjModalOpen(false)
     setModalOpen(true)
+    if (precisaAutoCodigo) {
+      preencherCodigoAutomaticoSeNovo()
+    }
     toastSuccess('CNPJ importado ✅', 'Dados da Receita preenchidos no cadastro do cliente.')
   }
 
@@ -351,9 +442,24 @@ export function Clientes() {
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
-          <div className="flex gap-8 flex-wrap">
+          <div className="flex gap-8 flex-wrap items-center">
             {[
-              { id: 'TODOS', label: `Todos (${clientes.length})` },
+              { id: 'ATIVOS', label: `Ativos (${contadoresStatus.ativos})` },
+              { id: 'INATIVOS', label: `Inativos (${contadoresStatus.inativos})` },
+              { id: 'TODOS', label: `Todos (${contadoresStatus.todos})` },
+            ].map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`btn btn--sm ${statusFiltro === s.id ? 'btn--primary' : 'btn--ghost'}`}
+                onClick={() => setStatusFiltro(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+            <span style={{ width: 1, height: 18, background: 'var(--border)' }} />
+            {[
+              { id: 'TODOS', label: 'Qualquer Perfil' },
               { id: 'PGTO_ENTREGA', label: 'Pgto na Entrega' },
               { id: 'BLOQUEADOS', label: 'Bloqueados Financeiro' },
               { id: 'COM_ALERTAS', label: 'Com Alertas ⚠️' },
@@ -401,6 +507,16 @@ export function Clientes() {
                       <td>
                         <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span>{c.razao_social}</span>
+                          {Number(c.ativo) === 0 && (
+                            <span className="badge badge--warning" style={{ fontSize: 10 }}>
+                              Inativo{c.dias_inativo != null ? ` (${c.dias_inativo}d)` : ''}
+                            </span>
+                          )}
+                          {c.tem_contas_financeiras && (
+                            <span className="badge badge--danger" style={{ fontSize: 10 }}>
+                              Contas a Receber
+                            </span>
+                          )}
                           {Number(c.is_padrao) === 1 && (
                             <span className="badge badge--info" style={{ fontSize: 10 }}>
                               <Star size={10} /> Padrão
@@ -467,10 +583,18 @@ export function Clientes() {
                             <Edit2 size={15} />
                           </button>
                           <button
+                            className={`btn btn--ghost btn--icon ${Number(c.ativo) === 0 ? 'text-success' : 'text-warning'}`}
+                            onClick={() => handleAlternarAtivo(c)}
+                            disabled={!isApiEnabled()}
+                            title={Number(c.ativo) === 0 ? 'Reativar Cliente' : 'Inativar Cliente'}
+                          >
+                            <Power size={15} />
+                          </button>
+                          <button
                             className="btn btn--ghost btn--icon text-danger"
                             onClick={() => handleExcluir(c)}
                             disabled={!isApiEnabled()}
-                            title="Desativar Cliente"
+                            title={c.motivo_bloqueio_exclusao || 'Apagar definitivamente do registro'}
                           >
                             <Trash2 size={15} />
                           </button>
@@ -502,7 +626,16 @@ export function Clientes() {
               <div className="form-grid form-grid--3">
                 <div>
                   <label className="form-label">Código Interno (Sistec/ERP)</label>
-                  <input className="form-input" value={form.codigo} onChange={(e) => setForm({ ...form, codigo: e.target.value })} placeholder="Ex: 822" />
+                  <input
+                    className="form-input"
+                    value={form.codigo}
+                    onChange={(e) => {
+                      codigoEditadoRef.current = true
+                      setForm({ ...form, codigo: e.target.value })
+                    }}
+                    placeholder="Automático"
+                    title="Gerado automaticamente. Apague para digitar outro código manualmente."
+                  />
                 </div>
                 <div style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Razão Social *</label>
@@ -856,12 +989,12 @@ export function Clientes() {
 
       <ModalDialog
         isOpen={confirmDlg.isOpen}
-        type="confirm"
+        type={confirmDlg.type || 'confirm'}
         title={confirmDlg.title}
         message={confirmDlg.message}
         onConfirm={confirmDlg.onConfirm}
         onClose={() => setConfirmDlg((d) => ({ ...d, isOpen: false }))}
-        confirmLabel="Sim, desativar"
+        confirmLabel={confirmDlg.confirmLabel || 'Confirmar'}
       />
     </div>
   )

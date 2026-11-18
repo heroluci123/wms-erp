@@ -1176,12 +1176,14 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         }
         fornecedorPcId = pc.fornecedorId
 
-        const [forn] = await tx
-          .select({ sif: fornecedores.registroSanitarioSif })
-          .from(fornecedores)
-          .where(eq(fornecedores.id, pc.fornecedorId))
-          .limit(1)
-        sifPc = forn?.sif || ''
+        if (pc.fornecedorId) {
+          const [forn] = await tx
+            .select({ sif: fornecedores.registroSanitarioSif })
+            .from(fornecedores)
+            .where(eq(fornecedores.id, pc.fornecedorId))
+            .limit(1)
+          sifPc = forn?.sif || ''
+        }
 
         const [pcItem] = await tx
           .select()

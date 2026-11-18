@@ -1263,6 +1263,13 @@ ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT ''
 ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS cnae_principal TEXT NOT NULL DEFAULT '';
 ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS regime_apuracao TEXT NOT NULL DEFAULT '';
 ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS situacao_cadastral TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS inativado_em TIMESTAMPTZ;
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS inativado_em TIMESTAMPTZ;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+UPDATE fornecedores SET inativado_em = COALESCE(inativado_em, created_at) WHERE ativo = 0 AND inativado_em IS NULL;
+UPDATE clientes SET inativado_em = COALESCE(inativado_em, created_at) WHERE ativo = 0 AND inativado_em IS NULL;
+ALTER TABLE pedidos_compra ALTER COLUMN fornecedor_id DROP NOT NULL;
 `
 
 export interface SeedDefaultsResult {
@@ -1271,9 +1278,57 @@ export interface SeedDefaultsResult {
   filialIds: { estoque: string; acougue: string; industrializacao: string }
 }
 
+async function backfillCodigosEIndicesUnicos(conn: DbConnection): Promise<void> {
+  const tabelas: Array<{ nome: 'fornecedores' | 'clientes' | 'transportadoras'; idx: string }> = [
+    { nome: 'fornecedores', idx: 'uq_fornecedores_tenant_codigo' },
+    { nome: 'clientes', idx: 'uq_clientes_tenant_codigo' },
+    { nome: 'transportadoras', idx: 'uq_transportadoras_tenant_codigo' },
+  ]
+
+  for (const tb of tabelas) {
+    const rows = await conn.queryRaw<{ id: string; tenant_id: string; codigo: string | null }>(
+      `SELECT id, tenant_id, codigo FROM ${tb.nome} ORDER BY created_at ASC, id ASC`,
+    )
+    const maxPorTenant = new Map<string, number>()
+    const usadosPorTenant = new Map<string, Set<string>>()
+
+    for (const r of rows) {
+      const cod = (r.codigo || '').trim()
+      if (!usadosPorTenant.has(r.tenant_id)) usadosPorTenant.set(r.tenant_id, new Set())
+      if (cod && /^\d{1,12}$/.test(cod)) {
+        const curMax = maxPorTenant.get(r.tenant_id) || 0
+        const n = Number(cod)
+        if (n > curMax) maxPorTenant.set(r.tenant_id, n)
+      }
+    }
+
+    for (const r of rows) {
+      const set = usadosPorTenant.get(r.tenant_id)!
+      const cod = (r.codigo || '').trim()
+      const keyLower = cod.toLowerCase()
+      if (!cod || set.has(keyLower)) {
+        let nextNum = (maxPorTenant.get(r.tenant_id) || 0) + 1
+        while (set.has(String(nextNum).toLowerCase())) nextNum += 1
+        maxPorTenant.set(r.tenant_id, nextNum)
+        const novoCod = String(nextNum)
+        set.add(novoCod.toLowerCase())
+        await conn.queryRaw(`UPDATE ${tb.nome} SET codigo = $1 WHERE id = $2`, [novoCod, r.id])
+      } else {
+        set.add(keyLower)
+        if (cod !== r.codigo) {
+          await conn.queryRaw(`UPDATE ${tb.nome} SET codigo = $1 WHERE id = $2`, [cod, r.id])
+        }
+      }
+    }
+
+    await conn.execMulti(`CREATE UNIQUE INDEX IF NOT EXISTS ${tb.idx} ON ${tb.nome}(tenant_id, codigo);`)
+  }
+}
+
 export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefaultsResult> {
   await conn.execMulti(SCHEMA_SQL)
   await conn.execMulti(POST_MIGRATIONS_SQL)
+  await backfillCodigosEIndicesUnicos(conn)
 
   const { db } = conn
   const existingTenants = await db.select().from(tenants).limit(1)

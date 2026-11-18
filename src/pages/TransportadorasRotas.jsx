@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Route, Truck, Plus, Edit2, Trash2, X, Save, Search } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
@@ -6,6 +6,11 @@ import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ConsultaCnpjModal } from '../components/shared/ConsultaCnpjModal'
 import { formatarCnpjInput } from '../utils/cnpj'
+import {
+  encontrarCodigoDuplicadoLocal,
+  obterProximoCodigoDisponivel,
+  sugerirProximoCodigoLocal,
+} from '../utils/codigoCadastro'
 
 const TRANS_INICIAL = {
   id: null,
@@ -39,6 +44,7 @@ export function TransportadorasRotas() {
   const [modalTransp, setModalTransp] = useState(false)
   const [cnpjTranspOpen, setCnpjTranspOpen] = useState(false)
   const [formTransp, setFormTransp] = useState(TRANS_INICIAL)
+  const codigoEditadoRef = useRef(false)
 
   const [modalRota, setModalRota] = useState(false)
   const [formRota, setFormRota] = useState(ROTA_INICIAL)
@@ -63,10 +69,27 @@ export function TransportadorasRotas() {
     carregar()
   }, [carregar])
 
+  const preencherAutoCodigoTransp = async () => {
+    const codServidor = await obterProximoCodigoDisponivel('transportadora', transportadoras)
+    if (!codigoEditadoRef.current) {
+      setFormTransp((prev) => (prev.id ? prev : { ...prev, codigo: codServidor }))
+    }
+  }
+
   const salvarTransp = async (e) => {
     e.preventDefault()
+    const codDigitado = String(formTransp.codigo || '').trim()
+    if (formTransp.id && !codDigitado) {
+      return toastError('Código obrigatório', 'Informe o código da transportadora.')
+    }
+    if (codDigitado) {
+      const dup = encontrarCodigoDuplicadoLocal(transportadoras, codDigitado, formTransp.id)
+      if (dup) {
+        return toastError('Código duplicado', `Já existe outra transportadora (${dup.razao_social}) com o código "${codDigitado}".`)
+      }
+    }
     try {
-      await cadastrosQueries.salvarTransportadora(formTransp)
+      await cadastrosQueries.salvarTransportadora({ ...formTransp, codigo: codDigitado })
       toastSuccess('Salvo', 'Transportadora salva com sucesso.')
       setModalTransp(false)
       carregar()
@@ -110,8 +133,10 @@ export function TransportadorasRotas() {
                 setFormRota(ROTA_INICIAL)
                 setModalRota(true)
               } else {
-                setFormTransp(TRANS_INICIAL)
+                codigoEditadoRef.current = false
+                setFormTransp({ ...TRANS_INICIAL, codigo: sugerirProximoCodigoLocal(transportadoras) })
                 setModalTransp(true)
+                preencherAutoCodigoTransp()
               }
             }}
           >
@@ -246,6 +271,7 @@ export function TransportadorasRotas() {
                             className="btn btn--ghost btn--icon"
                             disabled={!isApiEnabled()}
                             onClick={() => {
+                              codigoEditadoRef.current = false
                               setFormTransp({
                                 id: t.id,
                                 codigo: t.codigo || '',
@@ -354,7 +380,16 @@ export function TransportadorasRotas() {
               <div className="form-grid form-grid--3">
                 <div>
                   <label className="form-label">Código</label>
-                  <input className="form-input" value={formTransp.codigo} onChange={(e) => setFormTransp({ ...formTransp, codigo: e.target.value })} />
+                  <input
+                    className="form-input"
+                    value={formTransp.codigo}
+                    placeholder="Automático"
+                    title="Gerado automaticamente. Apague para digitar outro código manualmente."
+                    onChange={(e) => {
+                      codigoEditadoRef.current = true
+                      setFormTransp({ ...formTransp, codigo: e.target.value })
+                    }}
+                  />
                 </div>
                 <div style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Razão Social / Nome *</label>
@@ -423,18 +458,28 @@ export function TransportadorasRotas() {
         cnpjInicial={modalTransp ? formTransp.cnpj_cpf : ''}
         tipoAlvo="transportadora"
         onImportar={(dadosReceita) => {
-          setFormTransp((prev) => ({
-            ...prev,
-            razao_social: dadosReceita.razao_social || prev.razao_social,
-            nome_fantasia: dadosReceita.nome_fantasia || dadosReceita.razao_social || prev.nome_fantasia,
-            cnpj_cpf: dadosReceita.cnpj_formatado || dadosReceita.cnpj || prev.cnpj_cpf,
-            inscricao_estadual: dadosReceita.inscricao_estadual || prev.inscricao_estadual,
-            uf: dadosReceita.uf || prev.uf,
-            cidade: dadosReceita.cidade || prev.cidade,
-            telefone: dadosReceita.telefone || prev.telefone,
-          }))
+          if (!modalTransp) {
+            codigoEditadoRef.current = false
+          }
+          const precisaAutoCodigo = !formTransp?.id && !String(formTransp?.codigo || '').trim() && !codigoEditadoRef.current
+          const codFallback = sugerirProximoCodigoLocal(transportadoras)
+          setFormTransp((prev) => {
+            const codigoBase = prev.codigo || (!prev.id ? codFallback : '')
+            return {
+              ...prev,
+              codigo: codigoBase,
+              razao_social: dadosReceita.razao_social || prev.razao_social,
+              nome_fantasia: dadosReceita.nome_fantasia || dadosReceita.razao_social || prev.nome_fantasia,
+              cnpj_cpf: dadosReceita.cnpj_formatado || dadosReceita.cnpj || prev.cnpj_cpf,
+              inscricao_estadual: dadosReceita.inscricao_estadual || prev.inscricao_estadual,
+              uf: dadosReceita.uf || prev.uf,
+              cidade: dadosReceita.cidade || prev.cidade,
+              telefone: dadosReceita.telefone || prev.telefone,
+            }
+          })
           setCnpjTranspOpen(false)
           setModalTransp(true)
+          if (precisaAutoCodigo) preencherAutoCodigoTransp()
           toastSuccess('Dados importados ✅', 'CNPJ carregado na transportadora.')
         }}
       />

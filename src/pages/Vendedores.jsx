@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Briefcase, Plus, Edit2, Trash2, X, Save, UserCheck } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
@@ -6,6 +6,11 @@ import { cadastrosQueries } from '../queries/cadastros'
 import { operadoresQueries } from '../queries/operadores'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ModalDialog } from '../components/shared/ModalDialog'
+import {
+  encontrarCodigoDuplicadoLocal,
+  obterProximoCodigoDisponivel,
+  sugerirProximoCodigoLocal,
+} from '../utils/codigoCadastro'
 
 const FORM_INICIAL = {
   id: null,
@@ -35,6 +40,7 @@ export function Vendedores() {
   const [salvando, setSalvando] = useState(false)
   const [form, setForm] = useState(FORM_INICIAL)
   const [confirmDlg, setConfirmDlg] = useState({ isOpen: false, target: null })
+  const codigoEditadoRef = useRef(false)
 
   const carregar = useCallback(async () => {
     setLoading(true)
@@ -58,13 +64,21 @@ export function Vendedores() {
 
   const handleSalvar = async (e) => {
     e.preventDefault()
-    if (!form.codigo.trim() || !form.nome.trim()) {
+    const codDigitado = String(form.codigo || '').trim()
+    if (!form.nome.trim() || (form.id && !codDigitado)) {
       return toastError('Campos obrigatórios', 'Informe Código e Nome do vendedor.')
+    }
+    if (codDigitado) {
+      const dup = encontrarCodigoDuplicadoLocal(lista, codDigitado, form.id)
+      if (dup) {
+        return toastError('Código duplicado', `Já existe outro vendedor (${dup.nome}) com o código "${codDigitado}".`)
+      }
     }
     setSalvando(true)
     try {
       await cadastrosQueries.salvarVendedor({
         ...form,
+        codigo: codDigitado,
         operador_id: form.operador_id || null,
         pct_comissao: Number(form.pct_comissao || 0),
         meta_mensal_kg: Number(form.meta_mensal_kg || 0),
@@ -93,9 +107,14 @@ export function Vendedores() {
         </div>
         <button
           className="btn btn--primary"
-          onClick={() => {
-            setForm(FORM_INICIAL)
+          onClick={async () => {
+            codigoEditadoRef.current = false
+            setForm({ ...FORM_INICIAL, codigo: sugerirProximoCodigoLocal(lista) })
             setModalOpen(true)
+            const codServ = await obterProximoCodigoDisponivel('vendedor', lista)
+            if (!codigoEditadoRef.current) {
+              setForm((prev) => (prev.id ? prev : { ...prev, codigo: codServ }))
+            }
           }}
           disabled={!isApiEnabled()}
         >
@@ -219,8 +238,18 @@ export function Vendedores() {
             <form onSubmit={handleSalvar} className="p-20 flex flex-col gap-14">
               <div className="form-grid form-grid--3">
                 <div>
-                  <label className="form-label">Código *</label>
-                  <input className="form-input" required value={form.codigo} onChange={(e) => setForm({ ...form, codigo: e.target.value })} placeholder="Ex: 4" />
+                  <label className="form-label">Código</label>
+                  <input
+                    className="form-input"
+                    required={Boolean(form.id)}
+                    value={form.codigo}
+                    onChange={(e) => {
+                      codigoEditadoRef.current = true
+                      setForm({ ...form, codigo: e.target.value })
+                    }}
+                    placeholder="Automático"
+                    title="Gerado automaticamente. Apague para digitar outro código manualmente."
+                  />
                 </div>
                 <div>
                   <label className="form-label">Sigla</label>

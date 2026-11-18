@@ -12,6 +12,12 @@ import {
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import {
+  gerarProximoCodigoCadastro,
+  normalizarTipoCadastroCodigo,
+  resolverCodigoCadastroOnCreate,
+  resolverCodigoCadastroOnUpdate,
+} from './codigoHelper.js'
 import { registerCadastrosMestresRoutes } from './mestresRoutes.js'
 
 const ArvoreVinculoSchema = z.object({
@@ -20,7 +26,10 @@ const ArvoreVinculoSchema = z.object({
 })
 
 const ProdutoSchema = z.object({
-  codigo: z.string().trim().min(1, 'Codigo interno obrigatorio.'),
+  codigo: z
+    .string()
+    .nullish()
+    .transform((v) => (v && v.trim() ? v.trim() : null)),
   codigo_auxiliar: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
   ean: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
   descricao: z.string().trim().min(1, 'Descricao obrigatoria.'),
@@ -326,24 +335,18 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
       if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
       const d = parsed.data
 
-      const dup = await conn.db
-        .select({ id: produtos.id })
-        .from(produtos)
-        .where(and(eq(produtos.tenantId, ctx.tenantId), eq(produtos.codigo, d.codigo)))
-        .limit(1)
-      if (dup.length > 0) throw new HttpError(409, `Ja existe produto com o codigo "${d.codigo}".`)
-
       const vinculos =
         Array.isArray(d.arvore_vinculos) && d.arvore_vinculos.length > 0
           ? d.arvore_vinculos
           : d.pais_ids.map((paiId) => ({ pai_id: paiId, rendimento_esperado_pct: null }))
 
       const id = uuidv7()
-      await conn.db.transaction(async (tx) => {
+      const codigoFinal = await conn.db.transaction(async (tx) => {
+        const codResolvido = await resolverCodigoCadastroOnCreate(tx, ctx.tenantId, 'produto', d.codigo)
         await tx.insert(produtos).values({
           id,
           tenantId: ctx.tenantId,
-          codigo: d.codigo,
+          codigo: codResolvido,
           codigoAuxiliar: d.codigo_auxiliar,
           ean: d.ean,
           descricao: d.descricao,
@@ -378,8 +381,9 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
               .onConflictDoNothing()
           }
         }
+        return codResolvido
       })
-      return reply.status(201).send({ success: true, id })
+      return reply.status(201).send({ success: true, id, codigo: codigoFinal })
     }
   )
 
@@ -397,24 +401,12 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           ? d.arvore_vinculos
           : d.pais_ids.map((paiId) => ({ pai_id: paiId, rendimento_esperado_pct: null }))
 
-      const dup = await conn.db
-        .select({ id: produtos.id })
-        .from(produtos)
-        .where(
-          and(
-            eq(produtos.tenantId, ctx.tenantId),
-            eq(produtos.codigo, d.codigo),
-            sql`${produtos.id} != ${id}`,
-          ),
-        )
-        .limit(1)
-      if (dup.length > 0) throw new HttpError(409, `Ja existe outro produto com o codigo "${d.codigo}".`)
-
       await conn.db.transaction(async (tx) => {
+        const codResolvido = await resolverCodigoCadastroOnUpdate(tx, ctx.tenantId, 'produto', id, d.codigo)
         await tx
           .update(produtos)
           .set({
-            codigo: d.codigo,
+            codigo: codResolvido,
             codigoAuxiliar: d.codigo_auxiliar,
             ean: d.ean,
             descricao: d.descricao,
@@ -749,6 +741,35 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
       .where(and(eq(locais.id, id), eq(locais.tenantId, ctx.tenantId)))
     return { success: true }
   })
+
+  // Sugestão automática do próximo código sequencial disponível por tipo de cadastro
+  app.get(
+    '/api/cadastros/proximo-codigo/:tipo',
+    {
+      preHandler: requirePermission(
+        [
+          'produtos',
+          'clientes',
+          'fornecedores',
+          'transportadoras',
+          'vendedores',
+          'pedidos',
+          'financeiro_pedidos',
+          'compras',
+          'recebimento',
+          'operadores',
+        ],
+        { write: false },
+      ),
+    },
+    async (req) => {
+      const ctx = req.authCtx!
+      const rawTipo = (req.params as { tipo: string }).tipo
+      const tipo = normalizarTipoCadastroCodigo(rawTipo)
+      const codigo = await gerarProximoCodigoCadastro(conn.db, ctx.tenantId, tipo)
+      return { success: true, data: { tipo, codigo } }
+    },
+  )
 
   // Cadastros Mestres Estruturantes (Empresas, Filiais/SIF, Clientes+Espec, Fornecedores, Vendedores, Transportadoras/Rotas, Auxiliares)
   registerCadastrosMestresRoutes(app, conn)

@@ -45,12 +45,21 @@ export const cadastrosQueries = {
     return apiRequest(`/api/cadastros/filiais/${id}`, { method: 'DELETE' })
   },
 
+  // ── SUGESTAO AUTOMATICA DE CODIGO ─────────────────────────────────────────
+  async obterProximoCodigo(tipo) {
+    exigirApi('Próximo Código')
+    const res = await apiRequest(`/api/cadastros/proximo-codigo/${encodeURIComponent(tipo)}`)
+    return res?.data?.codigo || ''
+  },
+
   // ── CLIENTES & ESPECIFICACOES ─────────────────────────────────────────────
-  async listarClientes() {
+  async listarClientes({ incluirInativos = false } = {}) {
     if (isApiEnabled()) {
-      return (await apiRequest('/api/cadastros/clientes')).data || []
+      const qs = buildQueryString({ incluir_inativos: incluirInativos ? '1' : undefined })
+      return (await apiRequest(`/api/cadastros/clientes${qs}`)).data || []
     }
-    const res = await db.execute('SELECT * FROM clientes WHERE ativo = 1 ORDER BY is_padrao DESC, razao_social ASC')
+    const where = incluirInativos ? '' : 'WHERE ativo = 1 '
+    const res = await db.execute(`SELECT * FROM clientes ${where}ORDER BY is_padrao DESC, razao_social ASC`)
     return res.rows || []
   },
 
@@ -60,6 +69,11 @@ export const cadastrosQueries = {
       return apiRequest(`/api/cadastros/clientes/${dados.id}`, { method: 'PUT', body: dados })
     }
     return apiRequest('/api/cadastros/clientes', { method: 'POST', body: dados })
+  },
+
+  async alterarAtivoCliente(id, ativo) {
+    exigirApi('Clientes')
+    return apiRequest(`/api/cadastros/clientes/${id}/ativo`, { method: 'PATCH', body: { ativo: ativo ? 1 : 0 } })
   },
 
   async excluirCliente(id) {
@@ -96,9 +110,10 @@ export const cadastrosQueries = {
   },
 
   // ── FORNECEDORES ──────────────────────────────────────────────────────────
-  async listarFornecedores() {
+  async listarFornecedores({ incluirInativos = false } = {}) {
     if (!isApiEnabled()) return []
-    return (await apiRequest('/api/cadastros/fornecedores')).data || []
+    const qs = buildQueryString({ incluir_inativos: incluirInativos ? '1' : undefined })
+    return (await apiRequest(`/api/cadastros/fornecedores${qs}`)).data || []
   },
 
   async salvarFornecedor(dados) {
@@ -107,6 +122,11 @@ export const cadastrosQueries = {
       return apiRequest(`/api/cadastros/fornecedores/${dados.id}`, { method: 'PUT', body: dados })
     }
     return apiRequest('/api/cadastros/fornecedores', { method: 'POST', body: dados })
+  },
+
+  async alterarAtivoFornecedor(id, ativo) {
+    exigirApi('Fornecedores')
+    return apiRequest(`/api/cadastros/fornecedores/${id}/ativo`, { method: 'PATCH', body: { ativo: ativo ? 1 : 0 } })
   },
 
   async excluirFornecedor(id) {

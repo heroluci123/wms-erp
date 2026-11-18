@@ -24,6 +24,13 @@ import {
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { sugerirCfopOperacao } from '../wms/helpers.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { resolverCodigoCadastroOnCreate, resolverCodigoCadastroOnUpdate } from './codigoHelper.js'
+import {
+  avaliarExclusaoEmLoteClientes,
+  avaliarExclusaoEmLoteFornecedores,
+  executarExclusaoDefinitivaCliente,
+  executarExclusaoDefinitivaFornecedor,
+} from './exclusaoHelper.js'
 import { consultarCnpjReceita, type ProvedorCnpj } from './cnpjLookup.js'
 
 const optStr = (fallback = '') =>
@@ -121,7 +128,10 @@ const FornecedorSchema = z.object({
 })
 
 const VendedorSchema = z.object({
-  codigo: z.string().trim().min(1, 'Informe o código do vendedor.'),
+  codigo: z
+    .string()
+    .nullish()
+    .transform((v) => (v && v.trim() ? v.trim() : null)),
   sigla: optStr(''),
   nome: z.string().trim().min(1, 'Informe o nome do vendedor.'),
   operador_id: optNullableUuid.optional(),
@@ -414,6 +424,9 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     { preHandler: requirePermission(['clientes', 'pedidos', 'pedidos_consultar', 'financeiro_pedidos', 'saida', 'expedicao'], { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
+      const incluirInativos = ['1', 'true'].includes(
+        String((req.query as { incluir_inativos?: string }).incluir_inativos || '').toLowerCase(),
+      )
       const res = await conn.db.execute(sql`
         SELECT
           c.id,
@@ -446,27 +459,52 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           c.permite_pagamento_entrega,
           c.is_padrao,
           c.ativo,
+          c.inativado_em,
+          c.created_at,
+          c.updated_at,
           COALESCE((SELECT COUNT(*)::int FROM cliente_produto_espec e WHERE e.cliente_id = c.id), 0) AS qtd_especificacoes,
           COALESCE((SELECT COUNT(*)::int FROM cliente_produto_espec e WHERE e.cliente_id = c.id AND e.alerta_reclamacao = 1), 0) AS qtd_alertas
         FROM clientes c
         LEFT JOIN vendedores v ON v.id = c.vendedor_padrao_id
         LEFT JOIN formas_pagamento fp ON fp.id = c.forma_pagamento_padrao_id
         LEFT JOIN locais_cobranca lc ON lc.id = c.local_cobranca_padrao_id
-        WHERE c.tenant_id = ${ctx.tenantId} AND c.ativo = 1
-        ORDER BY c.is_padrao DESC, c.razao_social ASC
+        WHERE c.tenant_id = ${ctx.tenantId}
+          ${incluirInativos ? sql`` : sql`AND c.ativo = 1`}
+        ORDER BY c.ativo DESC, c.is_padrao DESC, c.razao_social ASC
       `)
+
+      const rows = res.rows as Array<Record<string, unknown>>
+      const elegMap = incluirInativos
+        ? await avaliarExclusaoEmLoteClientes(
+            conn.db,
+            ctx.tenantId,
+            rows.map((r) => ({ id: String(r.id), ativo: r.ativo, inativado_em: r.inativado_em })),
+          )
+        : null
 
       return {
         success: true,
-        data: (res.rows as Array<Record<string, unknown>>).map((r) => ({
-          ...r,
-          limite_credito: Number(r.limite_credito || 0),
-          bloqueado_financeiro: Number(r.bloqueado_financeiro || 0),
-          permite_pagamento_entrega: Number(r.permite_pagamento_entrega ?? 1),
-          is_padrao: Number(r.is_padrao || 0),
-          qtd_especificacoes: Number(r.qtd_especificacoes || 0),
-          qtd_alertas: Number(r.qtd_alertas || 0),
-        })),
+        data: rows.map((r) => {
+          const eleg = elegMap?.get(String(r.id))
+          return {
+            ...r,
+            limite_credito: Number(r.limite_credito || 0),
+            bloqueado_financeiro: Number(r.bloqueado_financeiro || 0),
+            permite_pagamento_entrega: Number(r.permite_pagamento_entrega ?? 1),
+            is_padrao: Number(r.is_padrao || 0),
+            qtd_especificacoes: Number(r.qtd_especificacoes || 0),
+            qtd_alertas: Number(r.qtd_alertas || 0),
+            ...(eleg
+              ? {
+                  dias_inativo: eleg.dias_inativo,
+                  tem_contas_financeiras: eleg.tem_contas_financeiras,
+                  teve_movimentacao: eleg.teve_movimentacao,
+                  pode_excluir_definitivo: eleg.pode_excluir_definitivo,
+                  motivo_bloqueio_exclusao: eleg.motivo_bloqueio_exclusao,
+                }
+              : {}),
+          }
+        }),
       }
     }
   )
@@ -482,14 +520,15 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
       const isPadrao = flag01(d.is_padrao, 0)
       const id = uuidv7()
 
-      await conn.db.transaction(async (tx) => {
+      const codigoFinal = await conn.db.transaction(async (tx) => {
+        const codResolvido = await resolverCodigoCadastroOnCreate(tx, ctx.tenantId, 'cliente', d.codigo)
         if (isPadrao === 1) {
           await tx.update(clientes).set({ isPadrao: 0 }).where(eq(clientes.tenantId, ctx.tenantId))
         }
         await tx.insert(clientes).values({
           id,
           tenantId: ctx.tenantId,
-          codigo: d.codigo,
+          codigo: codResolvido,
           razaoSocial: d.razao_social,
           nomeFantasia: d.nome_fantasia || d.razao_social,
           cnpjCpf: d.cnpj_cpf,
@@ -514,9 +553,10 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
           isPadrao,
         })
+        return codResolvido
       })
 
-      return reply.status(201).send({ success: true, id })
+      return reply.status(201).send({ success: true, id, codigo: codigoFinal })
     }
   )
 
@@ -528,14 +568,15 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     const d = parsed.data
     const isPadrao = flag01(d.is_padrao, 0)
 
-    await conn.db.transaction(async (tx) => {
+    const codigoFinal = await conn.db.transaction(async (tx) => {
+      const codResolvido = await resolverCodigoCadastroOnUpdate(tx, ctx.tenantId, 'cliente', id, d.codigo)
       if (isPadrao === 1) {
         await tx.update(clientes).set({ isPadrao: 0 }).where(eq(clientes.tenantId, ctx.tenantId))
       }
       await tx
         .update(clientes)
         .set({
-          codigo: d.codigo,
+          codigo: codResolvido,
           razaoSocial: d.razao_social,
           nomeFantasia: d.nome_fantasia || d.razao_social,
           cnpjCpf: d.cnpj_cpf,
@@ -559,20 +600,52 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           bloqueadoFinanceiro: flag01(d.bloqueado_financeiro, 0),
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
           isPadrao,
+          updatedAt: new Date(),
         })
         .where(and(eq(clientes.id, id), eq(clientes.tenantId, ctx.tenantId)))
+      return codResolvido
     })
 
-    return { success: true }
+    return { success: true, codigo: codigoFinal }
+  })
+
+  app.patch('/api/cadastros/clientes/:id/ativo', { preHandler: requirePermission(['clientes', 'pedidos']) }, async (req) => {
+    const ctx = req.authCtx!
+    const id = String((req.params as { id: string }).id || '').trim()
+    const body = (req.body || {}) as { ativo?: boolean | number }
+    const ativoNum = body.ativo === false || Number(body.ativo) === 0 ? 0 : 1
+
+    const [atual] = await conn.db
+      .select({ id: clientes.id, inativadoEm: clientes.inativadoEm })
+      .from(clientes)
+      .where(and(eq(clientes.id, id), eq(clientes.tenantId, ctx.tenantId)))
+      .limit(1)
+    if (!atual) throw new HttpError(404, 'Cliente não encontrado.')
+
+    const inativadoEm = ativoNum === 0 ? atual.inativadoEm || new Date() : null
+    await conn.db
+      .update(clientes)
+      .set({
+        ativo: ativoNum,
+        inativadoEm,
+        updatedAt: new Date(),
+        ...(ativoNum === 0 ? { isPadrao: 0 } : {}),
+      })
+      .where(and(eq(clientes.id, id), eq(clientes.tenantId, ctx.tenantId)))
+
+    return {
+      success: true,
+      ativo: ativoNum,
+      inativado_em: inativadoEm ? inativadoEm.toISOString() : null,
+    }
   })
 
   app.delete('/api/cadastros/clientes/:id', { preHandler: requirePermission(['clientes', 'pedidos']) }, async (req) => {
     const ctx = req.authCtx!
     const id = String((req.params as { id: string }).id || '').trim()
-    await conn.db
-      .update(clientes)
-      .set({ ativo: 0, isPadrao: 0 })
-      .where(and(eq(clientes.id, id), eq(clientes.tenantId, ctx.tenantId)))
+    await conn.db.transaction(async (tx) => {
+      await executarExclusaoDefinitivaCliente(tx, ctx.tenantId, id)
+    })
     return { success: true }
   })
 
@@ -765,6 +838,9 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     { preHandler: requirePermission(['fornecedores', 'recebimento', 'recebimento_consultar', 'compras', 'produtos'], { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
+      const incluirInativos = ['1', 'true'].includes(
+        String((req.query as { incluir_inativos?: string }).incluir_inativos || '').toLowerCase(),
+      )
       const rows = await conn.db
         .select({
           id: fornecedores.id,
@@ -788,12 +864,44 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           registro_sanitario_sif: fornecedores.registroSanitarioSif,
           prazo_entrega_dias: fornecedores.prazoEntregaDias,
           ativo: fornecedores.ativo,
+          inativado_em: fornecedores.inativadoEm,
           created_at: fornecedores.createdAt,
+          updated_at: fornecedores.updatedAt,
         })
         .from(fornecedores)
-        .where(and(eq(fornecedores.tenantId, ctx.tenantId), eq(fornecedores.ativo, 1)))
-        .orderBy(asc(fornecedores.razaoSocial))
-      return { success: true, data: rows }
+        .where(
+          incluirInativos
+            ? eq(fornecedores.tenantId, ctx.tenantId)
+            : and(eq(fornecedores.tenantId, ctx.tenantId), eq(fornecedores.ativo, 1)),
+        )
+        .orderBy(desc(fornecedores.ativo), asc(fornecedores.razaoSocial))
+
+      const elegMap = incluirInativos
+        ? await avaliarExclusaoEmLoteFornecedores(
+            conn.db,
+            ctx.tenantId,
+            rows.map((r) => ({ id: r.id, ativo: r.ativo, inativado_em: r.inativado_em })),
+          )
+        : null
+
+      return {
+        success: true,
+        data: rows.map((r) => {
+          const eleg = elegMap?.get(r.id)
+          return {
+            ...r,
+            ...(eleg
+              ? {
+                  dias_inativo: eleg.dias_inativo,
+                  tem_contas_financeiras: eleg.tem_contas_financeiras,
+                  teve_movimentacao: eleg.teve_movimentacao,
+                  pode_excluir_definitivo: eleg.pode_excluir_definitivo,
+                  motivo_bloqueio_exclusao: eleg.motivo_bloqueio_exclusao,
+                }
+              : {}),
+          }
+        }),
+      }
     }
   )
 
@@ -806,30 +914,34 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
       if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
       const d = parsed.data
       const id = uuidv7()
-      await conn.db.insert(fornecedores).values({
-        id,
-        tenantId: ctx.tenantId,
-        codigo: d.codigo,
-        razaoSocial: d.razao_social,
-        nomeFantasia: d.nome_fantasia || d.razao_social,
-        cnpjCpf: d.cnpj_cpf,
-        inscricaoEstadual: d.inscricao_estadual,
-        endereco: d.endereco,
-        numero: d.numero,
-        complemento: d.complemento,
-        bairro: d.bairro,
-        cep: d.cep,
-        uf: d.uf,
-        cidade: d.cidade,
-        telefone: d.telefone,
-        email: d.email,
-        cnaePrincipal: d.cnae_principal,
-        regimeApuracao: d.regime_apuracao,
-        situacaoCadastral: d.situacao_cadastral,
-        registroSanitarioSif: d.registro_sanitario_sif,
-        prazoEntregaDias: d.prazo_entrega_dias,
+      const codigoFinal = await conn.db.transaction(async (tx) => {
+        const codResolvido = await resolverCodigoCadastroOnCreate(tx, ctx.tenantId, 'fornecedor', d.codigo)
+        await tx.insert(fornecedores).values({
+          id,
+          tenantId: ctx.tenantId,
+          codigo: codResolvido,
+          razaoSocial: d.razao_social,
+          nomeFantasia: d.nome_fantasia || d.razao_social,
+          cnpjCpf: d.cnpj_cpf,
+          inscricaoEstadual: d.inscricao_estadual,
+          endereco: d.endereco,
+          numero: d.numero,
+          complemento: d.complemento,
+          bairro: d.bairro,
+          cep: d.cep,
+          uf: d.uf,
+          cidade: d.cidade,
+          telefone: d.telefone,
+          email: d.email,
+          cnaePrincipal: d.cnae_principal,
+          regimeApuracao: d.regime_apuracao,
+          situacaoCadastral: d.situacao_cadastral,
+          registroSanitarioSif: d.registro_sanitario_sif,
+          prazoEntregaDias: d.prazo_entrega_dias,
+        })
+        return codResolvido
       })
-      return reply.status(201).send({ success: true, id })
+      return reply.status(201).send({ success: true, id, codigo: codigoFinal })
     }
   )
 
@@ -839,40 +951,74 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     const parsed = FornecedorSchema.safeParse(req.body)
     if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
     const d = parsed.data
+    const codigoFinal = await conn.db.transaction(async (tx) => {
+      const codResolvido = await resolverCodigoCadastroOnUpdate(tx, ctx.tenantId, 'fornecedor', id, d.codigo)
+      await tx
+        .update(fornecedores)
+        .set({
+          codigo: codResolvido,
+          razaoSocial: d.razao_social,
+          nomeFantasia: d.nome_fantasia || d.razao_social,
+          cnpjCpf: d.cnpj_cpf,
+          inscricaoEstadual: d.inscricao_estadual,
+          endereco: d.endereco,
+          numero: d.numero,
+          complemento: d.complemento,
+          bairro: d.bairro,
+          cep: d.cep,
+          uf: d.uf,
+          cidade: d.cidade,
+          telefone: d.telefone,
+          email: d.email,
+          cnaePrincipal: d.cnae_principal,
+          regimeApuracao: d.regime_apuracao,
+          situacaoCadastral: d.situacao_cadastral,
+          registroSanitarioSif: d.registro_sanitario_sif,
+          prazoEntregaDias: d.prazo_entrega_dias,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(fornecedores.id, id), eq(fornecedores.tenantId, ctx.tenantId)))
+      return codResolvido
+    })
+    return { success: true, codigo: codigoFinal }
+  })
+
+  app.patch('/api/cadastros/fornecedores/:id/ativo', { preHandler: requirePermission(['fornecedores', 'recebimento']) }, async (req) => {
+    const ctx = req.authCtx!
+    const id = String((req.params as { id: string }).id || '').trim()
+    const body = (req.body || {}) as { ativo?: boolean | number }
+    const ativoNum = body.ativo === false || Number(body.ativo) === 0 ? 0 : 1
+
+    const [atual] = await conn.db
+      .select({ id: fornecedores.id, inativadoEm: fornecedores.inativadoEm })
+      .from(fornecedores)
+      .where(and(eq(fornecedores.id, id), eq(fornecedores.tenantId, ctx.tenantId)))
+      .limit(1)
+    if (!atual) throw new HttpError(404, 'Fornecedor não encontrado.')
+
+    const inativadoEm = ativoNum === 0 ? atual.inativadoEm || new Date() : null
     await conn.db
       .update(fornecedores)
       .set({
-        codigo: d.codigo,
-        razaoSocial: d.razao_social,
-        nomeFantasia: d.nome_fantasia || d.razao_social,
-        cnpjCpf: d.cnpj_cpf,
-        inscricaoEstadual: d.inscricao_estadual,
-        endereco: d.endereco,
-        numero: d.numero,
-        complemento: d.complemento,
-        bairro: d.bairro,
-        cep: d.cep,
-        uf: d.uf,
-        cidade: d.cidade,
-        telefone: d.telefone,
-        email: d.email,
-        cnaePrincipal: d.cnae_principal,
-        regimeApuracao: d.regime_apuracao,
-        situacaoCadastral: d.situacao_cadastral,
-        registroSanitarioSif: d.registro_sanitario_sif,
-        prazoEntregaDias: d.prazo_entrega_dias,
+        ativo: ativoNum,
+        inativadoEm,
+        updatedAt: new Date(),
       })
       .where(and(eq(fornecedores.id, id), eq(fornecedores.tenantId, ctx.tenantId)))
-    return { success: true }
+
+    return {
+      success: true,
+      ativo: ativoNum,
+      inativado_em: inativadoEm ? inativadoEm.toISOString() : null,
+    }
   })
 
   app.delete('/api/cadastros/fornecedores/:id', { preHandler: requirePermission(['fornecedores', 'recebimento']) }, async (req) => {
     const ctx = req.authCtx!
     const id = String((req.params as { id: string }).id || '').trim()
-    await conn.db
-      .update(fornecedores)
-      .set({ ativo: 0 })
-      .where(and(eq(fornecedores.id, id), eq(fornecedores.tenantId, ctx.tenantId)))
+    await conn.db.transaction(async (tx) => {
+      await executarExclusaoDefinitivaFornecedor(tx, ctx.tenantId, id)
+    })
     return { success: true }
   })
 
@@ -921,32 +1067,12 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
     const d = parsed.data
     const id = uuidv7()
-    await conn.db.insert(vendedores).values({
-      id,
-      tenantId: ctx.tenantId,
-      codigo: d.codigo,
-      sigla: d.sigla.toUpperCase(),
-      nome: d.nome,
-      operadorId: d.operador_id || null,
-      tipoComissao: d.tipo_comissao,
-      pctComissao: String(d.pct_comissao),
-      regraLiberacao: d.regra_liberacao,
-      metaMensalKg: String(d.meta_mensal_kg),
-      metaMensalValor: String(d.meta_mensal_valor),
-    })
-    return reply.status(201).send({ success: true, id })
-  })
-
-  app.put('/api/cadastros/vendedores/:id', { preHandler: requirePermission(['vendedores', 'operadores']) }, async (req) => {
-    const ctx = req.authCtx!
-    const id = String((req.params as { id: string }).id || '').trim()
-    const parsed = VendedorSchema.safeParse(req.body)
-    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
-    const d = parsed.data
-    await conn.db
-      .update(vendedores)
-      .set({
-        codigo: d.codigo,
+    const codigoFinal = await conn.db.transaction(async (tx) => {
+      const codResolvido = await resolverCodigoCadastroOnCreate(tx, ctx.tenantId, 'vendedor', d.codigo)
+      await tx.insert(vendedores).values({
+        id,
+        tenantId: ctx.tenantId,
+        codigo: codResolvido,
         sigla: d.sigla.toUpperCase(),
         nome: d.nome,
         operadorId: d.operador_id || null,
@@ -956,8 +1082,36 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         metaMensalKg: String(d.meta_mensal_kg),
         metaMensalValor: String(d.meta_mensal_valor),
       })
-      .where(and(eq(vendedores.id, id), eq(vendedores.tenantId, ctx.tenantId)))
-    return { success: true }
+      return codResolvido
+    })
+    return reply.status(201).send({ success: true, id, codigo: codigoFinal })
+  })
+
+  app.put('/api/cadastros/vendedores/:id', { preHandler: requirePermission(['vendedores', 'operadores']) }, async (req) => {
+    const ctx = req.authCtx!
+    const id = String((req.params as { id: string }).id || '').trim()
+    const parsed = VendedorSchema.safeParse(req.body)
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
+    const d = parsed.data
+    const codigoFinal = await conn.db.transaction(async (tx) => {
+      const codResolvido = await resolverCodigoCadastroOnUpdate(tx, ctx.tenantId, 'vendedor', id, d.codigo)
+      await tx
+        .update(vendedores)
+        .set({
+          codigo: codResolvido,
+          sigla: d.sigla.toUpperCase(),
+          nome: d.nome,
+          operadorId: d.operador_id || null,
+          tipoComissao: d.tipo_comissao,
+          pctComissao: String(d.pct_comissao),
+          regraLiberacao: d.regra_liberacao,
+          metaMensalKg: String(d.meta_mensal_kg),
+          metaMensalValor: String(d.meta_mensal_valor),
+        })
+        .where(and(eq(vendedores.id, id), eq(vendedores.tenantId, ctx.tenantId)))
+      return codResolvido
+    })
+    return { success: true, codigo: codigoFinal }
   })
 
   app.delete('/api/cadastros/vendedores/:id', { preHandler: requirePermission(['vendedores', 'operadores']) }, async (req) => {
@@ -1003,32 +1157,12 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
     const d = parsed.data
     const id = uuidv7()
-    await conn.db.insert(transportadoras).values({
-      id,
-      tenantId: ctx.tenantId,
-      codigo: d.codigo,
-      razaoSocial: d.razao_social,
-      nomeFantasia: d.nome_fantasia || d.razao_social,
-      cnpjCpf: d.cnpj_cpf,
-      inscricaoEstadual: d.inscricao_estadual,
-      uf: d.uf,
-      cidade: d.cidade,
-      telefone: d.telefone,
-      placaPadrao: d.placa_padrao,
-    })
-    return reply.status(201).send({ success: true, id })
-  })
-
-  app.put('/api/cadastros/transportadoras/:id', { preHandler: requirePermission('transportadoras') }, async (req) => {
-    const ctx = req.authCtx!
-    const id = String((req.params as { id: string }).id || '').trim()
-    const parsed = TransportadoraSchema.safeParse(req.body)
-    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
-    const d = parsed.data
-    await conn.db
-      .update(transportadoras)
-      .set({
-        codigo: d.codigo,
+    const codigoFinal = await conn.db.transaction(async (tx) => {
+      const codResolvido = await resolverCodigoCadastroOnCreate(tx, ctx.tenantId, 'transportadora', d.codigo)
+      await tx.insert(transportadoras).values({
+        id,
+        tenantId: ctx.tenantId,
+        codigo: codResolvido,
         razaoSocial: d.razao_social,
         nomeFantasia: d.nome_fantasia || d.razao_social,
         cnpjCpf: d.cnpj_cpf,
@@ -1038,8 +1172,36 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         telefone: d.telefone,
         placaPadrao: d.placa_padrao,
       })
-      .where(and(eq(transportadoras.id, id), eq(transportadoras.tenantId, ctx.tenantId)))
-    return { success: true }
+      return codResolvido
+    })
+    return reply.status(201).send({ success: true, id, codigo: codigoFinal })
+  })
+
+  app.put('/api/cadastros/transportadoras/:id', { preHandler: requirePermission('transportadoras') }, async (req) => {
+    const ctx = req.authCtx!
+    const id = String((req.params as { id: string }).id || '').trim()
+    const parsed = TransportadoraSchema.safeParse(req.body)
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados invalidos.')
+    const d = parsed.data
+    const codigoFinal = await conn.db.transaction(async (tx) => {
+      const codResolvido = await resolverCodigoCadastroOnUpdate(tx, ctx.tenantId, 'transportadora', id, d.codigo)
+      await tx
+        .update(transportadoras)
+        .set({
+          codigo: codResolvido,
+          razaoSocial: d.razao_social,
+          nomeFantasia: d.nome_fantasia || d.razao_social,
+          cnpjCpf: d.cnpj_cpf,
+          inscricaoEstadual: d.inscricao_estadual,
+          uf: d.uf,
+          cidade: d.cidade,
+          telefone: d.telefone,
+          placaPadrao: d.placa_padrao,
+        })
+        .where(and(eq(transportadoras.id, id), eq(transportadoras.tenantId, ctx.tenantId)))
+      return codResolvido
+    })
+    return { success: true, codigo: codigoFinal }
   })
 
   app.delete('/api/cadastros/transportadoras/:id', { preHandler: requirePermission('transportadoras') }, async (req) => {

@@ -270,7 +270,15 @@ export async function criar({
   let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
-    throw new Error('É obrigatório informar o Código Interno do Produto.')
+    const resCod = await db.execute('SELECT codigo FROM produtos')
+    let maxNum = 0
+    for (const row of resCod.rows || []) {
+      const c = String(row.codigo || '').trim()
+      if (/^\d{1,12}$/.test(c)) {
+        maxNum = Math.max(maxNum, Number(c))
+      }
+    }
+    codVal = String(maxNum + 1)
   }
 
   try {
@@ -353,7 +361,7 @@ export async function atualizar({
     }
   }
   await assertPermissao('produtos');
-  let codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
+  const codVal = (codigo && String(codigo).trim() !== '') ? String(codigo).trim() : null
 
   if (!codVal) {
     throw new Error('É obrigatório informar o Código Interno do Produto.')

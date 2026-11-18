@@ -238,9 +238,14 @@ export const fornecedores = pgTable(
     registroSanitarioSif: text('registro_sanitario_sif').notNull().default(''),
     prazoEntregaDias: integer('prazo_entrega_dias').notNull().default(5),
     ativo: integer('ativo').notNull().default(1),
+    inativadoEm: timestamp('inativado_em', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('idx_fornecedores_tenant').on(t.tenantId)]
+  (t) => [
+    index('idx_fornecedores_tenant').on(t.tenantId),
+    uniqueIndex('uq_fornecedores_tenant_codigo').on(t.tenantId, t.codigo),
+  ]
 )
 
 export const clientes = pgTable(
@@ -280,7 +285,9 @@ export const clientes = pgTable(
     permitePagamentoEntrega: integer('permite_pagamento_entrega').notNull().default(1),
     isPadrao: integer('is_padrao').notNull().default(0),
     ativo: integer('ativo').notNull().default(1),
+    inativadoEm: timestamp('inativado_em', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('idx_clientes_tenant').on(t.tenantId),

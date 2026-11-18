@@ -32,9 +32,7 @@ export const pedidosCompra = pgTable(
       .notNull()
       .references(() => filiais.id, { onDelete: 'cascade' }),
     codigo: text('codigo').notNull(),
-    fornecedorId: uuid('fornecedor_id')
-      .notNull()
-      .references(() => fornecedores.id),
+    fornecedorId: uuid('fornecedor_id').references(() => fornecedores.id, { onDelete: 'set null' }),
     naturezaId: uuid('natureza_id').references(() => naturezasOperacao.id),
     centroCustoId: uuid('centro_custo_id').references(() => centrosCusto.id),
     formaPagamentoId: uuid('forma_pagamento_id').references(() => formasPagamento.id),
