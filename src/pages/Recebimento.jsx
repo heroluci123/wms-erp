@@ -464,6 +464,7 @@ export function Recebimento() {
   
   // Tabs
   const [activeTab, setActiveTab] = useState(apiAtiva ? 'pedidos' : 'palete') // 'pedidos' | 'palete' | 'historico'
+  const [pedidoAbertoNaDoca, setPedidoAbertoNaDoca] = useState(false)
 
   // Caixas pré-importadas via TXT (Recebimento Guiado)
   const [preCaixas, setPreCaixas] = useState([])
@@ -812,21 +813,25 @@ export function Recebimento() {
     }
   }
 
+  const esconderHeader = apiAtiva && activeTab === 'pedidos' && pedidoAbertoNaDoca
+
   return (
-    <div style={{ maxWidth: 1240 }}>
-      <div className="page-header mb-16">
-        <div>
-          <h1 className="page-header__title">Recebimento (Inbound)</h1>
-          <p className="page-header__subtitle">
-            {apiAtiva
-              ? 'Conferência na Doca por Pedido de Compra, Balança e Etiqueta .TXT'
-              : 'Montagem de Paletes LPN e Rastreabilidade SSCC'}
-          </p>
+    <div style={{ width: '100%' }}>
+      {!esconderHeader && (
+        <div className="page-header mb-16">
+          <div>
+            <h1 className="page-header__title">Recebimento (Inbound)</h1>
+            <p className="page-header__subtitle">
+              {apiAtiva
+                ? 'Conferência na Doca por Pedido de Compra, Balança e Etiqueta .TXT'
+                : 'Montagem de Paletes LPN e Rastreabilidade SSCC'}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '2px solid var(--border)', marginBottom: esconderHeader ? 10 : 24 }}>
         {apiAtiva ? (
           <button
             className={`btn ${activeTab === 'pedidos' ? 'btn--primary' : 'btn--ghost'}`}
@@ -858,7 +863,9 @@ export function Recebimento() {
       </div>
 
       {/* TAB: Recebimento guiado por Pedido de Compra (API) */}
-      {apiAtiva && activeTab === 'pedidos' && <RecebimentoPedidoDoca />}
+      {apiAtiva && activeTab === 'pedidos' && (
+        <RecebimentoPedidoDoca onPedidoAbertoChange={setPedidoAbertoNaDoca} />
+      )}
 
       {/* TAB: Recebimento offline c/ Palete (apenas sem API) */}
       {!apiAtiva && activeTab === 'palete' && (

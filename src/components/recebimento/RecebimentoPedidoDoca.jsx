@@ -33,7 +33,7 @@ import { fmtDataBR, fmtKg2, hojeIsoLocal, validarPesagemTara } from '../../utils
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg`
 
-export function RecebimentoPedidoDoca() {
+export function RecebimentoPedidoDoca({ onPedidoAbertoChange } = {}) {
   const { operador, toastSuccess, toastError, toastWarning, confirmar } = useAppStore()
 
   // Lista de PCs liberados + Configs
@@ -47,6 +47,14 @@ export function RecebimentoPedidoDoca() {
   const [txtDisponiveisFornecedor, setTxtDisponiveisFornecedor] = useState(0)
   const [itemAtivoId, setItemAtivoId] = useState('')
   const [modoDoca, setModoDoca] = useState('MANUAL') // 'MANUAL' | 'BALANCA' | 'BIPAGEM'
+
+  useEffect(() => {
+    onPedidoAbertoChange?.(Boolean(pcDetalhe))
+  }, [pcDetalhe, onPedidoAbertoChange])
+
+  useEffect(() => {
+    return () => onPedidoAbertoChange?.(false)
+  }, [onPedidoAbertoChange])
 
   // Palete opcional + Endereço Doca + NF
   const [paletesAbertos, setPaletesAbertos] = useState([])
@@ -530,76 +538,81 @@ export function RecebimentoPedidoDoca() {
     )
   }
 
-  // ── RENDER: PEDIDO ABERTO NA DOCA (3 MODOS + PROGRESSO VIVO + TEMPERATURA) ───
+  // ── RENDER: PEDIDO ABERTO NA DOCA (COCKPIT WIDESCREEN EM 2 COLUNAS) ─────────
   const solTotal = itensOrdenados.reduce((s, i) => s + i.sol, 0)
   const recTotal = itensOrdenados.reduce((s, i) => s + i.rec, 0)
   const pctTotal = solTotal > 0 ? Math.min(100, Number(((recTotal / solTotal) * 100).toFixed(1))) : 0
 
   return (
-    <div className="flex flex-col gap-16">
-      {/* Barra Superior do Pedido na Doca */}
-      <div className="card">
-        <div className="flex justify-between items-start flex-wrap gap-12 mb-12">
-          <div>
-            <div className="flex items-center gap-10 flex-wrap">
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={() => {
-                  balancaConnRef.current?.disconnect?.()
-                  setPcDetalhe(null)
-                  carregarLista()
-                }}
-              >
-                <ArrowLeft size={15} /> Voltar aos Pedidos
-              </button>
-              <h2 className="text-lg font-bold text-primary font-mono m-0">{pcDetalhe.codigo}</h2>
-              <span className="font-bold text-base">{pcDetalhe.fornecedor_nome}</span>
-              {pcDetalhe.fornecedor_sif && <span className="badge badge--neutral">SIF {pcDetalhe.fornecedor_sif}</span>}
-              {pcDetalhe.recebimento?.codigo && <span className="badge badge--info">{pcDetalhe.recebimento.codigo}</span>}
-            </div>
-            <div className="text-xs text-muted mt-4">
-              Total Pedido: <strong>{fmtKg(solTotal)}</strong> • Recebido até agora: <strong className="text-cyan">{fmtKg(recTotal)}</strong> ({pctTotal}%) •{' '}
-              Tolerância: <strong>±{tolPct}%</strong> • Temp.: <strong>{exigirTemp ? 'Obrigatória' : 'Recomendada'}</strong>
-            </div>
+    <div className="flex flex-col gap-12">
+      {/* Barra Superior Compacta do Pedido na Doca */}
+      <div
+        className="card"
+        style={{
+          padding: '10px 14px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+        }}
+      >
+        <div style={{ minWidth: 260 }}>
+          <div className="flex items-center gap-8 flex-wrap">
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                balancaConnRef.current?.disconnect?.()
+                setPcDetalhe(null)
+                carregarLista()
+              }}
+            >
+              <ArrowLeft size={14} /> Voltar
+            </button>
+            <h2 className="text-base font-bold text-primary font-mono m-0">{pcDetalhe.codigo}</h2>
+            <span className="font-bold text-sm">{pcDetalhe.fornecedor_nome}</span>
+            {pcDetalhe.fornecedor_sif && <span className="badge badge--neutral">SIF {pcDetalhe.fornecedor_sif}</span>}
+            {pcDetalhe.recebimento?.codigo && <span className="badge badge--info">{pcDetalhe.recebimento.codigo}</span>}
           </div>
-
-          <div className="flex gap-8 flex-wrap">
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfigEstacaoOpen(true)}>
-              <Settings2 size={15} /> Zebra & Balança
-            </button>
-            <button type="button" className="btn btn--secondary btn--sm" onClick={() => setRelatorioPrint(pcDetalhe)}>
-              <Printer size={15} /> Relatório (c/ Temp.)
-            </button>
+          <div className="text-xs text-muted mt-4">
+            Total: <strong>{fmtKg(solTotal)}</strong> • Recebido: <strong className="text-cyan">{fmtKg(recTotal)}</strong> ({pctTotal}%) •{' '}
+            Tol.: <strong>±{tolPct}%</strong> • Temp.: <strong>{exigirTemp ? 'Obrigatória' : 'Recomendada'}</strong>
           </div>
         </div>
 
-        {/* Endereço, Palete LPN Opcional, NF */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Endereço Doca / Destino</label>
+        <div className="flex items-end gap-8 flex-wrap">
+          <div style={{ width: 82 }}>
+            <label className="form-label" style={{ fontSize: 10, marginBottom: 2 }}>End. Doca</label>
             <input
               type="text"
-              className="form-input"
+              className="form-input font-mono"
+              style={{ height: 32, padding: '4px 8px', fontSize: 12 }}
               value={enderecoDoca}
               onChange={(e) => setEnderecoDoca(e.target.value.toUpperCase())}
               placeholder="REC"
             />
           </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label flex justify-between">
-              <span>Palete LPN (Opcional)</span>
+
+          <div style={{ width: 195 }}>
+            <label className="form-label flex justify-between" style={{ fontSize: 10, marginBottom: 2 }}>
+              <span>Palete LPN</span>
               <button
                 type="button"
-                className="text-xs text-cyan cursor-pointer"
-                style={{ background: 'none', border: 'none', padding: 0 }}
+                className="text-cyan cursor-pointer"
+                style={{ background: 'none', border: 'none', padding: 0, fontSize: 10 }}
                 onClick={handleCriarPaleteRapido}
               >
-                + Novo Palete
+                + Novo
               </button>
             </label>
-            <select className="form-input" value={paleteId} onChange={(e) => setPaleteId(e.target.value)}>
-              <option value="">Sem palete (direto no endereço)</option>
+            <select
+              className="form-input"
+              style={{ height: 32, padding: '4px 8px', fontSize: 12 }}
+              value={paleteId}
+              onChange={(e) => setPaleteId(e.target.value)}
+            >
+              <option value="">Sem palete (direto)</option>
               {paletesAbertos.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.codigo} ({p.qtd_caixas || 0} cx)
@@ -607,310 +620,427 @@ export function RecebimentoPedidoDoca() {
               ))}
             </select>
           </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Nº Nota Fiscal (Opcional)</label>
+
+          <div style={{ width: 105 }}>
+            <label className="form-label" style={{ fontSize: 10, marginBottom: 2 }}>Nº NF (Opc.)</label>
             <input
               type="text"
-              className="form-input"
+              className="form-input font-mono"
+              style={{ height: 32, padding: '4px 8px', fontSize: 12 }}
               value={numeroNf}
               onChange={(e) => setNumeroNf(e.target.value)}
               placeholder="Ex: 10293"
             />
           </div>
+
+          <button type="button" className="btn btn--ghost btn--sm" style={{ height: 32 }} onClick={() => setConfigEstacaoOpen(true)}>
+            <Settings2 size={14} /> Zebra & Balança
+          </button>
+          <button type="button" className="btn btn--secondary btn--sm" style={{ height: 32 }} onClick={() => setRelatorioPrint(pcDetalhe)}>
+            <Printer size={14} /> Relatório (c/ Temp.)
+          </button>
         </div>
       </div>
 
-      {/* GRADE VIVA DOS ITENS DO PEDIDO (Pendentes no Topo / Concluídos embaixo em Verde) */}
-      <div className="card">
-        <div className="flex justify-between items-center flex-wrap gap-8 mb-10">
-          <h3 className="text-sm font-bold uppercase text-muted m-0">
-            Itens do Pedido — Clique no corte para pesar &amp; informe a Temperatura (1x por item)
-          </h3>
-          <span className="text-xs text-muted">
-            Concluídos descem automaticamente • Temperatura sai apenas no relatório
-          </span>
-        </div>
-
-        <div className="flex flex-col gap-8">
-          {itensOrdenados.map((it) => {
-            const ativo = itemAtivo?.id === it.id
-            const faltaTemp = exigirTemp && it.rec > 0 && it.temperatura_c == null
-            return (
-              <div
-                key={it.id}
-                onClick={() => setItemAtivoId(it.id)}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 10,
-                  cursor: 'pointer',
-                  border: `1.5px solid ${
-                    ativo
-                      ? 'var(--primary)'
-                      : it.concluido
-                        ? 'rgba(34,197,94,0.45)'
-                        : 'var(--border)'
-                  }`,
-                  background: it.concluido
-                    ? 'rgba(34,197,94,0.10)'
-                    : ativo
-                      ? 'rgba(56,189,248,0.08)'
-                      : 'var(--bg-1)',
-                  transition: 'all 0.15s',
-                }}
-              >
-                <div className="flex justify-between items-center flex-wrap gap-10">
-                  <div style={{ flex: '1 1 280px' }}>
-                    <div className="flex items-center gap-8 flex-wrap">
-                      <span className="font-mono text-xs text-muted">{it.produto_codigo}</span>
-                      <strong className="text-sm">{it.produto_descricao}</strong>
-                      {it.concluido ? (
-                        <span className="badge badge--success">
-                          <Check size={12} /> Concluído ({it.pct}%)
-                        </span>
-                      ) : (
-                        <span className="badge badge--warning">Falta {fmtKg(it.faltaKg)}</span>
-                      )}
-                      {ativo && <span className="badge badge--info">Selecionado p/ Pesar</span>}
-                    </div>
-                    <div className="text-xs text-muted mt-4">
-                      Pedido: <strong>{fmtKg(it.sol)}</strong> • Recebido: <strong className="text-cyan">{fmtKg(it.rec)}</strong> ({it.qtdCaixas} cx)
-                    </div>
-                    <div style={{ height: 7, background: 'var(--bg-2)', borderRadius: 99, overflow: 'hidden', marginTop: 6 }}>
-                      <div
-                        style={{
-                          width: `${it.pct}%`,
-                          height: '100%',
-                          background: it.concluido ? '#22c55e' : 'var(--primary)',
-                          transition: 'width 0.25s',
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Amostragem Temperatura 1x por item */}
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-6"
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: 8,
-                      background: 'var(--bg-2)',
-                      border: `1px solid ${faltaTemp ? 'var(--warning)' : 'var(--border)'}`,
-                    }}
-                  >
-                    <Thermometer size={15} className={it.temperatura_c != null ? 'text-cyan' : 'text-muted'} />
-                    <input
-                      type="number"
-                      step="0.1"
-                      className="form-input"
-                      style={{ width: 82, padding: '4px 8px', fontSize: 13 }}
-                      placeholder="Temp °C"
-                      value={tempEdits[it.id] ?? ''}
-                      onChange={(e) => setTempEdits((p) => ({ ...p, [it.id]: e.target.value }))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          handleSalvarTemperaturaItem(it)
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn--secondary btn--sm"
-                      disabled={salvandoTempId === it.id}
-                      onClick={() => handleSalvarTemperaturaItem(it)}
-                    >
-                      {it.temperatura_c != null ? 'Atualizar °C' : 'Salvar °C'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* SELETOR DOS 3 MODOS DE OPERAÇÃO DO PEDIDO */}
-      <div className="card">
-        <div className="flex gap-8 flex-wrap mb-16 pb-12 border-b border-border">
-          <button
-            type="button"
-            className={`btn ${modoDoca === 'MANUAL' ? 'btn--primary' : 'btn--ghost'}`}
-            style={{ flex: 1, minWidth: 190, justifyContent: 'center' }}
-            onClick={() => {
-              setModoDoca('MANUAL')
-              setTimeout(() => pesoBrutoRef.current?.focus(), 60)
-            }}
-          >
-            <Plus size={16} /> 1. Pesagem Manual + Etiqueta
-          </button>
-          <button
-            type="button"
-            className={`btn ${modoDoca === 'BALANCA' ? 'btn--primary' : 'btn--ghost'}`}
-            style={{ flex: 1, minWidth: 190, justifyContent: 'center' }}
-            onClick={() => setModoDoca('BALANCA')}
-          >
-            <Scale size={16} /> 2. Pesagem Automática (Balança)
-          </button>
-          <button
-            type="button"
-            className={`btn ${modoDoca === 'BIPAGEM' ? 'btn--primary' : 'btn--ghost'}`}
-            style={{ flex: 1, minWidth: 190, justifyContent: 'center' }}
-            onClick={() => {
-              setModoDoca('BIPAGEM')
-              setTimeout(() => scanTxtRef.current?.focus(), 60)
-            }}
-          >
-            <ScanBarcode size={16} /> 3. Bipagem (.TXT Fornecedor: {txtDisponiveisFornecedor})
-          </button>
-        </div>
-
-        {/* MODO 1 e 2: PESAGEM MANUAL ou PESAGEM AUTOMÁTICA BALANÇA */}
-        {(modoDoca === 'MANUAL' || modoDoca === 'BALANCA') && itemAtivo && (
-          <div className="flex flex-col gap-12">
-            <div className="p-10 rounded flex justify-between items-center flex-wrap gap-8" style={{ background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.35)' }}>
-              <div>
-                <span className="text-xs text-cyan uppercase font-bold">Item Selecionado para Pesagem:</span>{' '}
-                <strong className="text-sm">{itemAtivo.produto_codigo} — {itemAtivo.produto_descricao}</strong>
-              </div>
-              <span className="text-xs font-mono font-bold text-warning">
-                Falta: {fmtKg(itemAtivo.faltaKg)} (de {fmtKg(itemAtivo.sol)})
-              </span>
+      {/* GRID COCKPIT EM 2 COLUNAS LADO A LADO */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
+          gap: 12,
+          alignItems: 'start',
+        }}
+      >
+        {/* COLUNA ESQUERDA: ITENS DO PEDIDO + TEMPERATURA + FECHAMENTO */}
+        <div className="flex flex-col gap-12" style={{ minWidth: 0 }}>
+          <div className="card" style={{ padding: '12px 14px' }}>
+            <div className="flex justify-between items-center flex-wrap gap-6 mb-8">
+              <h3 className="text-xs font-bold uppercase text-muted m-0">
+                Itens do Pedido ({itensOrdenados.length}) — Clique p/ pesar &amp; informe °C
+              </h3>
+              <span className="text-xs text-muted">Concluídos descem p/ baixo</span>
             </div>
 
-            {modoDoca === 'BALANCA' && (
-              <div
-                className="p-14 rounded flex justify-between items-center flex-wrap gap-12"
-                style={{
-                  background: balancaStatus === 'CONECTADA' ? 'rgba(16,185,129,0.1)' : 'var(--bg-1)',
-                  border: `1px solid ${balancaStatus === 'CONECTADA' ? 'rgba(16,185,129,0.45)' : 'var(--border)'}`,
-                }}
-              >
-                <div className="flex items-center gap-12">
-                  {balancaStatus === 'CONECTADA' ? <Wifi size={22} className="text-success" /> : <WifiOff size={22} className="text-muted" />}
-                  <div>
-                    <div className="text-xs font-bold uppercase text-muted">
-                      Balança Serial ({cfgEstacao.balancaBaudRate || 9600} bps)
-                    </div>
-                    <div className="flex items-center gap-8">
-                      <strong className="text-xl font-mono text-cyan">{balancaPeso.toFixed(3).replace('.', ',')} kg</strong>
-                      {balancaStatus === 'CONECTADA' && (
-                        <span className={`badge ${balancaEstavel ? 'badge--success' : 'badge--warning'}`}>
-                          {balancaEstavel ? 'PESO ESTÁVEL' : 'OSCILANDO'}
-                        </span>
-                      )}
+            <div className="flex flex-col gap-8" style={{ maxHeight: 'calc(100vh - 300px)', overflowY: 'auto', paddingRight: 2 }}>
+              {itensOrdenados.map((it) => {
+                const ativo = itemAtivo?.id === it.id
+                const faltaTemp = exigirTemp && it.rec > 0 && it.temperatura_c == null
+                return (
+                  <div
+                    key={it.id}
+                    onClick={() => setItemAtivoId(it.id)}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      cursor: 'pointer',
+                      border: `1.5px solid ${
+                        ativo
+                          ? 'var(--primary)'
+                          : it.concluido
+                            ? 'rgba(34,197,94,0.45)'
+                            : 'var(--border)'
+                      }`,
+                      background: it.concluido
+                        ? 'rgba(34,197,94,0.10)'
+                        : ativo
+                          ? 'rgba(56,189,248,0.08)'
+                          : 'var(--bg-1)',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div className="flex justify-between items-center flex-wrap gap-8">
+                      <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                        <div className="flex items-center gap-6 flex-wrap">
+                          <span className="font-mono text-xs text-muted">{it.produto_codigo}</span>
+                          <strong className="text-sm">{it.produto_descricao}</strong>
+                          {it.concluido ? (
+                            <span className="badge badge--success">
+                              <Check size={11} /> Concluído ({it.pct}%)
+                            </span>
+                          ) : (
+                            <span className="badge badge--warning">Falta {fmtKg(it.faltaKg)}</span>
+                          )}
+                          {ativo && <span className="badge badge--info">Selecionado</span>}
+                        </div>
+                        <div className="text-xs text-muted mt-4">
+                          Pedido: <strong>{fmtKg(it.sol)}</strong> • Recebido: <strong className="text-cyan">{fmtKg(it.rec)}</strong> ({it.qtdCaixas} cx)
+                        </div>
+                        <div style={{ height: 6, background: 'var(--bg-2)', borderRadius: 99, overflow: 'hidden', marginTop: 6 }}>
+                          <div
+                            style={{
+                              width: `${it.pct}%`,
+                              height: '100%',
+                              background: it.concluido ? '#22c55e' : 'var(--primary)',
+                              transition: 'width 0.25s',
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Amostragem Temperatura 1x por item */}
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-6"
+                        style={{
+                          padding: '5px 8px',
+                          borderRadius: 8,
+                          background: 'var(--bg-2)',
+                          border: `1px solid ${faltaTemp ? 'var(--warning)' : 'var(--border)'}`,
+                        }}
+                      >
+                        <Thermometer size={14} className={it.temperatura_c != null ? 'text-cyan' : 'text-muted'} />
+                        <input
+                          type="number"
+                          step="0.1"
+                          className="form-input"
+                          style={{ width: 68, padding: '3px 6px', fontSize: 12, height: 28 }}
+                          placeholder="Temp °C"
+                          value={tempEdits[it.id] ?? ''}
+                          onChange={(e) => setTempEdits((p) => ({ ...p, [it.id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              handleSalvarTemperaturaItem(it)
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn--secondary btn--sm"
+                          style={{ padding: '4px 8px', fontSize: 11, height: 28 }}
+                          disabled={salvandoTempId === it.id}
+                          onClick={() => handleSalvarTemperaturaItem(it)}
+                        >
+                          {it.temperatura_c != null ? 'Atualizar °C' : 'Salvar °C'}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-10 flex-wrap">
-                  <label className="flex items-center gap-6 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoGravarEstavel}
-                      onChange={(e) => setAutoGravarEstavel(e.target.checked)}
-                    />
-                    Gravar automático ao estabilizar
-                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* FECHAMENTO NA DOCA SEMPRE VISÍVEL LOGO ABAIXO DOS ITENS */}
+          <div className="card" style={{ padding: '12px 14px' }}>
+            <div className="flex flex-col gap-10">
+              <div className="text-xs">
+                {diagnosticoFechamento.tudoOk ? (
+                  <span className="text-success font-bold flex items-center gap-6">
+                    <CheckCircle2 size={16} /> Todos os itens dentro da tolerância (±{tolPct}%)! Pronto para finalizar.
+                  </span>
+                ) : (
+                  <div className="text-warning flex items-start gap-6">
+                    <AlertTriangle size={16} className="shrink-0 mt-2" />
+                    <div>
+                      <strong>Bloqueio operador (±{tolPct}%):</strong>{' '}
+                      {diagnosticoFechamento.pendenciasPeso.length > 0 &&
+                        `${diagnosticoFechamento.pendenciasPeso.length} item(ns) fora da margem. `}
+                      {diagnosticoFechamento.pendenciasTemp.length > 0 &&
+                        `Falta °C obrigatório em ${diagnosticoFechamento.pendenciasTemp.length} item(ns). `}
+                      <span>Complete a pesagem/bipagem ou envie para o Analista.</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-8 flex-wrap justify-end">
+                {!diagnosticoFechamento.tudoOk && (
                   <button
                     type="button"
-                    className={`btn btn--sm ${balancaStatus === 'CONECTADA' ? 'btn--danger' : 'btn--info'}`}
-                    disabled={!isWebSerialSupported() && balancaStatus !== 'CONECTADA'}
-                    onClick={handleToggleBalanca}
+                    className="btn btn--warning btn--sm"
+                    disabled={finalizandoDoca || recTotal <= 0}
+                    onClick={() => handleFinalizarPedidoDoca(true)}
                   >
-                    <Scale size={14} /> {balancaStatus === 'CONECTADA' ? 'Desconectar Balança' : 'Conectar Balança USB'}
+                    <AlertTriangle size={14} /> Enviar Divergência p/ Analista
                   </button>
-                </div>
-              </div>
-            )}
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                handleGravarCaixaPesada()
-              }}
-              className="flex flex-col gap-12"
-            >
-              <PesagemTaraFields
-                taras={taras}
-                value={boxData}
-                onChange={(next, meta) => {
-                  setBoxData(next)
-                  setMetaPesagem(meta)
-                }}
-                permitirTaraManual
-                permitirLoteManual
-                pesoBrutoRef={pesoBrutoRef}
-                onEnterPesoBruto={() => handleGravarCaixaPesada()}
-              />
-
-              <div className="flex justify-between items-center flex-wrap gap-8 pt-6">
-                <div className="text-xs text-muted">
-                  Modo Impressão Estação: <strong>{cfgEstacao.modoImpressao}</strong> • Auto-imprimir:{' '}
-                  <strong>{cfgEstacao.imprimirAutoAoSalvar ? 'Sim' : 'Não'}</strong>
-                </div>
-                <button type="submit" className="btn btn--primary btn--lg" disabled={salvandoCaixa}>
-                  <Printer size={17} />{' '}
-                  {salvandoCaixa ? 'Salvando...' : 'Gravar Caixa & Imprimir Etiqueta'}
+                )}
+                <button
+                  type="button"
+                  className="btn btn--success"
+                  disabled={finalizandoDoca || !diagnosticoFechamento.tudoOk}
+                  onClick={() => handleFinalizarPedidoDoca(false)}
+                >
+                  <CheckCircle2 size={16} /> Finalizar Recebimento na Doca
                 </button>
               </div>
-            </form>
+            </div>
           </div>
-        )}
+        </div>
 
-        {/* MODO 3: BIPAGEM VIA BANCO UNIVERSAL DE TXT DO FORNECEDOR */}
-        {modoDoca === 'BIPAGEM' && (
-          <div className="flex flex-col gap-14">
-            {txtDisponiveisFornecedor === 0 ? (
-              <div className="p-14 rounded flex items-center gap-10 text-xs font-bold" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5' }}>
-                <AlertTriangle size={18} />
-                <div>
-                  Este fornecedor ({pcDetalhe.fornecedor_nome}) não possui arquivos TXT pré-importados pendentes.
-                  Importe os arquivos `.txt` na tela <strong>Compras</strong> ou utilize <strong>Pesagem Manual / Balança</strong>.
+        {/* COLUNA DIREITA: MESA DE OPERAÇÃO (3 MODOS) + CAIXAS RECEBIDAS */}
+        <div className="flex flex-col gap-12" style={{ minWidth: 0 }}>
+          <div className="card" style={{ padding: '12px 14px' }}>
+            <div className="flex gap-6 flex-wrap mb-12 pb-10 border-b border-border">
+              <button
+                type="button"
+                className={`btn btn--sm ${modoDoca === 'MANUAL' ? 'btn--primary' : 'btn--ghost'}`}
+                style={{ flex: 1, minWidth: 165, justifyContent: 'center' }}
+                onClick={() => {
+                  setModoDoca('MANUAL')
+                  setTimeout(() => pesoBrutoRef.current?.focus(), 60)
+                }}
+              >
+                <Plus size={15} /> 1. Pesagem Manual
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${modoDoca === 'BALANCA' ? 'btn--primary' : 'btn--ghost'}`}
+                style={{ flex: 1, minWidth: 165, justifyContent: 'center' }}
+                onClick={() => setModoDoca('BALANCA')}
+              >
+                <Scale size={15} /> 2. Balança Serial
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${modoDoca === 'BIPAGEM' ? 'btn--primary' : 'btn--ghost'}`}
+                style={{ flex: 1, minWidth: 165, justifyContent: 'center' }}
+                onClick={() => {
+                  setModoDoca('BIPAGEM')
+                  setTimeout(() => scanTxtRef.current?.focus(), 60)
+                }}
+              >
+                <ScanBarcode size={15} /> 3. Bipagem (.TXT: {txtDisponiveisFornecedor})
+              </button>
+            </div>
+
+            {/* MODO 1 e 2: PESAGEM MANUAL ou PESAGEM AUTOMÁTICA BALANÇA */}
+            {(modoDoca === 'MANUAL' || modoDoca === 'BALANCA') && itemAtivo && (
+              <div className="flex flex-col gap-10">
+                <div className="p-8 rounded flex justify-between items-center flex-wrap gap-8" style={{ background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.35)' }}>
+                  <div>
+                    <span className="text-xs text-cyan uppercase font-bold">Item Ativo:</span>{' '}
+                    <strong className="text-sm">{itemAtivo.produto_codigo} — {itemAtivo.produto_descricao}</strong>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-warning">
+                    Falta: {fmtKg(itemAtivo.faltaKg)} (de {fmtKg(itemAtivo.sol)})
+                  </span>
                 </div>
-              </div>
-            ) : (
-              <div className="p-10 rounded text-xs" style={{ background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.35)' }}>
-                <strong className="text-cyan">Banco Universal TXT Ativo ({pcDetalhe.fornecedor_nome}):</strong>{' '}
-                <strong>{txtDisponiveisFornecedor}</strong> caixa(s) disponíveis no pool do fornecedor. Bipe a etiqueta para dar entrada e abater dos kg pendentes deste pedido!
+
+                {modoDoca === 'BALANCA' && (
+                  <div
+                    className="p-12 rounded flex justify-between items-center flex-wrap gap-10"
+                    style={{
+                      background: balancaStatus === 'CONECTADA' ? 'rgba(16,185,129,0.1)' : 'var(--bg-1)',
+                      border: `1px solid ${balancaStatus === 'CONECTADA' ? 'rgba(16,185,129,0.45)' : 'var(--border)'}`,
+                    }}
+                  >
+                    <div className="flex items-center gap-10">
+                      {balancaStatus === 'CONECTADA' ? <Wifi size={20} className="text-success" /> : <WifiOff size={20} className="text-muted" />}
+                      <div>
+                        <div className="text-xs font-bold uppercase text-muted">
+                          Balança Serial ({cfgEstacao.balancaBaudRate || 9600} bps)
+                        </div>
+                        <div className="flex items-center gap-8">
+                          <strong className="text-lg font-mono text-cyan">{balancaPeso.toFixed(3).replace('.', ',')} kg</strong>
+                          {balancaStatus === 'CONECTADA' && (
+                            <span className={`badge ${balancaEstavel ? 'badge--success' : 'badge--warning'}`}>
+                              {balancaEstavel ? 'PESO ESTÁVEL' : 'OSCILANDO'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-8 flex-wrap">
+                      <label className="flex items-center gap-6 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={autoGravarEstavel}
+                          onChange={(e) => setAutoGravarEstavel(e.target.checked)}
+                        />
+                        Gravar ao estabilizar
+                      </label>
+                      <button
+                        type="button"
+                        className={`btn btn--sm ${balancaStatus === 'CONECTADA' ? 'btn--danger' : 'btn--info'}`}
+                        disabled={!isWebSerialSupported() && balancaStatus !== 'CONECTADA'}
+                        onClick={handleToggleBalanca}
+                      >
+                        <Scale size={14} /> {balancaStatus === 'CONECTADA' ? 'Desconectar' : 'Conectar Balança'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleGravarCaixaPesada()
+                  }}
+                  className="flex flex-col gap-10"
+                >
+                  <PesagemTaraFields
+                    taras={taras}
+                    value={boxData}
+                    onChange={(next, meta) => {
+                      setBoxData(next)
+                      setMetaPesagem(meta)
+                    }}
+                    permitirTaraManual
+                    permitirLoteManual
+                    pesoBrutoRef={pesoBrutoRef}
+                    onEnterPesoBruto={() => handleGravarCaixaPesada()}
+                  />
+
+                  <div className="flex justify-between items-center flex-wrap gap-8 pt-4">
+                    <div className="text-xs text-muted">
+                      Impressão: <strong>{cfgEstacao.modoImpressao}</strong> • Auto:{' '}
+                      <strong>{cfgEstacao.imprimirAutoAoSalvar ? 'Sim' : 'Não'}</strong>
+                    </div>
+                    <button type="submit" className="btn btn--primary" disabled={salvandoCaixa}>
+                      <Printer size={16} />{' '}
+                      {salvandoCaixa ? 'Salvando...' : 'Gravar Caixa & Imprimir Etiqueta'}
+                    </button>
+                  </div>
+                </form>
               </div>
             )}
 
-            <form onSubmit={handleBiparModoTxt} className="flex gap-8 items-center">
-              <input
-                ref={scanTxtRef}
-                type="text"
-                className="form-input form-input--scanner"
-                style={{ flex: 1 }}
-                placeholder="Bipe o código de barras da caixa (TXT) e pressione Enter..."
-                value={scanTxt}
-                onChange={(e) => setScanTxt(e.target.value)}
-                disabled={bipandoTxt}
-              />
-              <button type="submit" className="btn btn--primary" disabled={bipandoTxt}>
-                <Barcode size={16} /> {bipandoTxt ? 'Validando...' : 'Bipar Caixa'}
-              </button>
-            </form>
+            {/* MODO 3: BIPAGEM VIA BANCO UNIVERSAL DE TXT DO FORNECEDOR */}
+            {modoDoca === 'BIPAGEM' && (
+              <div className="flex flex-col gap-12">
+                {txtDisponiveisFornecedor === 0 ? (
+                  <div className="p-12 rounded flex items-center gap-10 text-xs font-bold" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5' }}>
+                    <AlertTriangle size={18} />
+                    <div>
+                      Este fornecedor ({pcDetalhe.fornecedor_nome}) não possui arquivos TXT pré-importados pendentes.
+                      Importe os arquivos `.txt` na tela <strong>Compras</strong> ou utilize <strong>Pesagem Manual / Balança</strong>.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-10 rounded text-xs" style={{ background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.35)' }}>
+                    <strong className="text-cyan">Banco Universal TXT Ativo ({pcDetalhe.fornecedor_nome}):</strong>{' '}
+                    <strong>{txtDisponiveisFornecedor}</strong> caixa(s) disponíveis no pool do fornecedor.
+                  </div>
+                )}
 
-            {preCaixasFornecedor.length > 0 && (
-              <div className="table-wrap" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                <form onSubmit={handleBiparModoTxt} className="flex gap-8 items-center">
+                  <input
+                    ref={scanTxtRef}
+                    type="text"
+                    className="form-input form-input--scanner"
+                    style={{ flex: 1 }}
+                    placeholder="Bipe o código de barras da caixa (TXT) e pressione Enter..."
+                    value={scanTxt}
+                    onChange={(e) => setScanTxt(e.target.value)}
+                    disabled={bipandoTxt}
+                  />
+                  <button type="submit" className="btn btn--primary" disabled={bipandoTxt}>
+                    <Barcode size={16} /> {bipandoTxt ? 'Validando...' : 'Bipar Caixa'}
+                  </button>
+                </form>
+
+                {preCaixasFornecedor.length > 0 && (
+                  <div className="table-wrap" style={{ maxHeight: 210, overflowY: 'auto' }}>
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>EAN TXT</th>
+                          <th>Produto</th>
+                          <th style={{ textAlign: 'right' }}>Peso Líq.</th>
+                          <th style={{ textAlign: 'right' }}>Peças</th>
+                          <th>Lote / Validade</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preCaixasFornecedor.slice(0, 60).map((cx) => (
+                          <tr key={cx.id}>
+                            <td className="font-mono text-cyan font-bold">{cx.ean_caixa}</td>
+                            <td className="text-sm">{cx.produto_codigo} — {cx.produto_descricao}</td>
+                            <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtKg(cx.peso_liquido_kg)}</td>
+                            <td style={{ textAlign: 'right' }}>{cx.qtd_pecas ?? '-'}</td>
+                            <td className="text-xs font-mono">{cx.lote || '-'} • {fmtDataBR(cx.validade)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* CAIXAS RECEBIDAS NESTE PEDIDO SEMPRE VISÍVEL ABAIXO DA MESA */}
+          <div className="card" style={{ padding: '12px 14px' }}>
+            <h4 className="text-xs font-bold uppercase text-muted mb-8 flex items-center gap-8 m-0">
+              <Layers size={15} className="text-success" /> Caixas Recebidas Neste Pedido ({(pcDetalhe.caixas_bipadas || []).length})
+            </h4>
+            {(pcDetalhe.caixas_bipadas || []).length === 0 ? (
+              <div className="text-xs text-muted py-8">
+                Nenhuma caixa lançada neste pedido ainda. Pese ou bipe uma caixa acima para vê-la aqui instantaneamente.
+              </div>
+            ) : (
+              <div className="table-wrap mt-8" style={{ maxHeight: 220, overflowY: 'auto' }}>
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>EAN TXT</th>
+                      <th>EAN / Etiqueta</th>
                       <th>Produto</th>
+                      <th>Lote / Val.</th>
+                      <th style={{ textAlign: 'right' }}>Pç</th>
                       <th style={{ textAlign: 'right' }}>Peso Líq.</th>
-                      <th style={{ textAlign: 'right' }}>Peças</th>
-                      <th>Lote / Validade</th>
+                      <th>End.</th>
+                      <th style={{ textAlign: 'right' }}>Etiqueta</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {preCaixasFornecedor.slice(0, 60).map((cx) => (
-                      <tr key={cx.id}>
-                        <td className="font-mono text-cyan font-bold">{cx.ean_caixa}</td>
-                        <td className="text-sm">{cx.produto_codigo} — {cx.produto_descricao}</td>
-                        <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtKg(cx.peso_liquido_kg)}</td>
-                        <td style={{ textAlign: 'right' }}>{cx.qtd_pecas ?? '-'}</td>
-                        <td className="text-xs font-mono">{cx.lote || '-'} • {fmtDataBR(cx.validade)}</td>
+                    {pcDetalhe.caixas_bipadas.map((c) => (
+                      <tr key={c.id}>
+                        <td className="font-mono font-bold text-cyan text-xs">{c.ean_caixa}</td>
+                        <td className="text-xs">{c.produto_codigo} — {c.produto_descricao}</td>
+                        <td className="text-xs font-mono">{c.lote || '-'} • {fmtDataBR(c.validade)}</td>
+                        <td style={{ textAlign: 'right' }} className="text-xs">{c.qtd_pecas ?? '-'}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono font-bold text-xs">{fmtKg(c.peso_kg)}</td>
+                        <td className="font-mono text-xs">{c.endereco || 'REC'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => despacharImpressaoEtiqueta([c], { onAbrirModal: (ets) => setEtiquetaPreview(ets) })}
+                          >
+                            <Printer size={13} /> Imprimir
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -918,95 +1048,6 @@ export function RecebimentoPedidoDoca() {
               </div>
             )}
           </div>
-        )}
-      </div>
-
-      {/* CAIXAS JÁ RECEBIDAS NESTE PEDIDO (c/ Reimpressão Zebra) */}
-      {(pcDetalhe.caixas_bipadas || []).length > 0 && (
-        <div className="card">
-          <h4 className="text-sm font-bold mb-10 flex items-center gap-8">
-            <Layers size={16} className="text-success" /> Caixas Recebidas Neste Pedido ({pcDetalhe.caixas_bipadas.length})
-          </h4>
-          <div className="table-wrap" style={{ maxHeight: 260, overflowY: 'auto' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>EAN / Etiqueta</th>
-                  <th>Produto</th>
-                  <th>Lote / Validade</th>
-                  <th style={{ textAlign: 'right' }}>Peças</th>
-                  <th style={{ textAlign: 'right' }}>Peso Líq.</th>
-                  <th>End.</th>
-                  <th style={{ textAlign: 'right' }}>Etiqueta</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pcDetalhe.caixas_bipadas.map((c) => (
-                  <tr key={c.id}>
-                    <td className="font-mono font-bold text-cyan">{c.ean_caixa}</td>
-                    <td className="text-sm">{c.produto_codigo} — {c.produto_descricao}</td>
-                    <td className="text-xs font-mono">{c.lote || '-'} • {fmtDataBR(c.validade)}</td>
-                    <td style={{ textAlign: 'right' }}>{c.qtd_pecas ?? '-'}</td>
-                    <td style={{ textAlign: 'right' }} className="font-mono font-bold">{fmtKg(c.peso_kg)}</td>
-                    <td className="font-mono text-xs">{c.endereco || 'REC'}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--sm"
-                        onClick={() => despacharImpressaoEtiqueta([c], { onAbrirModal: (ets) => setEtiquetaPreview(ets) })}
-                      >
-                        <Printer size={14} /> Imprimir
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* RODAPÉ FINALIZAÇÃO DOCA (±3% + APROVAÇÃO ANALISTA) */}
-      <div className="card flex justify-between items-center flex-wrap gap-12">
-        <div className="text-xs">
-          {diagnosticoFechamento.tudoOk ? (
-            <span className="text-success font-bold flex items-center gap-6">
-              <CheckCircle2 size={16} /> Todos os itens estão conferidos dentro da tolerância (±{tolPct}%)! Pronto para finalizar.
-            </span>
-          ) : (
-            <div className="text-warning flex items-start gap-6">
-              <AlertTriangle size={16} className="shrink-0 mt-2" />
-              <div>
-                <strong>Ainda não é possível finalizar direto pelo operador:</strong>{' '}
-                {diagnosticoFechamento.pendenciasPeso.length > 0 &&
-                  `${diagnosticoFechamento.pendenciasPeso.length} item(ns) fora da margem de ±${tolPct}%. `}
-                {diagnosticoFechamento.pendenciasTemp.length > 0 &&
-                  `Falta registrar temperatura obrigatória em ${diagnosticoFechamento.pendenciasTemp.length} item(ns). `}
-                <span>Conclua a pesagem/bipagem ou envie para aprovação do Analista.</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex gap-8 flex-wrap">
-          {!diagnosticoFechamento.tudoOk && (
-            <button
-              type="button"
-              className="btn btn--warning"
-              disabled={finalizandoDoca || recTotal <= 0}
-              onClick={() => handleFinalizarPedidoDoca(true)}
-            >
-              <AlertTriangle size={15} /> Enviar Divergência p/ Analista Aprovar
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn btn--success"
-            disabled={finalizandoDoca || !diagnosticoFechamento.tudoOk}
-            onClick={() => handleFinalizarPedidoDoca(false)}
-          >
-            <CheckCircle2 size={16} /> Finalizar Recebimento na Doca
-          </button>
         </div>
       </div>
 

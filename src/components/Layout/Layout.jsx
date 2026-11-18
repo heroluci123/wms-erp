@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -9,7 +9,7 @@ import { cadastrosQueries } from '../../queries/cadastros'
 import { operadoresQueries } from '../../queries/operadores'
 import { isCliente, isMaster, temPermissao, temAlgumaPermissao } from '../../utils/permissoes'
 
-function TopBar() {
+function TopBar({ sidebarRecolhida = false, onToggleSidebar }) {
   const {
     operador,
     sessionToken,
@@ -98,7 +98,29 @@ function TopBar() {
   return (
     <>
       <div className="titlebar">
-        <div className="titlebar__logo">
+        <div className="titlebar__logo" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              title={sidebarRecolhida ? 'Expandir menu lateral' : 'Recolher menu lateral (Tela Cheia)'}
+              style={{
+                WebkitAppRegion: 'no-drag',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 24,
+                height: 22,
+                borderRadius: 5,
+                background: 'rgba(148,163,184,0.12)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              {sidebarRecolhida ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+            </button>
+          )}
           <span className="titlebar__title">WMSphere - Tricarnes</span>
         </div>
 
@@ -300,13 +322,13 @@ function TopBar() {
   )
 }
 
-function Sidebar() {
+function Sidebar({ onCollapse }) {
   const { operador } = useAppStore()
   const cliente = isCliente(operador)
 
   if (cliente) {
     return (
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ position: 'relative' }}>
         <div className="sidebar__section-label">Portal do Cliente</div>
         <NavLink to="/portal-cliente" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ShieldCheck size={18} /> Visão Consolidada
@@ -372,7 +394,38 @@ function Sidebar() {
   const temCadastros = temAlgumaPermissao(operador, ['taras', 'locais', 'operadores', 'perfis_gerenciar'])
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={{ position: 'relative' }}>
+      {onCollapse && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            padding: '0 10px 6px',
+            borderBottom: '1px solid rgba(51,65,85,0.4)',
+            marginBottom: 4,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onCollapse}
+            title="Recolher menu lateral para tela cheia"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              fontSize: 11,
+              cursor: 'pointer',
+              padding: '2px 6px',
+              borderRadius: 4,
+            }}
+          >
+            <ChevronLeft size={14} /> Recolher menu
+          </button>
+        </div>
+      )}
       {(temVisaoGeral || !temOperacao) && (
         <div className="sidebar__section-label">Visão Geral</div>
       )}
@@ -598,6 +651,15 @@ export function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+  const [sidebarRecolhida, setSidebarRecolhida] = useState(() =>
+    window.location.pathname.startsWith('/recebimento'),
+  )
+
+  useEffect(() => {
+    if (location.pathname.startsWith('/recebimento')) {
+      setSidebarRecolhida(true)
+    }
+  }, [location.pathname])
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth <= 768)
@@ -654,10 +716,47 @@ export function Layout() {
   return (
     <div className="app-shell">
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-        {!isMobile && <TopBar />}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {!isMobile && <Sidebar />}
-          <main className={isMobile ? 'main-content-mobile' : 'main-content'}>
+        {!isMobile && (
+          <TopBar
+            sidebarRecolhida={sidebarRecolhida}
+            onToggleSidebar={() => setSidebarRecolhida((v) => !v)}
+          />
+        )}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+          {!isMobile && !sidebarRecolhida && <Sidebar onCollapse={() => setSidebarRecolhida(true)} />}
+          {!isMobile && (
+            <button
+              type="button"
+              onClick={() => setSidebarRecolhida((v) => !v)}
+              title={sidebarRecolhida ? 'Expandir menu lateral' : 'Recolher menu lateral'}
+              style={{
+                position: 'absolute',
+                left: sidebarRecolhida ? 0 : 210,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                zIndex: 55,
+                width: 18,
+                height: 44,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                borderRadius: '0 8px 8px 0',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderLeft: sidebarRecolhida ? 'none' : '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                boxShadow: '2px 0 8px rgba(0,0,0,0.35)',
+              }}
+            >
+              {sidebarRecolhida ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+            </button>
+          )}
+          <main
+            className={isMobile ? 'main-content-mobile' : 'main-content'}
+            style={!isMobile && sidebarRecolhida ? { padding: '12px 18px' } : undefined}
+          >
             <Outlet key={filialAtivaId || 'default'} />
           </main>
         </div>
