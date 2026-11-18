@@ -1409,215 +1409,261 @@ export function Compras() {
         </div>
       )}
 
-      {/* MODAL CENTRALIZADO: NOVO PEDIDO DE COMPRA */}
+      {/* MODAL AMPLO: NOVO PEDIDO DE COMPRA */}
       {modalNovo && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalNovo(false)}>
+        <div
+          className="modal-overlay"
+          style={{ padding: 14 }}
+          onClick={(e) => e.target === e.currentTarget && setModalNovo(false)}
+        >
           <div
-            className="modal"
-            style={{ maxWidth: 1080, width: '96%', maxHeight: '92vh', overflowY: 'auto' }}
+            className="card"
+            style={{
+              width: '96vw',
+              maxWidth: 1380,
+              height: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: 0,
+              background: 'var(--bg-1)',
+              overflow: 'hidden',
+            }}
           >
-            <div className="flex justify-between items-center pb-12 mb-16 border-b border-border">
-              <h2 className="text-lg font-bold flex items-center gap-8">
-                <ShoppingBag size={18} className="text-primary" /> Novo Pedido de Compra
-              </h2>
+            {/* Header Fixo */}
+            <div
+              className="flex justify-between items-center p-16"
+              style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}
+            >
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-8" style={{ margin: 0 }}>
+                  <ShoppingBag size={19} className="text-primary" /> Novo Pedido de Compra
+                </h2>
+                <div className="text-xs text-muted mt-4">
+                  Preencha os dados do fornecedor, condições comerciais e lance os produtos por código, descrição, De-Para ou Lupa.
+                </div>
+              </div>
               <button type="button" className="btn-icon" onClick={() => setModalNovo(false)}>
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSalvarCompra} className="flex flex-col gap-16">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-                <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
-                  <label className="form-label">Fornecedor / Frigorífico *</label>
-                  <select
-                    className="form-input"
-                    value={fornecedorId}
-                    onChange={(e) => setFornecedorId(e.target.value)}
-                    required
-                  >
-                    <option value="">Selecione o fornecedor...</option>
-                    {fornecedores.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.nome_fantasia} ({f.uf}) {f.registro_sanitario_sif ? `• SIF ${f.registro_sanitario_sif}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Finalidade (CFOP Auto)</label>
-                  <select className="form-input" value={finalidade} onChange={(e) => setFinalidade(e.target.value)}>
-                    <option value="MATERIA_PRIMA">Matéria-Prima p/ Desossa</option>
-                    <option value="REVENDA">Compra p/ Revenda</option>
-                    <option value="CONSUMO">Uso e Consumo / Embalagem</option>
-                  </select>
-                </div>
-              </div>
-
-              {cfopPreview && (
-                <div className="p-10 rounded text-xs" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)' }}>
-                  CFOP Sugerido automaticamente: <strong>{cfopPreview.cfop}</strong> ({cfopPreview.descricao} • Filial {cfopPreview.uf_filial} × Fornecedor {cfopPreview.uf_parceiro})
-                </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: 12 }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Centro de Custo</label>
-                  <select className="form-input" value={centroCustoId} onChange={(e) => setCentroCustoId(e.target.value)}>
-                    <option value="">Padrão</option>
-                    {(auxiliares.centrosCusto || []).map((cc) => (
-                      <option key={cc.id} value={cc.id}>
-                        {cc.codigo} — {cc.descricao}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Forma Pagto Combinada</label>
-                  <select className="form-input" value={formaPagamentoId} onChange={(e) => setFormaPagamentoId(e.target.value)}>
-                    <option value="">-- A definir na NF --</option>
-                    {(auxiliares.formasPagamento || []).map((fp) => (
-                      <option key={fp.id} value={fp.id}>
-                        {fp.codigo} — {fp.descricao}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Marchante / Corretor</label>
-                  <select className="form-input" value={marchante} onChange={(e) => setMarchante(e.target.value)}>
-                    {(auxiliares.marchantes || []).length === 0 ? (
-                      <option value="FRIGODIL">001 — FRIGODIL</option>
-                    ) : (
-                      (auxiliares.marchantes || []).map((m) => (
-                        <option key={m.id} value={m.nome}>
-                          {m.codigo} — {m.nome}
+            <form
+              onSubmit={handleSalvarCompra}
+              style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
+            >
+              {/* Área Scrollável Completa */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 20 }} className="flex flex-col gap-16">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                  <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
+                    <label className="form-label">Fornecedor / Frigorífico *</label>
+                    <select
+                      className="form-input"
+                      value={fornecedorId}
+                      onChange={(e) => setFornecedorId(e.target.value)}
+                      required
+                    >
+                      <option value="">Selecione o fornecedor...</option>
+                      {fornecedores.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.nome_fantasia} ({f.uf}) {f.registro_sanitario_sif ? `• SIF ${f.registro_sanitario_sif}` : ''}
                         </option>
-                      ))
-                    )}
-                  </select>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Finalidade (CFOP Auto)</label>
+                    <select className="form-input" value={finalidade} onChange={(e) => setFinalidade(e.target.value)}>
+                      <option value="MATERIA_PRIMA">Matéria-Prima p/ Desossa</option>
+                      <option value="REVENDA">Compra p/ Revenda</option>
+                      <option value="CONSUMO">Uso e Consumo / Embalagem</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Previsão Entrega</label>
-                  <input type="date" className="form-input" value={previsaoEntrega} onChange={(e) => setPrevisaoEntrega(e.target.value)} />
-                </div>
-              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 12 }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Frete (R$)</label>
-                  <input type="number" step="0.01" className="form-input" value={freteValor} onChange={(e) => setFreteValor(e.target.value)} placeholder="0,00" />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Despesas Acess. (R$)</label>
-                  <input type="number" step="0.01" className="form-input" value={despesasValor} onChange={(e) => setDespesasValor(e.target.value)} placeholder="0,00" />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Observações</label>
-                  <input type="text" className="form-input" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} placeholder="Placa, prazo negociado..." />
-                </div>
-              </div>
-
-              {/* Adicionar Itens (Código / Descrição Autocomplete / Lupa / De-Para) */}
-              <div className="flex flex-col gap-12">
-                <SeletorItemCompra
-                  produtos={produtosOrdenados}
-                  deparas={deparas}
-                  fornecedorId={fornecedorId}
-                  fornecedorNome={
-                    fornecedores.find((f) => String(f.id) === String(fornecedorId))?.nome_fantasia || ''
-                  }
-                  onIncluirItem={handleIncluirItemSelecionado}
-                  onAviso={(titulo, msg) => toastWarning(titulo, msg)}
-                />
-
-                {itensForm.length > 0 && (
-                  <div className="table-wrap p-10 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
-                    <div className="text-xs font-bold uppercase text-muted mb-8">
-                      Itens do Pedido de Compra ({itensForm.length})
-                    </div>
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Produto</th>
-                          <th style={{ textAlign: 'right' }}>Qtd (kg)</th>
-                          <th style={{ textAlign: 'right' }}>R$/kg</th>
-                          <th style={{ textAlign: 'right' }}>Subtotal</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {itensForm.map((it, idx) => (
-                          <tr key={it.produto_id}>
-                            <td>
-                              <div>
-                                <strong className="font-mono text-cyan">{it.produto_codigo}</strong> — {it.produto_descricao}
-                              </div>
-                              {it.codigo_fornecedor_usado && (
-                                <div className="text-xs text-muted">
-                                  Lançado via De-Para Cód. Fornecedor: <span className="font-mono">{it.codigo_fornecedor_usado}</span>
-                                </div>
-                              )}
-                            </td>
-                            <td style={{ textAlign: 'right' }}>
-                              <input
-                                type="number"
-                                step="0.001"
-                                className="form-input"
-                                style={{ width: 105, textAlign: 'right', display: 'inline-block' }}
-                                value={it.qtd_kg_solicitada}
-                                onChange={(e) => {
-                                  const v = Number(e.target.value || 0)
-                                  setItensForm((prev) => prev.map((x, i) => (i === idx ? { ...x, qtd_kg_solicitada: v } : x)))
-                                }}
-                              />
-                            </td>
-                            <td style={{ textAlign: 'right' }}>
-                              <input
-                                type="number"
-                                step="0.01"
-                                className="form-input"
-                                style={{ width: 105, textAlign: 'right', display: 'inline-block' }}
-                                value={it.preco_unitario_kg}
-                                onChange={(e) => {
-                                  const v = Number(e.target.value || 0)
-                                  setItensForm((prev) => prev.map((x, i) => (i === idx ? { ...x, preco_unitario_kg: v } : x)))
-                                }}
-                              />
-                            </td>
-                            <td style={{ textAlign: 'right' }} className="font-bold text-success">
-                              {fmtMoeda(Number(it.qtd_kg_solicitada || 0) * Number(it.preco_unitario_kg || 0))}
-                            </td>
-                            <td style={{ textAlign: 'right' }}>
-                              <button type="button" className="btn btn--ghost btn--sm text-danger" onClick={() => setItensForm((prev) => prev.filter((_, i) => i !== idx))}>
-                                <Trash2 size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {cfopPreview && (
+                  <div className="p-10 rounded text-xs" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)' }}>
+                    CFOP Sugerido automaticamente: <strong>{cfopPreview.cfop}</strong> ({cfopPreview.descricao} • Filial {cfopPreview.uf_filial} × Fornecedor {cfopPreview.uf_parceiro})
                   </div>
                 )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Centro de Custo</label>
+                    <select className="form-input" value={centroCustoId} onChange={(e) => setCentroCustoId(e.target.value)}>
+                      <option value="">Padrão</option>
+                      {(auxiliares.centrosCusto || []).map((cc) => (
+                        <option key={cc.id} value={cc.id}>
+                          {cc.codigo} — {cc.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Forma Pagto Combinada</label>
+                    <select className="form-input" value={formaPagamentoId} onChange={(e) => setFormaPagamentoId(e.target.value)}>
+                      <option value="">-- A definir na NF --</option>
+                      {(auxiliares.formasPagamento || []).map((fp) => (
+                        <option key={fp.id} value={fp.id}>
+                          {fp.codigo} — {fp.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Marchante / Corretor</label>
+                    <select className="form-input" value={marchante} onChange={(e) => setMarchante(e.target.value)}>
+                      {(auxiliares.marchantes || []).length === 0 ? (
+                        <option value="FRIGODIL">001 — FRIGODIL</option>
+                      ) : (
+                        (auxiliares.marchantes || []).map((m) => (
+                          <option key={m.id} value={m.nome}>
+                            {m.codigo} — {m.nome}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Previsão Entrega</label>
+                    <input type="date" className="form-input" value={previsaoEntrega} onChange={(e) => setPrevisaoEntrega(e.target.value)} />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Frete (R$)</label>
+                    <input type="number" step="0.01" className="form-input" value={freteValor} onChange={(e) => setFreteValor(e.target.value)} placeholder="0,00" />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Despesas Acess. (R$)</label>
+                    <input type="number" step="0.01" className="form-input" value={despesasValor} onChange={(e) => setDespesasValor(e.target.value)} placeholder="0,00" />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Observações</label>
+                    <input type="text" className="form-input" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} placeholder="Placa, prazo negociado..." />
+                  </div>
+                </div>
+
+                {/* Adicionar Itens (Código / Descrição Autocomplete / Lupa / De-Para) */}
+                <div className="flex flex-col gap-12">
+                  <SeletorItemCompra
+                    produtos={produtosOrdenados}
+                    deparas={deparas}
+                    fornecedorId={fornecedorId}
+                    fornecedorNome={
+                      fornecedores.find((f) => String(f.id) === String(fornecedorId))?.nome_fantasia || ''
+                    }
+                    onIncluirItem={handleIncluirItemSelecionado}
+                    onAviso={(titulo, msg) => toastWarning(titulo, msg)}
+                  />
+
+                  <div className="table-wrap p-12 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', minHeight: 160 }}>
+                    <div className="flex justify-between items-center mb-8">
+                      <div className="text-xs font-bold uppercase text-muted">
+                        Itens do Pedido de Compra ({itensForm.length})
+                      </div>
+                      <div className="text-xs text-muted font-mono">
+                        Peso Total:{' '}
+                        <strong>
+                          {fmtKg(itensForm.reduce((s, it) => s + Number(it.qtd_kg_solicitada || 0), 0))}
+                        </strong>
+                      </div>
+                    </div>
+                    {itensForm.length === 0 ? (
+                      <div className="p-24 text-center text-sm text-muted">
+                        Nenhum item lançado ainda. Utilize os campos acima (Código, Descrição, De-Para ou Lupa) para incluir os produtos deste Pedido de Compra.
+                      </div>
+                    ) : (
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Produto</th>
+                            <th style={{ textAlign: 'right' }}>Qtd (kg)</th>
+                            <th style={{ textAlign: 'right' }}>R$/kg</th>
+                            <th style={{ textAlign: 'right' }}>Subtotal</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {itensForm.map((it, idx) => (
+                            <tr key={it.produto_id}>
+                              <td>
+                                <div>
+                                  <strong className="font-mono text-cyan">{it.produto_codigo}</strong> — {it.produto_descricao}
+                                </div>
+                                {it.codigo_fornecedor_usado && (
+                                  <div className="text-xs text-muted">
+                                    Lançado via De-Para Cód. Fornecedor: <span className="font-mono">{it.codigo_fornecedor_usado}</span>
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  className="form-input"
+                                  style={{ width: 115, textAlign: 'right', display: 'inline-block' }}
+                                  value={it.qtd_kg_solicitada}
+                                  onChange={(e) => {
+                                    const v = Number(e.target.value || 0)
+                                    setItensForm((prev) => prev.map((x, i) => (i === idx ? { ...x, qtd_kg_solicitada: v } : x)))
+                                  }}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  className="form-input"
+                                  style={{ width: 115, textAlign: 'right', display: 'inline-block' }}
+                                  value={it.preco_unitario_kg}
+                                  onChange={(e) => {
+                                    const v = Number(e.target.value || 0)
+                                    setItensForm((prev) => prev.map((x, i) => (i === idx ? { ...x, preco_unitario_kg: v } : x)))
+                                  }}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'right' }} className="font-bold text-success">
+                                {fmtMoeda(Number(it.qtd_kg_solicitada || 0) * Number(it.preco_unitario_kg || 0))}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button type="button" className="btn btn--ghost btn--sm text-danger" onClick={() => setItensForm((prev) => prev.filter((_, i) => i !== idx))}>
+                                  <Trash2 size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div className="flex justify-between items-center flex-wrap gap-12 pt-8 border-t border-border">
+              {/* Footer Fixo */}
+              <div
+                className="flex justify-between items-center flex-wrap gap-12 p-16"
+                style={{ background: 'var(--bg-2)', borderTop: '1px solid var(--border)', flexShrink: 0 }}
+              >
                 <label className="flex items-center gap-8 text-sm cursor-pointer">
                   <input type="checkbox" checked={aprovarAoCriar} onChange={(e) => setAprovarAoCriar(e.target.checked)} />
                   Já salvar <strong>Aprovado</strong> (liberar direto para a doca receber)
                 </label>
-                <div className="text-right">
-                  <div className="text-xs text-muted">Total Geral c/ Frete e Despesas</div>
-                  <div className="text-xl font-bold text-success">{fmtMoeda(totalForm)}</div>
-                </div>
-              </div>
 
-              <div className="flex justify-end gap-8">
-                <button type="button" className="btn btn--ghost" onClick={() => setModalNovo(false)}>
-                  Cancelar
-                </button>
-                <button type="submit" className="btn btn--primary">
-                  <CheckCircle2 size={16} /> Salvar Pedido de Compra
-                </button>
+                <div className="flex items-center gap-16 flex-wrap">
+                  <div className="text-right">
+                    <div className="text-xs text-muted">Total Geral c/ Frete e Despesas</div>
+                    <div className="text-xl font-bold text-success">{fmtMoeda(totalForm)}</div>
+                  </div>
+                  <div className="flex gap-8">
+                    <button type="button" className="btn btn--ghost" onClick={() => setModalNovo(false)}>
+                      Cancelar
+                    </button>
+                    <button type="submit" className="btn btn--primary">
+                      <CheckCircle2 size={16} /> Salvar Pedido de Compra
+                    </button>
+                  </div>
+                </div>
               </div>
             </form>
           </div>

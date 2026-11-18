@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowRightLeft, Package, Plus, Search, X } from 'lucide-react'
 
 const normTxt = (s) =>
@@ -35,6 +36,7 @@ export function SeletorItemCompra({
 
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
   const [indiceSugestao, setIndiceSugestao] = useState(-1)
+  const [dropdownRect, setDropdownRect] = useState(null)
 
   // Modal expandido da Lupa
   const [modalBuscaAberto, setModalBuscaAberto] = useState(false)
@@ -43,10 +45,40 @@ export function SeletorItemCompra({
   const [modalSomenteDepara, setModalSomenteDepara] = useState(false)
 
   const codigoRef = useRef(null)
+  const descricaoWrapRef = useRef(null)
   const descricaoRef = useRef(null)
   const qtdRef = useRef(null)
   const precoRef = useRef(null)
   const modalBuscaRef = useRef(null)
+
+  const atualizarPosicaoDropdown = () => {
+    const el = descricaoWrapRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const espacoAbaixo = window.innerHeight - rect.bottom - 16
+    const espacoAcima = rect.top - 16
+    const abrirAcima = espacoAbaixo < 210 && espacoAcima > espacoAbaixo
+    const maxH = Math.max(160, Math.min(340, abrirAcima ? espacoAcima : espacoAbaixo))
+    setDropdownRect({
+      left: rect.left,
+      width: Math.max(rect.width, 360),
+      top: abrirAcima ? undefined : rect.bottom + 4,
+      bottom: abrirAcima ? window.innerHeight - rect.top + 4 : undefined,
+      maxHeight: maxH,
+    })
+  }
+
+  useEffect(() => {
+    if (!mostrarSugestoes) return
+    atualizarPosicaoDropdown()
+    const onMove = () => atualizarPosicaoDropdown()
+    window.addEventListener('resize', onMove)
+    window.addEventListener('scroll', onMove, true)
+    return () => {
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('scroll', onMove, true)
+    }
+  }, [mostrarSugestoes, descricaoInput])
 
   const deparasFornecedor = useMemo(() => {
     if (!fornecedorId) return []
@@ -390,7 +422,7 @@ export function SeletorItemCompra({
         <div style={{ position: 'relative' }}>
           <label className="form-label">Descrição do Produto *</label>
           <div style={{ display: 'flex', gap: 6 }}>
-            <div style={{ position: 'relative', flex: 1 }}>
+            <div ref={descricaoWrapRef} style={{ position: 'relative', flex: 1 }}>
               <input
                 ref={descricaoRef}
                 className="form-input"
@@ -441,105 +473,109 @@ export function SeletorItemCompra({
             </button>
           </div>
 
-          {/* Dropdown Autocomplete */}
-          {mostrarSugestoes && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                left: 0,
-                right: 48,
-                zIndex: 1050,
-                background: '#0f172a',
-                border: '1px solid var(--accent)',
-                borderRadius: 10,
-                boxShadow: '0 16px 36px rgba(0,0,0,0.75)',
-                maxHeight: 290,
-                overflowY: 'auto',
-              }}
-            >
-              {sugestoesProdutos.length === 0 ? (
-                <div style={{ padding: '12px 14px', fontSize: 12.5, color: '#94a3b8' }}>
-                  Nenhum produto encontrado para "{descricaoInput}". Use a lupa para explorar o cadastro.
-                </div>
-              ) : (
-                sugestoesProdutos.map((p, idx) => {
-                  const ativo = idx === indiceSugestao
-                  const dps = deparaPorProdutoId.get(String(p.id)) || []
-                  const dpBadge = dps[0]
-                  return (
-                    <div
-                      key={p.id}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        aplicarProduto(p, true, dpBadge || null)
-                      }}
-                      onMouseEnter={() => setIndiceSugestao(idx)}
-                      style={{
-                        padding: '9px 12px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        gap: 10,
-                        borderBottom: '1px solid rgba(51, 65, 85, 0.5)',
-                        background: ativo ? 'rgba(59, 130, 246, 0.22)' : 'transparent',
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <span
-                            className="font-mono"
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: '#38bdf8',
-                              background: 'rgba(56, 189, 248, 0.14)',
-                              padding: '1px 6px',
-                              borderRadius: 4,
-                            }}
-                          >
-                            {p.codigo || 'S/C'}
-                          </span>
-                          {dpBadge && (
+          {/* Dropdown Autocomplete via Portal para nunca cortar dentro de containers com scroll */}
+          {mostrarSugestoes &&
+            dropdownRect &&
+            createPortal(
+              <div
+                style={{
+                  position: 'fixed',
+                  top: dropdownRect.top,
+                  bottom: dropdownRect.bottom,
+                  left: dropdownRect.left,
+                  width: dropdownRect.width,
+                  zIndex: 1150,
+                  background: '#0f172a',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 10,
+                  boxShadow: '0 18px 42px rgba(0,0,0,0.85)',
+                  maxHeight: dropdownRect.maxHeight,
+                  overflowY: 'auto',
+                }}
+              >
+                {sugestoesProdutos.length === 0 ? (
+                  <div style={{ padding: '12px 14px', fontSize: 12.5, color: '#94a3b8' }}>
+                    Nenhum produto encontrado para "{descricaoInput}". Use a lupa para explorar o cadastro.
+                  </div>
+                ) : (
+                  sugestoesProdutos.map((p, idx) => {
+                    const ativo = idx === indiceSugestao
+                    const dps = deparaPorProdutoId.get(String(p.id)) || []
+                    const dpBadge = dps[0]
+                    return (
+                      <div
+                        key={p.id}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          aplicarProduto(p, true, dpBadge || null)
+                        }}
+                        onMouseEnter={() => setIndiceSugestao(idx)}
+                        style={{
+                          padding: '9px 12px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 10,
+                          borderBottom: '1px solid rgba(51, 65, 85, 0.5)',
+                          background: ativo ? 'rgba(59, 130, 246, 0.22)' : 'transparent',
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <span
                               className="font-mono"
                               style={{
-                                fontSize: 10.5,
+                                fontSize: 11,
                                 fontWeight: 700,
-                                color: '#fbbf24',
-                                background: 'rgba(245, 158, 11, 0.16)',
+                                color: '#38bdf8',
+                                background: 'rgba(56, 189, 248, 0.14)',
                                 padding: '1px 6px',
                                 borderRadius: 4,
                               }}
-                              title={`De-Para cadastrado: ${dpBadge.descricao_fornecedor || dpBadge.codigo_fornecedor}`}
                             >
-                              Forn: {dpBadge.codigo_fornecedor}
+                              {p.codigo || 'S/C'}
                             </span>
-                          )}
-                          <span
-                            style={{
-                              fontWeight: 700,
-                              fontSize: 13,
-                              color: '#f8fafc',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {p.descricao}
-                          </span>
+                            {dpBadge && (
+                              <span
+                                className="font-mono"
+                                style={{
+                                  fontSize: 10.5,
+                                  fontWeight: 700,
+                                  color: '#fbbf24',
+                                  background: 'rgba(245, 158, 11, 0.16)',
+                                  padding: '1px 6px',
+                                  borderRadius: 4,
+                                }}
+                                title={`De-Para cadastrado: ${dpBadge.descricao_fornecedor || dpBadge.codigo_fornecedor}`}
+                              >
+                                Forn: {dpBadge.codigo_fornecedor}
+                              </span>
+                            )}
+                            <span
+                              style={{
+                                fontWeight: 700,
+                                fontSize: 13,
+                                color: '#f8fafc',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {p.descricao}
+                            </span>
+                          </div>
                         </div>
+                        <span className="font-mono text-xs text-muted" style={{ flexShrink: 0 }}>
+                          {Number(p.custo_medio_kg || 0) > 0 ? `${fmtMoeda(p.custo_medio_kg)}/kg` : p.unidade || 'KG'}
+                        </span>
                       </div>
-                      <span className="font-mono text-xs text-muted" style={{ flexShrink: 0 }}>
-                        {Number(p.custo_medio_kg || 0) > 0 ? `${fmtMoeda(p.custo_medio_kg)}/kg` : p.unidade || 'KG'}
-                      </span>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          )}
+                    )
+                  })
+                )}
+              </div>,
+              document.body,
+            )}
         </div>
 
         {/* 4. Quantidade (kg) */}
