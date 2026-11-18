@@ -23,18 +23,26 @@ export default function PesagemTaraFields({
   ocultarDatas = false,
   mostrarQtdPecas = true,
   qtdPecasObrigatorio = true,
+  permitirTaraManual = true,
+  permitirLoteManual = false,
   compact = false,
   pesoBrutoRef = null,
   onEnterPesoBruto = null,
 }) {
+  const taraModo = value.tara_modo === 'MANUAL' && permitirTaraManual ? 'MANUAL' : 'CADASTRADA'
   const taraAtual = useMemo(
-    () => resolverTaraSelecionada(taras, value.tara_id),
-    [taras, value.tara_id]
+    () => (taraModo === 'CADASTRADA' ? resolverTaraSelecionada(taras, value.tara_id) : null),
+    [taras, value.tara_id, taraModo]
   )
 
   const taraIdAtual = taraAtual ? String(taraAtual.id) : ''
-  const taraKgAtual = taraAtual ? Number(taraAtual.peso_kg || 0) : 0
+  const taraManualNum = parseNumero(value.tara_manual_kg)
+  const taraKgAtual =
+    taraModo === 'MANUAL'
+      ? (Number.isFinite(taraManualNum) && taraManualNum >= 0 ? Number(taraManualNum.toFixed(3)) : 0)
+      : (taraAtual ? Number(taraAtual.peso_kg || 0) : 0)
   const loteGerado = useMemo(() => gerarLotePorData(value.data_producao), [value.data_producao])
+  const loteEfetivo = String(value.lote || '').trim() || loteGerado
 
   const brutoNum = parseNumero(value.peso_bruto)
   const pesoLiquido = useMemo(() => {
@@ -50,16 +58,22 @@ export default function PesagemTaraFields({
       tara_id: value.tara_id ?? taraIdAtual,
       ...patch,
     }
-    const nextTara = resolverTaraSelecionada(taras, next.tara_id)
-    const nextTaraKg = nextTara ? Number(nextTara.peso_kg || 0) : 0
+    const nextModo = next.tara_modo === 'MANUAL' && permitirTaraManual ? 'MANUAL' : 'CADASTRADA'
+    const nextTara = nextModo === 'CADASTRADA' ? resolverTaraSelecionada(taras, next.tara_id) : null
+    const nextManual = parseNumero(next.tara_manual_kg)
+    const nextTaraKg =
+      nextModo === 'MANUAL'
+        ? (Number.isFinite(nextManual) && nextManual >= 0 ? Number(nextManual.toFixed(3)) : 0)
+        : (nextTara ? Number(nextTara.peso_kg || 0) : 0)
     const nextBruto = parseNumero(next.peso_bruto)
     const nextLiquido = Number.isFinite(nextBruto) ? calcularPesoLiquido(nextBruto, nextTaraKg) : NaN
-    const nextLote = gerarLotePorData(next.data_producao)
+    const nextLote = String(next.lote || '').trim() || gerarLotePorData(next.data_producao)
     const nextPecasRaw = parseNumero(next.qtd_pecas)
     const nextPecas = Number.isFinite(nextPecasRaw) && nextPecasRaw > 0 ? Math.trunc(nextPecasRaw) : null
 
     onChange?.(next, {
       tara: nextTara,
+      tara_id: nextTara ? nextTara.id : null,
       tara_kg: nextTaraKg,
       peso_bruto_kg: nextBruto,
       peso_liquido_kg: nextLiquido,
@@ -177,26 +191,85 @@ export default function PesagemTaraFields({
           </div>
         )}
 
+        {permitirLoteManual && (
+          <div>
+            <label style={{
+              display: 'block', fontSize: 12, fontWeight: 600,
+              color: 'var(--text-secondary)', marginBottom: 5,
+            }}>
+              Lote (ou auto DDMMAA)
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder={loteGerado || 'Ex: 181126'}
+              value={value.lote ?? ''}
+              onChange={e => emitChange({ lote: e.target.value })}
+              style={{ width: '100%', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+            />
+          </div>
+        )}
+
         <div>
-          <label style={{
-            display: 'block', fontSize: 12, fontWeight: 600,
-            color: 'var(--text-secondary)', marginBottom: 5,
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 5,
           }}>
-            Tara da Caixa *
-          </label>
-          <select
-            className="form-input"
-            value={taraIdAtual}
-            onChange={e => emitChange({ tara_id: e.target.value })}
-            style={{ width: '100%' }}
-          >
-            {taras.length === 0 && <option value="">Nenhuma tara cadastrada</option>}
-            {taras.map(t => (
-              <option key={t.id} value={t.id}>
-                {t.nome} ({fmtKg3(t.peso_kg)})
-              </option>
-            ))}
-          </select>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', margin: 0 }}>
+              Tara da Caixa *
+            </label>
+            {permitirTaraManual && (
+              <div style={{ display: 'inline-flex', borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  onClick={() => emitChange({ tara_modo: 'CADASTRADA' })}
+                  style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 7px', cursor: 'pointer', border: 'none',
+                    background: taraModo === 'CADASTRADA' ? 'var(--primary)' : 'var(--bg-2)',
+                    color: taraModo === 'CADASTRADA' ? '#fff' : 'var(--text-muted)',
+                  }}
+                >
+                  Cadastrada
+                </button>
+                <button
+                  type="button"
+                  onClick={() => emitChange({ tara_modo: 'MANUAL', tara_id: null })}
+                  style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 7px', cursor: 'pointer', border: 'none',
+                    background: taraModo === 'MANUAL' ? 'var(--warning)' : 'var(--bg-2)',
+                    color: taraModo === 'MANUAL' ? '#0f172a' : 'var(--text-muted)',
+                  }}
+                >
+                  Manual (kg)
+                </button>
+              </div>
+            )}
+          </div>
+          {taraModo === 'MANUAL' ? (
+            <input
+              type="number"
+              step="0.001"
+              min="0"
+              className="form-input"
+              placeholder="Ex: 0.850"
+              value={value.tara_manual_kg ?? ''}
+              onChange={e => emitChange({ tara_manual_kg: e.target.value })}
+              style={{ width: '100%', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+            />
+          ) : (
+            <select
+              className="form-input"
+              value={taraIdAtual}
+              onChange={e => emitChange({ tara_id: e.target.value })}
+              style={{ width: '100%' }}
+            >
+              {taras.length === 0 && <option value="">Nenhuma tara cadastrada</option>}
+              {taras.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.nome} ({fmtKg3(t.peso_kg)})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div>
@@ -252,9 +325,9 @@ export default function PesagemTaraFields({
           <span style={{ color: 'var(--text-secondary)' }}>
             <strong>Tara:</strong> {fmtKg3(taraKgAtual)}
           </span>
-          {loteGerado && (
+          {loteEfetivo && (
             <span style={{ color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>
-              <strong>Lote Auto:</strong> {loteGerado}
+              <strong>Lote:</strong> {loteEfetivo}
             </span>
           )}
           {mostrarQtdPecas && (

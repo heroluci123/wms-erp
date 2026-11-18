@@ -9,6 +9,8 @@ export const comprasQueries = {
         trava_recebimento_sem_pc: false,
         rastreio_motorista_ativo: false,
         impressao_romaneio_padrao: 'OPCAO_B',
+        exigir_temperatura_recebimento: false,
+        tolerancia_recebimento_pct: 3,
       }
     }
     const res = await apiRequest('/api/configuracoes/modulos')
@@ -139,5 +141,21 @@ export const comprasQueries = {
   async confirmarPreCaixasLote(payload) {
     if (!isApiEnabled()) throw new Error(msgModoApi)
     return apiRequest('/api/recebimento/confirmar-pre-caixas-lote', { method: 'POST', body: payload })
+  },
+
+  async registrarTemperaturaItemPc(pcId, itemId, temperaturaC) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest(`/api/recebimento/pedidos/${pcId}/itens/${itemId}/temperatura`, {
+      method: 'PATCH',
+      body: { temperatura_c: temperaturaC },
+    })
+  },
+
+  async finalizarDocaPedido(pcId, payload = {}) {
+    if (!isApiEnabled()) throw new Error(msgModoApi)
+    return apiRequest(`/api/recebimento/pedidos/${pcId}/finalizar-doca`, {
+      method: 'POST',
+      body: payload,
+    })
   },
 }

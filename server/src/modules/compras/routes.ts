@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { DbConnection } from '../../db/client.js'
 import {
   centrosCusto,
@@ -102,6 +102,11 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           rastreio_motorista_ativo: raw.rastreio_motorista_ativo !== false,
           impressao_romaneio_padrao:
             String(raw.impressao_romaneio_padrao || 'OPCAO_B') === 'OPCAO_A' ? 'OPCAO_A' : 'OPCAO_B',
+          exigir_temperatura_recebimento: Boolean(raw.exigir_temperatura_recebimento),
+          tolerancia_recebimento_pct:
+            raw.tolerancia_recebimento_pct != null && Number.isFinite(Number(raw.tolerancia_recebimento_pct))
+              ? Number(raw.tolerancia_recebimento_pct)
+              : 3,
         },
       }
     },
@@ -116,6 +121,8 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         trava_recebimento_sem_pc?: boolean
         rastreio_motorista_ativo?: boolean
         impressao_romaneio_padrao?: string
+        exigir_temperatura_recebimento?: boolean
+        tolerancia_recebimento_pct?: number
       }
       const atual = await lerTenantFeatures(conn.db, ctx.tenantId)
       const next: Record<string, unknown> = { ...atual }
@@ -127,6 +134,13 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       }
       if (body.impressao_romaneio_padrao !== undefined) {
         next.impressao_romaneio_padrao = body.impressao_romaneio_padrao === 'OPCAO_A' ? 'OPCAO_A' : 'OPCAO_B'
+      }
+      if (body.exigir_temperatura_recebimento !== undefined) {
+        next.exigir_temperatura_recebimento = Boolean(body.exigir_temperatura_recebimento)
+      }
+      if (body.tolerancia_recebimento_pct !== undefined) {
+        const tol = Math.min(25, Math.max(0, Number(body.tolerancia_recebimento_pct)))
+        if (Number.isFinite(tol)) next.tolerancia_recebimento_pct = tol
       }
 
       await conn.db
@@ -168,9 +182,10 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         .orderBy(desc(pedidosCompra.createdAt))
 
       const pcIds = pcs.map((p) => p.id)
-      const itensRes =
+      const fornIds = Array.from(new Set(pcs.map((p) => p.fornecedor_id)))
+      const [itensRes, recRes, prePoolRes] = await Promise.all([
         pcIds.length > 0
-          ? await conn.db
+          ? conn.db
               .select({
                 id: pedidosCompraItens.id,
                 pedido_compra_id: pedidosCompraItens.pedidoCompraId,
@@ -180,15 +195,16 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
                 qtd_kg_solicitada: pedidosCompraItens.qtdKgSolicitada,
                 qtd_kg_recebida: pedidosCompraItens.qtdKgRecebida,
                 preco_unitario_kg: pedidosCompraItens.precoUnitarioKg,
+                temperatura_c: pedidosCompraItens.temperaturaC,
+                temperatura_registrada_em: pedidosCompraItens.temperaturaRegistradaEm,
+                temperatura_registrada_por: pedidosCompraItens.temperaturaRegistradaPor,
               })
               .from(pedidosCompraItens)
               .innerJoin(produtos, eq(produtos.id, pedidosCompraItens.produtoId))
               .where(inArray(pedidosCompraItens.pedidoCompraId, pcIds))
-          : []
-
-      const recRes =
+          : Promise.resolve([]),
         pcIds.length > 0
-          ? await conn.db
+          ? conn.db
               .select({
                 id: recebimentos.id,
                 codigo: recebimentos.codigo,
@@ -198,25 +214,76 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
               })
               .from(recebimentos)
               .where(inArray(recebimentos.pedidoCompraId, pcIds))
+          : Promise.resolve([]),
+        fornIds.length > 0
+          ? conn.db
+              .select({
+                fornecedor_id: recebimentoPreCaixas.fornecedorId,
+                pedido_compra_id: recebimentoPreCaixas.pedidoCompraId,
+              })
+              .from(recebimentoPreCaixas)
+              .where(
+                and(
+                  eq(recebimentoPreCaixas.tenantId, ctx.tenantId),
+                  eq(recebimentoPreCaixas.status, 'PENDENTE'),
+                  or(
+                    inArray(recebimentoPreCaixas.fornecedorId, fornIds),
+                    pcIds.length > 0 ? inArray(recebimentoPreCaixas.pedidoCompraId, pcIds) : sql`false`,
+                  ),
+                ),
+              )
+          : Promise.resolve([]),
+      ])
+
+      const recIds = recRes.map((r) => r.id)
+      const cxContagens =
+        recIds.length > 0
+          ? await conn.db
+              .select({
+                recebimento_id: estoqueCaixas.recebimentoId,
+                produto_id: estoqueCaixas.produtoId,
+                qtd: sql<number>`COUNT(*)::int`,
+              })
+              .from(estoqueCaixas)
+              .where(inArray(estoqueCaixas.recebimentoId, recIds))
+              .groupBy(estoqueCaixas.recebimentoId, estoqueCaixas.produtoId)
           : []
+
+      const tolPadrao =
+        features.tolerancia_recebimento_pct != null && Number.isFinite(Number(features.tolerancia_recebimento_pct))
+          ? Number(features.tolerancia_recebimento_pct)
+          : 3
 
       return {
         success: true,
         trava_recebimento_sem_pc: Boolean(features.trava_recebimento_sem_pc),
+        exigir_temperatura_recebimento: Boolean(features.exigir_temperatura_recebimento),
+        tolerancia_recebimento_pct: tolPadrao,
         data: pcs.map((pc) => {
+          const rec = recRes.find((r) => r.pedido_compra_id === pc.id) || null
           const its = itensRes
             .filter((i) => i.pedido_compra_id === pc.id)
-            .map((i) => ({
-              ...i,
-              qtd_kg_solicitada: toNum(i.qtd_kg_solicitada, 0),
-              qtd_kg_recebida: toNum(i.qtd_kg_recebida, 0),
-              preco_unitario_kg: toNum(i.preco_unitario_kg, 0),
-            }))
-          const rec = recRes.find((r) => r.pedido_compra_id === pc.id) || null
+            .map((i) => {
+              const cxRow = rec
+                ? cxContagens.find((c) => c.recebimento_id === rec.id && c.produto_id === i.produto_id)
+                : null
+              return {
+                ...i,
+                qtd_kg_solicitada: toNum(i.qtd_kg_solicitada, 0),
+                qtd_kg_recebida: toNum(i.qtd_kg_recebida, 0),
+                preco_unitario_kg: toNum(i.preco_unitario_kg, 0),
+                temperatura_c: i.temperatura_c != null ? toNum(i.temperatura_c, 0) : null,
+                qtd_caixas_recebidas: cxRow ? Number(cxRow.qtd) : 0,
+              }
+            })
+          const txtDisp = prePoolRes.filter(
+            (p) => p.pedido_compra_id === pc.id || (!p.pedido_compra_id && p.fornecedor_id === pc.fornecedor_id),
+          ).length
           return {
             ...pc,
             valor_total: toNum(pc.valor_total, 0),
             recebimento: rec,
+            txt_disponiveis_fornecedor: txtDisp,
             itens: its,
           }
         }),
@@ -348,6 +415,9 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             preco_unitario_kg: pedidosCompraItens.precoUnitarioKg,
             qtd_kg_recebida: pedidosCompraItens.qtdKgRecebida,
             cfop_aplicado: pedidosCompraItens.cfopAplicado,
+            temperatura_c: pedidosCompraItens.temperaturaC,
+            temperatura_registrada_em: pedidosCompraItens.temperaturaRegistradaEm,
+            temperatura_registrada_por: pedidosCompraItens.temperaturaRegistradaPor,
           })
           .from(pedidosCompraItens)
           .innerJoin(produtos, eq(produtos.id, pedidosCompraItens.produtoId))
@@ -367,11 +437,21 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
                 id: estoqueCaixas.id,
                 ean_caixa: estoqueCaixas.eanCaixa,
                 produto_id: estoqueCaixas.produtoId,
+                produto_codigo: produtos.codigo,
+                produto_descricao: produtos.descricao,
+                peso_bruto_kg: estoqueCaixas.pesoBrutoKg,
+                tara_kg: estoqueCaixas.taraKg,
                 peso_kg: estoqueCaixas.pesoKg,
+                qtd_pecas: estoqueCaixas.qtdPecas,
+                data_producao: estoqueCaixas.dataProducao,
+                validade: estoqueCaixas.validade,
                 lote: estoqueCaixas.lote,
+                endereco: estoqueCaixas.endereco,
                 custo_unitario_kg: estoqueCaixas.custoUnitarioKg,
+                operador_cadastro_nome: estoqueCaixas.operadorCadastroNome,
               })
               .from(estoqueCaixas)
+              .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
               .where(eq(estoqueCaixas.recebimentoId, recPrincipal.id))
           : Promise.resolve([]),
         conn.db
@@ -392,6 +472,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             qtd_kg_solicitada: toNum(it.qtd_kg_solicitada, 0),
             preco_unitario_kg: toNum(it.preco_unitario_kg, 0),
             qtd_kg_recebida: toNum(it.qtd_kg_recebida, 0),
+            temperatura_c: it.temperatura_c != null ? toNum(it.temperatura_c, 0) : null,
           })),
           recebimento: recPrincipal,
           pre_caixas_resumo: {
@@ -402,6 +483,8 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           },
           caixas_bipadas: caixasBipadas.map((c) => ({
             ...c,
+            peso_bruto_kg: c.peso_bruto_kg != null ? toNum(c.peso_bruto_kg, 0) : null,
+            tara_kg: c.tara_kg != null ? toNum(c.tara_kg, 0) : 0,
             peso_kg: toNum(c.peso_kg, 0),
             custo_unitario_kg: toNum(c.custo_unitario_kg, 0),
           })),
@@ -698,4 +781,228 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
 
     return { success: true, ...result }
   })
+
+  // Registrar temperatura de amostragem por item do Pedido de Compra (sai apenas no Relatório de Recebimento)
+  app.patch(
+    '/api/recebimento/pedidos/:pcId/itens/:itemId/temperatura',
+    { preHandler: requirePermission(['recebimento', 'compras']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const pcId = parseUuidOrBadRequest((req.params as { pcId: string }).pcId, 'pedido_compra_id')
+      const itemId = parseUuidOrBadRequest((req.params as { itemId: string }).itemId, 'item_id')
+      const body = (req.body || {}) as { temperatura_c?: number | null }
+
+      const tempNum =
+        body.temperatura_c === null || body.temperatura_c === undefined || String(body.temperatura_c).trim() === ''
+          ? null
+          : Number(String(body.temperatura_c).replace(',', '.'))
+
+      if (tempNum !== null && (!Number.isFinite(tempNum) || tempNum < -50 || tempNum > 60)) {
+        throw new HttpError(400, 'Informe uma temperatura válida entre -50 °C e +60 °C.')
+      }
+
+      const [it] = await conn.db
+        .select({ id: pedidosCompraItens.id })
+        .from(pedidosCompraItens)
+        .where(
+          and(
+            eq(pedidosCompraItens.id, itemId),
+            eq(pedidosCompraItens.pedidoCompraId, pcId),
+            eq(pedidosCompraItens.tenantId, ctx.tenantId),
+          ),
+        )
+        .limit(1)
+      if (!it) throw new HttpError(404, 'Item do Pedido de Compra não encontrado.')
+
+      const now = new Date()
+      await conn.db
+        .update(pedidosCompraItens)
+        .set({
+          temperaturaC: tempNum !== null ? toDec(tempNum, 2) : null,
+          temperaturaRegistradaEm: tempNum !== null ? now : null,
+          temperaturaRegistradaPor: tempNum !== null ? ctx.operador.nome : '',
+        })
+        .where(eq(pedidosCompraItens.id, itemId))
+
+      return {
+        success: true,
+        temperatura_c: tempNum,
+        temperatura_registrada_por: tempNum !== null ? ctx.operador.nome : '',
+        temperatura_registrada_em: tempNum !== null ? now : null,
+      }
+    },
+  )
+
+  // Operador finaliza recebimento na doca (fecha direto se dentro de +-tol%, senão bloqueia ou envia p/ analista)
+  app.post(
+    '/api/recebimento/pedidos/:pcId/finalizar-doca',
+    { preHandler: requirePermission(['recebimento', 'compras']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const pcId = parseUuidOrBadRequest((req.params as { pcId: string }).pcId, 'pedido_compra_id')
+      const body = (req.body || {}) as {
+        numero_nf?: string
+        chave_nfe?: string
+        enviar_para_analista?: boolean
+        observacao_divergencia?: string
+      }
+
+      const out = await conn.db.transaction(async (tx) => {
+        const [pc] = await tx
+          .select()
+          .from(pedidosCompra)
+          .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!pc) throw new HttpError(404, 'Pedido de Compra não encontrado.')
+        if (!['APROVADO', 'PARCIAL'].includes(pc.status)) {
+          throw new HttpError(400, `Pedido ${pc.codigo} está com status "${pc.status}".`)
+        }
+
+        const features = await lerTenantFeatures(tx, ctx.tenantId)
+        const exigirTemp = Boolean(features.exigir_temperatura_recebimento)
+        const tolPct =
+          features.tolerancia_recebimento_pct != null && Number.isFinite(Number(features.tolerancia_recebimento_pct))
+            ? Number(features.tolerancia_recebimento_pct)
+            : 3
+
+        const itens = await tx
+          .select({
+            id: pedidosCompraItens.id,
+            produto_id: pedidosCompraItens.produtoId,
+            produto_descricao: produtos.descricao,
+            qtd_sol: pedidosCompraItens.qtdKgSolicitada,
+            qtd_rec: pedidosCompraItens.qtdKgRecebida,
+            preco: pedidosCompraItens.precoUnitarioKg,
+            temperatura_c: pedidosCompraItens.temperaturaC,
+          })
+          .from(pedidosCompraItens)
+          .innerJoin(produtos, eq(produtos.id, pedidosCompraItens.produtoId))
+          .where(eq(pedidosCompraItens.pedidoCompraId, pcId))
+
+        if (exigirTemp && !body.enviar_para_analista) {
+          const semTemp = itens.filter((i) => toNum(i.qtd_rec, 0) > 0 && i.temperatura_c == null)
+          if (semTemp.length > 0) {
+            throw new HttpError(
+              400,
+              `Temperatura obrigatória ativa nos parâmetros! Informe a temperatura de amostragem para: ${semTemp.map((s) => s.produto_descricao).join(', ')}.`,
+            )
+          }
+        }
+
+        const divergentes: string[] = []
+        let totalSol = 0
+        let totalRec = 0
+        for (const it of itens) {
+          const sol = toNum(it.qtd_sol, 0)
+          const rec = toNum(it.qtd_rec, 0)
+          totalSol += sol
+          totalRec += rec
+          const difPct = sol > 0 ? Math.abs(rec - sol) / sol : 0
+          if (rec <= 0 || difPct > tolPct / 100) {
+            const falta = Number((sol - rec).toFixed(2))
+            divergentes.push(`${it.produto_descricao}: recebido ${rec.toFixed(2)} / pedido ${sol.toFixed(2)} kg`)
+            void falta
+          }
+        }
+
+        const temDivergencia = divergentes.length > 0 || totalRec <= 0
+        if (temDivergencia && !body.enviar_para_analista) {
+          throw new HttpError(
+            409,
+            `Ainda existem itens fora da tolerância de ±${tolPct}% (${divergentes.slice(0, 3).join('; ')}). Complete a pesagem/bipagem ou envie para aprovação do Analista.`,
+          )
+        }
+
+        const [recExist] = await tx
+          .select()
+          .from(recebimentos)
+          .where(and(eq(recebimentos.pedidoCompraId, pcId), eq(recebimentos.tenantId, ctx.tenantId)))
+          .limit(1)
+
+        const novoStatusVal = temDivergencia ? 'DIVERGENTE' : 'VALIDADO'
+        let recId = recExist?.id
+        let recCod = recExist?.codigo
+
+        if (!recExist) {
+          recId = uuidv7()
+          recCod = await gerarCodigoDocumento(tx, ctx.tenantId, 'RECEBIMENTO', 'REC', 4)
+          await tx.insert(recebimentos).values({
+            id: recId,
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            codigo: recCod,
+            pedidoCompraId: pcId,
+            fornecedorId: pc.fornecedorId,
+            numeroNf: String(body.numero_nf || '').trim(),
+            chaveNfe: String(body.chave_nfe || '').trim(),
+            statusValidacao: novoStatusVal,
+            validadoPorId: temDivergencia ? null : ctx.operador.id,
+            validadoAt: temDivergencia ? null : new Date(),
+          })
+        } else {
+          await tx
+            .update(recebimentos)
+            .set({
+              statusValidacao: novoStatusVal,
+              numeroNf: body.numero_nf ? String(body.numero_nf).trim() : recExist.numeroNf,
+              chaveNfe: body.chave_nfe ? String(body.chave_nfe).trim() : recExist.chaveNfe,
+              validadoPorId: temDivergencia ? recExist.validadoPorId : ctx.operador.id,
+              validadoAt: temDivergencia ? recExist.validadoAt : new Date(),
+            })
+            .where(eq(recebimentos.id, recExist.id))
+        }
+
+        if (!temDivergencia) {
+          const extrasTotal = toNum(pc.freteValor, 0) + toNum(pc.despesasValor, 0)
+          const rateioExtra = totalRec > 0 ? extrasTotal / totalRec : 0
+          for (const it of itens) {
+            const p = toNum(it.preco, 0)
+            if (p > 0) {
+              await tx
+                .update(produtos)
+                .set({ custoMedioKg: toDec(Number((p + rateioExtra).toFixed(4)), 4), updatedAt: new Date() })
+                .where(and(eq(produtos.id, it.produto_id), eq(produtos.tenantId, ctx.tenantId)))
+            }
+          }
+          await tx
+            .update(pedidosCompra)
+            .set({ status: 'RECEBIDO', updatedAt: new Date() })
+            .where(eq(pedidosCompra.id, pcId))
+
+          return {
+            status: 'RECEBIDO',
+            status_validacao: 'VALIDADO',
+            recebimento_codigo: recCod,
+            validado_direto: true,
+            total_recebida_kg: Number(totalRec.toFixed(3)),
+          }
+        }
+
+        // Divergente: mantém pedido em aberto para o Analista aprovar na Central/Compras
+        await tx.insert(pendenciasSetor).values({
+          id: uuidv7(),
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          setorDestino: 'SUPPLY_CHAIN',
+          tipoPendencia: 'VALIDACAO_RECEBIMENTO',
+          referenciaTabela: 'pedidos_compra',
+          referenciaId: pcId,
+          titulo: `${pc.codigo} (${recCod}) — Divergência Doca (±${tolPct}%): ${divergentes.slice(0, 2).join('; ')}${body.observacao_divergencia ? ` • Obs: ${body.observacao_divergencia}` : ''}`,
+          prioridade: 4,
+          status: 'PENDENTE',
+        })
+
+        return {
+          status: pc.status,
+          status_validacao: 'DIVERGENTE',
+          recebimento_codigo: recCod,
+          enviado_analista: true,
+          divergencias: divergentes,
+          total_recebida_kg: Number(totalRec.toFixed(3)),
+        }
+      })
+
+      return { success: true, ...out }
+    },
+  )
 }

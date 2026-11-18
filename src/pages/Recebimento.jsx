@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box, Unlock, Printer, FileText, RefreshCw } from 'lucide-react'
+import { Check, Trash2, Package, Layers, Plus, X, AlertTriangle, Tag, ArrowLeft, ScanBarcode, History, Download, Search, Filter, ChevronRight, Eye, CheckCircle2, Clock, Box, Unlock, Printer, FileText, RefreshCw, ClipboardCheck } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { temPermissao } from '../utils/permissoes'
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner'
@@ -14,6 +14,7 @@ import { isApiEnabled } from '../lib/apiClient.js';
 import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx';
 import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared/PesagemTaraFields.jsx';
 import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx';
+import RecebimentoPedidoDoca from '../components/recebimento/RecebimentoPedidoDoca.jsx';
 import { hojeIsoLocal, validarPesagemTara, fmtDataBR, fmtKg2, fmtKg3 } from '../utils/rastreabilidade.js';
 
 // ─── Helper: exportar CSV ────────────────────────────────────────────────────
@@ -462,7 +463,7 @@ export function Recebimento() {
   const apiAtiva = isApiEnabled()
   
   // Tabs
-  const [activeTab, setActiveTab] = useState('palete') // 'palete' | 'pre_caixas' | 'historico'
+  const [activeTab, setActiveTab] = useState(apiAtiva ? 'pedidos' : 'palete') // 'pedidos' | 'palete' | 'historico'
 
   // Caixas pré-importadas via TXT (Recebimento Guiado)
   const [preCaixas, setPreCaixas] = useState([])
@@ -812,41 +813,39 @@ export function Recebimento() {
   }
 
   return (
-    <div style={{ maxWidth: 1000 }}>
+    <div style={{ maxWidth: 1240 }}>
       <div className="page-header mb-16">
         <div>
           <h1 className="page-header__title">Recebimento (Inbound)</h1>
-          <p className="page-header__subtitle">Montagem de Paletes LPN e Rastreabilidade SSCC</p>
+          <p className="page-header__subtitle">
+            {apiAtiva
+              ? 'Conferência na Doca por Pedido de Compra, Balança e Etiqueta .TXT'
+              : 'Montagem de Paletes LPN e Rastreabilidade SSCC'}
+          </p>
         </div>
       </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
-        <button
-          className={`btn ${activeTab === 'palete' ? 'btn--primary' : 'btn--ghost'}`}
-          style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
-          onClick={() => { 
-            setActiveTab('palete'); 
-            carregarPaletesAbertos();
-            setTimeout(() => codigoRef.current?.focus(), 100);
-          }}
-        >
-          <Layers size={16} /> Recebimento c/ Palete
-        </button>
-        {apiAtiva && (
+        {apiAtiva ? (
           <button
-            className={`btn ${activeTab === 'pre_caixas' ? 'btn--primary' : 'btn--ghost'}`}
+            className={`btn ${activeTab === 'pedidos' ? 'btn--primary' : 'btn--ghost'}`}
+            style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
+            onClick={() => setActiveTab('pedidos')}
+          >
+            <ClipboardCheck size={16} /> Recebimento por Pedido de Compra
+          </button>
+        ) : (
+          <button
+            className={`btn ${activeTab === 'palete' ? 'btn--primary' : 'btn--ghost'}`}
             style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
             onClick={() => {
-              setActiveTab('pre_caixas')
-              carregarPreCaixas()
-              setTimeout(() => preScanRef.current?.focus(), 100)
+              setActiveTab('palete');
+              carregarPaletesAbertos();
+              setTimeout(() => codigoRef.current?.focus(), 100);
             }}
           >
-            <FileText size={16} /> Caixas Pré-Importadas (Só Bipar)
-            {preCaixasResumo.pendentes > 0 && (
-              <span className="badge badge--warning" style={{ marginLeft: 6 }}>{preCaixasResumo.pendentes}</span>
-            )}
+            <Layers size={16} /> Recebimento c/ Palete
           </button>
         )}
         <button
@@ -858,8 +857,11 @@ export function Recebimento() {
         </button>
       </div>
 
-      {/* TAB: Recebimento */}
-      {activeTab === 'palete' && (
+      {/* TAB: Recebimento guiado por Pedido de Compra (API) */}
+      {apiAtiva && activeTab === 'pedidos' && <RecebimentoPedidoDoca />}
+
+      {/* TAB: Recebimento offline c/ Palete (apenas sem API) */}
+      {!apiAtiva && activeTab === 'palete' && (
         <div className="grid-responsive">
           {apiAtiva && (
             <div className="card mb-12" style={{ borderColor: travaSemPc && !pcSelecionadoId ? 'var(--warning)' : 'var(--border)' }}>

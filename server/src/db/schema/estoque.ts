@@ -72,6 +72,9 @@ export const pedidosCompraItens = pgTable(
     precoUnitarioKg: numeric('preco_unitario_kg', { precision: 14, scale: 4 }).notNull().default('0'),
     qtdKgRecebida: numeric('qtd_kg_recebida', { precision: 14, scale: 3 }).notNull().default('0'),
     cfopAplicado: text('cfop_aplicado').notNull().default(''),
+    temperaturaC: numeric('temperatura_c', { precision: 6, scale: 2 }),
+    temperaturaRegistradaEm: timestamp('temperatura_registrada_em', { withTimezone: true }),
+    temperaturaRegistradaPor: text('temperatura_registrada_por').notNull().default(''),
   },
   (t) => [index('idx_pci_pedido').on(t.pedidoCompraId)]
 )

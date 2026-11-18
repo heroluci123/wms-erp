@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import JsBarcode from 'jsbarcode'
 import { Printer, Download, X, Tag, CheckCircle2 } from 'lucide-react'
 import { fmtDataBR, fmtKg2, fmtKg3, gerarLotePorData } from '../../utils/rastreabilidade'
+import { lerConfigEstacao } from '../../utils/estacaoConfig'
 
 function escHtml(str) {
   return String(str ?? '')
@@ -98,24 +99,36 @@ export function baixarZplEtiquetas(etiquetas, nomeArquivo = 'etiquetas_zebra_100
 /**
  * Renderiza etiqueta térmica exata de 100mm x 70mm em iframe isolado e dispara impressão automática.
  */
-export function imprimirEtiquetasZebraAuto(etiquetas) {
+function gerarBarcodeSvgHtml(ean) {
+  if (!ean || typeof document === 'undefined') return ''
+  try {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    JsBarcode(svg, String(ean), {
+      format: 'CODE128',
+      width: 2.1,
+      height: 36,
+      displayValue: true,
+      fontSize: 12,
+      fontOptions: 'bold',
+      textMargin: 1,
+      margin: 2,
+      background: '#ffffff',
+      lineColor: '#000000',
+    })
+    return svg.outerHTML
+  } catch (err) {
+    console.warn('JsBarcode svg error:', err)
+    return `<div style="font-family:monospace;font-weight:bold;">${escHtml(ean)}</div>`
+  }
+}
+
+export function montarHtmlEtiqueta100x70(etiquetas) {
   const lista = (Array.isArray(etiquetas) ? etiquetas : [etiquetas])
     .filter(Boolean)
     .map(normalizarEtiqueta)
-  if (lista.length === 0) return
+  if (lista.length === 0) return ''
 
-  const iframe = document.createElement('iframe')
-  iframe.style.position = 'fixed'
-  iframe.style.right = '0'
-  iframe.style.bottom = '0'
-  iframe.style.width = '0'
-  iframe.style.height = '0'
-  iframe.style.border = '0'
-  iframe.setAttribute('aria-hidden', 'true')
-  document.body.appendChild(iframe)
-
-  const doc = iframe.contentDocument || iframe.contentWindow.document
-  const cardsHtml = lista.map((e, idx) => `
+  const cardsHtml = lista.map((e) => `
     <div class="zlabel">
       <div class="zheader">
         <div>
@@ -162,188 +175,145 @@ export function imprimirEtiquetasZebraAuto(etiquetas) {
       </div>
 
       <div class="zbarcode-wrap">
-        <svg id="zbarcode-${idx}"></svg>
+        ${gerarBarcodeSvgHtml(e.ean)}
         ${e.ean_origem ? `<div class="zorigem">Origem: EAN ${escHtml(e.ean_origem)}</div>` : ''}
       </div>
     </div>
   `).join('')
 
-  doc.open()
-  doc.write(`<!DOCTYPE html>
+  return `<!DOCTYPE html>
   <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <title>Etiqueta Zebra 100x70mm</title>
     <style>
-      @page {
-        size: 100mm 70mm;
-        margin: 0;
-      }
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-      html, body {
-        width: 100mm;
-        background: #fff;
-        color: #000;
-        font-family: Arial, Helvetica, sans-serif;
-      }
-      .zlabel {
-        width: 100mm;
-        height: 70mm;
-        padding: 2.6mm 3.2mm 2mm 3.2mm;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        page-break-after: always;
-        break-after: page;
-        overflow: hidden;
-        background: #fff;
-      }
-      .zlabel:last-child {
-        page-break-after: auto;
-        break-after: auto;
-      }
-      .zheader {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom: 1.5pt solid #000;
-        padding-bottom: 1.2mm;
-      }
-      .zbrand {
-        font-size: 9pt;
-        font-weight: 900;
-        letter-spacing: 0.4px;
-        line-height: 1;
-      }
-      .zsub {
-        font-size: 6.5pt;
-        font-weight: 700;
-        margin-top: 0.6mm;
-      }
-      .zbadge {
-        background: #000;
-        color: #fff;
-        font-size: 6.5pt;
-        font-weight: 800;
-        padding: 1mm 2mm;
-        border-radius: 1mm;
-        text-transform: uppercase;
-        max-width: 44mm;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .zprod {
-        font-size: 10.5pt;
-        font-weight: 900;
-        line-height: 1.15;
-        text-transform: uppercase;
-        max-height: 8.5mm;
-        overflow: hidden;
-        margin: 1mm 0;
-      }
-      .zmeta-grid {
-        display: grid;
-        grid-template-columns: 1.05fr 0.95fr 0.95fr 0.72fr;
-        gap: 1.2mm;
-        border-top: 0.8pt solid #000;
-        border-bottom: 0.8pt solid #000;
-        padding: 1mm 0;
-      }
-      .zcell {
-        display: flex;
-        flex-direction: column;
-      }
-      .zlbl {
-        font-size: 6pt;
-        font-weight: 700;
-        color: #222;
-      }
-      .zval {
-        font-size: 8.5pt;
-        font-weight: 800;
-      }
-      .zval-big {
-        font-family: 'Courier New', monospace;
-        font-size: 9.5pt;
-        font-weight: 900;
-      }
-      .zpeso-strip {
-        display: grid;
-        grid-template-columns: 1fr 0.9fr 1.2fr;
-        gap: 1.5mm;
-        background: #f3f4f6;
-        border: 1pt solid #000;
-        padding: 1mm 1.5mm;
-        margin-top: 1mm;
-      }
-      .zpeso-item {
-        display: flex;
-        flex-direction: column;
-      }
-      .zpeso-item span {
-        font-size: 5.8pt;
-        font-weight: 700;
-      }
-      .zpeso-item strong {
-        font-size: 8.8pt;
-        font-weight: 800;
-      }
-      .zpeso-liq strong {
-        font-size: 10.5pt;
-        font-weight: 900;
-      }
-      .zbarcode-wrap {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        margin-top: 0.8mm;
-      }
-      .zbarcode-wrap svg {
-        max-width: 92mm;
-        height: 15.5mm;
-      }
-      .zorigem {
-        font-size: 6pt;
-        font-family: 'Courier New', monospace;
-        font-weight: 700;
-        margin-top: 0.3mm;
-      }
+      @page { size: 100mm 70mm; margin: 0; }
+      * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html, body { width: 100mm; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
+      .zlabel { width: 100mm; height: 70mm; padding: 2.6mm 3.2mm 2mm 3.2mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; overflow: hidden; background: #fff; }
+      .zlabel:last-child { page-break-after: auto; break-after: auto; }
+      .zheader { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5pt solid #000; padding-bottom: 1.2mm; }
+      .zbrand { font-size: 9pt; font-weight: 900; letter-spacing: 0.4px; line-height: 1; }
+      .zsub { font-size: 6.5pt; font-weight: 700; margin-top: 0.6mm; }
+      .zbadge { background: #000; color: #fff; font-size: 6.5pt; font-weight: 800; padding: 1mm 2mm; border-radius: 1mm; text-transform: uppercase; max-width: 44mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .zprod { font-size: 10.5pt; font-weight: 900; line-height: 1.15; text-transform: uppercase; max-height: 8.5mm; overflow: hidden; margin: 1mm 0; }
+      .zmeta-grid { display: grid; grid-template-columns: 1.05fr 0.95fr 0.95fr 0.72fr; gap: 1.2mm; border-top: 0.8pt solid #000; border-bottom: 0.8pt solid #000; padding: 1mm 0; }
+      .zcell { display: flex; flex-direction: column; }
+      .zlbl { font-size: 6pt; font-weight: 700; color: #222; }
+      .zval { font-size: 8.5pt; font-weight: 800; }
+      .zval-big { font-family: 'Courier New', monospace; font-size: 9.5pt; font-weight: 900; }
+      .zpeso-strip { display: grid; grid-template-columns: 1fr 0.9fr 1.2fr; gap: 1.5mm; background: #f3f4f6; border: 1pt solid #000; padding: 1mm 1.5mm; margin-top: 1mm; }
+      .zpeso-item { display: flex; flex-direction: column; }
+      .zpeso-item span { font-size: 5.8pt; font-weight: 700; }
+      .zpeso-item strong { font-size: 8.8pt; font-weight: 800; }
+      .zpeso-liq strong { font-size: 10.5pt; font-weight: 900; }
+      .zbarcode-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 0.8mm; }
+      .zbarcode-wrap svg { max-width: 92mm; height: 15.5mm; }
+      .zorigem { font-size: 6pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: 0.3mm; }
     </style>
   </head>
   <body>${cardsHtml}</body>
-  </html>`)
-  doc.close()
+  </html>`
+}
 
-  // Gera SVG CODE128 dentro de cada etiqueta no iframe
-  lista.forEach((e, idx) => {
-    const svg = doc.getElementById(`zbarcode-${idx}`)
-    if (svg && e.ean) {
-      try {
-        JsBarcode(svg, e.ean, {
-          format: 'CODE128',
-          width: 2.1,
-          height: 36,
-          displayValue: true,
-          fontSize: 12,
-          fontOptions: 'bold',
-          textMargin: 1,
-          margin: 2,
-          background: '#ffffff',
-          lineColor: '#000000',
-        })
-      } catch (err) {
-        console.warn('JsBarcode print error:', err)
-      }
+export async function imprimirZebraUsbZpl(etiquetas, { solicitarSeNaoPareada = true } = {}) {
+  if (typeof navigator === 'undefined' || !navigator.usb) {
+    throw new Error('Navegador não suporta WebUSB para envio direto à Zebra USB. Use Chrome/Edge ou App Desktop.')
+  }
+  const lista = (Array.isArray(etiquetas) ? etiquetas : [etiquetas]).filter(Boolean)
+  if (lista.length === 0) return
+
+  let devices = await navigator.usb.getDevices()
+  let zebra = devices.find((d) => d.vendorId === 0x0a5f)
+  if (!zebra && solicitarSeNaoPareada) {
+    zebra = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x0a5f }] })
+  }
+  if (!zebra) {
+    throw new Error('Nenhuma impressora Zebra USB pareada neste navegador.')
+  }
+
+  const zpl = lista.map(gerarZplEtiqueta100x70).join('\n')
+  const bytes = new TextEncoder().encode(zpl)
+
+  await zebra.open()
+  try {
+    if (zebra.configuration === null) {
+      await zebra.selectConfiguration(1)
     }
-  })
+    const iface =
+      zebra.configuration.interfaces.find((i) => i.alternates.some((a) => a.interfaceClass === 7)) ||
+      zebra.configuration.interfaces[0]
+    if (!iface) throw new Error('Interface USB de impressão não localizada na Zebra.')
+
+    await zebra.claimInterface(iface.interfaceNumber)
+    const outEp = iface.alternate.endpoints.find((ep) => ep.direction === 'out')
+    if (!outEp) throw new Error('Endpoint de saída (OUT) não encontrado na impressora Zebra.')
+    await zebra.transferOut(outEp.endpointNumber, bytes)
+  } finally {
+    try {
+      await zebra.close()
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export async function despacharImpressaoEtiqueta(etiquetas, { onAbrirModal } = {}) {
+  const lista = (Array.isArray(etiquetas) ? etiquetas : [etiquetas]).filter(Boolean)
+  if (lista.length === 0) return { modo: 'NENHUM' }
+  const cfg = lerConfigEstacao()
+
+  if (cfg.modoImpressao === 'ZEBRA_USB_ZPL') {
+    try {
+      await imprimirZebraUsbZpl(lista, { solicitarSeNaoPareada: false })
+      return { modo: 'ZEBRA_USB_ZPL', ok: true }
+    } catch (err) {
+      if (window?.wmsAPI?.printer?.printHtmlSilent) {
+        const html = montarHtmlEtiqueta100x70(lista)
+        await window.wmsAPI.printer.printHtmlSilent({ html, deviceName: cfg.impressoraNome || '' })
+        return { modo: 'SILENCIOSA_APP', ok: true }
+      }
+      imprimirEtiquetasZebraAuto(lista)
+      return { modo: 'FALLBACK_JANELA', erroUsb: err.message }
+    }
+  }
+
+  if (cfg.modoImpressao === 'SILENCIOSA') {
+    if (window?.wmsAPI?.printer?.printHtmlSilent) {
+      const html = montarHtmlEtiqueta100x70(lista)
+      await window.wmsAPI.printer.printHtmlSilent({ html, deviceName: cfg.impressoraNome || '' })
+      return { modo: 'SILENCIOSA_APP', ok: true }
+    }
+    imprimirEtiquetasZebraAuto(lista)
+    return { modo: 'SILENCIOSA_NAVEGADOR', ok: true }
+  }
+
+  if (onAbrirModal) {
+    onAbrirModal(lista)
+    return { modo: 'JANELA', ok: true }
+  }
+  imprimirEtiquetasZebraAuto(lista)
+  return { modo: 'JANELA', ok: true }
+}
+
+export function imprimirEtiquetasZebraAuto(etiquetas) {
+  const html = montarHtmlEtiqueta100x70(etiquetas)
+  if (!html) return
+
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '0'
+  iframe.style.bottom = '0'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  iframe.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(iframe)
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document
+  doc.open()
+  doc.write(html)
+  doc.close()
 
   const cleanup = () => {
     setTimeout(() => {

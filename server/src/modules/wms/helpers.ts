@@ -91,6 +91,7 @@ export interface PesagemValidada {
 export function validarPesagemTaraPayload(input: {
   data_producao?: unknown
   validade?: unknown
+  lote?: unknown
   peso_bruto_kg?: unknown
   tara_id?: unknown
   tara_kg?: unknown
@@ -147,7 +148,8 @@ export function validarPesagemTaraPayload(input: {
 
   const qtdPecas = Number.isFinite(pecasInt) && pecasInt > 0 ? pecasInt : null
   const taraId = input.tara_id ? String(input.tara_id).trim() || null : null
-  const lote = gerarLotePorData(dataProducao)
+  const loteInformado = String(input.lote || '').trim()
+  const lote = loteInformado || gerarLotePorData(dataProducao)
 
   return {
     dataProducao,

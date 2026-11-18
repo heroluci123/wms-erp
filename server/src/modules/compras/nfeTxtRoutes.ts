@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import {
@@ -118,6 +118,8 @@ async function efetivarPreCaixaNoEstoque(
     sifOrigem: string
     paleteId: string | null
     endereco: string
+    pedidoCompraIdOverride?: string | null
+    recebimentoIdOverride?: string | null
     forcarProdutoExtra?: boolean
   },
 ) {
@@ -138,30 +140,32 @@ async function efetivarPreCaixaNoEstoque(
     throw new HttpError(409, `A caixa com EAN "${pre.eanCaixa}" já deu entrada no estoque!`)
   }
 
+  const pcIdEfetivo = params.pedidoCompraIdOverride || pre.pedidoCompraId || null
+  const recIdEfetivo = params.recebimentoIdOverride || pre.recebimentoId || null
+
   let pcItemMatchId: string | null = null
   let custoPcFallback = 0
-  if (pre.pedidoCompraId) {
-    const [pcItem] = await tx
+  if (pcIdEfetivo) {
+    const [pcRow] = await tx
+      .select()
+      .from(pedidosCompra)
+      .where(and(eq(pedidosCompra.id, pcIdEfetivo), eq(pedidosCompra.tenantId, ctx.tenantId)))
+      .limit(1)
+    const pcItensAll = await tx
       .select()
       .from(pedidosCompraItens)
-      .where(
-        and(
-          eq(pedidosCompraItens.pedidoCompraId, pre.pedidoCompraId),
-          eq(pedidosCompraItens.produtoId, pre.produtoId),
-        ),
-      )
-      .limit(1)
+      .where(eq(pedidosCompraItens.pedidoCompraId, pcIdEfetivo))
+    const pcItem = pcItensAll.find((i) => i.produtoId === pre.produtoId)
     if (pcItem) {
       pcItemMatchId = pcItem.id
-      custoPcFallback = toNum(pcItem.precoUnitarioKg, 0)
+      const basePreco = toNum(pcItem.precoUnitarioKg, 0)
+      const extrasPc = pcRow ? toNum(pcRow.freteValor, 0) + toNum(pcRow.despesasValor, 0) : 0
+      const kgTotalPc = pcItensAll.reduce((s, i) => s + toNum(i.qtdKgSolicitada, 0), 0)
+      const rateioPc = kgTotalPc > 0 ? extrasPc / kgTotalPc : 0
+      custoPcFallback = basePreco > 0 ? Number((basePreco + rateioPc).toFixed(4)) : 0
     } else if (!params.forcarProdutoExtra) {
-      const [pcRow] = await tx
-        .select({ codigo: pedidosCompra.codigo })
-        .from(pedidosCompra)
-        .where(eq(pedidosCompra.id, pre.pedidoCompraId))
-        .limit(1)
       throw new HttpError(
-        409,
+        400,
         `O produto da caixa ${pre.eanCaixa} (${pre.descricaoProdutoFornecedor || pre.codigoProdutoFornecedor}) não consta no Pedido de Compra ${pcRow?.codigo || ''}.`,
       )
     }
@@ -170,7 +174,13 @@ async function efetivarPreCaixaNoEstoque(
   const pesoLiq = toNum(pre.pesoLiquidoKg, 0)
   const taraKg = toNum(pre.taraKg, 0)
   const pesoBruto = pre.pesoBrutoKg != null ? toNum(pre.pesoBrutoKg, pesoLiq + taraKg) : Number((pesoLiq + taraKg).toFixed(3))
-  const custoKg = toNum(pre.custoUnitarioKg, 0) > 0 ? toNum(pre.custoUnitarioKg, 0) : custoPcFallback
+  const custoPre = toNum(pre.custoUnitarioKg, 0)
+  const custoKg =
+    !pre.recebimentoId && custoPcFallback > 0
+      ? custoPcFallback
+      : custoPre > 0
+        ? custoPre
+        : custoPcFallback
   const caixaId = uuidv7()
   const now = new Date()
 
@@ -183,7 +193,7 @@ async function efetivarPreCaixaNoEstoque(
     paleteId: params.paleteId,
     paleteOrigemId: params.paleteId,
     fornecedorId: pre.fornecedorId,
-    recebimentoId: pre.recebimentoId,
+    recebimentoId: recIdEfetivo,
     sifOrigem: params.sifOrigem,
     endereco: params.endereco,
     lote: pre.lote || '',
@@ -201,10 +211,17 @@ async function efetivarPreCaixaNoEstoque(
 
   await tx
     .update(recebimentoPreCaixas)
-    .set({ status: 'BIPADA', caixaEstoqueId: caixaId, bipadaEm: now })
+    .set({
+      status: 'BIPADA',
+      caixaEstoqueId: caixaId,
+      pedidoCompraId: pcIdEfetivo,
+      recebimentoId: recIdEfetivo,
+      custoUnitarioKg: toDec(custoKg, 4),
+      bipadaEm: now,
+    })
     .where(eq(recebimentoPreCaixas.id, pre.id))
 
-  if (pcItemMatchId && pre.pedidoCompraId) {
+  if (pcItemMatchId && pcIdEfetivo) {
     await tx
       .update(pedidosCompraItens)
       .set({
@@ -214,7 +231,7 @@ async function efetivarPreCaixaNoEstoque(
     await tx
       .update(pedidosCompra)
       .set({ status: 'PARCIAL', updatedAt: now })
-      .where(and(eq(pedidosCompra.id, pre.pedidoCompraId), eq(pedidosCompra.status, 'APROVADO')))
+      .where(and(eq(pedidosCompra.id, pcIdEfetivo), eq(pedidosCompra.status, 'APROVADO')))
   }
 
   await registrarHistoricoCaixa(tx, {
@@ -708,8 +725,14 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
       if (!xmlRaw && txts.length === 0) {
         throw new HttpError(400, 'Envie ao menos 1 arquivo TXT de etiquetas ou o XML da NF-e.')
       }
+      if (txts.length > 0 && body.modo_entrada === 'DIRETO_ESTOQUE') {
+        throw new HttpError(
+          400,
+          'Entrada direta sem bipar está desativada. Arquivos TXT vão sempre para o banco de Pré-Recebimento (aguardando bipagem na doca em cima de um Pedido de Compra).',
+        )
+      }
 
-      const modoEntrada = body.modo_entrada === 'DIRETO_ESTOQUE' ? 'DIRETO_ESTOQUE' : 'PRE_RECEBIMENTO'
+      const modoEntrada = txts.length > 0 ? 'PRE_RECEBIMENTO' : (body.modo_entrada === 'DIRETO_ESTOQUE' ? 'DIRETO_ESTOQUE' : 'PRE_RECEBIMENTO')
       const enderecoFinal = String(body.endereco_direto || 'REC').trim().toUpperCase() || 'REC'
 
       const out = await conn.db.transaction(async (tx) => {
@@ -853,7 +876,8 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
           })
         }
 
-        // 4. Localizar ou criar Recebimento vinculando XML/PC
+        // 4. Localizar ou criar Recebimento apenas quando há Pedido de Compra ou XML NF-e vinculado
+        // (Quando importa só TXTs pelo fornecedor, fica no banco universal do fornecedor com recebimentoId/pedidoCompraId = null)
         let recRow: typeof recebimentos.$inferSelect | null = null
         if (pcRow) {
           const [exist] = await tx
@@ -864,7 +888,7 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
           recRow = exist || null
         }
 
-        if (!recRow) {
+        if (!recRow && (pcRow || xmlParsed)) {
           const recId = uuidv7()
           const recCod = await gerarCodigoDocumento(tx, ctx.tenantId, 'RECEBIMENTO', 'REC', 4)
           await tx.insert(recebimentos).values({
@@ -890,7 +914,7 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
           })
           const [criadoRec] = await tx.select().from(recebimentos).where(eq(recebimentos.id, recId)).limit(1)
           recRow = criadoRec
-        } else if (xmlParsed) {
+        } else if (recRow && xmlParsed) {
           await tx
             .update(recebimentos)
             .set({
@@ -911,14 +935,14 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
             .where(eq(recebimentos.id, recRow.id))
         }
 
-        // 5. Se vieram TXTs, gravar pré-caixas (ou entrar direto no estoque se modo DIRETO_ESTOQUE)
+        // 5. Se vieram TXTs, gravar sempre no banco de Pré-Caixas aguardando bipagem na doca
         let caixasImportadas = 0
         let duplicadasIgnoradas = 0
         let pesoTotalImportado = 0
 
         if (txts.length > 0) {
-          if (modoEntrada === 'DIRETO_ESTOQUE') {
-            await assertEnderecosNaoBloqueados(tx, ctx.tenantId, ctx.filialId, [enderecoFinal])
+          if (!fornecedorRow) {
+            throw new HttpError(400, 'Selecione o Fornecedor antes de importar arquivos TXT de etiquetas.')
           }
 
           let layoutRow = null
@@ -984,14 +1008,15 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
               )
             }
             const custoKg =
-              custoPorProduto.get(resProd.produto.id) ?? toNum(resProd.produto.custo_medio_kg, 0)
+              custoPorProduto.get(resProd.produto.id) ??
+              (pcRow ? toNum(resProd.produto.custo_medio_kg, 0) : 0)
 
             const preId = uuidv7()
             const preValues: typeof recebimentoPreCaixas.$inferInsert = {
               id: preId,
               tenantId: ctx.tenantId,
               filialId: ctx.filialId,
-              recebimentoId: recRow.id,
+              recebimentoId: recRow?.id || null,
               pedidoCompraId: pcRow?.id || null,
               fornecedorId: fornecedorRow?.id || null,
               eanCaixa: c.ean_caixa,
@@ -1013,28 +1038,8 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
 
             await tx.insert(recebimentoPreCaixas).values(preValues)
 
-            if (modoEntrada === 'DIRETO_ESTOQUE') {
-              const [preInserted] = await tx
-                .select()
-                .from(recebimentoPreCaixas)
-                .where(eq(recebimentoPreCaixas.id, preId))
-                .limit(1)
-              await efetivarPreCaixaNoEstoque(tx, {
-                ctx,
-                pre: preInserted,
-                sifOrigem: sifForn,
-                paleteId,
-                endereco: enderecoFinal,
-                forcarProdutoExtra: true,
-              })
-            }
-
             caixasImportadas += 1
             pesoTotalImportado = Number((pesoTotalImportado + c.peso_liquido_kg).toFixed(3))
-          }
-
-          if (modoEntrada === 'DIRETO_ESTOQUE' && caixasImportadas > 0) {
-            await recalcularPosicaoEnderecos(tx, ctx.tenantId, ctx.filialId, [enderecoFinal])
           }
         }
 
@@ -1051,10 +1056,10 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
         }
 
         return {
-          recebimento_id: recRow.id,
-          recebimento_codigo: recRow.codigo,
-          numero_nf: xmlParsed?.numero_nf || recRow.numeroNf || '',
-          chave_nfe: xmlParsed?.chave_nfe || recRow.chaveNfe || '',
+          recebimento_id: recRow?.id || null,
+          recebimento_codigo: recRow?.codigo || 'BANCO-TXT',
+          numero_nf: xmlParsed?.numero_nf || recRow?.numeroNf || '',
+          chave_nfe: xmlParsed?.chave_nfe || recRow?.chaveNfe || '',
           fornecedor_id: fornecedorRow?.id || null,
           fornecedor_nome: fornecedorRow?.nomeFantasia || null,
           modo_entrada: modoEntrada,
@@ -1075,13 +1080,31 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
     { preHandler: requirePermission(['recebimento', 'recebimento_consultar', 'compras'], { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
-      const q = req.query as { recebimento_id?: string; pedido_compra_id?: string; status?: string }
+      const q = req.query as { recebimento_id?: string; pedido_compra_id?: string; fornecedor_id?: string; status?: string }
       const conds = [eq(recebimentoPreCaixas.tenantId, ctx.tenantId), eq(recebimentoPreCaixas.filialId, ctx.filialId)]
       if (q.recebimento_id) {
         conds.push(eq(recebimentoPreCaixas.recebimentoId, parseUuidOrBadRequest(q.recebimento_id, 'recebimento_id')))
       }
+      if (q.fornecedor_id) {
+        conds.push(eq(recebimentoPreCaixas.fornecedorId, parseUuidOrBadRequest(q.fornecedor_id, 'fornecedor_id')))
+      }
       if (q.pedido_compra_id) {
-        conds.push(eq(recebimentoPreCaixas.pedidoCompraId, parseUuidOrBadRequest(q.pedido_compra_id, 'pedido_compra_id')))
+        const pcId = parseUuidOrBadRequest(q.pedido_compra_id, 'pedido_compra_id')
+        const [pcRow] = await conn.db
+          .select({ id: pedidosCompra.id, fornecedorId: pedidosCompra.fornecedorId })
+          .from(pedidosCompra)
+          .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (pcRow) {
+          conds.push(
+            or(
+              eq(recebimentoPreCaixas.pedidoCompraId, pcId),
+              and(isNull(recebimentoPreCaixas.pedidoCompraId), eq(recebimentoPreCaixas.fornecedorId, pcRow.fornecedorId)),
+            )!,
+          )
+        } else {
+          conds.push(eq(recebimentoPreCaixas.pedidoCompraId, pcId))
+        }
       }
       if (q.status && q.status !== 'TODOS') {
         conds.push(eq(recebimentoPreCaixas.status, String(q.status).toUpperCase()))
@@ -1159,20 +1182,81 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
         recebimento_id?: string | null
         palete_id?: string | null
         endereco?: string
+        forcar_produto_extra?: boolean
       }
       const codigo = String(body.ean_caixa || '').trim()
       if (!codigo) throw new HttpError(400, 'Bipe ou digite o código de barras da caixa.')
       const semZeros = codigo.replace(/^0+/, '') || codigo
 
       const out = await conn.db.transaction(async (tx) => {
+        let pcRow: typeof pedidosCompra.$inferSelect | null = null
+        let recIdPc: string | null = body.recebimento_id
+          ? parseUuidOrBadRequest(body.recebimento_id, 'recebimento_id')
+          : null
+
+        if (body.pedido_compra_id) {
+          const pcId = parseUuidOrBadRequest(body.pedido_compra_id, 'pedido_compra_id')
+          const [pc] = await tx
+            .select()
+            .from(pedidosCompra)
+            .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
+            .limit(1)
+          if (!pc) throw new HttpError(404, 'Pedido de Compra não encontrado.')
+          if (!['APROVADO', 'PARCIAL'].includes(pc.status)) {
+            throw new HttpError(400, `Pedido ${pc.codigo} está "${pc.status}" e não aceita recebimento.`)
+          }
+          pcRow = pc
+
+          // Verificar se há TXT disponível para o fornecedor/pedido antes de aceitar bipagem no modo TXT
+          const [poolRow] = await tx
+            .select({ id: recebimentoPreCaixas.id })
+            .from(recebimentoPreCaixas)
+            .where(
+              and(
+                eq(recebimentoPreCaixas.tenantId, ctx.tenantId),
+                eq(recebimentoPreCaixas.status, 'PENDENTE'),
+                or(
+                  eq(recebimentoPreCaixas.pedidoCompraId, pc.id),
+                  and(isNull(recebimentoPreCaixas.pedidoCompraId), eq(recebimentoPreCaixas.fornecedorId, pc.fornecedorId)),
+                )!,
+              ),
+            )
+            .limit(1)
+          if (!poolRow) {
+            // Checar se já foi bipada antes para devolver 409 claro
+            const [jaBip] = await tx
+              .select({ id: recebimentoPreCaixas.id, ean: recebimentoPreCaixas.eanCaixa })
+              .from(recebimentoPreCaixas)
+              .where(
+                and(
+                  eq(recebimentoPreCaixas.tenantId, ctx.tenantId),
+                  eq(recebimentoPreCaixas.status, 'BIPADA'),
+                  sql`(${recebimentoPreCaixas.eanCaixa} = ${codigo} OR LTRIM(${recebimentoPreCaixas.eanCaixa}, '0') = ${semZeros})`,
+                ),
+              )
+              .limit(1)
+            if (jaBip) {
+              throw new HttpError(409, `A caixa ${jaBip.ean} já foi bipada e lançada no estoque!`)
+            }
+            throw new HttpError(
+              400,
+              `Não há arquivos TXT pré-importados pendentes para este fornecedor/pedido (${pc.codigo}). Importe os TXTs em Compras ou utilize Pesagem Manual / Balança.`,
+            )
+          }
+        }
+
         const conds = [
           eq(recebimentoPreCaixas.tenantId, ctx.tenantId),
           sql`(${recebimentoPreCaixas.eanCaixa} = ${codigo} OR LTRIM(${recebimentoPreCaixas.eanCaixa}, '0') = ${semZeros})`,
         ]
-        if (body.pedido_compra_id) {
-          conds.push(eq(recebimentoPreCaixas.pedidoCompraId, parseUuidOrBadRequest(body.pedido_compra_id, 'pedido_compra_id')))
-        }
-        if (body.recebimento_id) {
+        if (pcRow) {
+          conds.push(
+            or(
+              eq(recebimentoPreCaixas.pedidoCompraId, pcRow.id),
+              and(isNull(recebimentoPreCaixas.pedidoCompraId), eq(recebimentoPreCaixas.fornecedorId, pcRow.fornecedorId)),
+            )!,
+          )
+        } else if (body.recebimento_id) {
           conds.push(eq(recebimentoPreCaixas.recebimentoId, parseUuidOrBadRequest(body.recebimento_id, 'recebimento_id')))
         }
 
@@ -1182,15 +1266,41 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
           .where(and(...conds))
           .limit(1)
         if (!pre) {
-          throw new HttpError(404, `Etiqueta "${codigo}" não encontrada nos arquivos pré-importados deste recebimento.`)
+          throw new HttpError(
+            404,
+            `Etiqueta "${codigo}" não encontrada no banco de arquivos TXT pré-importados deste fornecedor.`,
+          )
         }
         if (pre.status === 'BIPADA') {
           throw new HttpError(409, `A caixa ${pre.eanCaixa} já foi bipada e lançada no estoque!`)
         }
 
         const features = await lerTenantFeatures(tx, ctx.tenantId)
-        if (Boolean(features.trava_recebimento_sem_pc) && !pre.pedidoCompraId && !body.pedido_compra_id) {
-          throw new HttpError(400, 'Trava ativa: vincule um Pedido de Compra antes de bipar pré-caixas.')
+        if (Boolean(features.trava_recebimento_sem_pc) && !pre.pedidoCompraId && !pcRow) {
+          throw new HttpError(400, 'Selecione um Pedido de Compra liberado antes de bipar caixas na doca.')
+        }
+
+        if (pcRow && !recIdPc) {
+          const [recEx] = await tx
+            .select({ id: recebimentos.id })
+            .from(recebimentos)
+            .where(and(eq(recebimentos.pedidoCompraId, pcRow.id), eq(recebimentos.tenantId, ctx.tenantId)))
+            .limit(1)
+          if (recEx) {
+            recIdPc = recEx.id
+          } else {
+            recIdPc = uuidv7()
+            const recCod = await gerarCodigoDocumento(tx, ctx.tenantId, 'RECEBIMENTO', 'REC', 4)
+            await tx.insert(recebimentos).values({
+              id: recIdPc,
+              tenantId: ctx.tenantId,
+              filialId: ctx.filialId,
+              codigo: recCod,
+              pedidoCompraId: pcRow.id,
+              fornecedorId: pcRow.fornecedorId,
+              statusValidacao: 'AGUARDANDO_BIPAGEM',
+            })
+          }
         }
 
         let paleteId: string | null = body.palete_id ? parseUuidOrBadRequest(body.palete_id, 'palete_id') : null
@@ -1203,11 +1313,12 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
         await assertEnderecosNaoBloqueados(tx, ctx.tenantId, ctx.filialId, [endEfetivo])
 
         let sifForn = ''
-        if (pre.fornecedorId) {
+        const fornLookupId = pcRow?.fornecedorId || pre.fornecedorId
+        if (fornLookupId) {
           const [f] = await tx
             .select({ sif: fornecedores.registroSanitarioSif })
             .from(fornecedores)
-            .where(eq(fornecedores.id, pre.fornecedorId))
+            .where(eq(fornecedores.id, fornLookupId))
             .limit(1)
           sifForn = f?.sif || ''
         }
@@ -1218,7 +1329,9 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
           sifOrigem: sifForn,
           paleteId,
           endereco: endEfetivo,
-          forcarProdutoExtra: true,
+          pedidoCompraIdOverride: pcRow?.id || pre.pedidoCompraId,
+          recebimentoIdOverride: recIdPc || pre.recebimentoId,
+          forcarProdutoExtra: Boolean(body.forcar_produto_extra),
         })
 
         if (paleteId) {

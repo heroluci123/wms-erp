@@ -485,7 +485,10 @@ CREATE TABLE IF NOT EXISTS pedidos_compra_itens (
   qtd_kg_solicitada NUMERIC(14,3) NOT NULL,
   preco_unitario_kg NUMERIC(14,4) NOT NULL DEFAULT 0,
   qtd_kg_recebida NUMERIC(14,3) NOT NULL DEFAULT 0,
-  cfop_aplicado TEXT NOT NULL DEFAULT ''
+  cfop_aplicado TEXT NOT NULL DEFAULT '',
+  temperatura_c NUMERIC(6,2),
+  temperatura_registrada_em TIMESTAMPTZ,
+  temperatura_registrada_por TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_pci_pedido ON pedidos_compra_itens(pedido_compra_id);
 
@@ -1238,6 +1241,10 @@ ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS valor_total_nf NUMERIC(14,2) N
 ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS xml_itens_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS xml_duplicatas_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS xml_conteudo TEXT NOT NULL DEFAULT '';
+ALTER TABLE pedidos_compra_itens ADD COLUMN IF NOT EXISTS temperatura_c NUMERIC(6,2);
+ALTER TABLE pedidos_compra_itens ADD COLUMN IF NOT EXISTS temperatura_registrada_em TIMESTAMPTZ;
+ALTER TABLE pedidos_compra_itens ADD COLUMN IF NOT EXISTS temperatura_registrada_por TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_pre_caixas_forn_status ON recebimento_pre_caixas(tenant_id, fornecedor_id, status);
 `
 
 export interface SeedDefaultsResult {

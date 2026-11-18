@@ -143,7 +143,26 @@ test('Fase 3: Multi-TXT (sem XML) + De-Para + Pré-Caixas Doca + XML NF-e + Moto
     assert.equal(resPc.statusCode, 201, resPc.body)
     const pcId = resPc.json().id
 
-    // 4. Pré-visualizar MÚLTIPLOS TXT de etiquetas (formato real Frigodil 12 colunas ;) SEM XML!
+    // 4. Doca & Parametrização: Pedido sem TXT no banco do fornecedor NÃO pode bipar no modo TXT (400)
+    const resLibAntes = await app.inject({ method: 'GET', url: '/api/recebimento/pedidos-liberados', headers })
+    assert.equal(resLibAntes.statusCode, 200)
+    const pcLibAntes = resLibAntes.json().data.find((p: any) => p.id === pcId)
+    assert.ok(pcLibAntes, 'PC aprovado deve aparecer em /api/recebimento/pedidos-liberados')
+    assert.equal(pcLibAntes.txt_disponiveis_fornecedor, 0)
+    const pcItemId = pcLibAntes.itens[0].id
+
+    const resBipSemTxt = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/bipar-pre-caixa',
+      headers,
+      payload: {
+        ean_caixa: '0025722336000075',
+        pedido_compra_id: pcId,
+        endereco: 'REC',
+      },
+    })
+    assert.equal(resBipSemTxt.statusCode, 400, 'Bipar em modo TXT sem etiquetas importadas deve bloquear com 400')
+
     // Total real das 3 caixas únicas = 20,00 + 15,00 + 15,00 = 50,00 kg (com 1 EAN repetido entre os arquivos)
     const txt1 = [
       'FRIGODIL ALIMENTOS LTDA (TR CM);35861;0025722336000075;75;PEIXINHO (T7);20,00;24;19102026;18122026;226057;Expedida;26102026 10:01',
@@ -154,6 +173,24 @@ test('Fase 3: Multi-TXT (sem XML) + De-Para + Pré-Caixas Doca + XML NF-e + Moto
       'FRIGODIL ALIMENTOS LTDA (TR CM);35862;0025722336000077;75;PEIXINHO (T7);15,00;16;19102026;18122026;226057;Expedida;26102026 10:05',
     ].join('\n')
 
+    // Proibido usar DIRETO_ESTOQUE quando houver arquivos .TXT (obrigatório bipar na doca)
+    const resBloqueioDireto = await app.inject({
+      method: 'POST',
+      url: '/api/compras/importar-lote',
+      headers,
+      payload: {
+        fornecedor_id: fornId,
+        layout_id: layoutPadrao.id,
+        modo_entrada: 'DIRETO_ESTOQUE',
+        depara_vinculos: [
+          { codigo_fornecedor: '75', descricao_fornecedor: 'PEIXINHO (T7)', produto_id: mpId },
+        ],
+        txts: [{ nome: 'ETIQUETAS_REMESSA_1.txt', conteudo: txt1 }],
+      },
+    })
+    assert.equal(resBloqueioDireto.statusCode, 400, 'Importação de TXT direto para estoque sem bipar deve ser bloqueada')
+
+    // Pré-visualizar MÚLTIPLOS TXT SEM vincular a Pedido de Compra (universal por fornecedor)
     const resTxtPrev = await app.inject({
       method: 'POST',
       url: '/api/compras/txt/parse-preview',
@@ -164,7 +201,7 @@ test('Fase 3: Multi-TXT (sem XML) + De-Para + Pré-Caixas Doca + XML NF-e + Moto
           { nome: 'ETIQUETAS_REMESSA_2.txt', conteudo: txt2 },
         ],
         layout_id: layoutPadrao.id,
-        pedido_compra_id: pcId,
+        fornecedor_id: fornId,
       },
     })
     assert.equal(resTxtPrev.statusCode, 200, resTxtPrev.body)
@@ -177,13 +214,13 @@ test('Fase 3: Multi-TXT (sem XML) + De-Para + Pré-Caixas Doca + XML NF-e + Moto
     assert.equal(prevJson.codigos_encontrados[0].codigo_fornecedor, '75')
     assert.equal(prevJson.codigos_encontrados[0].origem_vinculo, 'NAO_MAPEADO')
 
-    // 5. Importar Lote TXT (apenas TXTs + De-Para '75' -> mpId, SEM XML!) p/ Pré-Recebimento na Doca
+    // 5. Importar Lote TXT UNIVERSAL para o Fornecedor (SEM pedido_compra_id! Fica disponível para qualquer PC do fornecedor)
     const resImpTxt = await app.inject({
       method: 'POST',
       url: '/api/compras/importar-lote',
       headers,
       payload: {
-        pedido_compra_id: pcId,
+        fornecedor_id: fornId,
         layout_id: layoutPadrao.id,
         modo_entrada: 'PRE_RECEBIMENTO',
         depara_vinculos: [
@@ -206,7 +243,13 @@ test('Fase 3: Multi-TXT (sem XML) + De-Para + Pré-Caixas Doca + XML NF-e + Moto
     assert.equal(resDp.json().data[0].codigo_fornecedor, '75')
     assert.equal(resDp.json().data[0].produto_id, mpId)
 
-    // 6. Doca: listar Pré-Caixas -> Bipar 1 caixa (sem zeros à esquerda para testar normalização!) -> Confirmar outras 2 em lote
+    // Pedidos liberados para o mesmo fornecedor já enxergam automaticamente as 3 caixas universais do banco .TXT
+    const resLibDepois = await app.inject({ method: 'GET', url: '/api/recebimento/pedidos-liberados', headers })
+    assert.equal(resLibDepois.statusCode, 200)
+    const pcLibDepois = resLibDepois.json().data.find((p: any) => p.id === pcId)
+    assert.equal(pcLibDepois.txt_disponiveis_fornecedor, 3)
+
+    // 6. Doca: listar Pré-Caixas pelo PC (traz pool universal do fornecedor) -> bipar e validar tolerância ±3% + temperatura
     const resPreList = await app.inject({
       method: 'GET',
       url: `/api/recebimento/pre-caixas?pedido_compra_id=${pcId}&status=PENDENTE`,
@@ -241,25 +284,123 @@ test('Fase 3: Multi-TXT (sem XML) + De-Para + Pré-Caixas Doca + XML NF-e + Moto
     })
     assert.equal(resBipDup.statusCode, 409)
 
-    // Confirmar as 2 caixas restantes em lote na doca
-    const resConfLote = await app.inject({
+    // Tentar finalizar na doca com apenas 20kg de 50kg (fora de ±3%) deve bloquear com 409
+    const resFinPrematuro = await app.inject({
       method: 'POST',
-      url: '/api/recebimento/confirmar-pre-caixas-lote',
+      url: `/api/recebimento/pedidos/${pcId}/finalizar-doca`,
       headers,
-      payload: {
-        recebimento_id: resImpTxt.json().recebimento_id,
-        endereco: 'REC',
-      },
+      payload: {},
     })
-    assert.equal(resConfLote.statusCode, 200, resConfLote.body)
-    assert.equal(resConfLote.json().confirmadas, 2)
-    assert.equal(resConfLote.json().peso_kg, 30)
+    assert.equal(resFinPrematuro.statusCode, 409, 'Fechamento direto fora da tolerância de ±3% deve ser bloqueado')
 
-    // Verificar detalhe do PC mostra 50kg recebidos e 3/3 pré-caixas bipadas
+    // Bipar as outras 2 etiquetas do banco universal vinculando ao PC ativo (total 50kg / 50kg)
+    for (const eanRest of ['0025722336000076', '0025722336000077']) {
+      const rBip = await app.inject({
+        method: 'POST',
+        url: '/api/recebimento/bipar-pre-caixa',
+        headers,
+        payload: { ean_caixa: eanRest, pedido_compra_id: pcId, endereco: 'REC' },
+      })
+      assert.equal(rBip.statusCode, 201, rBip.body)
+    }
+
+    // Ligar exigência de temperatura obrigatória e validar bloqueio antes de registrar temperatura
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/configuracoes/modulos',
+      headers,
+      payload: { exigir_temperatura_recebimento: true, tolerancia_recebimento_pct: 3 },
+    })
+    const resFinSemTemp = await app.inject({
+      method: 'POST',
+      url: `/api/recebimento/pedidos/${pcId}/finalizar-doca`,
+      headers,
+      payload: {},
+    })
+    assert.equal(resFinSemTemp.statusCode, 400, 'Temperatura obrigatória deve bloquear finalização sem °C')
+
+    // Registrar temperatura de amostragem única por item (-1.5 °C) e finalizar na doca
+    const resTemp = await app.inject({
+      method: 'PATCH',
+      url: `/api/recebimento/pedidos/${pcId}/itens/${pcItemId}/temperatura`,
+      headers,
+      payload: { temperatura_c: -1.5 },
+    })
+    assert.equal(resTemp.statusCode, 200, resTemp.body)
+    assert.equal(resTemp.json().temperatura_c, -1.5)
+
+    const resFinOk = await app.inject({
+      method: 'POST',
+      url: `/api/recebimento/pedidos/${pcId}/finalizar-doca`,
+      headers,
+      payload: {},
+    })
+    assert.equal(resFinOk.statusCode, 200, resFinOk.body)
+    assert.equal(resFinOk.json().status_validacao, 'VALIDADO')
+
+    // Restaurar parâmetro Temperatura como Recomendada (padrão)
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/configuracoes/modulos',
+      headers,
+      payload: { exigir_temperatura_recebimento: false },
+    })
+
+    // Verificar detalhe do PC mostra 50kg recebidos, temperatura registrada e 3/3 pré-caixas bipadas
     const resPcDet = await app.inject({ method: 'GET', url: `/api/compras/${pcId}`, headers })
     assert.equal(resPcDet.statusCode, 200)
     assert.equal(resPcDet.json().data.pre_caixas_resumo.total, 3)
     assert.equal(resPcDet.json().data.pre_caixas_resumo.bipadas, 3)
+    assert.equal(resPcDet.json().data.itens[0].temperatura_c, -1.5)
+
+    // 6b. Pesagem Manual na Doca c/ Tara Manual (tara_id: null, tara_kg: 0.85) + EAN interno AUTO
+    const resPcManual = await app.inject({
+      method: 'POST',
+      url: '/api/compras',
+      headers,
+      payload: {
+        fornecedor_id: fornId,
+        finalidade: 'MATERIA_PRIMA',
+        aprovar: true,
+        itens: [{ produto_id: corteNobreId, qtd_kg_solicitada: 10, preco_unitario_kg: 40.0 }],
+      },
+    })
+    assert.equal(resPcManual.statusCode, 201, resPcManual.body)
+    const pcManualId = resPcManual.json().id
+
+    const resCaixaAuto = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/caixa',
+      headers,
+      payload: {
+        ean_caixa: 'AUTO',
+        produto_id: corteNobreId,
+        pedido_compra_id: pcManualId,
+        exigir_pedido_compra: true,
+        peso_bruto_kg: 10.85,
+        tara_id: null,
+        tara_kg: 0.85,
+        peso_kg: 10.0,
+        qtd_pecas: 10,
+        data_producao: '2026-11-17',
+        validade: '2026-12-20',
+        lote: 'LOTE-DOCA-01',
+        endereco: 'REC',
+      },
+    })
+    assert.equal(resCaixaAuto.statusCode, 201, resCaixaAuto.body)
+    assert.ok(String(resCaixaAuto.json().caixa.ean_caixa || '').length >= 8, 'EAN interno AUTO deve ser gerado')
+    assert.equal(Number(resCaixaAuto.json().caixa.peso_kg), 10)
+    assert.equal(Number(resCaixaAuto.json().caixa.tara_kg), 0.85)
+    assert.equal(resCaixaAuto.json().caixa.lote, 'LOTE-DOCA-01')
+
+    const resFinManual = await app.inject({
+      method: 'POST',
+      url: `/api/recebimento/pedidos/${pcManualId}/finalizar-doca`,
+      headers,
+      payload: {},
+    })
+    assert.equal(resFinManual.statusCode, 200, 'Com temperatura recomendada, doca dentro de ±3% fecha direto')
 
     // 7. Importação opcional via XML NF-e (CNPJ novo com auto-cadastro, frete R$ 50 e duplicatas <dup>)
     const xmlNfe = `<?xml version="1.0" encoding="UTF-8"?>

@@ -20,6 +20,7 @@ import {
   Settings2,
   Boxes,
   Check,
+  Printer,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { temPermissao } from '../utils/permissoes'
@@ -27,6 +28,7 @@ import { isApiEnabled } from '../lib/apiClient'
 import { comprasQueries } from '../queries/compras'
 import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos.js'
+import { RelatorioRecebimentoPrint } from '../components/shared/RelatorioRecebimentoPrint'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -105,16 +107,14 @@ export function Compras() {
   const [qtdAdd, setQtdAdd] = useState('')
   const [precoAdd, setPrecoAdd] = useState('')
 
-  // Modal Detalhe / Validação 3-Way
+  // Modal Detalhe / Validação 3-Way / Relatório
   const [detalhe, setDetalhe] = useState(null)
+  const [relatorioRecPedido, setRelatorioRecPedido] = useState(null)
 
-  // Aba Importar Lote (Múltiplos TXTs e/ou XML NF-e)
-  const [impPcId, setImpPcId] = useState('')
+  // Banco Universal de Pré-Caixas (.TXT) por Fornecedor
   const [impFornId, setImpFornId] = useState('')
   const [impAutoCadForn, setImpAutoCadForn] = useState(true)
   const [impLayoutId, setImpLayoutId] = useState('')
-  const [impModoEntrada, setImpModoEntrada] = useState('PRE_RECEBIMENTO')
-  const [impEnderecoDireto, setImpEnderecoDireto] = useState('REC')
   const [impXmlText, setImpXmlText] = useState('')
   const [impXmlFileName, setImpXmlFileName] = useState('')
   const [impXmlPreview, setImpXmlPreview] = useState(null)
@@ -123,6 +123,7 @@ export function Compras() {
   const [impDeparaEdits, setImpDeparaEdits] = useState({}) // { [codigoForn]: produtoId }
   const [impExecutando, setImpExecutando] = useState(false)
   const [impResultado, setImpResultado] = useState(null)
+  const [poolPreCaixas, setPoolPreCaixas] = useState([])
 
   // Aba De-Para & Layouts TXT
   const [filtroFornDepara, setFiltroFornDepara] = useState('')
@@ -164,6 +165,9 @@ export function Compras() {
         apiAtiva ? comprasQueries.listarLayoutsTxt().catch(() => []) : Promise.resolve([]),
         apiAtiva ? comprasQueries.listarDepara().catch(() => []) : Promise.resolve([]),
       ])
+      if (apiAtiva) {
+        comprasQueries.listarPreCaixasRecebimento({ status: 'PENDENTE' }).then((r) => setPoolPreCaixas(r?.data || [])).catch(() => {})
+      }
       setCompras(resCompras.data || [])
       setTravaAtiva(Boolean(resCompras.trava_recebimento_sem_pc))
       setFornecedores(listForn || [])
@@ -376,9 +380,9 @@ export function Compras() {
     }
   }
 
-  // ── IMPORTAÇÃO EM LOTE (TXT(s) e/ou XML NF-e) ───────────────────────────────
+  // ── BANCO UNIVERSAL DE TXTs POR FORNECEDOR (+ XML NF-e OPCIONAL) ───────────
   const rodarPreviewXml = useCallback(
-    async (xmlStr, fornIdOverride = impFornId, pcIdOverride = impPcId) => {
+    async (xmlStr, fornIdOverride = impFornId) => {
       if (!xmlStr?.trim()) {
         setImpXmlPreview(null)
         return
@@ -387,7 +391,6 @@ export function Compras() {
         const res = await comprasQueries.previewXmlNfe({
           xml_conteudo: xmlStr,
           fornecedor_id: fornIdOverride || null,
-          pedido_compra_id: pcIdOverride || null,
         })
         setImpXmlPreview(res)
         if (res.fornecedor_encontrado?.id && !fornIdOverride) {
@@ -404,11 +407,11 @@ export function Compras() {
         toastError('Erro ao ler XML NF-e', err.message)
       }
     },
-    [impFornId, impPcId, toastError],
+    [impFornId, toastError],
   )
 
   const rodarPreviewTxts = useCallback(
-    async (arquivos, layoutIdOverride = impLayoutId, fornIdOverride = impFornId, pcIdOverride = impPcId) => {
+    async (arquivos, layoutIdOverride = impLayoutId, fornIdOverride = impFornId) => {
       if (!arquivos || arquivos.length === 0) {
         setImpTxtPreview(null)
         return
@@ -418,7 +421,6 @@ export function Compras() {
           arquivos,
           layout_id: layoutIdOverride || null,
           fornecedor_id: fornIdOverride || null,
-          pedido_compra_id: pcIdOverride || null,
         })
         setImpTxtPreview(res)
         const preEdits = {}
@@ -432,7 +434,7 @@ export function Compras() {
         toastError('Erro ao ler TXTs', err.message)
       }
     },
-    [impLayoutId, impFornId, impPcId, toastError],
+    [impLayoutId, impFornId, toastError],
   )
 
   const handleSelecionarXmlFile = async (e) => {
@@ -475,13 +477,10 @@ export function Compras() {
     }
   }
 
-  const handleSelecionarPcImportacao = async (pcId) => {
-    setImpPcId(pcId)
-    const pc = compras.find((x) => x.id === pcId)
-    const fornId = pc?.fornecedor_id || impFornId
-    if (pc?.fornecedor_id) setImpFornId(pc.fornecedor_id)
-    if (impXmlText) await rodarPreviewXml(impXmlText, fornId, pcId)
-    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, impLayoutId, fornId, pcId)
+  const handleSelecionarFornecedorTxt = async (fornId) => {
+    setImpFornId(fornId)
+    if (impXmlText) await rodarPreviewXml(impXmlText, fornId)
+    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, impLayoutId, fornId)
   }
 
   const codigosConsolidados = useMemo(() => {
@@ -533,10 +532,10 @@ export function Compras() {
     if (!impXmlText.trim() && impTxtArquivos.length === 0) {
       return toastWarning('Arquivos', 'Selecione os arquivos TXT das etiquetas e/ou o XML da NF-e.')
     }
-    if (!impFornId && !impPcId && (!impXmlText.trim() || !impAutoCadForn)) {
+    if (!impFornId && (!impXmlText.trim() || !impAutoCadForn)) {
       return toastWarning(
         'Fornecedor obrigatório',
-        'Selecione o Pedido de Compra, ou escolha o Fornecedor acima para salvar o De-Para.',
+        'Selecione o Fornecedor / Frigorífico acima para gravar as etiquetas e o De-Para.',
       )
     }
     if (impTxtArquivos.length > 0 && codigosPendentesDepara.length > 0) {
@@ -562,22 +561,19 @@ export function Compras() {
     setImpExecutando(true)
     try {
       const res = await comprasQueries.importarLoteEntrada({
-        pedido_compra_id: impPcId || null,
+        pedido_compra_id: null,
         fornecedor_id: impFornId || null,
         auto_cadastrar_fornecedor: impAutoCadForn,
         xml_conteudo: impXmlText || undefined,
         txts: impTxtArquivos,
         layout_id: impLayoutId || null,
         depara_vinculos: vinculos,
-        modo_entrada: impModoEntrada,
-        endereco_direto: impEnderecoDireto || 'REC',
+        modo_entrada: 'PRE_RECEBIMENTO',
       })
       setImpResultado(res)
       toastSuccess(
-        'Importação Concluída ✅',
-        res.modo_entrada === 'PRE_RECEBIMENTO'
-          ? `${res.caixas_importadas} caixa(s) enviadas para pré-recebimento na doca (${res.recebimento_codigo})!`
-          : `${res.caixas_importadas} caixa(s) lançadas diretamente em estoque (${impEnderecoDireto})!`,
+        'Etiquetas Importadas ✅',
+        `${res.caixas_importadas} caixa(s) gravadas no banco do fornecedor ${res.fornecedor_nome || ''} para bipagem na doca!`,
       )
       carregar()
     } catch (err) {
@@ -881,13 +877,13 @@ export function Compras() {
                               <button
                                 type="button"
                                 className="btn btn--ghost btn--sm text-cyan"
-                                title="Importar arquivos TXT/XML vinculados a este Pedido"
+                                title="Importar etiquetas TXT deste Fornecedor"
                                 onClick={() => {
-                                  handleSelecionarPcImportacao(c.id)
+                                  handleSelecionarFornecedorTxt(c.fornecedor_id)
                                   setAbaAtiva('importar')
                                 }}
                               >
-                                <Upload size={14} /> TXT/XML
+                                <Upload size={14} /> TXT
                               </button>
                             )}
                             {podeEscrever && c.status === 'ABERTO' && (
@@ -924,8 +920,7 @@ export function Compras() {
                   <Upload size={18} className="text-info" /> Importação em Lote: Arquivos TXT de Etiquetas & XML NF-e
                 </h2>
                 <p className="text-xs text-muted mt-4">
-                  <strong>Flexível:</strong> Você pode enviar <strong>apenas múltiplos .txt</strong> de etiquetas (puxando preço do Pedido de Compra),
-                  ou combinar <strong>TXTs + XML da NF-e</strong> (custo real + frete + duplicatas), ou <strong>só XML</strong> para embalagens/insumos.
+                  <strong>Banco Universal por Fornecedor:</strong> Importe quantos arquivos <code>.txt</code> desejar selecionando apenas o <strong>Fornecedor e Layout</strong> (sem vínculo com Pedido de Compra). Quando qualquer Pedido desse fornecedor for aberto na doca, as caixas bipadas abaterão automaticamente!
                 </p>
               </div>
               <button type="button" className="btn btn--ghost btn--sm" onClick={handleLimparImportacao}>
@@ -933,46 +928,23 @@ export function Compras() {
               </button>
             </div>
 
-            {/* Vínculo PC / Fornecedor / Layout / Modo */}
+            {/* Fornecedor + Layout TXT */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
                 gap: 12,
                 marginBottom: 16,
               }}
             >
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">1. Pedido de Compra (Opcional — Traz Preços)</label>
-                <select
-                  className="form-input"
-                  value={impPcId}
-                  onChange={(e) => handleSelecionarPcImportacao(e.target.value)}
-                >
-                  <option value="">-- Sem Pedido de Compra vinculado --</option>
-                  {compras
-                    .filter((c) => !['CANCELADO', 'RECEBIDO'].includes(c.status))
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.codigo} — {c.fornecedor_nome} ({fmtKg(c.total_kg_solicitada)})
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">2. Fornecedor / Frigorífico (p/ De-Para)</label>
+                <label className="form-label">1. Fornecedor / Frigorífico *</label>
                 <select
                   className="form-input"
                   value={impFornId}
-                  onChange={async (e) => {
-                    const fid = e.target.value
-                    setImpFornId(fid)
-                    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, impLayoutId, fid, impPcId)
-                    if (impXmlText) await rodarPreviewXml(impXmlText, fid, impPcId)
-                  }}
+                  onChange={(e) => handleSelecionarFornecedorTxt(e.target.value)}
                 >
-                  <option value="">Auto-detectar do XML ou PC...</option>
+                  <option value="">Selecione o fornecedor (ou auto pelo XML)...</option>
                   {fornecedores.map((f) => (
                     <option key={f.id} value={f.id}>
                       {f.nome_fantasia} ({f.cnpj_cpf})
@@ -982,14 +954,14 @@ export function Compras() {
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">3. Layout Leitura TXT</label>
+                <label className="form-label">2. Layout Leitura TXT</label>
                 <select
                   className="form-input"
                   value={impLayoutId}
                   onChange={async (e) => {
                     const lid = e.target.value
                     setImpLayoutId(lid)
-                    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, lid, impFornId, impPcId)
+                    if (impTxtArquivos.length > 0) await rodarPreviewTxts(impTxtArquivos, lid, impFornId)
                   }}
                 >
                   {layoutsTxt.map((l) => (
@@ -999,34 +971,7 @@ export function Compras() {
                   ))}
                 </select>
               </div>
-
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">4. Destino das Caixas ao Importar</label>
-                <select
-                  className="form-input"
-                  value={impModoEntrada}
-                  onChange={(e) => setImpModoEntrada(e.target.value)}
-                >
-                  <option value="PRE_RECEBIMENTO">Pré-Recebimento Doca (Só Bipar Caixas)</option>
-                  <option value="DIRETO_ESTOQUE">Lançar Direto em Estoque (Sem Bipar)</option>
-                </select>
-              </div>
             </div>
-
-            {impModoEntrada === 'DIRETO_ESTOQUE' && (
-              <div className="p-12 rounded mb-16 flex items-center gap-12 flex-wrap" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)' }}>
-                <span className="text-xs font-bold text-success">Endereço de destino direto:</span>
-                <input
-                  type="text"
-                  className="form-input"
-                  style={{ width: 180 }}
-                  value={impEnderecoDireto}
-                  onChange={(e) => setImpEnderecoDireto(e.target.value.toUpperCase())}
-                  placeholder="REC"
-                />
-                <span className="text-xs text-muted">Todas as caixas inéditas dos TXTs entrarão imediatamente com saldo DISPONÍVEL neste endereço.</span>
-              </div>
-            )}
 
             {/* Zona de Seleção: Múltiplos TXTs + XML Opcional */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
@@ -1240,7 +1185,7 @@ export function Compras() {
               <div className="flex justify-end items-center gap-12">
                 {impResultado && (
                   <div className="text-sm text-success font-bold flex items-center gap-6">
-                    <Boxes size={16} /> Lote importado: {impResultado.recebimento_codigo} ({impResultado.caixas_importadas} cx • {fmtKg(impResultado.peso_total_importado_kg)})
+                    <Boxes size={16} /> Lote importado: {impResultado.caixas_importadas} cx ({fmtKg(impResultado.peso_total_importado_kg)}) p/ Doca
                   </div>
                 )}
                 <button
@@ -1252,9 +1197,7 @@ export function Compras() {
                   <CheckCircle2 size={16} />
                   {impExecutando
                     ? 'Importando Lote...'
-                    : impModoEntrada === 'PRE_RECEBIMENTO'
-                      ? 'Confirmar Importação → Liberar Doca (Só Bipar)'
-                      : 'Confirmar Importação Direta no Estoque'}
+                    : 'Gravar no Banco do Fornecedor (Aguardando Bipagem na Doca)'}
                 </button>
               </div>
             </div>
@@ -1273,6 +1216,45 @@ export function Compras() {
               </button>
             </div>
           )}
+
+          {/* Banco de Etiquetas TXT Pendentes na Doca */}
+          <div className="card">
+            <div className="flex justify-between items-center mb-10">
+              <h3 className="text-sm font-bold flex items-center gap-8 text-cyan">
+                <Boxes size={16} /> Banco Universal de Etiquetas (.TXT) Prontas p/ Bipar na Doca ({poolPreCaixas.length})
+              </h3>
+            </div>
+            {poolPreCaixas.length === 0 ? (
+              <div className="text-xs text-muted">Nenhuma etiqueta pendente de bipagem no momento.</div>
+            ) : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>EAN</th>
+                      <th>Fornecedor</th>
+                      <th>Produto</th>
+                      <th style={{ textAlign: 'right' }}>Peso Líq.</th>
+                      <th>Lote / Validade</th>
+                      <th>Arquivo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poolPreCaixas.slice(0, 60).map((cx) => (
+                      <tr key={cx.id}>
+                        <td className="font-mono text-cyan font-bold">{cx.ean_caixa}</td>
+                        <td className="text-sm font-bold">{cx.fornecedor_nome || '-'}</td>
+                        <td className="text-sm">{cx.produto_codigo} — {cx.produto_descricao}</td>
+                        <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg(cx.peso_liquido_kg)}</td>
+                        <td className="text-xs font-mono">{cx.lote || '-'} • {fmtData(cx.validade)}</td>
+                        <td className="text-xs text-muted">{cx.arquivo_origem || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1694,6 +1676,7 @@ export function Compras() {
                     <th style={{ textAlign: 'right' }}>Solicitado (kg)</th>
                     <th style={{ textAlign: 'right' }}>Bipado Doca (kg)</th>
                     <th style={{ textAlign: 'right' }}>Diferença</th>
+                    <th style={{ textAlign: 'center' }}>Temp. (°C)</th>
                     <th style={{ textAlign: 'right' }}>Preço/kg</th>
                   </tr>
                 </thead>
@@ -1708,6 +1691,9 @@ export function Compras() {
                         <td style={{ textAlign: 'right' }} className="font-mono font-bold text-cyan">{fmtKg(it.qtd_kg_recebida)}</td>
                         <td style={{ textAlign: 'right' }} className={`font-mono font-bold ${dif < -1 ? 'text-danger' : 'text-success'}`}>
                           {dif >= 0 ? `+${fmtKg(dif)}` : fmtKg(dif)}
+                        </td>
+                        <td style={{ textAlign: 'center' }} className="font-mono">
+                          {it.temperatura_c != null ? `${Number(it.temperatura_c).toFixed(1).replace('.', ',')} °C` : '-'}
                         </td>
                         <td style={{ textAlign: 'right' }}>{fmtMoeda(it.preco_unitario_kg)}</td>
                       </tr>
@@ -1727,19 +1713,26 @@ export function Compras() {
               <div className="text-sm text-muted">
                 Frete: <strong>{fmtMoeda(detalhe.frete_valor)}</strong> • Despesas: <strong>{fmtMoeda(detalhe.despesas_valor)}</strong> • Total: <strong className="text-success">{fmtMoeda(detalhe.valor_total)}</strong>
               </div>
-              <div className="flex gap-8">
+              <div className="flex gap-8 flex-wrap">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setRelatorioRecPedido(detalhe)}
+                >
+                  <Printer size={15} /> Relatório Recebimento (c/ Temp.)
+                </button>
                 {podeEscrever && !['RECEBIDO', 'CANCELADO'].includes(detalhe.status) && (
                   <button
                     type="button"
                     className="btn btn--ghost"
                     onClick={() => {
-                      const id = detalhe.id
+                      const fid = detalhe.fornecedor_id
                       setDetalhe(null)
-                      handleSelecionarPcImportacao(id)
+                      handleSelecionarFornecedorTxt(fid)
                       setAbaAtiva('importar')
                     }}
                   >
-                    <Upload size={15} /> Importar TXTs / XML
+                    <Upload size={15} /> Importar TXTs
                   </button>
                 )}
                 {podeEscrever && detalhe.status === 'ABERTO' && (
@@ -1843,6 +1836,14 @@ export function Compras() {
             </form>
           </div>
         </div>
+      )}
+
+      {relatorioRecPedido && (
+        <RelatorioRecebimentoPrint
+          pedido={relatorioRecPedido}
+          onClose={() => setRelatorioRecPedido(null)}
+          autoPrint
+        />
       )}
     </div>
   )

@@ -293,3 +293,41 @@ ipcMain.on('window-maximize', () => {
   }
 })
 ipcMain.on('window-close', () => mainWindow?.close())
+
+ipcMain.handle('print-get-printers', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return []
+  return await mainWindow.webContents.getPrintersAsync()
+})
+
+ipcMain.handle('print-html-silent', async (_event, { html, deviceName } = {}) => {
+  if (!html) throw new Error('HTML da etiqueta vazio.')
+  const printWin = new BrowserWindow({
+    show: false,
+    width: 420,
+    height: 300,
+    webPreferences: {
+      sandbox: false,
+      contextIsolation: true,
+    },
+  })
+  try {
+    await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(String(html))}`)
+    await new Promise((r) => setTimeout(r, 150))
+    return await new Promise((resolve) => {
+      printWin.webContents.print(
+        {
+          silent: true,
+          printBackground: true,
+          ...(deviceName ? { deviceName: String(deviceName) } : {}),
+          margins: { marginType: 'none' },
+          pageSize: { width: 100000, height: 70000 },
+        },
+        (success, failureReason) => {
+          resolve({ success: Boolean(success), error: failureReason || null })
+        },
+      )
+    })
+  } finally {
+    if (!printWin.isDestroyed()) printWin.destroy()
+  }
+})

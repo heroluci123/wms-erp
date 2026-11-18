@@ -1112,8 +1112,8 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
       exigir_qtd_pecas?: boolean
     }
 
-    const ean = String(body.ean_caixa || '').trim()
-    if (!ean) throw new HttpError(400, 'Informe ou bipe o EAN da caixa.')
+    const eanInput = String(body.ean_caixa || '').trim()
+    if (!eanInput) throw new HttpError(400, 'Informe ou bipe o EAN da caixa.')
     const produtoId = parseUuidOrBadRequest(body.produto_id, 'produto_id')
     const enderecoFinal = String(body.endereco || 'REC').trim().toUpperCase() || 'REC'
 
@@ -1129,6 +1129,19 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         )
       }
 
+      const [prod] = await tx
+        .select({ id: produtos.id, codigo: produtos.codigo, descricao: produtos.descricao })
+        .from(produtos)
+        .where(and(eq(produtos.id, produtoId), eq(produtos.tenantId, ctx.tenantId)))
+        .limit(1)
+      if (!prod) throw new HttpError(404, 'Produto não encontrado.')
+
+      let ean = eanInput
+      if (eanInput.toUpperCase() === 'AUTO') {
+        const [gerado] = await gerarProximosEansInternos(tx, ctx.tenantId, 1, prod.codigo || '')
+        ean = gerado
+      }
+
       const [dup] = await tx
         .select({ id: estoqueCaixas.id })
         .from(estoqueCaixas)
@@ -1137,13 +1150,6 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
       if (dup) {
         throw new HttpError(409, `A caixa com EAN "${ean}" já está registrada no sistema!`)
       }
-
-      const [prod] = await tx
-        .select({ id: produtos.id, codigo: produtos.codigo, descricao: produtos.descricao })
-        .from(produtos)
-        .where(and(eq(produtos.id, produtoId), eq(produtos.tenantId, ctx.tenantId)))
-        .limit(1)
-      if (!prod) throw new HttpError(404, 'Produto não encontrado.')
 
       let pcIdFinal: string | null = null
       let recebimentoIdFinal: string | null = body.recebimento_id
@@ -1240,6 +1246,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         pesagem = validarPesagemTaraPayload({
           data_producao: body.data_producao,
           validade: body.validade,
+          lote: body.lote,
           peso_bruto_kg: body.peso_bruto_kg,
           tara_id: taraId,
           tara_kg: taraKg + taraPrimTotal,

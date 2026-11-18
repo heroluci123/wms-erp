@@ -11,5 +11,10 @@ contextBridge.exposeInMainWorld('wmsAPI', {
     execute: (query, args) => ipcRenderer.invoke('db-execute', query, args),
     batch: (queries) => ipcRenderer.invoke('db-batch', queries),
     sync: () => ipcRenderer.invoke('db-sync'),
-  }
+  },
+  // Impressão silenciosa nativa para etiquetas 100x70mm no app desktop
+  printer: {
+    list: () => ipcRenderer.invoke('print-get-printers'),
+    printHtmlSilent: (opts) => ipcRenderer.invoke('print-html-silent', opts),
+  },
 })

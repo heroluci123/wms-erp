@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Settings2, CreditCard, Landmark, FileSpreadsheet, Layers, Shield, Plus, Trash2, Calculator, Tag } from 'lucide-react'
+import { Settings2, CreditCard, Landmark, FileSpreadsheet, Layers, Shield, Plus, Trash2, Calculator, Tag, Thermometer, CheckCircle2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
 import { cadastrosQueries } from '../queries/cadastros'
+import { comprasQueries } from '../queries/compras'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 
 export function ParametrosComerciais() {
@@ -48,11 +49,30 @@ export function ParametrosComerciais() {
   const [simTipo, setSimTipo] = useState('SAIDA')
   const [simResultado, setSimResultado] = useState(null)
 
+  // Parâmetros Recebimento & Doca
+  const [recCfg, setRecCfg] = useState({
+    trava_recebimento_sem_pc: true,
+    exigir_temperatura_recebimento: false,
+    tolerancia_recebimento_pct: 3,
+  })
+  const [salvandoRecCfg, setSalvandoRecCfg] = useState(false)
+
   const carregar = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await cadastrosQueries.listarAuxiliares()
+      const [data, modCfg] = await Promise.all([
+        cadastrosQueries.listarAuxiliares(),
+        isApiEnabled() ? comprasQueries.obterConfigModulos().catch(() => null) : Promise.resolve(null),
+      ])
       setAux(data || { formasPagamento: [], locaisCobranca: [], centrosCusto: [], naturezasOperacao: [], matrizTributaria: [] })
+      if (modCfg) {
+        setRecCfg({
+          trava_recebimento_sem_pc: Boolean(modCfg.trava_recebimento_sem_pc),
+          exigir_temperatura_recebimento: Boolean(modCfg.exigir_temperatura_recebimento),
+          tolerancia_recebimento_pct:
+            modCfg.tolerancia_recebimento_pct != null ? Number(modCfg.tolerancia_recebimento_pct) : 3,
+        })
+      }
     } catch (err) {
       toastError('Erro', err.message)
     } finally {
@@ -123,6 +143,7 @@ export function ParametrosComerciais() {
           { id: 'centros', label: 'Centros de Custo', icon: Layers },
           { id: 'marchantes', label: 'Marchantes', icon: Tag },
           { id: 'matriz', label: 'Matriz Tributária (Contador)', icon: Shield },
+          { id: 'recebimento', label: 'Recebimento & Doca (Frigorífico)', icon: Thermometer },
         ].map((t) => {
           const Icon = t.icon
           return (
@@ -637,6 +658,81 @@ export function ParametrosComerciais() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {aba === 'recebimento' && (
+            <div className="card" style={{ maxWidth: 680 }}>
+              <h3 className="text-base font-bold mb-8 flex items-center gap-8">
+                <Thermometer size={18} className="text-cyan" /> Regras de Doca, Temperatura & Tolerância (Frigorífico)
+              </h3>
+              <p className="text-xs text-muted mb-16">
+                Defina o rigor da conferência física no Recebimento antes que o operador consiga finalizar um Pedido de Compra na doca.
+              </p>
+              <form
+                className="flex flex-col gap-16"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  setSalvandoRecCfg(true)
+                  try {
+                    await comprasQueries.salvarConfigModulos({
+                      trava_recebimento_sem_pc: recCfg.trava_recebimento_sem_pc,
+                      exigir_temperatura_recebimento: recCfg.exigir_temperatura_recebimento,
+                      tolerancia_recebimento_pct: Number(recCfg.tolerancia_recebimento_pct || 3),
+                    })
+                    toastSuccess('Parâmetros Salvos ✅', 'Regras de Recebimento e Temperatura atualizadas!')
+                  } catch (err) {
+                    toastError('Erro', err.message)
+                  } finally {
+                    setSalvandoRecCfg(false)
+                  }
+                }}
+              >
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Tolerância de Peso na Doca para Finalizar Direto (%)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="25"
+                    className="form-input"
+                    value={recCfg.tolerancia_recebimento_pct}
+                    onChange={(e) => setRecCfg((p) => ({ ...p, tolerancia_recebimento_pct: e.target.value }))}
+                  />
+                  <span className="text-xs text-muted mt-4">
+                    Padrão recomendado: <strong>3%</strong>. Se a diferença entre peso recebido e pedido passar dessa margem, o operador fica impedido de concluir direto e apenas o Analista pode aprovar.
+                  </span>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Temperatura de Amostragem por Item do Pedido (°C)</label>
+                  <select
+                    className="form-input"
+                    value={recCfg.exigir_temperatura_recebimento ? 'OBRIGATORIA' : 'RECOMENDADA'}
+                    onChange={(e) =>
+                      setRecCfg((p) => ({ ...p, exigir_temperatura_recebimento: e.target.value === 'OBRIGATORIA' }))
+                    }
+                  >
+                    <option value="RECOMENDADA">Recomendada (Permite finalizar mesmo sem registrar °C)</option>
+                    <option value="OBRIGATORIA">Obrigatória (Bloqueia finalizar recebimento se faltar °C em algum item)</option>
+                  </select>
+                </div>
+
+                <label className="flex items-center gap-8 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(recCfg.trava_recebimento_sem_pc)}
+                    onChange={(e) => setRecCfg((p) => ({ ...p, trava_recebimento_sem_pc: e.target.checked }))}
+                  />
+                  Exigir Pedido de Compra aprovado para qualquer bipagem/recebimento na doca
+                </label>
+
+                <div className="flex justify-end">
+                  <button type="submit" className="btn btn--primary" disabled={!isApiEnabled() || salvandoRecCfg}>
+                    <CheckCircle2 size={16} /> {salvandoRecCfg ? 'Salvando...' : 'Salvar Parâmetros de Recebimento'}
+                  </button>
+                </div>
+              </form>
             </div>
           )}
         </>
