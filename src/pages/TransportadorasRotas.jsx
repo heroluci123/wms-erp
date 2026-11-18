@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Route, Truck, Plus, Edit2, Trash2, X, Save } from 'lucide-react'
+import { Route, Truck, Plus, Edit2, Trash2, X, Save, Search } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
+import { ConsultaCnpjModal } from '../components/shared/ConsultaCnpjModal'
+import { formatarCnpjInput } from '../utils/cnpj'
 
 const TRANS_INICIAL = {
   id: null,
@@ -35,6 +37,7 @@ export function TransportadorasRotas() {
   const [loading, setLoading] = useState(true)
 
   const [modalTransp, setModalTransp] = useState(false)
+  const [cnpjTranspOpen, setCnpjTranspOpen] = useState(false)
   const [formTransp, setFormTransp] = useState(TRANS_INICIAL)
 
   const [modalRota, setModalRota] = useState(false)
@@ -361,7 +364,27 @@ export function TransportadorasRotas() {
               <div className="form-grid form-grid--3">
                 <div>
                   <label className="form-label">CNPJ / CPF</label>
-                  <input className="form-input" value={formTransp.cnpj_cpf} onChange={(e) => setFormTransp({ ...formTransp, cnpj_cpf: e.target.value })} />
+                  <div className="flex gap-6">
+                    <input
+                      className="form-input form-input--mono"
+                      style={{ flex: 1 }}
+                      placeholder="00.000.000/0000-00"
+                      value={formTransp.cnpj_cpf}
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        const d = raw.replace(/\D+/g, '')
+                        setFormTransp({ ...formTransp, cnpj_cpf: d.length > 11 ? formatarCnpjInput(raw) : raw })
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      onClick={() => setCnpjTranspOpen(true)}
+                      title="Consultar CNPJ online"
+                    >
+                      <Search size={14} /> CNPJ
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="form-label">Placa Padrão</label>
@@ -394,6 +417,27 @@ export function TransportadorasRotas() {
           </div>
         </div>
       )}
+      <ConsultaCnpjModal
+        isOpen={cnpjTranspOpen}
+        onClose={() => setCnpjTranspOpen(false)}
+        cnpjInicial={modalTransp ? formTransp.cnpj_cpf : ''}
+        tipoAlvo="transportadora"
+        onImportar={(dadosReceita) => {
+          setFormTransp((prev) => ({
+            ...prev,
+            razao_social: dadosReceita.razao_social || prev.razao_social,
+            nome_fantasia: dadosReceita.nome_fantasia || dadosReceita.razao_social || prev.nome_fantasia,
+            cnpj_cpf: dadosReceita.cnpj_formatado || dadosReceita.cnpj || prev.cnpj_cpf,
+            inscricao_estadual: dadosReceita.inscricao_estadual || prev.inscricao_estadual,
+            uf: dadosReceita.uf || prev.uf,
+            cidade: dadosReceita.cidade || prev.cidade,
+            telefone: dadosReceita.telefone || prev.telefone,
+          }))
+          setCnpjTranspOpen(false)
+          setModalTransp(true)
+          toastSuccess('Dados importados ✅', 'CNPJ carregado na transportadora.')
+        }}
+      />
     </div>
   )
 }

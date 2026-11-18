@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { Truck, Plus, Search, Edit2, Trash2, X, Save, ShieldCheck } from 'lucide-react'
+import { Truck, Plus, Search, Edit2, Trash2, X, Save, ShieldCheck, Building2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ModalDialog } from '../components/shared/ModalDialog'
+import { ConsultaCnpjModal } from '../components/shared/ConsultaCnpjModal'
+import { formatarCnpjInput } from '../utils/cnpj'
 
 const FORM_INICIAL = {
   id: null,
@@ -13,9 +15,18 @@ const FORM_INICIAL = {
   nome_fantasia: '',
   cnpj_cpf: '',
   inscricao_estadual: '',
+  endereco: '',
+  numero: '',
+  complemento: '',
+  bairro: '',
+  cep: '',
   uf: 'SP',
   cidade: '',
   telefone: '',
+  email: '',
+  cnae_principal: '',
+  regime_apuracao: '',
+  situacao_cadastral: '',
   registro_sanitario_sif: '',
   prazo_entrega_dias: 5,
 }
@@ -26,6 +37,7 @@ export function Fornecedores() {
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
+  const [cnpjModalOpen, setCnpjModalOpen] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [form, setForm] = useState(FORM_INICIAL)
   const [confirmDlg, setConfirmDlg] = useState({ isOpen: false, target: null })
@@ -77,6 +89,73 @@ export function Fornecedores() {
     }
   }
 
+  const aplicarDadosCnpjNoForm = (dadosReceita, { existingRegistro } = {}) => {
+    const baseExistente = existingRegistro?.id
+      ? lista.find((f) => String(f.id) === String(existingRegistro.id)) || null
+      : null
+
+    setForm((prev) => {
+      const base = baseExistente
+        ? { ...FORM_INICIAL, ...baseExistente, prazo_entrega_dias: Number(baseExistente.prazo_entrega_dias ?? 5) }
+        : prev?.id || modalOpen
+          ? prev
+          : { ...FORM_INICIAL }
+
+      return {
+        ...base,
+        razao_social: dadosReceita.razao_social || base.razao_social,
+        nome_fantasia: dadosReceita.nome_fantasia || dadosReceita.razao_social || base.nome_fantasia,
+        cnpj_cpf: dadosReceita.cnpj_formatado || dadosReceita.cnpj || base.cnpj_cpf,
+        inscricao_estadual: dadosReceita.inscricao_estadual || base.inscricao_estadual,
+        endereco: dadosReceita.endereco || base.endereco,
+        numero: dadosReceita.numero || base.numero,
+        complemento: dadosReceita.complemento || base.complemento,
+        bairro: dadosReceita.bairro || base.bairro,
+        cep: dadosReceita.cep || base.cep,
+        uf: dadosReceita.uf || base.uf,
+        cidade: dadosReceita.cidade || base.cidade,
+        telefone: dadosReceita.telefone || base.telefone,
+        email: dadosReceita.email || base.email,
+        cnae_principal: dadosReceita.cnae_principal || base.cnae_principal,
+        regime_apuracao: dadosReceita.regime_apuracao || base.regime_apuracao,
+        situacao_cadastral: dadosReceita.situacao || base.situacao_cadastral,
+      }
+    })
+    setCnpjModalOpen(false)
+    setModalOpen(true)
+    toastSuccess('Dados importados da Receita ✅', 'Confira os campos (como SIF e prazo) e salve o fornecedor.')
+  }
+
+  const cadastrarDiretoPeloCnpj = async (dadosReceita) => {
+    try {
+      await cadastrosQueries.salvarFornecedor({
+        ...FORM_INICIAL,
+        razao_social: dadosReceita.razao_social,
+        nome_fantasia: dadosReceita.nome_fantasia || dadosReceita.razao_social,
+        cnpj_cpf: dadosReceita.cnpj_formatado || dadosReceita.cnpj,
+        inscricao_estadual: dadosReceita.inscricao_estadual || '',
+        endereco: dadosReceita.endereco || '',
+        numero: dadosReceita.numero || '',
+        complemento: dadosReceita.complemento || '',
+        bairro: dadosReceita.bairro || '',
+        cep: dadosReceita.cep || '',
+        uf: dadosReceita.uf || 'SP',
+        cidade: dadosReceita.cidade || '',
+        telefone: dadosReceita.telefone || '',
+        email: dadosReceita.email || '',
+        cnae_principal: dadosReceita.cnae_principal || '',
+        regime_apuracao: dadosReceita.regime_apuracao || '',
+        situacao_cadastral: dadosReceita.situacao || '',
+        prazo_entrega_dias: 5,
+      })
+      toastSuccess('Fornecedor Cadastrado ✅', `${dadosReceita.razao_social} adicionado à lista de fornecedores!`)
+      setCnpjModalOpen(false)
+      await carregar()
+    } catch (err) {
+      toastError('Erro ao cadastrar fornecedor', err.message)
+    }
+  }
+
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -88,16 +167,26 @@ export function Fornecedores() {
             Frigoríficos, fornecedores de matéria-prima, embalagens, prazo de lead-time e registro sanitário SIF/DIPOA
           </p>
         </div>
-        <button
-          className="btn btn--primary"
-          onClick={() => {
-            setForm(FORM_INICIAL)
-            setModalOpen(true)
-          }}
-          disabled={!isApiEnabled()}
-        >
-          <Plus size={18} /> Novo Fornecedor
-        </button>
+        <div className="flex gap-8 flex-wrap">
+          <button
+            className="btn btn--outline"
+            onClick={() => setCnpjModalOpen(true)}
+            disabled={!isApiEnabled()}
+            title="Consultar CNPJ online na Receita Federal / BrasilAPI / CNPJ.ws"
+          >
+            <Building2 size={17} /> Consultar CNPJ
+          </button>
+          <button
+            className="btn btn--primary"
+            onClick={() => {
+              setForm(FORM_INICIAL)
+              setModalOpen(true)
+            }}
+            disabled={!isApiEnabled()}
+          >
+            <Plus size={18} /> Novo Fornecedor
+          </button>
+        </div>
       </div>
 
       <ApiModeRequiredBanner modulo="Fornecedores" />
@@ -180,9 +269,18 @@ export function Fornecedores() {
                                 nome_fantasia: f.nome_fantasia || '',
                                 cnpj_cpf: f.cnpj_cpf || '',
                                 inscricao_estadual: f.inscricao_estadual || '',
+                                endereco: f.endereco || '',
+                                numero: f.numero || '',
+                                complemento: f.complemento || '',
+                                bairro: f.bairro || '',
+                                cep: f.cep || '',
                                 uf: f.uf || 'SP',
                                 cidade: f.cidade || '',
                                 telefone: f.telefone || '',
+                                email: f.email || '',
+                                cnae_principal: f.cnae_principal || '',
+                                regime_apuracao: f.regime_apuracao || '',
+                                situacao_cadastral: f.situacao_cadastral || '',
                                 registro_sanitario_sif: f.registro_sanitario_sif || '',
                                 prazo_entrega_dias: Number(f.prazo_entrega_dias ?? 5),
                               })
@@ -211,17 +309,20 @@ export function Fornecedores() {
 
       {modalOpen && (
         <div
-          className="flex items-center justify-center p-24 fade-in"
+          className="flex items-center justify-center p-20 fade-in"
           style={{ position: 'fixed', inset: 0, zIndex: 90, backgroundColor: 'rgba(5,9,18,0.82)', backdropFilter: 'blur(4px)' }}
         >
-          <div className="card" style={{ width: '100%', maxWidth: 740, padding: 0, background: 'var(--bg-1)' }}>
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: 860, maxHeight: '92vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}
+          >
             <div className="flex items-center justify-between p-16 border-b border-border" style={{ background: 'var(--bg-2)' }}>
               <h3 className="text-base font-bold">{form.id ? 'Editar Fornecedor' : 'Novo Fornecedor'}</h3>
               <button className="btn-icon" onClick={() => setModalOpen(false)}>
                 <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleSalvar} className="p-20 flex flex-col gap-14">
+            <form onSubmit={handleSalvar} style={{ overflowY: 'auto', padding: 20 }} className="flex flex-col gap-14">
               <div className="form-grid form-grid--3">
                 <div>
                   <label className="form-label">Código</label>
@@ -239,35 +340,96 @@ export function Fornecedores() {
                 </div>
                 <div>
                   <label className="form-label">CNPJ / CPF</label>
-                  <input className="form-input" value={form.cnpj_cpf} onChange={(e) => setForm({ ...form, cnpj_cpf: e.target.value })} />
+                  <div className="flex gap-6">
+                    <input
+                      className="form-input form-input--mono"
+                      style={{ flex: 1 }}
+                      placeholder="00.000.000/0000-00"
+                      value={form.cnpj_cpf}
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        const digits = raw.replace(/\D+/g, '')
+                        setForm({ ...form, cnpj_cpf: digits.length > 11 ? formatarCnpjInput(raw) : raw })
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      title="Consultar CNPJ e preencher automático"
+                      onClick={() => setCnpjModalOpen(true)}
+                    >
+                      <Search size={14} /> CNPJ
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="form-label">Inscrição Estadual</label>
-                  <input className="form-input" value={form.inscricao_estadual} onChange={(e) => setForm({ ...form, inscricao_estadual: e.target.value })} />
+                  <input className="form-input form-input--mono" value={form.inscricao_estadual} onChange={(e) => setForm({ ...form, inscricao_estadual: e.target.value })} />
                 </div>
               </div>
-              <div className="form-grid form-grid--3">
+              <div className="form-grid form-grid--4">
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label className="form-label">Endereço</label>
+                  <input className="form-input" value={form.endereco} onChange={(e) => setForm({ ...form, endereco: e.target.value.toUpperCase() })} />
+                </div>
                 <div>
-                  <label className="form-label">UF</label>
-                  <input className="form-input" maxLength={2} value={form.uf} onChange={(e) => setForm({ ...form, uf: e.target.value.toUpperCase() })} />
+                  <label className="form-label">Número</label>
+                  <input className="form-input" value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} />
+                </div>
+                <div>
+                  <label className="form-label">Bairro</label>
+                  <input className="form-input" value={form.bairro} onChange={(e) => setForm({ ...form, bairro: e.target.value.toUpperCase() })} />
+                </div>
+              </div>
+              <div className="form-grid form-grid--4">
+                <div>
+                  <label className="form-label">Complemento</label>
+                  <input className="form-input" value={form.complemento} onChange={(e) => setForm({ ...form, complemento: e.target.value.toUpperCase() })} />
                 </div>
                 <div>
                   <label className="form-label">Cidade</label>
                   <input className="form-input" value={form.cidade} onChange={(e) => setForm({ ...form, cidade: e.target.value.toUpperCase() })} />
                 </div>
                 <div>
+                  <label className="form-label">UF</label>
+                  <input className="form-input" maxLength={2} value={form.uf} onChange={(e) => setForm({ ...form, uf: e.target.value.toUpperCase() })} />
+                </div>
+                <div>
+                  <label className="form-label">CEP</label>
+                  <input className="form-input form-input--mono" value={form.cep} onChange={(e) => setForm({ ...form, cep: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-grid form-grid--4">
+                <div>
                   <label className="form-label">Telefone</label>
                   <input className="form-input" value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} />
                 </div>
-              </div>
-              <div className="form-grid form-grid--2">
                 <div>
-                  <label className="form-label">Registro Sanitário (SIF / DIPOA / SISBI)</label>
+                  <label className="form-label">E-mail</label>
+                  <input className="form-input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.toLowerCase() })} />
+                </div>
+                <div>
+                  <label className="form-label">Registro Sanitário (SIF / DIPOA)</label>
                   <input className="form-input" value={form.registro_sanitario_sif} onChange={(e) => setForm({ ...form, registro_sanitario_sif: e.target.value.toUpperCase() })} placeholder="Ex: SIF 1929 / DIPOA 007" />
                 </div>
                 <div>
-                  <label className="form-label">Prazo Médio de Entrega (dias)</label>
+                  <label className="form-label">Prazo Médio Entrega (dias)</label>
                   <input type="number" min="0" className="form-input" value={form.prazo_entrega_dias} onChange={(e) => setForm({ ...form, prazo_entrega_dias: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-grid form-grid--3">
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label className="form-label">CNAE Principal</label>
+                  <input className="form-input" value={form.cnae_principal} onChange={(e) => setForm({ ...form, cnae_principal: e.target.value })} />
+                </div>
+                <div>
+                  <label className="form-label">Regime / Situação</label>
+                  <input
+                    className="form-input"
+                    value={form.regime_apuracao}
+                    onChange={(e) => setForm({ ...form, regime_apuracao: e.target.value.toUpperCase() })}
+                    placeholder={form.situacao_cadastral || 'Ex: SIMPLES NACIONAL'}
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-8 pt-12 border-t border-border">
@@ -282,6 +444,15 @@ export function Fornecedores() {
           </div>
         </div>
       )}
+
+      <ConsultaCnpjModal
+        isOpen={cnpjModalOpen}
+        onClose={() => setCnpjModalOpen(false)}
+        cnpjInicial={modalOpen ? form.cnpj_cpf : ''}
+        tipoAlvo="fornecedor"
+        onImportar={aplicarDadosCnpjNoForm}
+        onCadastrarDireto={cadastrarDiretoPeloCnpj}
+      />
 
       <ModalDialog
         isOpen={confirmDlg.isOpen}

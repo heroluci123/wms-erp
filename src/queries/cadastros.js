@@ -87,6 +87,14 @@ export const cadastrosQueries = {
     })
   },
 
+  // ── CONSULTA PÚBLICA DE CNPJ ──────────────────────────────────────────────
+  async consultarCnpj(cnpj, { provedor = 'AUTO', refresh = false } = {}) {
+    exigirApi('Consulta de CNPJ')
+    const digits = String(cnpj || '').replace(/\D+/g, '')
+    const qs = buildQueryString({ provedor, refresh: refresh ? '1' : undefined })
+    return apiRequest(`/api/cadastros/consultar-cnpj/${digits}${qs}`)
+  },
+
   // ── FORNECEDORES ──────────────────────────────────────────────────────────
   async listarFornecedores() {
     if (!isApiEnabled()) return []

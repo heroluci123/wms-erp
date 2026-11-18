@@ -24,6 +24,7 @@ import {
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { sugerirCfopOperacao } from '../wms/helpers.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { consultarCnpjReceita, type ProvedorCnpj } from './cnpjLookup.js'
 
 const optStr = (fallback = '') =>
   z
@@ -103,9 +104,18 @@ const FornecedorSchema = z.object({
   nome_fantasia: optStr(''),
   cnpj_cpf: optStr(''),
   inscricao_estadual: optStr(''),
+  endereco: optStr(''),
+  numero: optStr(''),
+  complemento: optStr(''),
+  bairro: optStr(''),
+  cep: optStr(''),
   uf: z.string().nullish().transform((v) => (v ?? 'SP').trim().toUpperCase().slice(0, 2) || 'SP'),
   cidade: optStr(''),
   telefone: optStr(''),
+  email: optStr(''),
+  cnae_principal: optStr(''),
+  regime_apuracao: optStr(''),
+  situacao_cadastral: optStr(''),
   registro_sanitario_sif: optStr(''),
   prazo_entrega_dias: z.coerce.number().int().min(0).default(5),
 })
@@ -671,6 +681,84 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     }
   )
 
+  // ── CONSULTA PÚBLICA DE CNPJ (RECEITA FEDERAL / MULTI-PROVEDOR) ─────────────
+  app.get(
+    '/api/cadastros/consultar-cnpj/:cnpj',
+    {
+      preHandler: requirePermission(
+        ['fornecedores', 'clientes', 'transportadoras', 'compras', 'recebimento', 'empresas'],
+        { write: false },
+      ),
+    },
+    async (req) => {
+      const ctx = req.authCtx!
+      const { cnpj } = req.params as { cnpj: string }
+      const q = (req.query || {}) as { provedor?: string; refresh?: string }
+      const provedor = (String(q.provedor || 'AUTO').toUpperCase() as ProvedorCnpj) || 'AUTO'
+      const ignorarCache = q.refresh === '1' || q.refresh === 'true'
+
+      const data = await consultarCnpjReceita(cnpj, provedor, { ignorarCache })
+
+      const [fornEx, cliEx, transpEx] = await Promise.all([
+        conn.db
+          .select({
+            id: fornecedores.id,
+            codigo: fornecedores.codigo,
+            razao_social: fornecedores.razaoSocial,
+          })
+          .from(fornecedores)
+          .where(
+            and(
+              eq(fornecedores.tenantId, ctx.tenantId),
+              eq(fornecedores.ativo, 1),
+              sql`REGEXP_REPLACE(${fornecedores.cnpjCpf}, '[^0-9]', '', 'g') = ${data.cnpj}`,
+            ),
+          )
+          .limit(1),
+        conn.db
+          .select({
+            id: clientes.id,
+            codigo: clientes.codigo,
+            razao_social: clientes.razaoSocial,
+          })
+          .from(clientes)
+          .where(
+            and(
+              eq(clientes.tenantId, ctx.tenantId),
+              eq(clientes.ativo, 1),
+              sql`REGEXP_REPLACE(${clientes.cnpjCpf}, '[^0-9]', '', 'g') = ${data.cnpj}`,
+            ),
+          )
+          .limit(1),
+        conn.db
+          .select({
+            id: transportadoras.id,
+            codigo: transportadoras.codigo,
+            razao_social: transportadoras.razaoSocial,
+          })
+          .from(transportadoras)
+          .where(
+            and(
+              eq(transportadoras.tenantId, ctx.tenantId),
+              eq(transportadoras.ativo, 1),
+              sql`REGEXP_REPLACE(${transportadoras.cnpjCpf}, '[^0-9]', '', 'g') = ${data.cnpj}`,
+            ),
+          )
+          .limit(1),
+      ])
+
+      return {
+        success: true,
+        data,
+        ja_cadastrado: {
+          fornecedor: fornEx[0] || null,
+          cliente: cliEx[0] || null,
+          transportadora: transpEx[0] || null,
+        },
+      }
+    },
+  )
+
   // ── FORNECEDORES ────────────────────────────────────────────────────────────
   app.get(
     '/api/cadastros/fornecedores',
@@ -685,9 +773,18 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           nome_fantasia: fornecedores.nomeFantasia,
           cnpj_cpf: fornecedores.cnpjCpf,
           inscricao_estadual: fornecedores.inscricaoEstadual,
+          endereco: fornecedores.endereco,
+          numero: fornecedores.numero,
+          complemento: fornecedores.complemento,
+          bairro: fornecedores.bairro,
+          cep: fornecedores.cep,
           uf: fornecedores.uf,
           cidade: fornecedores.cidade,
           telefone: fornecedores.telefone,
+          email: fornecedores.email,
+          cnae_principal: fornecedores.cnaePrincipal,
+          regime_apuracao: fornecedores.regimeApuracao,
+          situacao_cadastral: fornecedores.situacaoCadastral,
           registro_sanitario_sif: fornecedores.registroSanitarioSif,
           prazo_entrega_dias: fornecedores.prazoEntregaDias,
           ativo: fornecedores.ativo,
@@ -717,9 +814,18 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         nomeFantasia: d.nome_fantasia || d.razao_social,
         cnpjCpf: d.cnpj_cpf,
         inscricaoEstadual: d.inscricao_estadual,
+        endereco: d.endereco,
+        numero: d.numero,
+        complemento: d.complemento,
+        bairro: d.bairro,
+        cep: d.cep,
         uf: d.uf,
         cidade: d.cidade,
         telefone: d.telefone,
+        email: d.email,
+        cnaePrincipal: d.cnae_principal,
+        regimeApuracao: d.regime_apuracao,
+        situacaoCadastral: d.situacao_cadastral,
         registroSanitarioSif: d.registro_sanitario_sif,
         prazoEntregaDias: d.prazo_entrega_dias,
       })
@@ -741,9 +847,18 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         nomeFantasia: d.nome_fantasia || d.razao_social,
         cnpjCpf: d.cnpj_cpf,
         inscricaoEstadual: d.inscricao_estadual,
+        endereco: d.endereco,
+        numero: d.numero,
+        complemento: d.complemento,
+        bairro: d.bairro,
+        cep: d.cep,
         uf: d.uf,
         cidade: d.cidade,
         telefone: d.telefone,
+        email: d.email,
+        cnaePrincipal: d.cnae_principal,
+        regimeApuracao: d.regime_apuracao,
+        situacaoCadastral: d.situacao_cadastral,
         registroSanitarioSif: d.registro_sanitario_sif,
         prazoEntregaDias: d.prazo_entrega_dias,
       })

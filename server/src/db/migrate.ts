@@ -364,9 +364,18 @@ CREATE TABLE IF NOT EXISTS fornecedores (
   nome_fantasia TEXT NOT NULL,
   cnpj_cpf TEXT NOT NULL DEFAULT '',
   inscricao_estadual TEXT NOT NULL DEFAULT '',
+  endereco TEXT NOT NULL DEFAULT '',
+  numero TEXT NOT NULL DEFAULT '',
+  complemento TEXT NOT NULL DEFAULT '',
+  bairro TEXT NOT NULL DEFAULT '',
+  cep TEXT NOT NULL DEFAULT '',
   uf TEXT NOT NULL DEFAULT 'SP',
   cidade TEXT NOT NULL DEFAULT '',
   telefone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  cnae_principal TEXT NOT NULL DEFAULT '',
+  regime_apuracao TEXT NOT NULL DEFAULT '',
+  situacao_cadastral TEXT NOT NULL DEFAULT '',
   registro_sanitario_sif TEXT NOT NULL DEFAULT '',
   prazo_entrega_dias INTEGER NOT NULL DEFAULT 5,
   ativo INTEGER NOT NULL DEFAULT 1,
@@ -1245,6 +1254,15 @@ ALTER TABLE pedidos_compra_itens ADD COLUMN IF NOT EXISTS temperatura_c NUMERIC(
 ALTER TABLE pedidos_compra_itens ADD COLUMN IF NOT EXISTS temperatura_registrada_em TIMESTAMPTZ;
 ALTER TABLE pedidos_compra_itens ADD COLUMN IF NOT EXISTS temperatura_registrada_por TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_pre_caixas_forn_status ON recebimento_pre_caixas(tenant_id, fornecedor_id, status);
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS endereco TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS numero TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS complemento TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS bairro TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS cep TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS cnae_principal TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS regime_apuracao TEXT NOT NULL DEFAULT '';
+ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS situacao_cadastral TEXT NOT NULL DEFAULT '';
 `
 
 export interface SeedDefaultsResult {
