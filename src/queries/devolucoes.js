@@ -288,7 +288,53 @@ export const devolucoesQueries = {
     }))
   },
 
-  async finalizarDevolucao({ eans = [], motivo, acao_estoque = 'DISPONIVEL', endereco_destino = 'REC', observacoes = '' }) {
+  async buscarDevolucoesAbertasPorPedidos(pedidosCodigos = []) {
+    const listaPed = Array.from(
+      new Set((pedidosCodigos || []).map((p) => String(p || '').trim().toUpperCase()).filter(Boolean)),
+    )
+    if (listaPed.length === 0) return []
+
+    if (isApiEnabled()) {
+      return (
+        (
+          await apiRequest(
+            `/api/devolucoes/abertas-por-pedido${buildQueryString({ pedidos: listaPed.join(',') })}`,
+          )
+        ).data || []
+      )
+    }
+
+    await assertPermissao(PERM_READ, { write: false, bloquearCliente: true })
+    await ensureDevolucoesSchema()
+
+    const res = await db.execute({
+      sql: `
+        SELECT id, codigo, motivo, acao_estoque, endereco_destino, pedido_id, pedido_codigo,
+               romaneio_id, romaneio_codigo, cliente_nome, observacoes, qtd_caixas, peso_total_kg, valor_estimado, created_at
+        FROM devolucoes
+        WHERE status_fiscal = 'PENDENTE_FATURAMENTO'
+        ORDER BY id DESC
+        LIMIT 80
+      `,
+      args: [],
+    })
+    return (res.rows || []).filter((d) => {
+      const peds = String(d.pedido_codigo || '')
+        .split(',')
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean)
+      return peds.some((p) => listaPed.includes(p))
+    })
+  },
+
+  async finalizarDevolucao({
+    eans = [],
+    motivo,
+    acao_estoque = 'DISPONIVEL',
+    endereco_destino = 'REC',
+    observacoes = '',
+    devolucao_destino_id = null,
+  }) {
     const eansLimpos = Array.from(new Set(eans.map((e) => String(e || '').trim()).filter(Boolean)))
     if (eansLimpos.length === 0) {
       throw new Error('Bipe ao menos 1 caixa antes de finalizar a devolução.')
@@ -306,6 +352,7 @@ export const devolucoesQueries = {
           acao_estoque,
           endereco_destino,
           observacoes,
+          devolucao_destino_id: devolucao_destino_id || undefined,
         },
       })
     }
@@ -326,11 +373,9 @@ export const devolucoesQueries = {
       resolvidas.push(cx)
     }
 
-    const maxRes = await db.execute('SELECT MAX(id) AS max_id FROM devolucoes')
-    const seq = Number(maxRes.rows[0]?.max_id || 0) + 1
-    const codigo = `DEV-${String(seq).padStart(4, '0')}`
-    const pesoTotalKg = Number(resolvidas.reduce((s, r) => s + Number(r.peso_kg || 0), 0).toFixed(3))
-    const valorEstimado = Number(
+    const obsNova = String(observacoes || '').trim()
+    const pesoLoteKg = Number(resolvidas.reduce((s, r) => s + Number(r.peso_kg || 0), 0).toFixed(3))
+    const valorLote = Number(
       resolvidas.reduce((s, r) => s + Number(r.peso_kg || 0) * Number(r.preco_unitario || 0), 0).toFixed(2),
     )
 
@@ -343,40 +388,64 @@ export const devolucoesQueries = {
     const romaneioCodigoResumo = romaneiosUnicos.join(', ')
     const clienteResumo = clientesUnicos.join(', ')
 
-    const insDev = await db.execute({
-      sql: `
-        INSERT INTO devolucoes (
-          codigo, motivo, acao_estoque, endereco_destino, pedido_id, pedido_codigo,
-          romaneio_id, romaneio_codigo, cliente_nome, observacoes, status, status_fiscal,
-          qtd_caixas, peso_total_kg, valor_estimado, operador_id, operador_nome
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONCLUIDA_FISICA', 'PENDENTE_FATURAMENTO', ?, ?, ?, ?, ?)
-      `,
-      args: [
-        codigo,
-        motivo,
-        acaoFinal,
-        endFinal,
-        pedidoIdHeader,
-        pedidoCodigoResumo,
-        romaneioIdHeader,
-        romaneioCodigoResumo,
-        clienteResumo,
-        String(observacoes || '').trim(),
-        resolvidas.length,
-        pesoTotalKg,
-        valorEstimado,
-        opId,
-        opNome,
-      ],
-    })
-    const devId = Number(insDev.lastInsertRowid)
+    let devId = null
+    let codigo = ''
+
+    if (devolucao_destino_id) {
+      const exRes = await db.execute({
+        sql: 'SELECT * FROM devolucoes WHERE id = ? LIMIT 1',
+        args: [Number(devolucao_destino_id)],
+      })
+      const ex = exRes.rows[0]
+      if (!ex) {
+        throw new Error('Romaneio de devolução de destino não encontrado.')
+      }
+      if (ex.status_fiscal !== 'PENDENTE_FATURAMENTO') {
+        throw new Error(`A devolução ${ex.codigo} já teve tratativa fiscal encerrada e não aceita novos itens.`)
+      }
+      devId = Number(ex.id)
+      codigo = ex.codigo
+    } else {
+      const maxRes = await db.execute('SELECT MAX(id) AS max_id FROM devolucoes')
+      const seq = Number(maxRes.rows[0]?.max_id || 0) + 1
+      codigo = `DEV-${String(seq).padStart(4, '0')}`
+      const insDev = await db.execute({
+        sql: `
+          INSERT INTO devolucoes (
+            codigo, motivo, acao_estoque, endereco_destino, pedido_id, pedido_codigo,
+            romaneio_id, romaneio_codigo, cliente_nome, observacoes, status, status_fiscal,
+            qtd_caixas, peso_total_kg, valor_estimado, operador_id, operador_nome
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONCLUIDA_FISICA', 'PENDENTE_FATURAMENTO', ?, ?, ?, ?, ?)
+        `,
+        args: [
+          codigo,
+          motivo,
+          acaoFinal,
+          endFinal,
+          pedidoIdHeader,
+          pedidoCodigoResumo,
+          romaneioIdHeader,
+          romaneioCodigoResumo,
+          clienteResumo,
+          obsNova,
+          resolvidas.length,
+          pesoLoteKg,
+          valorLote,
+          opId,
+          opNome,
+        ],
+      })
+      devId = Number(insDev.lastInsertRowid)
+    }
+
     const motivoLabel = MOTIVOS_LABEL[motivo] || motivo
     const statusDesc = acaoFinal === 'BLOQUEADO' ? 'QUARENTENA / BLOQUEADO' : 'DISPONIVEL NO ESTOQUE'
     const endsAfetados = new Set([endFinal])
+    const stmts = []
 
     for (const r of resolvidas) {
       if (r.endereco) endsAfetados.add(r.endereco)
-      await db.execute({
+      stmts.push({
         sql: `
           INSERT INTO devolucao_itens (
             devolucao_id, caixa_id, ean_caixa, produto_id, produto_codigo, produto_descricao,
@@ -403,7 +472,7 @@ export const devolucoesQueries = {
         ],
       })
 
-      await db.execute({
+      stmts.push({
         sql: `
           UPDATE estoque_caixas
           SET status = ?,
@@ -421,7 +490,7 @@ export const devolucoesQueries = {
         args: [acaoFinal, endFinal, r.id],
       })
 
-      await db.execute({
+      stmts.push({
         sql: `
           INSERT INTO caixas_historico (caixa_id, ean_caixa, operacao, detalhes, operador_nome)
           VALUES (?, ?, 'DEVOLUCAO', ?, ?)
@@ -434,10 +503,10 @@ export const devolucoesQueries = {
         ],
       })
 
-      await db.execute({
+      stmts.push({
         sql: `
           INSERT INTO movimentacoes_log (produto_id, endereco_origem, endereco_destino, lote, qtd_caixas, qtd_kg, operador_id, operador_nome, tipo, num_pedido, cliente)
-          VALUES (?, 'SAIDA', ?, ?, 1, ?, ?, ?, 'DEVOLUCAO', ?, ?)
+          VALUES (?, 'SAIDA', ?, ?, 1, ?, ?, ?, 'AJUSTE', ?, ?)
         `,
         args: [
           r.produto_id,
@@ -452,23 +521,145 @@ export const devolucoesQueries = {
       })
     }
 
+    await db.batch(stmts, 'write')
+
+    // Recalcular totais exatos do cabeçalho a partir de todos os itens (garante consistência quando anexado a um romaneio existente)
+    const itensAllRes = await db.execute({
+      sql: `SELECT * FROM devolucao_itens WHERE devolucao_id = ? ORDER BY id ASC`,
+      args: [devId],
+    })
+    const todosItens = itensAllRes.rows || []
+    const totalCaixasFinal = todosItens.length
+    const pesoTotalFinal = Number(todosItens.reduce((s, i) => s + Number(i.peso_kg || 0), 0).toFixed(3))
+    const valorFinal = Number(
+      todosItens.reduce((s, i) => s + Number(i.peso_kg || 0) * Number(i.preco_unitario || 0), 0).toFixed(2),
+    )
+    const pedsFinal = Array.from(new Set(todosItens.map((i) => i.pedido_codigo).filter(Boolean))).join(', ')
+    const romsFinal = Array.from(new Set(todosItens.map((i) => i.romaneio_codigo).filter(Boolean))).join(', ')
+    const clisFinal = Array.from(new Set(todosItens.map((i) => i.cliente_nome).filter(Boolean))).join(', ')
+
+    if (devolucao_destino_id) {
+      await db.execute({
+        sql: `
+          UPDATE devolucoes
+          SET qtd_caixas = ?,
+              peso_total_kg = ?,
+              valor_estimado = ?,
+              pedido_codigo = ?,
+              romaneio_codigo = ?,
+              cliente_nome = ?,
+              observacoes = CASE WHEN ? != '' AND observacoes != ? THEN CASE WHEN observacoes = '' THEN ? ELSE observacoes || ' | ' || ? END ELSE observacoes END
+          WHERE id = ?
+        `,
+        args: [
+          totalCaixasFinal,
+          pesoTotalFinal,
+          valorFinal,
+          pedsFinal,
+          romsFinal,
+          clisFinal,
+          obsNova,
+          obsNova,
+          obsNova,
+          obsNova,
+          devId,
+        ],
+      })
+    }
+
     await recalcularPosicaoEnderecos([...endsAfetados])
 
     return {
       success: true,
       id: devId,
       codigo,
+      anexado_em_existente: Boolean(devolucao_destino_id),
       motivo,
       motivo_label: motivoLabel,
       acao_estoque: acaoFinal,
       endereco_destino: endFinal,
-      pedido_codigo: pedidoCodigoResumo,
-      romaneio_codigo: romaneioCodigoResumo,
-      cliente_nome: clienteResumo,
-      qtd_caixas: resolvidas.length,
-      peso_total_kg: pesoTotalKg,
-      valor_estimado: valorEstimado,
+      pedido_codigo: pedsFinal || pedidoCodigoResumo,
+      romaneio_codigo: romsFinal || romaneioCodigoResumo,
+      cliente_nome: clisFinal || clienteResumo,
+      qtd_caixas: totalCaixasFinal,
+      peso_total_kg: pesoTotalFinal,
+      valor_estimado: valorFinal,
+      itens: todosItens,
     }
+  },
+
+  async mesclarDevolucoes(devolucaoDestinoId, devolucaoOrigemId) {
+    if (String(devolucaoDestinoId) === String(devolucaoOrigemId)) {
+      throw new Error('Selecione dois romaneios de devolução diferentes para unificar.')
+    }
+    if (isApiEnabled()) {
+      return await apiRequest(`/api/devolucoes/${devolucaoDestinoId}/mesclar`, {
+        method: 'POST',
+        body: { devolucao_origem_id: devolucaoOrigemId },
+      })
+    }
+
+    await assertPermissao(PERM_FISCAL)
+    await ensureDevolucoesSchema()
+
+    const destId = Number(devolucaoDestinoId)
+    const origId = Number(devolucaoOrigemId)
+    const [destRes, origRes] = await Promise.all([
+      db.execute({ sql: 'SELECT * FROM devolucoes WHERE id = ? LIMIT 1', args: [destId] }),
+      db.execute({ sql: 'SELECT * FROM devolucoes WHERE id = ? LIMIT 1', args: [origId] }),
+    ])
+    const dest = destRes.rows[0]
+    const orig = origRes.rows[0]
+    if (!dest || !orig) throw new Error('Um dos registros de devolução não foi encontrado.')
+    if (dest.status_fiscal !== 'PENDENTE_FATURAMENTO' || orig.status_fiscal !== 'PENDENTE_FATURAMENTO') {
+      throw new Error('Só é possível unificar devoluções que ainda estejam pendentes de tratativa fiscal.')
+    }
+
+    const itensOrig = (
+      await db.execute({ sql: 'SELECT caixa_id FROM devolucao_itens WHERE devolucao_id = ?', args: [origId] })
+    ).rows || []
+
+    const batchStmts = [
+      {
+        sql: 'UPDATE devolucao_itens SET devolucao_id = ? WHERE devolucao_id = ?',
+        args: [destId, origId],
+      },
+      ...itensOrig.map((it) => ({
+        sql: `UPDATE caixas_historico SET detalhes = REPLACE(detalhes, ?, ?) WHERE caixa_id = ? AND operacao = 'DEVOLUCAO'`,
+        args: [orig.codigo, dest.codigo, it.caixa_id],
+      })),
+      {
+        sql: 'DELETE FROM devolucoes WHERE id = ?',
+        args: [origId],
+      },
+    ]
+    await db.batch(batchStmts, 'write')
+
+    const itensAllRes = await db.execute({
+      sql: 'SELECT * FROM devolucao_itens WHERE devolucao_id = ? ORDER BY id ASC',
+      args: [destId],
+    })
+    const todosItens = itensAllRes.rows || []
+    const qtd = todosItens.length
+    const peso = Number(todosItens.reduce((s, i) => s + Number(i.peso_kg || 0), 0).toFixed(3))
+    const valor = Number(
+      todosItens.reduce((s, i) => s + Number(i.peso_kg || 0) * Number(i.preco_unitario || 0), 0).toFixed(2),
+    )
+    const peds = Array.from(new Set(todosItens.map((i) => i.pedido_codigo).filter(Boolean))).join(', ')
+    const roms = Array.from(new Set(todosItens.map((i) => i.romaneio_codigo).filter(Boolean))).join(', ')
+    const clis = Array.from(new Set(todosItens.map((i) => i.cliente_nome).filter(Boolean))).join(', ')
+
+    await db.execute({
+      sql: `
+        UPDATE devolucoes
+        SET qtd_caixas = ?, peso_total_kg = ?, valor_estimado = ?,
+            pedido_codigo = ?, romaneio_codigo = ?, cliente_nome = ?
+        WHERE id = ?
+      `,
+      args: [qtd, peso, valor, peds, roms, clis, destId],
+    })
+
+    return { success: true, id: destId, codigo: dest.codigo, codigo_removido: orig.codigo, qtd_caixas: qtd, peso_total_kg: peso }
   },
 
   async tratarFiscal(devolucaoId, { status_fiscal, numero_nf_devolucao = '', observacoes }) {

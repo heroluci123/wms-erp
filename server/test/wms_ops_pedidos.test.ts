@@ -627,6 +627,18 @@ test('WMS Parte 2C: Pedido -> Separacao (+50% e Extra) -> Conferencia -> Expedic
     })
     assert.equal(resLibQuar.statusCode, 200, `Liberar quarentena falhou: ${resLibQuar.body}`)
 
+    // Sugestão de agrupamento deve retornar essa devolução em aberto para o mesmo pedido
+    const devSugAntes = await app.inject({
+      method: 'GET',
+      url: `/api/devolucoes/abertas-por-pedido?pedidos=${encodeURIComponent(pedPosDev.json().data.codigo)}`,
+      headers,
+    })
+    assert.equal(devSugAntes.statusCode, 200)
+    assert.ok(
+      (devSugAntes.json().data || []).some((d: any) => d.id === devBody.id),
+      'Esperava devolucao aberta para agrupamento pelo mesmo pedido',
+    )
+
     // Baixa fiscal pelo Faturamento -> conclui pendencia DEVOLUCAO_FISCAL
     const resTratarFiscal = await app.inject({
       method: 'POST',

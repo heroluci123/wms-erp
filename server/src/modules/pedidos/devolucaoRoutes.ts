@@ -186,6 +186,65 @@ export function registerDevolucaoRoutes(app: FastifyInstance, conn: DbConnection
     },
   )
 
+  // Sugestões de devoluções abertas (PENDENTE_FATURAMENTO) para agrupar caixas do mesmo pedido
+  app.get(
+    '/api/devolucoes/abertas-por-pedido',
+    { preHandler: requirePermission(PERM_DEV_READ, { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const q = req.query as { pedidos?: string }
+      const listaPed = String(q.pedidos || '')
+        .split(',')
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean)
+      if (listaPed.length === 0) return { data: [] }
+
+      const rows = await conn.db
+        .select({
+          id: devolucoes.id,
+          codigo: devolucoes.codigo,
+          motivo: devolucoes.motivo,
+          acao_estoque: devolucoes.acaoEstoque,
+          endereco_destino: devolucoes.enderecoDestino,
+          pedido_id: devolucoes.pedidoId,
+          pedido_codigo: devolucoes.pedidoCodigo,
+          romaneio_id: devolucoes.romaneioId,
+          romaneio_codigo: devolucoes.romaneioCodigo,
+          cliente_nome: devolucoes.clienteNome,
+          observacoes: devolucoes.observacoes,
+          qtd_caixas: devolucoes.qtdCaixas,
+          peso_total_kg: devolucoes.pesoTotalKg,
+          valor_estimado: devolucoes.valorEstimado,
+          created_at: devolucoes.createdAt,
+        })
+        .from(devolucoes)
+        .where(
+          and(
+            eq(devolucoes.tenantId, ctx.tenantId),
+            eq(devolucoes.filialId, ctx.filialId),
+            eq(devolucoes.statusFiscal, 'PENDENTE_FATURAMENTO'),
+          ),
+        )
+        .orderBy(desc(devolucoes.createdAt))
+        .limit(80)
+
+      const filtradas = rows
+        .filter((d) =>
+          String(d.pedido_codigo || '')
+            .split(',')
+            .map((p) => p.trim().toUpperCase())
+            .some((p) => listaPed.includes(p)),
+        )
+        .map((d) => ({
+          ...d,
+          peso_total_kg: toNum(d.peso_total_kg, 0),
+          valor_estimado: toNum(d.valor_estimado, 0),
+        }))
+
+      return { data: filtradas }
+    },
+  )
+
   // Lista devoluções registradas (com filtros e itens)
   app.get(
     '/api/devolucoes',
@@ -301,6 +360,7 @@ export function registerDevolucaoRoutes(app: FastifyInstance, conn: DbConnection
         acao_estoque?: 'DISPONIVEL' | 'BLOQUEADO'
         endereco_destino?: string
         observacoes?: string
+        devolucao_destino_id?: string | null
       }
 
       const eansRaw = Array.isArray(body.eans)
@@ -392,10 +452,36 @@ export function registerDevolucaoRoutes(app: FastifyInstance, conn: DbConnection
           })
         }
 
-        const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'DEVOLUCAO', 'DEV', 4)
-        const devId = uuidv7()
-        const pesoTotalKg = Number(resolvidas.reduce((s, r) => s + r.pesoKg, 0).toFixed(3))
-        const valorEstimado = Number(resolvidas.reduce((s, r) => s + r.pesoKg * r.precoUnitario, 0).toFixed(2))
+        const devDestinoId = body.devolucao_destino_id
+          ? parseUuidOrBadRequest(body.devolucao_destino_id, 'devolucao_destino_id')
+          : null
+        const obsNova = String(body.observacoes || '').trim()
+
+        let devId = ''
+        let codigo = ''
+
+        if (devDestinoId) {
+          const [exDev] = await tx
+            .select()
+            .from(devolucoes)
+            .where(and(eq(devolucoes.id, devDestinoId), eq(devolucoes.tenantId, ctx.tenantId)))
+            .limit(1)
+          if (!exDev) throw new HttpError(404, 'Romaneio de devolução de destino não encontrado.')
+          if (exDev.statusFiscal !== 'PENDENTE_FATURAMENTO') {
+            throw new HttpError(
+              400,
+              `A devolução ${exDev.codigo} já teve tratativa fiscal encerrada e não aceita novos itens.`,
+            )
+          }
+          devId = exDev.id
+          codigo = exDev.codigo
+        } else {
+          codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'DEVOLUCAO', 'DEV', 4)
+          devId = uuidv7()
+        }
+
+        const pesoLoteKg = Number(resolvidas.reduce((s, r) => s + r.pesoKg, 0).toFixed(3))
+        const valorLote = Number(resolvidas.reduce((s, r) => s + r.pesoKg * r.precoUnitario, 0).toFixed(2))
 
         const pedidosUnicos = Array.from(new Set(resolvidas.map((r) => r.pedidoCodigo).filter(Boolean)))
         const romaneiosUnicos = Array.from(new Set(resolvidas.map((r) => r.romaneioCodigo).filter(Boolean)))
@@ -407,28 +493,30 @@ export function registerDevolucaoRoutes(app: FastifyInstance, conn: DbConnection
         const romaneioCodigoResumo = romaneiosUnicos.join(', ')
         const clienteResumo = clientesUnicos.join(', ')
 
-        await tx.insert(devolucoes).values({
-          id: devId,
-          tenantId: ctx.tenantId,
-          filialId: ctx.filialId,
-          codigo,
-          motivo,
-          acaoEstoque,
-          enderecoDestino,
-          pedidoId: pedidoIdHeader,
-          pedidoCodigo: pedidoCodigoResumo,
-          romaneioId: romaneioIdHeader,
-          romaneioCodigo: romaneioCodigoResumo,
-          clienteNome: clienteResumo,
-          observacoes: String(body.observacoes || '').trim(),
-          status: 'CONCLUIDA_FISICA',
-          statusFiscal: 'PENDENTE_FATURAMENTO',
-          qtdCaixas: resolvidas.length,
-          pesoTotalKg: toDec(pesoTotalKg, 3),
-          valorEstimado: toDec(valorEstimado, 2),
-          operadorId: ctx.operador.id,
-          operadorNome: ctx.operador.nome,
-        })
+        if (!devDestinoId) {
+          await tx.insert(devolucoes).values({
+            id: devId,
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            codigo,
+            motivo,
+            acaoEstoque,
+            enderecoDestino,
+            pedidoId: pedidoIdHeader,
+            pedidoCodigo: pedidoCodigoResumo,
+            romaneioId: romaneioIdHeader,
+            romaneioCodigo: romaneioCodigoResumo,
+            clienteNome: clienteResumo,
+            observacoes: obsNova,
+            status: 'CONCLUIDA_FISICA',
+            statusFiscal: 'PENDENTE_FATURAMENTO',
+            qtdCaixas: resolvidas.length,
+            pesoTotalKg: toDec(pesoLoteKg, 3),
+            valorEstimado: toDec(valorLote, 2),
+            operadorId: ctx.operador.id,
+            operadorNome: ctx.operador.nome,
+          })
+        }
 
         await tx.insert(devolucaoItens).values(
           resolvidas.map((r) => ({
@@ -513,37 +601,169 @@ export function registerDevolucaoRoutes(app: FastifyInstance, conn: DbConnection
 
         await recalcularPosicaoEnderecos(tx, ctx.tenantId, ctx.filialId, [...endsAfetados])
 
-        // Desacoplamento Físico x Fiscal: cria tarefa para Faturamento emitir NF Devolução / ajustar título
-        await tx.insert(pendenciasSetor).values({
-          id: uuidv7(),
-          tenantId: ctx.tenantId,
-          filialId: ctx.filialId,
-          setorDestino: 'FATURAMENTO',
-          tipoPendencia: 'DEVOLUCAO_FISCAL',
-          referenciaTabela: 'devolucoes',
-          referenciaId: devId,
-          titulo: `${codigo} • Devolução física de ${resolvidas.length} cx (${pesoTotalKg.toFixed(2)} kg) [${motivoLabel}]${pedidoCodigoResumo ? ` — Ped. ${pedidoCodigoResumo}` : ''}${clienteResumo ? ` (${clienteResumo})` : ''}`,
-          prioridade: motivo === 'VALIDADE' ? 3 : 2,
-          status: 'PENDENTE',
-        })
+        const todosItens = await tx
+          .select()
+          .from(devolucaoItens)
+          .where(eq(devolucaoItens.devolucaoId, devId))
+
+        const totalCaixasFinal = todosItens.length
+        const pesoTotalFinal = Number(todosItens.reduce((s, i) => s + toNum(i.pesoKg, 0), 0).toFixed(3))
+        const valorFinal = Number(
+          todosItens.reduce((s, i) => s + toNum(i.pesoKg, 0) * toNum(i.precoUnitario, 0), 0).toFixed(2),
+        )
+        const pedsFinal = Array.from(new Set(todosItens.map((i) => i.pedidoCodigo).filter(Boolean))).join(', ')
+        const romsFinal = Array.from(new Set(todosItens.map((i) => i.romaneioCodigo).filter(Boolean))).join(', ')
+        const clisFinal = Array.from(new Set(todosItens.map((i) => i.clienteNome).filter(Boolean))).join(', ')
+
+        if (devDestinoId) {
+          await tx
+            .update(devolucoes)
+            .set({
+              qtdCaixas: totalCaixasFinal,
+              pesoTotalKg: toDec(pesoTotalFinal, 3),
+              valorEstimado: toDec(valorFinal, 2),
+              pedidoCodigo: pedsFinal,
+              romaneioCodigo: romsFinal,
+              clienteNome: clisFinal,
+            })
+            .where(eq(devolucoes.id, devId))
+
+          await tx
+            .update(pendenciasSetor)
+            .set({
+              titulo: `${codigo} • Devolução física de ${totalCaixasFinal} cx (${pesoTotalFinal.toFixed(2)} kg) [${motivoLabel}]${pedsFinal ? ` — Ped. ${pedsFinal}` : ''}${clisFinal ? ` (${clisFinal})` : ''}`,
+            })
+            .where(
+              and(
+                eq(pendenciasSetor.tenantId, ctx.tenantId),
+                eq(pendenciasSetor.referenciaTabela, 'devolucoes'),
+                eq(pendenciasSetor.referenciaId, devId),
+              ),
+            )
+        } else {
+          // Desacoplamento Físico x Fiscal: cria tarefa para Faturamento emitir NF Devolução / ajustar título
+          await tx.insert(pendenciasSetor).values({
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            setorDestino: 'FATURAMENTO',
+            tipoPendencia: 'DEVOLUCAO_FISCAL',
+            referenciaTabela: 'devolucoes',
+            referenciaId: devId,
+            titulo: `${codigo} • Devolução física de ${totalCaixasFinal} cx (${pesoTotalFinal.toFixed(2)} kg) [${motivoLabel}]${pedsFinal ? ` — Ped. ${pedsFinal}` : ''}${clisFinal ? ` (${clisFinal})` : ''}`,
+            prioridade: motivo === 'VALIDADE' ? 3 : 2,
+            status: 'PENDENTE',
+          })
+        }
 
         return {
           id: devId,
           codigo,
+          anexado_em_existente: Boolean(devDestinoId),
           motivo,
           motivo_label: motivoLabel,
           acao_estoque: acaoEstoque,
           endereco_destino: enderecoDestino,
-          pedido_codigo: pedidoCodigoResumo,
-          romaneio_codigo: romaneioCodigoResumo,
-          cliente_nome: clienteResumo,
-          qtd_caixas: resolvidas.length,
-          peso_total_kg: pesoTotalKg,
-          valor_estimado: valorEstimado,
+          pedido_codigo: pedsFinal || pedidoCodigoResumo,
+          romaneio_codigo: romsFinal || romaneioCodigoResumo,
+          cliente_nome: clisFinal || clienteResumo,
+          qtd_caixas: totalCaixasFinal,
+          peso_total_kg: pesoTotalFinal,
+          valor_estimado: valorFinal,
+          itens: todosItens.map((i) => ({
+            id: i.id,
+            devolucao_id: i.devolucaoId,
+            caixa_id: i.caixaId,
+            ean_caixa: i.eanCaixa,
+            produto_id: i.produtoId,
+            produto_codigo: i.produtoCodigo,
+            produto_descricao: i.produtoDescricao,
+            lote: i.lote,
+            validade: i.validade,
+            peso_kg: toNum(i.pesoKg, 0),
+            preco_unitario: toNum(i.precoUnitario, 0),
+            pedido_id: i.pedidoId,
+            pedido_codigo: i.pedidoCodigo,
+            romaneio_id: i.romaneioId,
+            romaneio_codigo: i.romaneioCodigo,
+            cliente_nome: i.clienteNome,
+          })),
         }
       })
 
       return reply.code(201).send({ success: true, ...result })
+    },
+  )
+
+  // Unifica dois romaneios de devolução abertos (PENDENTE_FATURAMENTO) em um único documento
+  app.post(
+    '/api/devolucoes/:id/mesclar',
+    { preHandler: requirePermission(PERM_DEV_FISCAL) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const destId = parseUuidOrBadRequest((req.params as { id: string }).id, 'devolucao_destino_id')
+      const body = (req.body || {}) as { devolucao_origem_id?: string }
+      const origId = parseUuidOrBadRequest(body.devolucao_origem_id, 'devolucao_origem_id')
+      if (destId === origId) throw new HttpError(400, 'Selecione dois romaneios diferentes.')
+
+      const res = await conn.db.transaction(async (tx) => {
+        const [dest] = await tx
+          .select()
+          .from(devolucoes)
+          .where(and(eq(devolucoes.id, destId), eq(devolucoes.tenantId, ctx.tenantId)))
+          .limit(1)
+        const [orig] = await tx
+          .select()
+          .from(devolucoes)
+          .where(and(eq(devolucoes.id, origId), eq(devolucoes.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!dest || !orig) throw new HttpError(404, 'Devolução não encontrada.')
+        if (dest.statusFiscal !== 'PENDENTE_FATURAMENTO' || orig.statusFiscal !== 'PENDENTE_FATURAMENTO') {
+          throw new HttpError(400, 'Só é possível unificar devoluções pendentes de tratativa fiscal.')
+        }
+
+        await tx
+          .update(devolucaoItens)
+          .set({ devolucaoId: destId })
+          .where(eq(devolucaoItens.devolucaoId, origId))
+
+        await tx
+          .delete(pendenciasSetor)
+          .where(
+            and(
+              eq(pendenciasSetor.tenantId, ctx.tenantId),
+              eq(pendenciasSetor.referenciaTabela, 'devolucoes'),
+              eq(pendenciasSetor.referenciaId, origId),
+            ),
+          )
+        await tx.delete(devolucoes).where(eq(devolucoes.id, origId))
+
+        const todosItens = await tx.select().from(devolucaoItens).where(eq(devolucaoItens.devolucaoId, destId))
+        const qtd = todosItens.length
+        const peso = Number(todosItens.reduce((s, i) => s + toNum(i.pesoKg, 0), 0).toFixed(3))
+        const valor = Number(
+          todosItens.reduce((s, i) => s + toNum(i.pesoKg, 0) * toNum(i.precoUnitario, 0), 0).toFixed(2),
+        )
+        const peds = Array.from(new Set(todosItens.map((i) => i.pedidoCodigo).filter(Boolean))).join(', ')
+        const roms = Array.from(new Set(todosItens.map((i) => i.romaneioCodigo).filter(Boolean))).join(', ')
+        const clis = Array.from(new Set(todosItens.map((i) => i.clienteNome).filter(Boolean))).join(', ')
+
+        await tx
+          .update(devolucoes)
+          .set({
+            qtdCaixas: qtd,
+            pesoTotalKg: toDec(peso, 3),
+            valorEstimado: toDec(valor, 2),
+            pedidoCodigo: peds,
+            romaneioCodigo: roms,
+            clienteNome: clis,
+          })
+          .where(eq(devolucoes.id, destId))
+
+        return { id: destId, codigo: dest.codigo, codigo_removido: orig.codigo, qtd_caixas: qtd, peso_total_kg: peso }
+      })
+
+      return { success: true, ...res }
     },
   )
 

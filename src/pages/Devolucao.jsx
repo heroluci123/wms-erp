@@ -16,6 +16,7 @@ import {
   RefreshCw,
   MapPin,
   X,
+  Layers,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { temAlgumaPermissao } from '../utils/permissoes'
@@ -74,6 +75,8 @@ export function Devolucao() {
   const [locais, setLocais] = useState([])
   const [finalizando, setFinalizando] = useState(false)
   const [ultimaDevolucaoConcluida, setUltimaDevolucaoConcluida] = useState(null)
+  const [devolucoesAbertasMesmoPedido, setDevolucoesAbertasMesmoPedido] = useState([])
+  const [devolucaoDestinoId, setDevolucaoDestinoId] = useState('')
   const scannerRef = useRef(null)
 
   // Aba Histórico
@@ -190,6 +193,32 @@ export function Devolucao() {
     return { pedidos, romaneios, clientes, pesoTotal, valorTotal }
   }, [caixasBipadas])
 
+  useEffect(() => {
+    let ativo = true
+    if (resumoLote.pedidos.length === 0) {
+      setDevolucoesAbertasMesmoPedido([])
+      setDevolucaoDestinoId('')
+      return
+    }
+    devolucoesQueries
+      .buscarDevolucoesAbertasPorPedidos(resumoLote.pedidos)
+      .then((lista) => {
+        if (!ativo) return
+        const arr = lista || []
+        setDevolucoesAbertasMesmoPedido(arr)
+        setDevolucaoDestinoId((prev) => {
+          if (prev && arr.some((d) => String(d.id) === String(prev))) return prev
+          return arr[0]?.id ? String(arr[0].id) : ''
+        })
+      })
+      .catch(() => {
+        if (ativo) setDevolucoesAbertasMesmoPedido([])
+      })
+    return () => {
+      ativo = false
+    }
+  }, [resumoLote.pedidos.join(',')])
+
   const enderecoFinal =
     enderecoModo === 'CUSTOM'
       ? String(enderecoCustom || '').trim().toUpperCase()
@@ -225,23 +254,27 @@ export function Devolucao() {
         acao_estoque: acaoEstoque,
         endereco_destino: enderecoFinal,
         observacoes,
+        devolucao_destino_id: devolucaoDestinoId || null,
       })
 
       setUltimaDevolucaoConcluida({
         ...res,
-        observacoes,
+        observacoes: res.observacoes ?? observacoes,
         created_at: new Date().toISOString(),
         operador_nome: operador?.nome || '-',
-        itens: caixasBipadas,
+        itens: Array.isArray(res.itens) && res.itens.length > 0 ? res.itens : caixasBipadas,
       })
       setCaixasBipadas([])
+      setDevolucaoDestinoId('')
       setMotivo('')
       setAcaoEstoque('DISPONIVEL')
       setObservacoes('')
       setErroBipagem('')
       toastSuccess(
-        `Devolução ${res.codigo} registrada!`,
-        `${res.qtd_caixas} caixa(s) retornada(s) para ${res.endereco_destino}.`,
+        res.anexado_em_existente
+          ? `Caixa(s) anexadas ao romaneio ${res.codigo}!`
+          : `Devolução ${res.codigo} registrada!`,
+        `Total consolidado: ${res.qtd_caixas} caixa(s) retornada(s) para ${res.endereco_destino}.`,
       )
       if (podeHistoricoFiscal) {
         await carregarHistorico()
@@ -290,6 +323,25 @@ export function Devolucao() {
       await carregarHistorico()
     } catch (err) {
       toastError('Erro na tratativa fiscal', err.message)
+    }
+  }
+
+  const handleMesclarDevolucao = async (devOrigem, devDestino) => {
+    const ok = await confirmar({
+      title: 'Unificar Romaneios de Devolução',
+      message: `Deseja mover as caixas de ${devOrigem.codigo} (${devOrigem.qtd_caixas} cx • ${fmtKg(devOrigem.peso_total_kg)}) para dentro de ${devDestino.codigo} (${devDestino.pedido_codigo || '-'}), mantendo tudo em um único Romaneio de Devolução?`,
+      confirmLabel: `Unificar em ${devDestino.codigo}`,
+    })
+    if (!ok) return
+    try {
+      const res = await devolucoesQueries.mesclarDevolucoes(devDestino.id, devOrigem.id)
+      toastSuccess(
+        'Romaneios Unificados ✅',
+        `${devOrigem.codigo} foi incorporada em ${res.codigo} (${res.qtd_caixas} cx • ${fmtKg(res.peso_total_kg)}).`,
+      )
+      await carregarHistorico()
+    } catch (err) {
+      toastError('Erro ao unificar devoluções', err.message)
     }
   }
 
@@ -698,6 +750,39 @@ export function Devolucao() {
                   </div>
                 </div>
 
+                {devolucoesAbertasMesmoPedido.length > 0 && (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 8,
+                      background: 'rgba(56, 189, 248, 0.1)',
+                      border: '1px solid rgba(56, 189, 248, 0.4)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    <div className="text-xs font-bold uppercase text-cyan flex items-center gap-6">
+                      <Layers size={14} /> Mesmo Pedido com Romaneio de Devolução em Aberto!
+                    </div>
+                    <div className="text-xs" style={{ color: '#cbd5e1' }}>
+                      Para manter todas as caixas do mesmo pedido no mesmo romaneio, selecione abaixo se deseja anexar em uma devolução já aberta ou criar uma nova:
+                    </div>
+                    <select
+                      className="form-input"
+                      value={devolucaoDestinoId}
+                      onChange={(e) => setDevolucaoDestinoId(e.target.value)}
+                    >
+                      {devolucoesAbertasMesmoPedido.map((d) => (
+                        <option key={d.id} value={String(d.id)}>
+                          Anexar ao mesmo Romaneio: {d.codigo} ({d.pedido_codigo || '-'} • {d.qtd_caixas} cx • {fmtKg(d.peso_total_kg)})
+                        </option>
+                      ))}
+                      <option value="">Criar um novo Romaneio de Devolução separado</option>
+                    </select>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
                   <button
                     type="button"
@@ -719,7 +804,9 @@ export function Devolucao() {
                     <CheckCircle2 size={16} />{' '}
                     {finalizando
                       ? 'Finalizando...'
-                      : `Finalizar Devolução (${caixasBipadas.length} cx • ${fmtKg(resumoLote.pesoTotal)})`}
+                      : devolucaoDestinoId
+                        ? `Anexar ao Romaneio (${caixasBipadas.length} cx • ${fmtKg(resumoLote.pesoTotal)})`
+                        : `Finalizar Devolução (${caixasBipadas.length} cx • ${fmtKg(resumoLote.pesoTotal)})`}
                   </button>
                 </div>
               </div>
@@ -808,6 +895,20 @@ export function Devolucao() {
                     cls: 'badge--neutral',
                   }
                   const expandido = devolucaoExpandidaId === dev.id
+                  const alvosMescla =
+                    dev.status_fiscal === 'PENDENTE_FATURAMENTO'
+                      ? historico.filter(
+                          (out) =>
+                            out.id !== dev.id &&
+                            out.status_fiscal === 'PENDENTE_FATURAMENTO' &&
+                            dev.pedido_codigo &&
+                            out.pedido_codigo &&
+                            String(dev.pedido_codigo)
+                              .split(',')
+                              .some((p) => String(out.pedido_codigo).split(',').map((s) => s.trim()).includes(p.trim())),
+                        )
+                      : []
+                  const alvoMescla = alvosMescla.find((o) => String(o.codigo) < String(dev.codigo)) || alvosMescla[0] || null
                   return (
                     <div
                       key={dev.id}
@@ -868,6 +969,16 @@ export function Devolucao() {
                           >
                             <Printer size={13} /> Romaneio de Devolução
                           </button>
+                          {podeTratarFiscal && alvoMescla && (
+                            <button
+                              type="button"
+                              className="btn btn--info btn--sm"
+                              onClick={() => handleMesclarDevolucao(dev, alvoMescla)}
+                              title={`Unificar ${dev.codigo} em ${alvoMescla.codigo} (mesmo pedido)`}
+                            >
+                              <Layers size={13} /> Unificar em {alvoMescla.codigo}
+                            </button>
+                          )}
                           {podeTratarFiscal && (
                             <button
                               type="button"
