@@ -322,14 +322,34 @@ function TopBar({ sidebarRecolhida = false, onToggleSidebar }) {
   )
 }
 
-function Sidebar({ onCollapse }) {
+function Sidebar({ collapsed = false, onCollapse }) {
   const { operador } = useAppStore()
   const cliente = isCliente(operador)
 
   if (cliente) {
     return (
-      <aside className="sidebar" style={{ position: 'relative' }}>
-        <div className="sidebar__section-label">Portal do Cliente</div>
+      <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`} style={{ position: 'relative' }}>
+        <div
+          className="sidebar__section-label"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '4px 10px 6px 16px',
+          }}
+        >
+          <span>Portal do Cliente</span>
+          {onCollapse && (
+            <button
+              type="button"
+              className="sidebar__collapse-pill"
+              onClick={onCollapse}
+              title="Recolher menu lateral"
+            >
+              <ChevronLeft size={13} /> Recolher
+            </button>
+          )}
+        </div>
         <NavLink to="/portal-cliente" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
           <ShieldCheck size={18} /> Visão Consolidada
         </NavLink>
@@ -394,41 +414,29 @@ function Sidebar({ onCollapse }) {
   const temCadastros = temAlgumaPermissao(operador, ['taras', 'locais', 'operadores', 'perfis_gerenciar'])
 
   return (
-    <aside className="sidebar" style={{ position: 'relative' }}>
-      {onCollapse && (
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            padding: '0 10px 6px',
-            borderBottom: '1px solid rgba(51,65,85,0.4)',
-            marginBottom: 4,
-          }}
-        >
+    <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`} style={{ position: 'relative' }}>
+      <div
+        className="sidebar__section-label"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 10px 6px 16px',
+          marginTop: 2,
+        }}
+      >
+        <span>{temVisaoGeral || !temOperacao ? 'Visão Geral' : 'Menu'}</span>
+        {onCollapse && (
           <button
             type="button"
+            className="sidebar__collapse-pill"
             onClick={onCollapse}
             title="Recolher menu lateral para tela cheia"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted)',
-              fontSize: 11,
-              cursor: 'pointer',
-              padding: '2px 6px',
-              borderRadius: 4,
-            }}
           >
-            <ChevronLeft size={14} /> Recolher menu
+            <ChevronLeft size={13} /> Recolher
           </button>
-        </div>
-      )}
-      {(temVisaoGeral || !temOperacao) && (
-        <div className="sidebar__section-label">Visão Geral</div>
-      )}
+        )}
+      </div>
       <NavLink to="/" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
         <Package size={18} /> {temPermissao(operador, 'dashboard_executivo') ? 'Dashboard' : 'Início / Operações'}
       </NavLink>
@@ -723,34 +731,20 @@ export function Layout() {
           />
         )}
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
-          {!isMobile && !sidebarRecolhida && <Sidebar onCollapse={() => setSidebarRecolhida(true)} />}
+          {!isMobile && (
+            <Sidebar
+              collapsed={sidebarRecolhida}
+              onCollapse={() => setSidebarRecolhida(true)}
+            />
+          )}
           {!isMobile && (
             <button
               type="button"
+              className={`sidebar-edge-toggle ${sidebarRecolhida ? 'sidebar-edge-toggle--collapsed' : ''}`}
               onClick={() => setSidebarRecolhida((v) => !v)}
               title={sidebarRecolhida ? 'Expandir menu lateral' : 'Recolher menu lateral'}
-              style={{
-                position: 'absolute',
-                left: sidebarRecolhida ? 0 : 210,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                zIndex: 55,
-                width: 18,
-                height: 44,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 0,
-                borderRadius: '0 8px 8px 0',
-                background: 'var(--bg-2)',
-                border: '1px solid var(--border)',
-                borderLeft: sidebarRecolhida ? 'none' : '1px solid var(--border)',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                boxShadow: '2px 0 8px rgba(0,0,0,0.35)',
-              }}
             >
-              {sidebarRecolhida ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+              {sidebarRecolhida ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
             </button>
           )}
           <main
