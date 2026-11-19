@@ -51,6 +51,7 @@ import { MotoristaRastreio } from './pages/MotoristaRastreio'
 import { PedidoRastreio } from './pages/PedidoRastreio'
 import { Financeiro } from './pages/Financeiro'
 import { DreGerencial } from './pages/DreGerencial'
+import { Fiscal } from './pages/Fiscal'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -117,6 +118,7 @@ function App() {
           <Route path="pendencias" element={<RequirePermissao allowCliente={false} element={<CentralPendencias />} />} />
           <Route path="whatsapp-inbox" element={<RequirePermissao permissoes={['whatsapp_inbox', 'pedidos']} element={<WhatsappInbox />} />} />
           <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos', 'financeiro_pedidos']} element={<Pedidos />} />} />
+          <Route path="fiscal" element={<RequirePermissao permissoes={['fiscal', 'devolucao_fiscal', 'parametros_comerciais']} element={<Fiscal />} />} />
           <Route path="financeiro" element={<RequirePermissao permissoes={['financeiro', 'financeiro_pedidos']} element={<Financeiro />} />} />
           <Route path="dre" element={<RequirePermissao permissoes={['financeiro', 'financeiro_pedidos', 'dashboard_executivo']} element={<DreGerencial />} />} />
           <Route path="roteirizacao" element={<RequirePermissao permissoes={['roteirizacao', 'roteirizacao_carregamento', 'pedidos', 'saida', 'expedicao', 'transportadoras']} element={<Roteirizacao />} />} />

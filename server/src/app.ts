@@ -21,6 +21,7 @@ import { registerDevolucaoRoutes } from './modules/pedidos/devolucaoRoutes.js'
 import { registerRoteirizacaoRoutes } from './modules/pedidos/roteirizacaoRoutes.js'
 import { registerFinanceiroRoutes } from './modules/financeiro/routes.js'
 import { registerDreRoutes } from './modules/financeiro/dreRoutes.js'
+import { registerFiscalRoutes } from './modules/fiscal/routes.js'
 
 export async function buildApp(
   conn: DbConnection,
@@ -96,6 +97,7 @@ export async function buildApp(
   registerRoteirizacaoRoutes(app, conn)
   registerFinanceiroRoutes(app, conn)
   registerDreRoutes(app, conn)
+  registerFiscalRoutes(app, conn)
 
   return app
 }

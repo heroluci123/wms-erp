@@ -1285,6 +1285,105 @@ CREATE TABLE IF NOT EXISTS financeiro_movimentacoes (
 );
 CREATE INDEX IF NOT EXISTS idx_fin_mov_conta_data ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, data_movimento);
 CREATE INDEX IF NOT EXISTS idx_fin_mov_titulo ON financeiro_movimentacoes(titulo_id);
+
+CREATE TABLE IF NOT EXISTS fiscal_config_filial (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  ambiente TEXT NOT NULL DEFAULT 'HOMOLOGACAO',
+  provedor TEXT NOT NULL DEFAULT 'SIMULACAO_LOCAL',
+  serie_nfe INTEGER NOT NULL DEFAULT 1,
+  proximo_numero_nfe INTEGER NOT NULL DEFAULT 1,
+  serie_nfce INTEGER NOT NULL DEFAULT 1,
+  proximo_numero_nfce INTEGER NOT NULL DEFAULT 1,
+  csc_id TEXT NOT NULL DEFAULT '',
+  csc_token TEXT NOT NULL DEFAULT '',
+  certificado_nome TEXT NOT NULL DEFAULT '',
+  certificado_pfx_base64 TEXT NOT NULL DEFAULT '',
+  certificado_senha_enc TEXT NOT NULL DEFAULT '',
+  certificado_validade DATE,
+  certificado_titular TEXT NOT NULL DEFAULT '',
+  certificado_cnpj TEXT NOT NULL DEFAULT '',
+  gateway_api_token_enc TEXT NOT NULL DEFAULT '',
+  inf_complementar_padrao TEXT NOT NULL DEFAULT 'ICMS com redução de base de cálculo (Cesta Básica Carnes). PIS/COFINS alíquota zero conforme Lei 10.925/2004.',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fiscal_cfg_tenant_filial ON fiscal_config_filial(tenant_id, filial_id);
+
+CREATE TABLE IF NOT EXISTS fiscal_notas (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  modelo TEXT NOT NULL DEFAULT '55',
+  tipo_operacao TEXT NOT NULL DEFAULT 'SAIDA',
+  finalidade TEXT NOT NULL DEFAULT '1',
+  ambiente TEXT NOT NULL DEFAULT 'HOMOLOGACAO',
+  provedor_usado TEXT NOT NULL DEFAULT 'SIMULACAO_LOCAL',
+  serie INTEGER NOT NULL DEFAULT 1,
+  numero INTEGER NOT NULL,
+  chave_acesso TEXT NOT NULL,
+  protocolo_autorizacao TEXT NOT NULL DEFAULT '',
+  data_autorizacao TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'AUTORIZADA',
+  natureza_operacao TEXT NOT NULL DEFAULT 'VENDA DE MERCADORIA',
+  pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL,
+  devolucao_id UUID REFERENCES devolucoes(id) ON DELETE SET NULL,
+  cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+  destinatario_nome TEXT NOT NULL DEFAULT 'CONSUMIDOR FINAL',
+  destinatario_doc TEXT NOT NULL DEFAULT '',
+  destinatario_ie TEXT NOT NULL DEFAULT '',
+  destinatario_uf TEXT NOT NULL DEFAULT 'SP',
+  destinatario_cidade TEXT NOT NULL DEFAULT '',
+  destinatario_endereco TEXT NOT NULL DEFAULT '',
+  forma_pagamento_label TEXT NOT NULL DEFAULT '99 - Outros',
+  valor_produtos NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_desconto NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_frete NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_icms_base NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_icms NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_icms_st NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_pis NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_cofins NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_total_nf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  peso_bruto_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  peso_liquido_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  qtd_volumes INTEGER NOT NULL DEFAULT 0,
+  itens_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  xml_conteudo TEXT NOT NULL DEFAULT '',
+  xml_cancelamento TEXT NOT NULL DEFAULT '',
+  motivo_cancelamento TEXT NOT NULL DEFAULT '',
+  cancelada_em TIMESTAMPTZ,
+  inf_complementar TEXT NOT NULL DEFAULT '',
+  emitida_por_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  emitida_por_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fiscal_nota_num ON fiscal_notas(tenant_id, filial_id, modelo, serie, numero);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fiscal_nota_chave ON fiscal_notas(tenant_id, chave_acesso);
+CREATE INDEX IF NOT EXISTS idx_fiscal_nota_status ON fiscal_notas(tenant_id, filial_id, modelo, status);
+CREATE INDEX IF NOT EXISTS idx_fiscal_nota_pedido ON fiscal_notas(tenant_id, pedido_id);
+
+CREATE TABLE IF NOT EXISTS fiscal_eventos (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  nota_id UUID REFERENCES fiscal_notas(id) ON DELETE CASCADE,
+  tipo_evento TEXT NOT NULL,
+  sequencia INTEGER NOT NULL DEFAULT 1,
+  modelo TEXT NOT NULL DEFAULT '55',
+  serie INTEGER NOT NULL DEFAULT 1,
+  numero_inicial INTEGER NOT NULL DEFAULT 0,
+  numero_final INTEGER NOT NULL DEFAULT 0,
+  descricao TEXT NOT NULL,
+  protocolo TEXT NOT NULL DEFAULT '',
+  xml_evento TEXT NOT NULL DEFAULT '',
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fiscal_ev_nota ON fiscal_eventos(nota_id);
+CREATE INDEX IF NOT EXISTS idx_fiscal_ev_tenant ON fiscal_eventos(tenant_id, filial_id, tipo_evento);
 `
 
 const POST_MIGRATIONS_SQL = `
