@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -371,6 +371,7 @@ function Sidebar({ collapsed = false, onCollapse }) {
   const temVisaoGeral = temAlgumaPermissao(operador, ['dashboard_executivo', 'estoque_enderecos', 'consulta_estoque', 'relatorios_estoque'])
   const temCompras = temAlgumaPermissao(operador, ['compras', 'recebimento'])
   const temFaturamento = temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos', 'financeiro_pedidos', 'roteirizacao'])
+  const temFinanceiro = temAlgumaPermissao(operador, ['financeiro', 'financeiro_pedidos'])
   const temGestaoOperacional = temAlgumaPermissao(operador, ['mapa_producao', 'producao_criar_op'])
   const temOperacao = temAlgumaPermissao(operador, [
     'recebimento',
@@ -486,6 +487,15 @@ function Sidebar({ collapsed = false, onCollapse }) {
               <Truck size={18} /> Roteirização / Embarques
             </NavLink>
           )}
+        </>
+      )}
+
+      {temFinanceiro && (
+        <>
+          <div className="sidebar__section-label">Financeiro</div>
+          <NavLink to="/financeiro" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+            <DollarSign size={18} /> Financeiro (Pagar/Receber)
+          </NavLink>
         </>
       )}
 

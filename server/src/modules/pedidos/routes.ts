@@ -24,6 +24,7 @@ import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
 import { calcularESalvarParcelas } from './parcelasHelper.js'
 import { registrarPendenciaTravaEstoque, verificarEstoquePedido } from './travaEstoqueHelper.js'
+import { sincronizarTitulosPedidoVenda } from '../financeiro/integracaoHelper.js'
 import {
   assertEnderecosNaoBloqueados,
   gerarCodigoDocumento,
@@ -767,6 +768,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         dataBaseIso: body.previsao_entrega,
       })
 
+      await sincronizarTitulosPedidoVenda(tx, {
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        pedidoId,
+        operadorId: ctx.operador.id,
+        operadorNome: ctx.operador.nome,
+      })
+
       return {
         id: pedidoId,
         codigo,
@@ -918,6 +927,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         dataBaseIso: body.previsao_entrega,
       })
 
+      await sincronizarTitulosPedidoVenda(tx, {
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        pedidoId,
+        operadorId: ctx.operador.id,
+        operadorNome: ctx.operador.nome,
+      })
+
       if (nextStatus === 'BLOQUEADO_ESTOQUE' && itensInsuficientes.length > 0) {
         await registrarPendenciaTravaEstoque(tx, {
           tenantId: ctx.tenantId,
@@ -1014,6 +1031,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         .set({ status: 'CONCLUIDA', concluidaPorId: ctx.operador.id, concluidaAt: new Date() })
         .where(and(eq(pendenciasSetor.tenantId, ctx.tenantId), eq(pendenciasSetor.referenciaId, pedidoId)))
 
+      await sincronizarTitulosPedidoVenda(tx, {
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        pedidoId,
+        operadorId: ctx.operador.id,
+        operadorNome: ctx.operador.nome,
+      })
+
       return { id: pedidoId, codigo: ped.codigo, status: 'LIBERADO', trava_estoque: false, itens_insuficientes: [] }
     })
 
@@ -1093,6 +1118,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         formaPagamentoId: orig.formaPagamentoId,
         valorTotal: toNum(orig.valorTotal, 0),
         dataBaseIso: orig.previsaoEntrega,
+      })
+
+      await sincronizarTitulosPedidoVenda(tx, {
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        pedidoId: novoId,
+        operadorId: ctx.operador.id,
+        operadorNome: ctx.operador.nome,
       })
 
       return { id: novoId, codigo: novoCodigo, status }
@@ -1348,6 +1381,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         .update(pedidos)
         .set({ status: 'CANCELADO', canceladoAt: new Date(), updatedAt: new Date() })
         .where(eq(pedidos.id, pedidoId))
+
+      await sincronizarTitulosPedidoVenda(tx, {
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        pedidoId,
+        operadorId: ctx.operador.id,
+        operadorNome: ctx.operador.nome,
+      })
     })
 
     return { success: true }

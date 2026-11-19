@@ -14,6 +14,7 @@ import {
   tiposVeiculo,
   layoutsImportacaoTxt,
   eanSequencias,
+  financeiroContasBancarias,
 } from './schema/index.js'
 import { uuidv7 } from '../utils/uuid.js'
 import { hashSenha } from '../utils/crypto.js'
@@ -1196,6 +1197,91 @@ CREATE TABLE IF NOT EXISTS devolucao_itens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_dev_itens_dev ON devolucao_itens(devolucao_id);
+
+CREATE TABLE IF NOT EXISTS financeiro_contas_bancarias (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID REFERENCES filiais(id) ON DELETE SET NULL,
+  codigo TEXT NOT NULL,
+  nome TEXT NOT NULL,
+  tipo TEXT NOT NULL DEFAULT 'CONTA_CORRENTE',
+  banco_codigo TEXT NOT NULL DEFAULT '',
+  agencia TEXT NOT NULL DEFAULT '',
+  conta TEXT NOT NULL DEFAULT '',
+  chave_pix TEXT NOT NULL DEFAULT '',
+  local_cobranca_id UUID REFERENCES locais_cobranca(id) ON DELETE SET NULL,
+  saldo_inicial NUMERIC(14,2) NOT NULL DEFAULT 0,
+  saldo_atual NUMERIC(14,2) NOT NULL DEFAULT 0,
+  padrao INTEGER NOT NULL DEFAULT 0,
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fin_contas_tenant_cod ON financeiro_contas_bancarias(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_fin_contas_tenant ON financeiro_contas_bancarias(tenant_id, ativo);
+
+CREATE TABLE IF NOT EXISTS financeiro_titulos (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  tipo TEXT NOT NULL,
+  origem TEXT NOT NULL DEFAULT 'MANUAL',
+  descricao TEXT NOT NULL,
+  numero_documento TEXT NOT NULL DEFAULT '',
+  parcela_num INTEGER NOT NULL DEFAULT 1,
+  parcela_total INTEGER NOT NULL DEFAULT 1,
+  fornecedor_id UUID REFERENCES fornecedores(id) ON DELETE SET NULL,
+  cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+  vendedor_id UUID REFERENCES vendedores(id) ON DELETE SET NULL,
+  pedido_compra_id UUID REFERENCES pedidos_compra(id) ON DELETE SET NULL,
+  recebimento_id UUID REFERENCES recebimentos(id) ON DELETE SET NULL,
+  pedido_venda_id UUID REFERENCES pedidos(id) ON DELETE SET NULL,
+  centro_custo_id UUID REFERENCES centros_custo(id) ON DELETE SET NULL,
+  forma_pagamento_id UUID REFERENCES formas_pagamento(id) ON DELETE SET NULL,
+  conta_bancaria_id UUID REFERENCES financeiro_contas_bancarias(id) ON DELETE SET NULL,
+  data_emissao DATE NOT NULL,
+  data_vencimento DATE NOT NULL,
+  data_pagamento DATE,
+  valor_original NUMERIC(14,2) NOT NULL,
+  valor_desconto NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_juros_multa NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_pago NUMERIC(14,2) NOT NULL DEFAULT 0,
+  saldo_aberto NUMERIC(14,2) NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ABERTO',
+  forma_pagamento_efetiva TEXT NOT NULL DEFAULT '',
+  observacoes TEXT NOT NULL DEFAULT '',
+  criado_por_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  criado_por_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fin_titulos_tenant_cod ON financeiro_titulos(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_fin_titulos_tipo_status_venc ON financeiro_titulos(tenant_id, tipo, status, data_vencimento);
+CREATE INDEX IF NOT EXISTS idx_fin_titulos_cliente ON financeiro_titulos(tenant_id, cliente_id, status);
+CREATE INDEX IF NOT EXISTS idx_fin_titulos_fornecedor ON financeiro_titulos(tenant_id, fornecedor_id, status);
+CREATE INDEX IF NOT EXISTS idx_fin_titulos_pedido_venda ON financeiro_titulos(tenant_id, pedido_venda_id);
+CREATE INDEX IF NOT EXISTS idx_fin_titulos_pedido_compra ON financeiro_titulos(tenant_id, pedido_compra_id);
+CREATE INDEX IF NOT EXISTS idx_fin_titulos_recebimento ON financeiro_titulos(tenant_id, recebimento_id);
+
+CREATE TABLE IF NOT EXISTS financeiro_movimentacoes (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  conta_bancaria_id UUID NOT NULL REFERENCES financeiro_contas_bancarias(id) ON DELETE CASCADE,
+  titulo_id UUID REFERENCES financeiro_titulos(id) ON DELETE SET NULL,
+  tipo TEXT NOT NULL,
+  categoria TEXT NOT NULL DEFAULT 'LANCAMENTO_AVULSO',
+  data_movimento DATE NOT NULL,
+  valor NUMERIC(14,2) NOT NULL,
+  forma_pagamento TEXT NOT NULL DEFAULT '',
+  historico TEXT NOT NULL,
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fin_mov_conta_data ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, data_movimento);
+CREATE INDEX IF NOT EXISTS idx_fin_mov_titulo ON financeiro_movimentacoes(titulo_id);
 `
 
 const POST_MIGRATIONS_SQL = `
@@ -1460,6 +1546,56 @@ export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefa
     .insert(locaisCobranca)
     .values({ id: uuidv7(), tenantId, codigo: 'BB', nome: 'BANCO DO BRASIL' })
     .onConflictDoNothing()
+
+  const existingContasFin = await db
+    .select({ id: financeiroContasBancarias.id })
+    .from(financeiroContasBancarias)
+    .where(eq(financeiroContasBancarias.tenantId, tenantId))
+    .limit(1)
+  if (existingContasFin.length === 0) {
+    const locaisList = await db
+      .select()
+      .from(locaisCobranca)
+      .where(eq(locaisCobranca.tenantId, tenantId))
+    const bbLocal = locaisList.find((l) => l.codigo === 'BB') || locaisList[0] || null
+    await db
+      .insert(financeiroContasBancarias)
+      .values([
+        {
+          id: uuidv7(),
+          tenantId,
+          codigo: 'CX1',
+          nome: 'CAIXA GERAL',
+          tipo: 'CAIXA_FISICO',
+          bancoCodigo: '',
+          agencia: '',
+          conta: '',
+          chavePix: '',
+          localCobrancaId: null,
+          saldoInicial: '0.00',
+          saldoAtual: '0.00',
+          padrao: 1,
+          ativo: 1,
+        },
+        {
+          id: uuidv7(),
+          tenantId,
+          codigo: 'BB1',
+          nome: bbLocal?.nome || 'BANCO DO BRASIL',
+          tipo: 'CONTA_CORRENTE',
+          bancoCodigo: '001',
+          agencia: '',
+          conta: '',
+          chavePix: '',
+          localCobrancaId: bbLocal?.id || null,
+          saldoInicial: '0.00',
+          saldoAtual: '0.00',
+          padrao: 0,
+          ativo: 1,
+        },
+      ])
+      .onConflictDoNothing()
+  }
 
   await db
     .insert(centrosCusto)

@@ -18,6 +18,7 @@ import {
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { gerarTitulosCompraOuXml } from '../financeiro/integracaoHelper.js'
 import {
   gerarCodigoDocumento,
   lerTenantFeatures,
@@ -776,6 +777,14 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           ),
         )
 
+      await gerarTitulosCompraOuXml(tx, {
+        tenantId: ctx.tenantId,
+        filialId: ctx.filialId,
+        pedidoCompraId: id,
+        operadorId: ctx.operador.id,
+        operadorNome: ctx.operador.nome,
+      })
+
       return { status: novoStatusPc, total_recebida_kg: Number(totalRec.toFixed(3)) }
     })
 
@@ -968,6 +977,15 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             .update(pedidosCompra)
             .set({ status: 'RECEBIDO', updatedAt: new Date() })
             .where(eq(pedidosCompra.id, pcId))
+
+          await gerarTitulosCompraOuXml(tx, {
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            pedidoCompraId: pcId,
+            recebimentoId: recId || null,
+            operadorId: ctx.operador.id,
+            operadorNome: ctx.operador.nome,
+          })
 
           return {
             status: 'RECEBIDO',

@@ -277,7 +277,9 @@ export async function gerarCodigoDocumento(
     | 'RECEBIMENTO'
     | 'MAPA_PRODUCAO'
     | 'EMBARQUE'
-    | 'DEVOLUCAO',
+    | 'DEVOLUCAO'
+    | 'FIN_PAGAR'
+    | 'FIN_RECEBER',
   prefix: string,
   pad = 4,
 ): Promise<string> {

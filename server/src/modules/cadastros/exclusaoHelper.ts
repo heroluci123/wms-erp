@@ -125,35 +125,46 @@ async function obterStatusMovimentacaoEContasClientes(
   const filtroCliP = clienteId ? sql`AND p.cliente_id = ${clienteId}` : sql``
   const filtroCliM = clienteId ? sql`AND m.cliente_id = ${clienteId}` : sql``
   const filtroCliW = clienteId ? sql`AND w.cliente_sugerido_id = ${clienteId}` : sql``
+  const filtroCliF = clienteId ? sql`AND ft.cliente_id = ${clienteId}` : sql``
 
   const [contasRes, movRes] = await Promise.all([
     dbOrTx.execute(sql`
-      SELECT DISTINCT p.cliente_id AS id
-      FROM pedidos p
-      WHERE p.tenant_id = ${tenantId}
-        AND p.cliente_id IS NOT NULL
-        ${filtroCliP}
-        AND p.status != 'CANCELADO'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM entregas_tracking et
-          WHERE et.pedido_id = p.id
-            AND et.pagamento_confirmado = 1
-        )
-        AND (
-          EXISTS (
+      SELECT DISTINCT id FROM (
+        SELECT p.cliente_id AS id
+        FROM pedidos p
+        WHERE p.tenant_id = ${tenantId}
+          AND p.cliente_id IS NOT NULL
+          ${filtroCliP}
+          AND p.status != 'CANCELADO'
+          AND NOT EXISTS (
             SELECT 1
-            FROM pedidos_parcelas pp
-            WHERE pp.pedido_id = p.id
+            FROM entregas_tracking et
+            WHERE et.pedido_id = p.id
+              AND et.pagamento_confirmado = 1
           )
-          OR (
-            COALESCE(p.valor_total, 0) > 0
-            AND (
-              p.status NOT IN ('EXPEDIDO', 'CANCELADO')
-              OR p.pagamento_na_entrega = 1
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM pedidos_parcelas pp
+              WHERE pp.pedido_id = p.id
+            )
+            OR (
+              COALESCE(p.valor_total, 0) > 0
+              AND (
+                p.status NOT IN ('EXPEDIDO', 'CANCELADO')
+                OR p.pagamento_na_entrega = 1
+              )
             )
           )
-        )
+        UNION
+        SELECT ft.cliente_id AS id
+        FROM financeiro_titulos ft
+        WHERE ft.tenant_id = ${tenantId}
+          AND ft.tipo = 'RECEBER'
+          AND ft.cliente_id IS NOT NULL
+          ${filtroCliF}
+          AND ft.status IN ('ABERTO', 'PARCIAL')
+      ) contas_receber
     `),
     dbOrTx.execute(sql`
       SELECT DISTINCT id FROM (
@@ -168,6 +179,10 @@ async function obterStatusMovimentacaoEContasClientes(
         SELECT w.cliente_sugerido_id AS id
         FROM whatsapp_inbox w
         WHERE w.tenant_id = ${tenantId} AND w.cliente_sugerido_id IS NOT NULL ${filtroCliW}
+        UNION
+        SELECT ft.cliente_id AS id
+        FROM financeiro_titulos ft
+        WHERE ft.tenant_id = ${tenantId} AND ft.cliente_id IS NOT NULL ${filtroCliF}
       ) movs
     `),
   ])
@@ -190,6 +205,7 @@ async function obterStatusMovimentacaoEContasFornecedores(
   const filtroFornRec = fornecedorId ? sql`AND r.fornecedor_id = ${fornecedorId}` : sql``
   const filtroFornPre = fornecedorId ? sql`AND pre.fornecedor_id = ${fornecedorId}` : sql``
   const filtroFornCx = fornecedorId ? sql`AND ec.fornecedor_id = ${fornecedorId}` : sql``
+  const filtroFornFin = fornecedorId ? sql`AND ft.fornecedor_id = ${fornecedorId}` : sql``
 
   const [contasRes, movRes] = await Promise.all([
     dbOrTx.execute(sql`
@@ -215,6 +231,14 @@ async function obterStatusMovimentacaoEContasFornecedores(
             OR pc.forma_pagamento_id IS NOT NULL
             OR COALESCE(pc.valor_total, 0) > 0
           )
+        UNION
+        SELECT ft.fornecedor_id AS id
+        FROM financeiro_titulos ft
+        WHERE ft.tenant_id = ${tenantId}
+          AND ft.tipo = 'PAGAR'
+          AND ft.fornecedor_id IS NOT NULL
+          ${filtroFornFin}
+          AND ft.status IN ('ABERTO', 'PARCIAL')
       ) contas_pagar
     `),
     dbOrTx.execute(sql`
@@ -234,6 +258,10 @@ async function obterStatusMovimentacaoEContasFornecedores(
         SELECT ec.fornecedor_id AS id
         FROM estoque_caixas ec
         WHERE ec.tenant_id = ${tenantId} AND ec.fornecedor_id IS NOT NULL ${filtroFornCx}
+        UNION
+        SELECT ft.fornecedor_id AS id
+        FROM financeiro_titulos ft
+        WHERE ft.tenant_id = ${tenantId} AND ft.fornecedor_id IS NOT NULL ${filtroFornFin}
       ) movs
     `),
   ])

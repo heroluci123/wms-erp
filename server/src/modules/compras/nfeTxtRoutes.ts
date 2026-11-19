@@ -16,6 +16,7 @@ import {
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { gerarTitulosCompraOuXml } from '../financeiro/integracaoHelper.js'
 import {
   assertEnderecosNaoBloqueados,
   type DbOrTx,
@@ -1056,6 +1057,18 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
                 .where(and(eq(produtos.id, pid), eq(produtos.tenantId, ctx.tenantId)))
             }
           }
+        }
+
+        // Gera títulos automáticos no Contas a Pagar quando houver XML NF-e importado
+        if (xmlParsed && recRow?.id) {
+          await gerarTitulosCompraOuXml(tx, {
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            recebimentoId: recRow.id,
+            pedidoCompraId: pcRow?.id || null,
+            operadorId: ctx.operador.id,
+            operadorNome: ctx.operador.nome,
+          })
         }
 
         return {

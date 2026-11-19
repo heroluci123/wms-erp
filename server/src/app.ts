@@ -19,6 +19,7 @@ import { registerNfeTxtRoutes } from './modules/compras/nfeTxtRoutes.js'
 import { registerMapaProducaoRoutes } from './modules/producao/mapaRoutes.js'
 import { registerDevolucaoRoutes } from './modules/pedidos/devolucaoRoutes.js'
 import { registerRoteirizacaoRoutes } from './modules/pedidos/roteirizacaoRoutes.js'
+import { registerFinanceiroRoutes } from './modules/financeiro/routes.js'
 
 export async function buildApp(
   conn: DbConnection,
@@ -92,6 +93,7 @@ export async function buildApp(
   registerMapaProducaoRoutes(app, conn)
   registerDevolucaoRoutes(app, conn)
   registerRoteirizacaoRoutes(app, conn)
+  registerFinanceiroRoutes(app, conn)
 
   return app
 }

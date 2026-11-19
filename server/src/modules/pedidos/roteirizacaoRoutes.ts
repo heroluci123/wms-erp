@@ -18,6 +18,7 @@ import {
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { baixarTitulosPedidoEntregaConfirmada } from '../financeiro/integracaoHelper.js'
 import {
   gerarCodigoDocumento,
   hojeIsoLocal,
@@ -1566,6 +1567,17 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             ),
           )
 
+        if (body.pagamento_confirmado) {
+          await baixarTitulosPedidoEntregaConfirmada(tx, {
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            pedidoId,
+            formaPagamentoRecebida: String(body.forma_pagamento_recebida || '').trim(),
+            operadorId: ctx.operador.id,
+            operadorNome: ctx.operador.nome,
+          })
+        }
+
         const allStops = await tx
           .select({ statusEntrega: entregasTracking.statusEntrega })
           .from(entregasTracking)
@@ -1825,6 +1837,16 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           concluidoAt: nextStatus === 'ENTREGUE' || nextStatus === 'DEVOLVIDA' ? now : null,
         })
         .where(and(eq(entregasTracking.embarqueId, emb.id), eq(entregasTracking.pedidoId, pedidoId)))
+
+      if (body.pagamento_confirmado) {
+        await baixarTitulosPedidoEntregaConfirmada(tx, {
+          tenantId: emb.tenantId,
+          filialId: emb.filialId,
+          pedidoId,
+          formaPagamentoRecebida: String(body.forma_pagamento_recebida || '').trim(),
+          operadorNome: emb.motoristaNome || 'Motorista',
+        })
+      }
 
       const allStops = await tx
         .select({ statusEntrega: entregasTracking.statusEntrega })

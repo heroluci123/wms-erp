@@ -75,6 +75,7 @@ export const SETORES_PERMISSOES = [
       { key: 'roteirizacao', label: 'Roteirização & Central de Embarques (Gestão)', desc: 'Criar roteiros, ordenar entregas, vincular transportadora/veículo e imprimir Romaneio Consolidado.' },
       { key: 'roteirizacao_carregamento', label: 'Carregamento Bipadado do Roteiro (Operação)', desc: 'Bipar caixa a caixa na doca para validar e carregar o veículo da rota.' },
       { key: 'pedidos', label: 'Criar / Editar / Liberar pedidos', desc: 'Cadastrar novos pedidos, editar quantidades e liberar para câmara.' },
+      { key: 'financeiro', label: 'Financeiro (Pagar, Receber, Caixa & Comissões)', desc: 'Gerenciar contas a pagar, contas a receber, baixas, bancos, fluxo de caixa e apuração de comissões.' },
       { key: 'financeiro_pedidos', label: 'Lançar pedidos pelo Financeiro', desc: 'Permite ao Financeiro criar solicitações de pedido que caem na fila do Supply Chain.' },
       { key: 'whatsapp_inbox', label: 'Caixa de Entrada WhatsApp (Parser)', desc: 'Visualizar mensagens recebidas do WhatsApp e converter em pedidos.' },
     ],
@@ -149,6 +150,7 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'inventario_carga_inicial',
   'pedidos',
   'pedidos_consultar',
+  'financeiro',
   'financeiro_pedidos',
   'whatsapp_inbox',
   'saida',
@@ -364,6 +366,9 @@ export function sanitizarPermissoes(rawPermissoes = {}, nivel = 'OPERACIONAL', p
   if ((obj?.pedidos || obj?.financeiro_pedidos) && obj?.devolucao_fiscal === undefined) {
     mapa.devolucao_fiscal = true
   }
+  if (obj?.financeiro_pedidos && obj?.financeiro === undefined) {
+    mapa.financeiro = true
+  }
   if ((obj?.pedidos || obj?.transportadoras) && obj?.roteirizacao === undefined) {
     mapa.roteirizacao = true
   }
@@ -371,7 +376,7 @@ export function sanitizarPermissoes(rawPermissoes = {}, nivel = 'OPERACIONAL', p
     mapa.roteirizacao_carregamento = true
   }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao', 'devolucao_fiscal', 'roteirizacao', 'roteirizacao_carregamento']) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'financeiro', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao', 'devolucao_fiscal', 'roteirizacao', 'roteirizacao_carregamento']) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }
@@ -419,6 +424,8 @@ export function temPermissao(operador, chave) {
       return p.devolucao !== false && (!!p.saida || !!p.expedicao || !!p.recebimento || isAdministradorOuSuperior(operador))
     case 'devolucao_fiscal':
       return !!p.pedidos || !!p.financeiro_pedidos || isAdministradorOuSuperior(operador)
+    case 'financeiro':
+      return !!p.financeiro_pedidos || isAdministradorOuSuperior(operador)
     case 'roteirizacao':
       return !!p.pedidos || !!p.transportadoras || isAdministradorOuSuperior(operador)
     case 'roteirizacao_carregamento':
