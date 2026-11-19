@@ -127,10 +127,10 @@ export function ParametrosComerciais() {
       <div className="page-header">
         <div>
           <h1 className="page-header__title flex items-center gap-12">
-            <Settings2 className="text-primary" size={26} /> Parâmetros Comerciais, Cobrança & CFOP
+            <Settings2 className="text-primary" size={26} /> Parâmetros Comerciais &amp; Fiscais
           </h1>
           <p className="page-header__subtitle">
-            Condições de pagamento com simulação instantânea, bancos de cobrança, centros de custo, CFOP automático por UF e matriz tributária
+            Condições de pagamento com simulação instantânea, bancos de cobrança, centros de custo, CFOP automático por UF, matriz tributária e trava fiscal de expedição
           </p>
         </div>
       </div>
@@ -145,7 +145,7 @@ export function ParametrosComerciais() {
           { id: 'centros', label: 'Centros de Custo', icon: Layers },
           { id: 'marchantes', label: 'Marchantes', icon: Tag },
           { id: 'matriz', label: 'Matriz Tributária (Contador)', icon: Shield },
-          { id: 'recebimento', label: 'Recebimento & Doca (Frigorífico)', icon: Thermometer },
+          { id: 'recebimento', label: 'Doca, Temperatura & Trava Fiscal', icon: Thermometer },
         ].map((t) => {
           const Icon = t.icon
           return (

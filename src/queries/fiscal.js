@@ -43,6 +43,22 @@ export const fiscalQueries = {
     })
   },
 
+  async emitirLote(dados = {}) {
+    exigirApi()
+    return apiRequest('/api/fiscal/notas/emitir-lote', {
+      method: 'POST',
+      body: dados,
+    })
+  },
+
+  async obterPacoteImpressao(nota_ids = []) {
+    exigirApi()
+    return apiRequest('/api/fiscal/notas/pacote-impressao', {
+      method: 'POST',
+      body: { nota_ids },
+    })
+  },
+
   async emitirDevolucao(devolucaoId) {
     exigirApi()
     return apiRequest(`/api/fiscal/notas/emitir-devolucao/${devolucaoId}`, {

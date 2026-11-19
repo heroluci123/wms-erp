@@ -628,11 +628,11 @@ export function Pedidos() {
     const qtdAtual = Number(String(qtdInput).replace(',', '.'))
     const pesoPorCx = conversaoItem?.pesoPorCx || 0
 
-    if (Number.isFinite(qtdAtual) && qtdAtual > 0 && pesoPorCx > 0) {
+    if (Number.isFinite(qtdAtual) && qtdAtual > 0) {
       if (novaUnidade === 'CX') {
-        const emCx = Number((qtdAtual / pesoPorCx).toFixed(2))
+        const emCx = pesoPorCx > 0 ? Math.max(1, Math.round(qtdAtual / pesoPorCx)) : Math.max(1, Math.round(qtdAtual))
         setQtdInput(String(emCx))
-      } else {
+      } else if (pesoPorCx > 0) {
         const emKg = Number((qtdAtual * pesoPorCx).toFixed(2))
         setQtdInput(String(emKg))
       }
@@ -705,6 +705,9 @@ export function Pedidos() {
     if (!Number.isFinite(qtdNum) || qtdNum <= 0) {
       return toastWarning('Informe a quantidade do pedido maior que zero.')
     }
+    if (unidadeInput === 'CX' && (!Number.isInteger(qtdNum) || qtdNum < 1 || /[.,]/.test(String(qtdInput)))) {
+      return toastWarning('Em Caixas (CX), informe sempre um número inteiro (1 ou mais caixas, sem vírgula).')
+    }
 
     const pesoPorCx = conversaoItem?.pesoPorCx || 0
     if (unidadeInput === 'CX' && pesoPorCx <= 0) {
@@ -716,11 +719,11 @@ export function Pedidos() {
     const kgFinal =
       unidadeInput === 'KG'
         ? Number(qtdNum.toFixed(3))
-        : Number((qtdNum * pesoPorCx).toFixed(3))
+        : Number((Math.round(qtdNum) * pesoPorCx).toFixed(3))
 
     const cxFinal =
       unidadeInput === 'CX'
-        ? Number(qtdNum.toFixed(2))
+        ? Math.max(1, Math.round(qtdNum))
         : pesoPorCx > 0
           ? Math.max(1, Math.round(kgFinal / pesoPorCx))
           : null
@@ -743,10 +746,10 @@ export function Pedidos() {
       if (idx >= 0) {
         const next = [...prev]
         const novoKg = Number(next[idx].qtd_kg_solicitada || 0) + kgFinal
-        const prevCx = next[idx].qtd_caixas_solicitada !== '' ? Number(next[idx].qtd_caixas_solicitada) : 0
+        const prevCx = next[idx].qtd_caixas_solicitada !== '' ? Math.round(Number(next[idx].qtd_caixas_solicitada)) : 0
         const novoCx =
           cxFinal !== null || next[idx].qtd_caixas_solicitada !== ''
-            ? String(Number((prevCx + (cxFinal || 0)).toFixed(2)))
+            ? String(Math.max(1, Math.round(prevCx + (cxFinal || 0))))
             : ''
         next[idx] = {
           ...next[idx],
@@ -857,7 +860,7 @@ export function Pedidos() {
         travaDisparada = Boolean(resEdit?.trava_estoque)
         if (travaDisparada) {
           toastWarning(
-            `🔒 Trava de Estoque (${editCodigo}): Saldo insuficiente. Pedido bloqueado com cadeado na Central de Pendências (ou abra OP).`
+            `🔒 Trava (${editCodigo}): ${resEdit?.motivo_trava || 'Saldo insuficiente/comprometido'}. Pedido bloqueado com cadeado!`
           )
         } else {
           toastSuccess(
@@ -889,7 +892,7 @@ export function Pedidos() {
         travaDisparada = Boolean(res?.trava_estoque)
         if (travaDisparada) {
           toastWarning(
-            `🔒 Trava de Estoque (${res.codigo}): Saldo insuficiente p/ separação imediata. Cadeado enviado para Central de Pendências!`
+            `🔒 Trava (${res.codigo}): ${res?.motivo_trava || 'Saldo insuficiente ou reservado em outro pedido'}. Cadeado enviado para Central de Pendências!`
           )
         } else {
           toastSuccess(
@@ -1591,6 +1594,25 @@ export function Pedidos() {
                           </td>
                           <td>
                             <span className={`badge ${st.cls}`}>{st.label}</span>
+                            {ped.status === 'BLOQUEADO_ESTOQUE' && (
+                              <div
+                                style={{
+                                  marginTop: 5,
+                                  fontSize: 11,
+                                  lineHeight: 1.3,
+                                  color: '#fca5a5',
+                                  background: 'rgba(239, 68, 68, 0.12)',
+                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                  borderRadius: 6,
+                                  padding: '4px 7px',
+                                  maxWidth: 260,
+                                }}
+                                title={ped.motivo_trava || 'Estoque insuficiente ou comprometido'}
+                              >
+                                <strong>Motivo:</strong>{' '}
+                                {ped.motivo_trava || 'Estoque insuficiente ou comprometido por outro pedido em aberto'}
+                              </div>
+                            )}
                           </td>
                           <td className="font-mono">
                             {ped.romaneio_codigo ? (
@@ -2157,12 +2179,24 @@ export function Pedidos() {
                     ref={qtdRef}
                     type="number"
                     step={unidadeInput === 'KG' ? '0.01' : '1'}
-                    min="0.01"
+                    min={unidadeInput === 'KG' ? '0.01' : '1'}
                     className="form-input font-mono"
                     placeholder={unidadeInput === 'KG' ? 'Ex: 40' : 'Ex: 2'}
                     value={qtdInput}
-                    onChange={(e) => setQtdInput(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      if (unidadeInput === 'CX') {
+                        const digits = raw.replace(/\D/g, '')
+                        setQtdInput(digits ? String(Math.max(1, parseInt(digits, 10))) : '')
+                      } else {
+                        setQtdInput(raw)
+                      }
+                    }}
                     onKeyDown={(e) => {
+                      if (unidadeInput === 'CX' && ['.', ',', 'e', 'E', '-', '+'].includes(e.key)) {
+                        e.preventDefault()
+                        return
+                      }
                       if (e.key === 'Enter') {
                         e.preventDefault()
                         handleAdicionarItem()
@@ -2506,12 +2540,20 @@ export function Pedidos() {
                             <input
                               type="number"
                               step="1"
-                              min="0"
+                              min="1"
                               className="form-input font-mono"
+                              placeholder="1"
+                              title="Somente números inteiros (1 ou mais caixas, sem vírgula)"
                               value={item.qtd_caixas_solicitada}
+                              onKeyDown={(e) => {
+                                if (['.', ',', 'e', 'E', '-', '+'].includes(e.key)) {
+                                  e.preventDefault()
+                                }
+                              }}
                               onChange={(e) => {
-                                const v = e.target.value
-                                const cx = Number(String(v).replace(',', '.') || 0)
+                                const digits = e.target.value.replace(/\D/g, '')
+                                const cx = digits ? Math.max(1, parseInt(digits, 10)) : 0
+                                const v = cx > 0 ? String(cx) : ''
                                 setItensForm((prev) =>
                                   prev.map((r, i) => {
                                     if (i !== idx) return r
@@ -2519,7 +2561,7 @@ export function Pedidos() {
                                     return {
                                       ...r,
                                       qtd_caixas_solicitada: v,
-                                      unidade_solicitada: 'CX',
+                                      unidade_solicitada: cx > 0 ? 'CX' : r.unidade_solicitada,
                                       qtd_solicitada_exibicao: cx > 0 ? cx : r.qtd_solicitada_exibicao,
                                       qtd_kg_solicitada:
                                         pm > 0 && cx > 0 ? String(Number((cx * pm).toFixed(3))) : r.qtd_kg_solicitada,

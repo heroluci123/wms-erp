@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, KeyRound, Lock, Save, ShieldCheck, Upload } from 'lucide-react'
+import { CheckCircle2, KeyRound, Lock, Save, Settings2, ShieldCheck, Upload } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { fiscalQueries } from '../../queries/fiscal'
+import { comprasQueries } from '../../queries/compras'
 
 export function AbaConfigCertificado({ config, onAtualizar, toastSuccess, toastError }) {
+  const navigate = useNavigate()
+  const [exigirNfExpedir, setExigirNfExpedir] = useState(false)
+  const [salvandoTrava, setSalvandoTrava] = useState(false)
   const [form, setForm] = useState({
     ambiente: 'HOMOLOGACAO',
     provedor: 'SIMULACAO_LOCAL',
@@ -29,6 +34,15 @@ export function AbaConfigCertificado({ config, onAtualizar, toastSuccess, toastE
   const fileRef = useRef(null)
 
   useEffect(() => {
+    comprasQueries
+      .obterConfigModulos()
+      .then((res) => {
+        if (res) setExigirNfExpedir(Boolean(res.exigir_nf_para_expedir))
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     if (!config) return
     setForm({
       ambiente: config.ambiente || 'HOMOLOGACAO',
@@ -43,6 +57,25 @@ export function AbaConfigCertificado({ config, onAtualizar, toastSuccess, toastE
       inf_complementar_padrao: config.inf_complementar_padrao || '',
     })
   }, [config])
+
+  const handleToggleTravaExpedir = async (checked) => {
+    setExigirNfExpedir(checked)
+    setSalvandoTrava(true)
+    try {
+      await comprasQueries.salvarConfigModulos({ exigir_nf_para_expedir: checked })
+      toastSuccess(
+        checked ? 'Trava Fiscal Ativada ✅' : 'Trava Fiscal Desativada',
+        checked
+          ? 'Pedidos separados agora exigem NF-e autorizada antes de expedir ou despachar o caminhão.'
+          : 'Expedição liberada mesmo sem NF-e (modo flexível / PAVAN).',
+      )
+    } catch (err) {
+      toastError('Erro ao salvar trava fiscal', err.message)
+      setExigirNfExpedir(!checked)
+    } finally {
+      setSalvandoTrava(false)
+    }
+  }
 
   const handleSalvarConfig = async (e) => {
     e.preventDefault()
@@ -100,11 +133,42 @@ export function AbaConfigCertificado({ config, onAtualizar, toastSuccess, toastE
           <h3 className="text-sm font-bold m-0 flex items-center gap-8">
             <ShieldCheck size={16} className="text-primary" /> Parâmetros Fiscais da Filial (NF-e 55 &amp; NFC-e 65)
           </h3>
-          {config?.emitente && (
-            <span className="badge badge--info text-xs">
-              {config.emitente.regime} • UF {config.emitente.uf}
-            </span>
-          )}
+          <div className="flex items-center gap-8">
+            {config?.emitente && (
+              <span className="badge badge--info text-xs">
+                {config.emitente.regime} • UF {config.emitente.uf}
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => navigate('/parametros-comerciais')}
+              title="Abrir tela de CFOP, Matriz Tributária, Formas de Pagamento e Trava Fiscal"
+            >
+              <Settings2 size={13} /> CFOP, Matriz &amp; Parâmetros
+            </button>
+          </div>
+        </div>
+
+        <div
+          className="p-14 rounded flex flex-col gap-6"
+          style={{
+            background: exigirNfExpedir ? 'rgba(16,185,129,0.1)' : 'var(--bg-2)',
+            border: exigirNfExpedir ? '1px solid rgba(16,185,129,0.4)' : '1px solid var(--border)',
+          }}
+        >
+          <label className="flex items-center gap-8 text-xs font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              disabled={salvandoTrava}
+              checked={exigirNfExpedir}
+              onChange={(e) => handleToggleTravaExpedir(e.target.checked)}
+            />
+            Exigir NF-e faturada antes de expedir / despachar caminhão (Trava Fiscal de Carregamento)
+          </label>
+          <div className="text-xs text-muted" style={{ paddingLeft: 22 }}>
+            Quando marcada, o romaneio não pode ser expedido nem o caminhão despachado sem NF-e autorizada. Deixe desmarcada para operações sem faturamento interno (ex.: PAVAN).
+          </div>
         </div>
 
         <div className="form-grid form-grid--2">

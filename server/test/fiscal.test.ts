@@ -548,6 +548,120 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
       headers,
     })
     assert.equal(resExpOk.statusCode, 200, `Após emitir NF-e, expedição deve ser liberada: ${resExpOk.body}`)
+
+    // 11. Bloquear caixas previstas quebradas (ex: 0.1 caixa) + Motivo explícito de trava de estoque
+    const resCxQuebrada = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Caixa Quebrada Inválida',
+        cliente_id: cliId,
+        cliente: 'CHURRASCARIA FOGO DE CHAO SP LTDA',
+        liberar: false,
+        itens: [
+          {
+            produto_id: carneId,
+            qtd_kg_solicitada: 2.5,
+            qtd_caixas_solicitada: 0.1,
+            unidade_solicitada: 'CX',
+            preco_unitario: 100,
+          },
+        ],
+      },
+    })
+    assert.equal(resCxQuebrada.statusCode, 400, 'Quantidade de caixas quebrada (0.1) deve ser bloqueada com 400')
+
+    const resPedTravaMotivo = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Sem Estoque Motivo Explicito',
+        cliente_id: cliId,
+        cliente: 'CHURRASCARIA FOGO DE CHAO SP LTDA',
+        liberar: true,
+        itens: [
+          {
+            produto_id: carneId,
+            qtd_kg_solicitada: 80,
+            qtd_caixas_solicitada: 4,
+            unidade_solicitada: 'CX',
+            preco_unitario: 100,
+          },
+        ],
+      },
+    })
+    assert.equal(resPedTravaMotivo.statusCode, 201, resPedTravaMotivo.body)
+    assert.equal(resPedTravaMotivo.json().trava_estoque, true)
+    assert.ok(
+      String(resPedTravaMotivo.json().motivo_trava || '').includes('PICANHA BOVINA RESFRIADA'),
+      `Motivo da trava deve detalhar o produto em falta: ${resPedTravaMotivo.body}`,
+    )
+
+    // 12. Faturamento em Lote (múltiplos pedidos de uma vez) + Boletos FEBRABAN + Romaneio de Produtos
+    const resPedLote1 = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Lote 1',
+        cliente_id: cliId,
+        cliente: 'CHURRASCARIA FOGO DE CHAO SP LTDA',
+        liberar: true,
+        ignorar_trava_estoque: true,
+        itens: [{ produto_id: carneId, qtd_kg_solicitada: 15, qtd_caixas_solicitada: 1, preco_unitario: 90 }],
+      },
+    })
+    assert.equal(resPedLote1.statusCode, 201)
+    const pedLote1Id = resPedLote1.json().id as string
+
+    const resPedLote2 = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Lote 2',
+        cliente_id: cliId,
+        cliente: 'CHURRASCARIA FOGO DE CHAO SP LTDA',
+        liberar: true,
+        ignorar_trava_estoque: true,
+        itens: [{ produto_id: carvaoId, qtd_kg_solicitada: 10, qtd_caixas_solicitada: 2, preco_unitario: 25 }],
+      },
+    })
+    assert.equal(resPedLote2.statusCode, 201)
+    const pedLote2Id = resPedLote2.json().id as string
+
+    const resEmitLote = await app.inject({
+      method: 'POST',
+      url: '/api/fiscal/notas/emitir-lote',
+      headers,
+      payload: {
+        modelo: '55',
+        mod_frete: '0',
+        transportadora_id: transpId,
+        veiculo_id: veic1Id,
+        pedidos: [{ pedido_id: pedLote1Id }, { pedido_id: pedLote2Id }],
+      },
+    })
+    assert.equal(resEmitLote.statusCode, 201, resEmitLote.body)
+    const loteBody = resEmitLote.json()
+    assert.equal(loteBody.total_emitidas, 2)
+    assert.equal(loteBody.notas.length, 2)
+    assert.equal(loteBody.notas[0].transportadora_nome, 'FRIGOEX LOGISTICA REFRIGERADA LTDA')
+    assert.equal(loteBody.notas[1].veiculo_placa, 'ABC1D23')
+    assert.ok(Array.isArray(loteBody.notas[0].boletos) && loteBody.notas[0].boletos.length >= 1, 'Cada nota deve retornar boleto(s)')
+    assert.ok(loteBody.notas[0].boletos[0].linha_digitavel.length >= 40, 'Boleto deve ter linha digitável FEBRABAN')
+    assert.ok(loteBody.notas[0].romaneio_produtos.itens.length === 1, 'Nota deve incluir romaneio_produtos com a relação dos itens')
+
+    const resPacote = await app.inject({
+      method: 'POST',
+      url: '/api/fiscal/notas/pacote-impressao',
+      headers,
+      payload: { nota_ids: loteBody.nota_ids },
+    })
+    assert.equal(resPacote.statusCode, 200, resPacote.body)
+    assert.equal(resPacote.json().notas.length, 2)
   } finally {
     await app.close()
     await conn.close()

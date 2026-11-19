@@ -19,6 +19,8 @@ export interface ItemInsuficiente {
   codigo: string
   descricao: string
   solicitado_kg: number
+  fisico_kg: number
+  comprometido_outros_kg: number
   disponivel_kg: number
   deficit_kg: number
 }
@@ -123,6 +125,8 @@ export async function verificarEstoquePedido(
         codigo: p?.codigo || '',
         descricao: p?.descricao || 'Produto',
         solicitado_kg: Number(sol.toFixed(3)),
+        fisico_kg: Number(fisico.toFixed(3)),
+        comprometido_outros_kg: Number(comprometidoOutros.toFixed(3)),
         disponivel_kg: disp,
         deficit_kg: Number((sol - disp).toFixed(3)),
       })
@@ -130,6 +134,21 @@ export async function verificarEstoquePedido(
   }
 
   return { suficiente: insuficientes.length === 0, insuficientes }
+}
+
+export function formatarResumoTravaEstoque(insuficientes: ItemInsuficiente[]): string {
+  if (!insuficientes.length) return 'Estoque insuficiente na câmara.'
+  const partes = insuficientes.slice(0, 3).map((x) => {
+    const labelProd = `${x.codigo ? `[${x.codigo}] ` : ''}${x.descricao}`
+    if (x.fisico_kg >= x.solicitado_kg && x.comprometido_outros_kg > 0) {
+      return `${labelProd} (físico ${x.fisico_kg.toFixed(2)} kg já reservado em outros pedidos — livre ${x.disponivel_kg.toFixed(2)} kg)`
+    }
+    return `${labelProd} (falta ${x.deficit_kg.toFixed(2)} kg — disponível ${x.disponivel_kg.toFixed(2)} kg)`
+  })
+  const sufixoMais = insuficientes.length > 3 ? ` +${insuficientes.length - 3} item(ns)` : ''
+  const todosComprometidos = insuficientes.every((x) => x.fisico_kg >= x.solicitado_kg && x.comprometido_outros_kg > 0)
+  const prefixo = todosComprometidos ? 'Estoque comprometido por outros pedidos' : 'Estoque insuficiente'
+  return `${prefixo}: ${partes.join(', ')}${sufixoMais}`
 }
 
 export async function registrarPendenciaTravaEstoque(
@@ -143,12 +162,8 @@ export async function registrarPendenciaTravaEstoque(
     insuficientes: ItemInsuficiente[]
   },
 ): Promise<void> {
-  const resumo = params.insuficientes
-    .slice(0, 3)
-    .map((x) => `${x.codigo ? `[${x.codigo}] ` : ''}${x.descricao} (falta ${x.deficit_kg.toFixed(2)} kg)`)
-    .join(', ')
-  const sufixoMais = params.insuficientes.length > 3 ? ` +${params.insuficientes.length - 3}` : ''
-  const titulo = `${params.codigoPedido} — ${params.clienteNome}: Estoque insuficiente (${resumo}${sufixoMais}). Cadeado aguardando liberação p/ operação.`
+  const motivoClaro = formatarResumoTravaEstoque(params.insuficientes)
+  const titulo = `${params.codigoPedido} — ${params.clienteNome}: ${motivoClaro}. Cadeado aguardando liberação p/ operação.`
 
   const [existente] = await tx
     .select({ id: pendenciasSetor.id })

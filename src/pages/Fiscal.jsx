@@ -1,13 +1,18 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Archive,
   Ban,
+  Calendar,
   CheckCircle2,
+  CheckSquare,
+  ClipboardList,
+  CreditCard,
   Download,
   FileCheck2,
   FileCode2,
   FileText,
   KeyRound,
+  Layers,
   Plus,
   Printer,
   RefreshCw,
@@ -15,6 +20,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Truck,
   X,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
@@ -22,11 +28,32 @@ import { isApiEnabled } from '../lib/apiClient'
 import { fiscalQueries } from '../queries/fiscal'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
-import { DanfePrintModal, imprimirDanfeDocumento } from '../components/fiscal/DanfePrintModal'
+import {
+  DanfePrintModal,
+  PacoteLotePrintModal,
+  imprimirBoletoNota,
+  imprimirDanfeDocumento,
+  imprimirPacoteCompletoNota,
+  imprimirRomaneioProdutosNota,
+  imprimirSomenteDanfe,
+} from '../components/fiscal/DanfePrintModal'
 import { AbaConfigCertificado } from '../components/fiscal/AbaConfigCertificado'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+const fmtData = (d) => {
+  if (!d) return '-'
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(d))) {
+    const [y, m, day] = String(d).split('-')
+    return `${day}/${m}/${y}`
+  }
+  try {
+    return new Date(d).toLocaleDateString('pt-BR')
+  } catch {
+    return String(d)
+  }
+}
 
 const fmtDataHora = (d) => {
   if (!d) return '-'
@@ -34,6 +61,88 @@ const fmtDataHora = (d) => {
     return new Date(d).toLocaleString('pt-BR')
   } catch {
     return String(d)
+  }
+}
+
+// Cores e rótulos distintos por Status Operacional na Fila de Emissão Fiscal
+function obterBadgeStatusFila(status) {
+  switch (String(status || '').toUpperCase()) {
+    case 'AGUARDANDO_CONFERENCIA':
+      return {
+        label: '✓ Pronto p/ Faturar',
+        style: {
+          background: 'rgba(37, 99, 235, 0.22)',
+          color: '#60a5fa',
+          border: '1px solid rgba(59, 130, 246, 0.55)',
+          fontWeight: 800,
+        },
+        pronto: true,
+      }
+    case 'EM_CONFERENCIA':
+      return {
+        label: '✓ Conferido / Pronto p/ Faturar',
+        style: {
+          background: 'rgba(6, 182, 212, 0.18)',
+          color: '#22d3ee',
+          border: '1px solid rgba(6, 182, 212, 0.45)',
+          fontWeight: 800,
+        },
+        pronto: true,
+      }
+    case 'EXPEDIDO':
+      return {
+        label: '✓ Expedido (Peso Real)',
+        style: {
+          background: 'rgba(16, 185, 129, 0.18)',
+          color: '#34d399',
+          border: '1px solid rgba(16, 185, 129, 0.45)',
+          fontWeight: 800,
+        },
+        pronto: true,
+      }
+    case 'EM_SEPARACAO':
+      return {
+        label: 'Em Separação na Câmara',
+        style: {
+          background: 'rgba(245, 158, 11, 0.18)',
+          color: '#fbbf24',
+          border: '1px solid rgba(245, 158, 11, 0.45)',
+          fontWeight: 700,
+        },
+        pronto: false,
+      }
+    case 'LIBERADO':
+      return {
+        label: 'Liberado p/ Separação',
+        style: {
+          background: 'rgba(168, 85, 247, 0.18)',
+          color: '#c084fc',
+          border: '1px solid rgba(168, 85, 247, 0.42)',
+          fontWeight: 700,
+        },
+        pronto: false,
+      }
+    case 'BLOQUEADO_ESTOQUE':
+      return {
+        label: '🔒 Trava Estoque',
+        style: {
+          background: 'rgba(239, 68, 68, 0.18)',
+          color: '#f87171',
+          border: '1px solid rgba(239, 68, 68, 0.45)',
+          fontWeight: 700,
+        },
+        pronto: false,
+      }
+    default:
+      return {
+        label: status || 'Pendente',
+        style: {
+          background: 'rgba(148, 163, 184, 0.15)',
+          color: '#cbd5e1',
+          border: '1px solid rgba(148, 163, 184, 0.3)',
+        },
+        pronto: false,
+      }
   }
 }
 
@@ -69,19 +178,33 @@ export function Fiscal() {
   })
   const [eventos, setEventos] = useState([])
 
-  // Filtros notas
+  // ── FILTROS DINÂMICOS DA FILA DE EMISSÃO ──────────────────────────────────
+  const [buscaFila, setBuscaFila] = useState('')
+  const [statusFilaFiltro, setStatusFilaFiltro] = useState('TODOS') // 'TODOS' | 'PRONTOS' | 'AGUARDANDO_CONFERENCIA' | 'LIBERADO' | 'EXPEDIDO'
+  const [dataIniFila, setDataIniFila] = useState('')
+  const [dataFimFila, setDataFimFila] = useState('')
+  const [selecionadosFila, setSelecionadosFila] = useState([]) // array de pedido.id
+
+  // ── FILTROS DINÂMICOS DE NOTAS EMITIDAS ───────────────────────────────────
   const [modeloFiltro, setModeloFiltro] = useState('')
   const [statusFiltro, setStatusFiltro] = useState('TODOS')
   const [buscaNota, setBuscaNota] = useState('')
+  const [dataIniNota, setDataIniNota] = useState('')
+  const [dataFimNota, setDataFimNota] = useState('')
+  const [selecionadasNotas, setSelecionadasNotas] = useState([]) // array de nota.id
 
   // Cofre XML mensal
   const [mesCofre, setMesCofre] = useState(() => new Date().toISOString().slice(0, 7))
   const [cofre, setCofre] = useState({ resumo: {}, arquivos: [] })
 
-  // Modais
-  const [previewPedido, setPreviewPedido] = useState(null) // { pedido, preview, modelo, frete, infExtra }
+  // Modais de Emissão & Impressão
+  const [previewPedido, setPreviewPedido] = useState(null) // modal individual (1 pedido)
+  const [modalLote, setModalLote] = useState(null) // modal de faturamento em lote (2+ pedidos)
   const [emitindo, setEmitindo] = useState(false)
-  const [notaDanfe, setNotaDanfe] = useState(null)
+  const [notaDanfe, setNotaDanfe] = useState(null) // modal de impressão individual (1 nota)
+  const [pacoteLoteNotas, setPacoteLoteNotas] = useState(null) // modal de impressão de lote (2+ notas)
+  const [carregandoImpressaoId, setCarregandoImpressaoId] = useState(null)
+
   const [modalEvento, setModalEvento] = useState(null) // { tipo: 'CANCELAR' | 'CCE', nota, texto }
   const [modalAvulsa, setModalAvulsa] = useState(false)
   const [produtosCat, setProdutosCat] = useState([])
@@ -126,6 +249,8 @@ export function Fiscal() {
           modelo: modeloFiltro || undefined,
           status: statusFiltro,
           busca: buscaNota || undefined,
+          data_inicio: dataIniNota || undefined,
+          data_fim: dataFimNota || undefined,
         }),
         fiscalQueries.listarEventos(),
         cadastrosQueries.listarProdutos?.().catch(() => []) || Promise.resolve([]),
@@ -153,7 +278,7 @@ export function Fiscal() {
     } finally {
       setLoading(false)
     }
-  }, [apiAtiva, modeloFiltro, statusFiltro, buscaNota, toastError])
+  }, [apiAtiva, modeloFiltro, statusFiltro, buscaNota, dataIniNota, dataFimNota, toastError])
 
   const carregarCofre = useCallback(async () => {
     if (!apiAtiva || aba !== 'COFRE') return
@@ -173,11 +298,88 @@ export function Fiscal() {
     carregarCofre()
   }, [carregarCofre])
 
+  // ── FILTRAGEM INSTANTÂNEA DA FILA DE EMISSÃO ──────────────────────────────
+  const pedidosFilaFiltrados = useMemo(() => {
+    const q = buscaFila.trim().toLowerCase()
+    return (fila.pedidos || []).filter((p) => {
+      const st = String(p.status || '').toUpperCase()
+      if (statusFilaFiltro === 'PRONTOS') {
+        if (!['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA', 'EXPEDIDO'].includes(st)) return false
+      } else if (statusFilaFiltro !== 'TODOS' && st !== statusFilaFiltro) {
+        return false
+      }
+
+      const diaRef = String(p.previsao_entrega || (p.created_at ? new Date(p.created_at).toISOString().slice(0, 10) : '')).slice(0, 10)
+      if (dataIniFila && diaRef && diaRef < dataIniFila) return false
+      if (dataFimFila && diaRef && diaRef > dataFimFila) return false
+
+      if (!q) return true
+      return (
+        String(p.codigo || '').toLowerCase().includes(q) ||
+        String(p.titulo || '').toLowerCase().includes(q) ||
+        String(p.cliente_nome || '').toLowerCase().includes(q) ||
+        String(p.cliente_doc || '').toLowerCase().includes(q) ||
+        String(p.forma_pagamento || '').toLowerCase().includes(q)
+      )
+    })
+  }, [fila.pedidos, buscaFila, statusFilaFiltro, dataIniFila, dataFimFila])
+
+  const aplicarPresetDataFila = (dias) => {
+    if (dias === null) {
+      setDataIniFila('')
+      setDataFimFila('')
+      return
+    }
+    const fim = new Date()
+    const ini = new Date()
+    ini.setDate(fim.getDate() - dias)
+    setDataIniFila(ini.toISOString().slice(0, 10))
+    setDataFimFila(fim.toISOString().slice(0, 10))
+  }
+
+  const aplicarPresetDataNotas = (dias) => {
+    if (dias === null) {
+      setDataIniNota('')
+      setDataFimNota('')
+      return
+    }
+    const fim = new Date()
+    const ini = new Date()
+    ini.setDate(fim.getDate() - dias)
+    setDataIniNota(ini.toISOString().slice(0, 10))
+    setDataFimNota(fim.toISOString().slice(0, 10))
+  }
+
+  // ── SELEÇÃO EM LOTE NA FILA ───────────────────────────────────────────────
+  const toggleSelecaoFila = (pedId) => {
+    setSelecionadosFila((prev) =>
+      prev.includes(pedId) ? prev.filter((id) => id !== pedId) : [...prev, pedId],
+    )
+  }
+
+  const toggleSelecionarTodosFila = () => {
+    const idsVisiveis = pedidosFilaFiltrados.map((p) => p.id)
+    const todosMarcados = idsVisiveis.length > 0 && idsVisiveis.every((id) => selecionadosFila.includes(id))
+    if (todosMarcados) {
+      setSelecionadosFila((prev) => prev.filter((id) => !idsVisiveis.includes(id)))
+    } else {
+      setSelecionadosFila((prev) => Array.from(new Set([...prev, ...idsVisiveis])))
+    }
+  }
+
+  const selecionarProntosParaFaturar = () => {
+    const prontosIds = pedidosFilaFiltrados
+      .filter((p) => ['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA', 'EXPEDIDO'].includes(String(p.status).toUpperCase()))
+      .map((p) => p.id)
+    setSelecionadosFila(prontosIds)
+  }
+
+  // ── EMISSÃO INDIVIDUAL (1 PEDIDO) ─────────────────────────────────────────
   const abrirPreviewPedido = async (ped, modelo = '55') => {
     try {
       const prev = await fiscalQueries.previewPedido(ped.id, modelo)
       const sugId = prev?.sugestao_transporte?.transportadora_id || ''
-      const sugTransp = transportadorasCat.find((t) => t.id === sugId) || null
+      const sugTransp = transportadorasCat.find((t) => t.id === sugId) || transportadorasCat[0] || null
       const veicPadrao =
         sugTransp?.veiculos?.find((v) => v.padrao) || sugTransp?.veiculos?.[0] || null
       setPreviewPedido({
@@ -185,9 +387,10 @@ export function Fiscal() {
         preview: prev,
         modelo,
         mod_frete: modelo === '65' ? '9' : '0',
-        transportadora_id: sugId,
+        transportadora_id: sugTransp?.id || '',
         veiculo_id: veicPadrao?.id || '',
-        veiculo_placa: prev?.sugestao_transporte?.veiculo_placa || veicPadrao?.placa || sugTransp?.placa_padrao || '',
+        veiculo_placa:
+          prev?.sugestao_transporte?.veiculo_placa || veicPadrao?.placa || sugTransp?.placa_padrao || '',
         veiculo_uf: veicPadrao?.uf_placa || sugTransp?.uf || prev?.emitente?.uf || 'SP',
         transportadora_antt: veicPadrao?.rntrc_antt || sugTransp?.rntrc_antt || '',
         especie_volumes: 'CAIXA',
@@ -225,14 +428,85 @@ export function Fiscal() {
       })
       toastSuccess(
         `${previewPedido.modelo === '65' ? 'NFC-e' : 'NF-e'} Autorizada ✅`,
-        `Nº ${res.numero} / Série ${res.serie} • Chave ${res.chave_acesso}`,
+        `Nº ${res.numero} / Série ${res.serie} • Abrindo DANFE + Boleto para impressão.`,
       )
       setPreviewPedido(null)
+      setSelecionadosFila((prev) => prev.filter((id) => id !== previewPedido.pedido.id))
       await carregarTudo()
       const detalhe = await fiscalQueries.obterNota(res.id)
       setNotaDanfe(detalhe)
     } catch (err) {
       toastError('Erro ao emitir nota fiscal', err.message)
+    } finally {
+      setEmitindo(false)
+    }
+  }
+
+  // ── EMISSÃO EM LOTE (2 OU MAIS PEDIDOS) ───────────────────────────────────
+  const abrirModalFaturamentoLote = () => {
+    const peds = (fila.pedidos || []).filter((p) => selecionadosFila.includes(p.id))
+    if (peds.length === 0) return
+    if (peds.length === 1) {
+      abrirPreviewPedido(peds[0], '55')
+      return
+    }
+    const transpDefault = transportadorasCat[0] || null
+    const veicDefault = transpDefault?.veiculos?.find((v) => v.padrao) || transpDefault?.veiculos?.[0] || null
+    setModalLote({
+      modelo: '55',
+      mod_frete: '0',
+      transportadora_id: transpDefault?.id || '',
+      veiculo_id: veicDefault?.id || '',
+      veiculo_placa: veicDefault?.placa || transpDefault?.placa_padrao || '',
+      veiculo_uf: veicDefault?.uf_placa || transpDefault?.uf || 'SP',
+      transportadora_antt: veicDefault?.rntrc_antt || transpDefault?.rntrc_antt || '',
+      especie_volumes: 'CAIXA',
+      inf_complementar: '',
+      pedidos: peds,
+    })
+  }
+
+  const confirmarEmissaoLote = async () => {
+    if (!modalLote) return
+    const exigeTransp = modalLote.modelo === '55' && ['0', '1'].includes(String(modalLote.mod_frete))
+    if (exigeTransp && !modalLote.transportadora_id) {
+      return toastError(
+        'Transportadora obrigatória no Lote',
+        'Selecione a Transportadora padrão do lote para frete 0 (CIF) ou 1 (FOB).',
+      )
+    }
+    setEmitindo(true)
+    try {
+      const res = await fiscalQueries.emitirLote({
+        modelo: modalLote.modelo,
+        mod_frete: modalLote.mod_frete,
+        transportadora_id: modalLote.transportadora_id || null,
+        veiculo_id: modalLote.veiculo_id || null,
+        veiculo_placa: modalLote.veiculo_placa || '',
+        veiculo_uf: modalLote.veiculo_uf || '',
+        transportadora_antt: modalLote.transportadora_antt || '',
+        especie_volumes: modalLote.especie_volumes || 'CAIXA',
+        inf_complementar: modalLote.inf_complementar || '',
+        pedidos: modalLote.pedidos.map((p) => ({
+          pedido_id: p.id,
+        })),
+      })
+      toastSuccess(
+        `Lote Faturado com Sucesso ✅`,
+        `${res.total_emitidas} NF-e(s) autorizadas! Pacotão de impressão (NF + Boleto + Romaneio) pronto.`,
+      )
+      setModalLote(null)
+      setSelecionadosFila([])
+      await carregarTudo()
+      if (Array.isArray(res.notas) && res.notas.length > 0) {
+        if (res.notas.length === 1) {
+          setNotaDanfe(res.notas[0])
+        } else {
+          setPacoteLoteNotas(res.notas)
+        }
+      }
+    } catch (err) {
+      toastError('Erro no faturamento em lote', err.message)
     } finally {
       setEmitindo(false)
     }
@@ -312,13 +586,61 @@ export function Fiscal() {
     }
   }
 
-  const abrirDanfe = async (notaId) => {
+  // ── IMPRESSÃO E REIMPRESSÃO EM NOTAS EMITIDAS ─────────────────────────────
+  const abrirModalNotaCompleta = async (notaId) => {
+    setCarregandoImpressaoId(notaId)
     try {
       const det = await fiscalQueries.obterNota(notaId)
       setNotaDanfe(det)
     } catch (err) {
-      toastError('Erro ao abrir DANFE', err.message)
+      toastError('Erro ao carregar documentos da nota', err.message)
+    } finally {
+      setCarregandoImpressaoId(null)
     }
+  }
+
+  const reimprimirDireto = async (notaId, tipo) => {
+    setCarregandoImpressaoId(notaId)
+    try {
+      const det = await fiscalQueries.obterNota(notaId)
+      if (tipo === 'DANFE') imprimirSomenteDanfe(det)
+      else if (tipo === 'BOLETO') imprimirBoletoNota(det)
+      else if (tipo === 'ROMANEIO') imprimirRomaneioProdutosNota(det)
+      else if (tipo === 'PACOTE') imprimirPacoteCompletoNota(det)
+      else imprimirDanfeDocumento(det)
+    } catch (err) {
+      toastError('Erro ao preparar impressão', err.message)
+    } finally {
+      setCarregandoImpressaoId(null)
+    }
+  }
+
+  const abrirPacotaoNotasSelecionadas = async () => {
+    if (selecionadasNotas.length === 0) return
+    if (selecionadasNotas.length === 1) {
+      await abrirModalNotaCompleta(selecionadasNotas[0])
+      return
+    }
+    try {
+      const res = await fiscalQueries.obterPacoteImpressao(selecionadasNotas)
+      if (Array.isArray(res?.notas) && res.notas.length > 0) {
+        setPacoteLoteNotas(res.notas)
+      }
+    } catch (err) {
+      toastError('Erro ao montar pacote de impressão em lote', err.message)
+    }
+  }
+
+  const toggleSelecaoNota = (notaId) => {
+    setSelecionadasNotas((prev) =>
+      prev.includes(notaId) ? prev.filter((id) => id !== notaId) : [...prev, notaId],
+    )
+  }
+
+  const toggleSelecionarTodasNotas = () => {
+    const ids = notas.map((n) => n.id)
+    const todas = ids.length > 0 && ids.every((id) => selecionadasNotas.includes(id))
+    setSelecionadasNotas(todas ? [] : ids)
   }
 
   const baixarXmlNota = async (notaId) => {
@@ -383,16 +705,24 @@ export function Fiscal() {
     toastSuccess('Pacote do Contador exportado ✅', 'Planilha CSV + Lote XML consolidado baixados.')
   }
 
+  const qtdProntosFila = useMemo(
+    () =>
+      (fila.pedidos || []).filter((p) =>
+        ['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA', 'EXPEDIDO'].includes(String(p.status).toUpperCase()),
+      ).length,
+    [fila.pedidos],
+  )
+
   return (
     <div className="fade-in">
       {/* CABEÇALHO */}
       <div className="page-header">
         <div>
           <h1 className="page-header__title flex items-center gap-10">
-            <FileCheck2 className="text-primary" size={26} /> Módulo Fiscal — NF-e 55 &amp; NFC-e 65
+            <FileCheck2 className="text-primary" size={26} /> Módulo Fiscal — NF-e 55, NFC-e 65, Boletos &amp; Romaneio
           </h1>
           <p className="page-header__subtitle">
-            Motor Tributário de Carnes (Cesta Básica / PIS-COFINS Zero), Emissão XML 4.00, DANFE, CC-e, Cofre XML e Certificado A1
+            Faturamento individual ou em lote com peso real das caixas, DANFE 2026, Boleto Bancário e Romaneio de Produtos em 1 clique
           </p>
         </div>
         <div className="flex gap-8 flex-wrap">
@@ -408,44 +738,59 @@ export function Fiscal() {
       <ApiModeRequiredBanner modulo="Módulo Fiscal (NF-e / NFC-e)" />
 
       {/* 5 CARDS KPI */}
-      <div className="grid gap-12 mb-16" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
         <div className="card" style={{ padding: '14px 16px' }}>
           <div className="text-xs text-muted uppercase font-bold">Fila de Emissão</div>
-          <div className="text-xl font-bold font-mono text-warning mt-6">
+          <div className="text-xl font-bold font-mono text-warning" style={{ marginTop: 6 }}>
             {fila.pedidos.length + fila.devolucoes.length} pendente(s)
           </div>
-          <div className="text-xs text-muted mt-4">
-            {fila.pedidos.length} Pedido(s) • {fila.devolucoes.length} Devolução(ões)
+          <div className="text-xs" style={{ marginTop: 4, color: '#60a5fa', fontWeight: 700 }}>
+            {qtdProntosFila} Pronto(s) p/ Faturar (Separados)
           </div>
         </div>
 
         <div className="card" style={{ padding: '14px 16px' }}>
           <div className="text-xs text-muted uppercase font-bold">Notas Autorizadas</div>
-          <div className="text-xl font-bold font-mono text-success mt-6">{resumoNotas.autorizadas}</div>
-          <div className="text-xs text-muted mt-4">
+          <div className="text-xl font-bold font-mono text-success" style={{ marginTop: 6 }}>
+            {resumoNotas.autorizadas}
+          </div>
+          <div className="text-xs text-muted" style={{ marginTop: 4 }}>
             NF-e 55: <strong>{resumoNotas.nfe_55}</strong> • NFC-e 65: <strong>{resumoNotas.nfce_65}</strong>
           </div>
         </div>
 
         <div className="card" style={{ padding: '14px 16px' }}>
           <div className="text-xs text-muted uppercase font-bold">Total Faturado Fiscal</div>
-          <div className="text-xl font-bold font-mono text-cyan mt-6">{fmtMoeda(resumoNotas.valor_total_autorizado)}</div>
-          <div className="text-xs text-muted mt-4">ICMS destacado: {fmtMoeda(resumoNotas.total_icms)}</div>
+          <div className="text-xl font-bold font-mono text-cyan" style={{ marginTop: 6 }}>
+            {fmtMoeda(resumoNotas.valor_total_autorizado)}
+          </div>
+          <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+            ICMS destacado: {fmtMoeda(resumoNotas.total_icms)}
+          </div>
         </div>
 
         <div className="card" style={{ padding: '14px 16px' }}>
           <div className="text-xs text-muted uppercase font-bold">Ambiente &amp; Motor</div>
-          <div className="mt-6 flex items-center gap-6">
+          <div style={{ marginTop: 6 }} className="flex items-center gap-6">
             <span className={`badge ${config?.ambiente === 'PRODUCAO' ? 'badge--success' : 'badge--warning'}`}>
               {config?.ambiente || 'HOMOLOGACAO'}
             </span>
           </div>
-          <div className="text-xs text-muted mt-4 font-mono">{config?.provedor || 'SIMULACAO_LOCAL'}</div>
+          <div className="text-xs text-muted font-mono" style={{ marginTop: 4 }}>
+            {config?.provedor || 'SIMULACAO_LOCAL'}
+          </div>
         </div>
 
         <div className="card" style={{ padding: '14px 16px' }}>
           <div className="text-xs text-muted uppercase font-bold">Certificado Digital A1</div>
-          <div className="mt-6">
+          <div style={{ marginTop: 6 }}>
             {config?.certificado_configurado ? (
               <span className="badge badge--success">
                 <CheckCircle2 size={12} /> A1 Instalado
@@ -454,14 +799,23 @@ export function Fiscal() {
               <span className="badge badge--neutral">Modo Simulação (Sem A1)</span>
             )}
           </div>
-          <div className="text-xs text-muted mt-4 font-mono">
+          <div className="text-xs text-muted font-mono" style={{ marginTop: 4 }}>
             Próx. NF-e #{config?.proximo_numero_nfe || 1} • NFC-e #{config?.proximo_numero_nfce || 1}
           </div>
         </div>
       </div>
 
       {/* ABAS */}
-      <div className="flex gap-8 flex-wrap mb-16 pb-8 border-b border-border">
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          marginBottom: 16,
+          paddingBottom: 10,
+          borderBottom: '1px solid var(--border)',
+        }}
+      >
         {[
           { id: 'FILA', label: `Fila de Emissão (${fila.pedidos.length + fila.devolucoes.length})`, icon: Send },
           { id: 'NOTAS', label: `Notas Emitidas (${notas.length})`, icon: FileText },
@@ -485,78 +839,289 @@ export function Fiscal() {
 
       {/* ABA 1: FILA DE EMISSÃO */}
       {aba === 'FILA' && (
-        <div className="flex flex-col gap-16">
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="p-14 border-b border-border flex justify-between items-center" style={{ background: 'var(--bg-2)' }}>
-              <h3 className="text-sm font-bold m-0">Pedidos de Venda Aguardando NF-e / NFC-e</h3>
-              <span className="text-xs text-muted">Puxa peso real das caixas expedidas e calcula impostos de carnes automaticamente</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* BARRA DE FILTROS DINÂMICOS DA FILA */}
+          <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: 440 }}>
+                <Search
+                  size={15}
+                  style={{
+                    position: 'absolute',
+                    left: 11,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)',
+                  }}
+                />
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ paddingLeft: 34, height: 36 }}
+                  placeholder="Buscar por Nº do Pedido (PED-0009), nome do cliente, CNPJ, título..."
+                  value={buscaFila}
+                  onChange={(e) => setBuscaFila(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                {[
+                  { id: 'TODOS', label: `Todos (${fila.pedidos.length})` },
+                  { id: 'PRONTOS', label: `✓ Prontos p/ Faturar (${qtdProntosFila})` },
+                  { id: 'LIBERADO', label: 'Liberados / Em Separação' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={`btn btn--sm ${statusFilaFiltro === f.id ? 'btn--primary' : 'btn--ghost'}`}
+                    onClick={() => setStatusFilaFiltro(f.id)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="text-xs text-muted flex items-center gap-4">
+                  <Calendar size={13} /> Data:
+                </span>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 'auto', height: 32, padding: '2px 8px', fontSize: 12 }}
+                  value={dataIniFila}
+                  onChange={(e) => setDataIniFila(e.target.value)}
+                />
+                <span className="text-xs text-muted">até</span>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 'auto', height: 32, padding: '2px 8px', fontSize: 12 }}
+                  value={dataFimFila}
+                  onChange={(e) => setDataFimFila(e.target.value)}
+                />
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => aplicarPresetDataFila(0)}>
+                  Hoje
+                </button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => aplicarPresetDataFila(7)}>
+                  7 Dias
+                </button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => aplicarPresetDataFila(null)}>
+                  Todas Datas
+                </button>
+                {(buscaFila || statusFilaFiltro !== 'TODOS' || dataIniFila || dataFimFila) && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => {
+                      setBuscaFila('')
+                      setStatusFilaFiltro('TODOS')
+                      setDataIniFila('')
+                      setDataFimFila('')
+                    }}
+                  >
+                    Limpar Filtros
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {qtdProntosFila > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn--outline btn--sm"
+                    onClick={selecionarProntosParaFaturar}
+                  >
+                    <CheckSquare size={14} /> Marcar Prontos p/ Faturar ({qtdProntosFila})
+                  </button>
+                )}
+                {selecionadosFila.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn--success btn--sm"
+                    onClick={abrirModalFaturamentoLote}
+                  >
+                    <Layers size={14} />{' '}
+                    {selecionadosFila.length === 1
+                      ? 'Faturar 1 Pedido Selecionado'
+                      : `Faturar em Lote (${selecionadosFila.length} Pedidos)`}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* CARD PEDIDOS DE VENDA AGUARDANDO NF-e */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div
+              style={{
+                padding: '14px 18px',
+                background: 'var(--bg-2)',
+                borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}
+            >
+              <div>
+                <h3 className="text-sm font-bold m-0">
+                  Pedidos de Venda Aguardando NF-e / NFC-e ({pedidosFilaFiltrados.length})
+                </h3>
+                <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                  Selecione 1 pedido para conferência detalhada ou vários pedidos para faturar em lote e imprimir NF + Boleto + Romaneio de uma vez
+                </div>
+              </div>
+              {selecionadosFila.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="badge badge--info">{selecionadosFila.length} selecionado(s)</span>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => setSelecionadosFila([])}
+                  >
+                    Desmarcar
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Pedido</th>
+                    <th style={{ width: 38, textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={
+                          pedidosFilaFiltrados.length > 0 &&
+                          pedidosFilaFiltrados.every((p) => selecionadosFila.includes(p.id))
+                        }
+                        onChange={toggleSelecionarTodosFila}
+                        title="Selecionar todos os pedidos visíveis"
+                      />
+                    </th>
+                    <th>Pedido / Data</th>
                     <th>Status Operacional</th>
-                    <th>Cliente / UF</th>
+                    <th>Cliente / UF / Condição</th>
+                    <th style={{ textAlign: 'right' }}>Peso / Caixas</th>
                     <th style={{ textAlign: 'right' }}>Valor Pedido</th>
                     <th style={{ textAlign: 'right' }}>Emissão</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {fila.pedidos.length === 0 ? (
+                  {pedidosFilaFiltrados.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center p-24 text-muted">
-                        Todos os pedidos ativos já possuem NF-e autorizada ou ainda não há pedidos liberados.
+                      <td colSpan={7} className="text-center" style={{ padding: 28, color: 'var(--text-muted)' }}>
+                        Nenhum pedido encontrado na fila de faturamento com os filtros atuais.
                       </td>
                     </tr>
                   ) : (
-                    fila.pedidos.map((p) => (
-                      <tr key={p.id}>
-                        <td>
-                          <div className="font-mono font-bold text-xs text-cyan">{p.codigo}</div>
-                          <div className="text-xs text-muted">{p.titulo}</div>
-                        </td>
-                        <td>
-                          <span className="badge badge--info">{p.status}</span>
-                        </td>
-                        <td>
-                          <div className="font-bold text-sm">{p.cliente_nome}</div>
-                          <div className="text-xs text-muted font-mono">
-                            {p.cliente_doc || 'Sem doc'} • UF {p.cliente_uf}
-                          </div>
-                        </td>
-                        <td style={{ textAlign: 'right' }} className="font-mono font-bold text-sm">
-                          {fmtMoeda(p.valor_total)}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <div className="flex justify-end gap-6">
-                            <button
-                              type="button"
-                              className="btn btn--primary btn--sm"
-                              onClick={() => abrirPreviewPedido(p, '55')}
+                    pedidosFilaFiltrados.map((p) => {
+                      const badge = obterBadgeStatusFila(p.status)
+                      const marcado = selecionadosFila.includes(p.id)
+                      const temSep = Number(p.peso_separado_kg || 0) > 0
+                      return (
+                        <tr
+                          key={p.id}
+                          style={{
+                            background: marcado ? 'rgba(59, 130, 246, 0.09)' : undefined,
+                          }}
+                        >
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={marcado}
+                              onChange={() => toggleSelecaoFila(p.id)}
+                            />
+                          </td>
+                          <td>
+                            <div className="font-mono font-bold text-xs text-cyan">{p.codigo}</div>
+                            <div className="text-xs font-bold">{p.titulo}</div>
+                            <div className="text-xs text-muted font-mono">
+                              {fmtData(p.previsao_entrega || p.created_at)}
+                            </div>
+                          </td>
+                          <td>
+                            <span
+                              className="badge"
+                              style={{
+                                ...badge.style,
+                                padding: '4px 10px',
+                                borderRadius: 999,
+                                fontSize: 11.5,
+                                display: 'inline-block',
+                              }}
                             >
-                              <FileCheck2 size={13} /> Emitir NF-e (55)
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn--ghost btn--sm"
-                              onClick={() => abrirPreviewPedido(p, '65')}
-                            >
-                              NFC-e (65)
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="font-bold text-sm">{p.cliente_nome}</div>
+                            <div className="text-xs text-muted font-mono">
+                              {p.cliente_doc || 'Sem CNPJ/CPF'} • UF {p.cliente_uf} • {p.forma_pagamento || 'À VISTA'}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }} className="font-mono text-xs">
+                            {temSep ? (
+                              <>
+                                <div className="font-bold text-success">
+                                  {Number(p.peso_separado_kg).toFixed(2)} kg ({p.qtd_caixas_separadas} cx)
+                                </div>
+                                <div className="text-muted">Solic.: {Number(p.peso_solicitado_kg || 0).toFixed(2)} kg</div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="font-bold">{Number(p.peso_solicitado_kg || 0).toFixed(2)} kg</div>
+                                <div className="text-muted">{p.qtd_itens || 1} produto(s)</div>
+                              </>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'right' }} className="font-mono font-bold text-sm">
+                            {fmtMoeda(p.valor_total)}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                              <button
+                                type="button"
+                                className="btn btn--primary btn--sm"
+                                onClick={() => abrirPreviewPedido(p, '55')}
+                              >
+                                <FileCheck2 size={13} /> Emitir NF-e (55)
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--sm"
+                                onClick={() => abrirPreviewPedido(p, '65')}
+                              >
+                                NFC-e (65)
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
 
+          {/* CARD DEVOLUÇÕES PENDENTES */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="p-14 border-b border-border flex justify-between items-center" style={{ background: 'var(--bg-2)' }}>
-              <h3 className="text-sm font-bold m-0">Devoluções Pendentes de NF-e de Entrada (CFOP 1202 / 2202)</h3>
+            <div
+              style={{
+                padding: '14px 18px',
+                background: 'var(--bg-2)',
+                borderBottom: '1px solid var(--border)',
+              }}
+            >
+              <h3 className="text-sm font-bold m-0">
+                Devoluções Pendentes de NF-e de Entrada — CFOP 1202 / 2202 ({fila.devolucoes.length})
+              </h3>
             </div>
             <div className="table-wrap">
               <table className="table">
@@ -573,7 +1138,7 @@ export function Fiscal() {
                 <tbody>
                   {fila.devolucoes.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center p-20 text-muted">
+                      <td colSpan={6} className="text-center" style={{ padding: 24, color: 'var(--text-muted)' }}>
                         Nenhuma devolução pendente de NF-e fiscal.
                       </td>
                     </tr>
@@ -613,10 +1178,10 @@ export function Fiscal() {
 
       {/* ABA 2: NOTAS EMITIDAS */}
       {aba === 'NOTAS' && (
-        <div className="flex flex-col gap-12">
-          <div className="card" style={{ padding: '12px 14px' }}>
-            <div className="flex flex-wrap items-center justify-between gap-10">
-              <div className="flex gap-6 flex-wrap">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                 {[
                   { id: '', label: 'Todos Modelos' },
                   { id: '55', label: 'NF-e (55)' },
@@ -633,7 +1198,7 @@ export function Fiscal() {
                 ))}
                 <select
                   className="form-input"
-                  style={{ width: 140, height: 32, fontSize: 12, padding: '2px 8px' }}
+                  style={{ width: 150, height: 34, fontSize: 12, padding: '2px 8px' }}
                   value={statusFiltro}
                   onChange={(e) => setStatusFiltro(e.target.value)}
                 >
@@ -642,20 +1207,72 @@ export function Fiscal() {
                   <option value="CANCELADA">Canceladas</option>
                 </select>
               </div>
-              <div style={{ position: 'relative', minWidth: 250 }}>
+
+              <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: 420 }}>
                 <Search
-                  size={14}
-                  style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+                  size={15}
+                  style={{
+                    position: 'absolute',
+                    left: 11,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)',
+                  }}
                 />
                 <input
                   type="text"
                   className="form-input"
-                  style={{ paddingLeft: 32, height: 34, fontSize: 12.5 }}
-                  placeholder="Nº NF, chave de acesso, cliente..."
+                  style={{ paddingLeft: 34, height: 36 }}
+                  placeholder="Nº NF, Nº Pedido (PED-0009), cliente, CNPJ, chave..."
                   value={buscaNota}
                   onChange={(e) => setBuscaNota(e.target.value)}
                 />
               </div>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="text-xs text-muted flex items-center gap-4">
+                  <Calendar size={13} /> Emissão:
+                </span>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 'auto', height: 32, padding: '2px 8px', fontSize: 12 }}
+                  value={dataIniNota}
+                  onChange={(e) => setDataIniNota(e.target.value)}
+                />
+                <span className="text-xs text-muted">até</span>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 'auto', height: 32, padding: '2px 8px', fontSize: 12 }}
+                  value={dataFimNota}
+                  onChange={(e) => setDataFimNota(e.target.value)}
+                />
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => aplicarPresetDataNotas(0)}>
+                  Hoje
+                </button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => aplicarPresetDataNotas(7)}>
+                  7 Dias
+                </button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => aplicarPresetDataNotas(30)}>
+                  30 Dias
+                </button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => aplicarPresetDataNotas(null)}>
+                  Todas
+                </button>
+              </div>
+
+              {selecionadasNotas.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn--success btn--sm"
+                  onClick={abrirPacotaoNotasSelecionadas}
+                >
+                  <Printer size={14} /> Imprimir Pacotão Selecionado ({selecionadasNotas.length} Nota(s): NF + Boleto + Romaneio)
+                </button>
+              )}
             </div>
           </div>
 
@@ -664,95 +1281,161 @@ export function Fiscal() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Modelo / Nº</th>
+                    <th style={{ width: 38, textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={notas.length > 0 && notas.every((n) => selecionadasNotas.includes(n.id))}
+                        onChange={toggleSelecionarTodasNotas}
+                        title="Selecionar todas as notas listadas"
+                      />
+                    </th>
+                    <th>Modelo / Nº / Pedido</th>
                     <th>Emissão</th>
-                    <th>Destinatário / Chave</th>
+                    <th>Destinatário / Transporte</th>
                     <th style={{ textAlign: 'right' }}>Total NF</th>
                     <th>Situação</th>
-                    <th style={{ textAlign: 'right' }}>Ações</th>
+                    <th style={{ textAlign: 'right' }}>Reimpressão (DANFE / Boleto / Romaneio) &amp; Ações</th>
                   </tr>
                 </thead>
                 <tbody>
                   {notas.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center p-24 text-muted">
+                      <td colSpan={7} className="text-center" style={{ padding: 28, color: 'var(--text-muted)' }}>
                         Nenhuma nota fiscal emitida neste filtro.
                       </td>
                     </tr>
                   ) : (
-                    notas.map((n) => (
-                      <tr key={n.id}>
-                        <td>
-                          <span className={`badge ${n.modelo === '65' ? 'badge--warning' : 'badge--info'}`}>
-                            {n.modelo === '65' ? 'NFC-e 65' : 'NF-e 55'}
-                          </span>
-                          <div className="font-mono font-bold text-xs mt-4">
-                            Nº {String(n.numero).padStart(6, '0')} • S{n.serie}
-                          </div>
-                        </td>
-                        <td className="text-xs font-mono">
-                          <div>{fmtDataHora(n.data_autorizacao || n.created_at)}</div>
-                          <div className="text-muted">{n.ambiente}</div>
-                        </td>
-                        <td>
-                          <div className="font-bold text-sm">{n.destinatario_nome}</div>
-                          <div className="text-[11px] font-mono text-muted">
-                            {n.chave_acesso}
-                          </div>
-                        </td>
-                        <td style={{ textAlign: 'right' }} className="font-mono font-bold text-sm text-cyan">
-                          {fmtMoeda(n.valor_total_nf)}
-                          <div className="text-[11px] text-muted font-normal">ICMS: {fmtMoeda(n.valor_icms)}</div>
-                        </td>
-                        <td>
-                          {n.status === 'AUTORIZADA' ? (
-                            <span className="badge badge--success">Autorizada</span>
-                          ) : (
-                            <span className="badge badge--danger">{n.status}</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <div className="flex justify-end gap-6 flex-wrap">
-                            <button
-                              type="button"
-                              className="btn btn--primary btn--sm"
-                              title="Visualizar e Imprimir DANFE"
-                              onClick={() => abrirDanfe(n.id)}
-                            >
-                              <Printer size={13} /> DANFE
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn--ghost btn--sm"
-                              title="Baixar XML 4.00"
-                              onClick={() => baixarXmlNota(n.id)}
-                            >
-                              <Download size={13} /> XML
-                            </button>
-                            {n.status === 'AUTORIZADA' && n.modelo === '55' && (
+                    notas.map((n) => {
+                      const marcada = selecionadasNotas.includes(n.id)
+                      const busy = carregandoImpressaoId === n.id
+                      return (
+                        <tr
+                          key={n.id}
+                          style={{
+                            background: marcada ? 'rgba(59, 130, 246, 0.09)' : undefined,
+                          }}
+                        >
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={marcada}
+                              onChange={() => toggleSelecaoNota(n.id)}
+                            />
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span className={`badge ${n.modelo === '65' ? 'badge--warning' : 'badge--info'}`}>
+                                {n.modelo === '65' ? 'NFC-e 65' : 'NF-e 55'}
+                              </span>
+                              {n.pedido_codigo && (
+                                <span className="font-mono font-bold text-xs text-cyan">{n.pedido_codigo}</span>
+                              )}
+                            </div>
+                            <div className="font-mono font-bold text-xs" style={{ marginTop: 4 }}>
+                              Nº {String(n.numero).padStart(6, '0')} • Série {n.serie}
+                            </div>
+                          </td>
+                          <td className="text-xs font-mono">
+                            <div>{fmtDataHora(n.data_autorizacao || n.created_at)}</div>
+                            <div className="text-muted">{n.ambiente}</div>
+                          </td>
+                          <td>
+                            <div className="font-bold text-sm">{n.destinatario_nome}</div>
+                            <div className="text-xs font-mono text-muted">{n.chave_acesso}</div>
+                            {n.transportadora_nome && (
+                              <div className="text-xs text-cyan" style={{ marginTop: 2 }}>
+                                Transp.: {n.transportadora_nome} {n.veiculo_placa ? `• Placa ${n.veiculo_placa}` : ''}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'right' }} className="font-mono font-bold text-sm text-cyan">
+                            {fmtMoeda(n.valor_total_nf)}
+                            <div className="text-xs text-muted font-normal">
+                              {Number(n.peso_liquido_kg || 0).toFixed(2)} kg • ICMS: {fmtMoeda(n.valor_icms)}
+                            </div>
+                          </td>
+                          <td>
+                            {n.status === 'AUTORIZADA' ? (
+                              <span className="badge badge--success">Autorizada</span>
+                            ) : (
+                              <span className="badge badge--danger">{n.status}</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="btn btn--primary btn--sm"
+                                disabled={busy}
+                                title="Abrir tela com DANFE, Boleto e Romaneio de Produtos"
+                                onClick={() => abrirModalNotaCompleta(n.id)}
+                              >
+                                <Printer size={13} /> DANFE
+                              </button>
+                              {n.modelo === '55' && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn btn--secondary btn--sm"
+                                    disabled={busy}
+                                    title="Reimprimir Boleto Bancário desta NF-e"
+                                    onClick={() => reimprimirDireto(n.id, 'BOLETO')}
+                                  >
+                                    <CreditCard size={13} /> Boleto
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn--secondary btn--sm"
+                                    disabled={busy}
+                                    title="Reimprimir Romaneio de Produtos do Pedido"
+                                    onClick={() => reimprimirDireto(n.id, 'ROMANEIO')}
+                                  >
+                                    <ClipboardList size={13} /> Romaneio
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn--success btn--sm"
+                                    disabled={busy}
+                                    title="Imprimir Pacote Completo: DANFE + Boleto + Romaneio de Produtos"
+                                    onClick={() => reimprimirDireto(n.id, 'PACOTE')}
+                                  >
+                                    <Layers size={13} /> Tudo
+                                  </button>
+                                </>
+                              )}
                               <button
                                 type="button"
                                 className="btn btn--ghost btn--sm"
-                                title="Emitir Carta de Correção (CC-e)"
-                                onClick={() => setModalEvento({ tipo: 'CCE', nota: n, texto: '' })}
+                                title="Baixar XML 4.00"
+                                onClick={() => baixarXmlNota(n.id)}
                               >
-                                CC-e
+                                <Download size={13} /> XML
                               </button>
-                            )}
-                            {n.status === 'AUTORIZADA' && (
-                              <button
-                                type="button"
-                                className="btn btn--ghost btn--sm text-danger"
-                                title="Cancelar Nota Fiscal"
-                                onClick={() => setModalEvento({ tipo: 'CANCELAR', nota: n, texto: '' })}
-                              >
-                                <Ban size={13} />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              {n.status === 'AUTORIZADA' && n.modelo === '55' && (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--sm"
+                                  title="Emitir Carta de Correção (CC-e)"
+                                  onClick={() => setModalEvento({ tipo: 'CCE', nota: n, texto: '' })}
+                                >
+                                  CC-e
+                                </button>
+                              )}
+                              {n.status === 'AUTORIZADA' && (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--sm text-danger"
+                                  title="Cancelar Nota Fiscal"
+                                  onClick={() => setModalEvento({ tipo: 'CANCELAR', nota: n, texto: '' })}
+                                >
+                                  <Ban size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })
                   )}
                 </tbody>
               </table>
@@ -763,32 +1446,30 @@ export function Fiscal() {
 
       {/* ABA 3: COFRE XML DO CONTADOR */}
       {aba === 'COFRE' && (
-        <div className="flex flex-col gap-12">
-          <div className="card p-16 flex flex-wrap items-center justify-between gap-12">
-            <div className="flex items-center gap-12 flex-wrap">
-              <div>
-                <label className="form-label">Mês de Competência</label>
-                <input
-                  type="month"
-                  className="form-input font-mono"
-                  value={mesCofre}
-                  onChange={(e) => setMesCofre(e.target.value)}
-                />
-              </div>
-              <div className="text-xs text-muted flex gap-16 flex-wrap mt-16">
-                <span>Notas: <strong>{cofre.resumo?.qtd_notas || 0}</strong></span>
-                <span>Eventos: <strong>{cofre.resumo?.qtd_eventos || 0}</strong></span>
-                <span>Autorizado: <strong className="font-mono text-success">{fmtMoeda(cofre.resumo?.valor_total_autorizado)}</strong></span>
-              </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 16, display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <h3 className="text-sm font-bold m-0">Cofre XML Mensal — Fechamento Contábil</h3>
+              <p className="text-xs text-muted" style={{ marginTop: 4 }}>
+                Guarda legal de 5 anos de todos os XMLs autorizados, cancelados e eventos (CC-e / Inutilização).
+              </p>
             </div>
-            <button
-              type="button"
-              className="btn btn--success"
-              disabled={!cofre.arquivos?.length}
-              onClick={exportarPacoteContador}
-            >
-              <Download size={15} /> Exportar Pacote Mensal p/ Contador (XML + CSV)
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                type="month"
+                className="form-input font-mono"
+                value={mesCofre}
+                onChange={(e) => setMesCofre(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!cofre?.arquivos?.length}
+                onClick={exportarPacoteContador}
+              >
+                <Download size={15} /> Exportar Pacote Contador (CSV + Lote XML)
+              </button>
+            </div>
           </div>
 
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -798,28 +1479,32 @@ export function Fiscal() {
                   <tr>
                     <th>Arquivo XML</th>
                     <th>Tipo</th>
-                    <th>Status</th>
+                    <th>Série / Nº</th>
                     <th>Destinatário / Evento</th>
                     <th style={{ textAlign: 'right' }}>Valor</th>
-                    <th style={{ textAlign: 'right' }}>Baixar</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Download</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(cofre.arquivos || []).length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center p-24 text-muted">
-                        Nenhum XML armazenado em {mesCofre}.
+                      <td colSpan={7} className="text-center" style={{ padding: 28, color: 'var(--text-muted)' }}>
+                        Nenhum arquivo XML gerado na competência {mesCofre}.
                       </td>
                     </tr>
                   ) : (
                     cofre.arquivos.map((a, idx) => (
                       <tr key={idx}>
-                        <td className="font-mono text-xs font-bold">{a.nome}</td>
+                        <td className="font-mono text-xs">{a.nome}</td>
                         <td><span className="badge badge--info">{a.tipo}</span></td>
-                        <td className="text-xs">{a.status}</td>
+                        <td className="font-mono text-xs">S{a.serie} • Nº {a.numero}</td>
                         <td className="text-xs">{a.destinatario}</td>
-                        <td style={{ textAlign: 'right' }} className="font-mono text-xs">
-                          {a.valor > 0 ? fmtMoeda(a.valor) : '-'}
+                        <td style={{ textAlign: 'right' }} className="font-mono text-xs">{fmtMoeda(a.valor)}</td>
+                        <td>
+                          <span className={`badge ${a.status === 'CANCELADA' ? 'badge--danger' : 'badge--success'}`}>
+                            {a.status}
+                          </span>
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <button
@@ -827,7 +1512,7 @@ export function Fiscal() {
                             className="btn btn--ghost btn--sm"
                             onClick={() => downloadTextFile(a.nome, a.xml)}
                           >
-                            <Download size={13} /> XML
+                            <Download size={13} /> Baixar
                           </button>
                         </td>
                       </tr>
@@ -842,46 +1527,85 @@ export function Fiscal() {
 
       {/* ABA 4: EVENTOS & INUTILIZAÇÃO */}
       {aba === 'EVENTOS' && (
-        <div className="grid gap-16" style={{ gridTemplateColumns: 'minmax(300px, 380px) 1fr' }}>
-          <form className="card p-16 flex flex-col gap-12" onSubmit={handleInutilizar}>
-            <h3 className="text-sm font-bold m-0">Inutilizar Faixa de Numeração</h3>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+            gap: 16,
+          }}
+        >
+          <form className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={handleInutilizar}>
+            <h3 className="text-sm font-bold m-0">Inutilizar Faixa de Numeração SEFAZ</h3>
             <p className="text-xs text-muted m-0">
-              Use quando houver pulo de numeração de NF-e/NFC-e não utilizada na SEFAZ.
+              Utilize quando houver quebra/pulo de sequência de numeração de NF-e (55) ou NFC-e (65).
             </p>
             <div className="form-grid form-grid--2">
               <div>
-                <label className="form-label">Modelo</label>
-                <select className="form-input" value={inutForm.modelo} onChange={(e) => setInutForm({ ...inutForm, modelo: e.target.value })}>
+                <label className="form-label">Modelo *</label>
+                <select
+                  className="form-input"
+                  value={inutForm.modelo}
+                  onChange={(e) => setInutForm({ ...inutForm, modelo: e.target.value })}
+                >
                   <option value="55">55 — NF-e</option>
                   <option value="65">65 — NFC-e</option>
                 </select>
               </div>
               <div>
-                <label className="form-label">Série</label>
-                <input type="number" min="1" className="form-input font-mono" value={inutForm.serie} onChange={(e) => setInutForm({ ...inutForm, serie: Number(e.target.value) })} />
+                <label className="form-label">Série *</label>
+                <input
+                  type="number"
+                  min={1}
+                  required
+                  className="form-input font-mono"
+                  value={inutForm.serie}
+                  onChange={(e) => setInutForm({ ...inutForm, serie: e.target.value })}
+                />
               </div>
             </div>
             <div className="form-grid form-grid--2">
               <div>
-                <label className="form-label">Nº Inicial *</label>
-                <input type="number" min="1" required className="form-input font-mono" value={inutForm.numero_inicial} onChange={(e) => setInutForm({ ...inutForm, numero_inicial: e.target.value })} />
+                <label className="form-label">Número Inicial *</label>
+                <input
+                  type="number"
+                  min={1}
+                  required
+                  className="form-input font-mono"
+                  value={inutForm.numero_inicial}
+                  onChange={(e) => setInutForm({ ...inutForm, numero_inicial: e.target.value })}
+                />
               </div>
               <div>
-                <label className="form-label">Nº Final *</label>
-                <input type="number" min="1" required className="form-input font-mono" value={inutForm.numero_final} onChange={(e) => setInutForm({ ...inutForm, numero_final: e.target.value })} />
+                <label className="form-label">Número Final *</label>
+                <input
+                  type="number"
+                  min={1}
+                  required
+                  className="form-input font-mono"
+                  value={inutForm.numero_final}
+                  onChange={(e) => setInutForm({ ...inutForm, numero_final: e.target.value })}
+                />
               </div>
             </div>
             <div>
-              <label className="form-label">Justificativa SEFAZ (mín. 15 caracteres) *</label>
-              <textarea required minLength={15} rows={3} className="form-input" placeholder="Ex: Pulo de numeração por falha de sistema..." value={inutForm.justificativa} onChange={(e) => setInutForm({ ...inutForm, justificativa: e.target.value })} />
+              <label className="form-label">Justificativa Técnica (mín. 15 caracteres) *</label>
+              <textarea
+                rows={3}
+                minLength={15}
+                required
+                className="form-input"
+                placeholder="Ex: Numeração pulada devido a falha de sincronismo..."
+                value={inutForm.justificativa}
+                onChange={(e) => setInutForm({ ...inutForm, justificativa: e.target.value })}
+              />
             </div>
-            <button type="submit" className="btn btn--secondary">
+            <button type="submit" className="btn btn--warning">
               Registrar Inutilização
             </button>
           </form>
 
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="p-14 border-b border-border" style={{ background: 'var(--bg-2)' }}>
+            <div style={{ padding: '14px 18px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
               <h3 className="text-sm font-bold m-0">Histórico de Eventos Fiscais (CC-e, Cancelamentos &amp; Inutilizações)</h3>
             </div>
             <div className="table-wrap">
@@ -898,7 +1622,7 @@ export function Fiscal() {
                 <tbody>
                   {eventos.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center p-24 text-muted">
+                      <td colSpan={5} className="text-center" style={{ padding: 24, color: 'var(--text-muted)' }}>
                         Nenhum evento fiscal registrado ainda.
                       </td>
                     </tr>
@@ -945,16 +1669,37 @@ export function Fiscal() {
         />
       )}
 
-      {/* MODAL PRÉ-VISUALIZAÇÃO TRIBUTÁRIA & EMISSÃO DE PEDIDO */}
+      {/* ── MODAL 1: CONFERÊNCIA TRIBUTÁRIA & EMISSÃO INDIVIDUAL (1 PEDIDO — CAMPOS UM ABAIXO DO OUTRO) ── */}
       {previewPedido && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setPreviewPedido(null)}>
-          <div className="card" style={{ width: '96%', maxWidth: 920, maxHeight: '92vh', display: 'flex', flexDirection: 'column', padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
-            <div className="flex justify-between items-center p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+          <div
+            className="card"
+            style={{
+              width: '96%',
+              maxWidth: 880,
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: 0,
+              background: 'var(--bg-1)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px 22px',
+                background: 'var(--bg-2)',
+                borderBottom: '1px solid var(--border)',
+              }}
+            >
               <div>
                 <h3 className="text-base font-bold m-0 flex items-center gap-8">
-                  <ShieldCheck size={18} className="text-success" /> Conferência Tributária — {previewPedido.preview.pedido_codigo} ({previewPedido.modelo === '65' ? 'NFC-e 65' : 'NF-e 55'})
+                  <ShieldCheck size={19} className="text-success" /> Emissão Fiscal — {previewPedido.preview.pedido_codigo} ({previewPedido.modelo === '65' ? 'NFC-e 65' : 'NF-e 55'})
                 </h3>
-                <div className="text-xs text-muted mt-2">
+                <div className="text-xs text-muted" style={{ marginTop: 4 }}>
                   Destinatário: <strong>{previewPedido.preview.destinatario.nome}</strong> (UF {previewPedido.preview.destinatario.uf}) • Regime Emitente: <strong>{previewPedido.preview.emitente.regime}</strong>
                 </div>
               </div>
@@ -963,8 +1708,9 @@ export function Fiscal() {
               </button>
             </div>
 
-            <div className="p-20 overflow-auto flex flex-col gap-14">
-              <div className="table-wrap">
+            <div style={{ padding: 22, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* TABELA DE ITENS */}
+              <div className="table-wrap" style={{ border: '1px solid var(--border)', borderRadius: 8 }}>
                 <table className="table">
                   <thead>
                     <tr>
@@ -983,7 +1729,7 @@ export function Fiscal() {
                       <tr key={it.n_item}>
                         <td>
                           <div className="font-bold text-xs">{it.codigo} — {it.descricao}</div>
-                          <div className="text-[11px] text-muted">{it.regra_origem}</div>
+                          <div className="text-xs text-muted">{it.regra_origem}</div>
                         </td>
                         <td className="font-mono text-xs">{it.ncm}</td>
                         <td className="font-mono font-bold text-xs text-cyan">{it.cfop}</td>
@@ -992,11 +1738,11 @@ export function Fiscal() {
                         <td style={{ textAlign: 'right' }} className="font-mono font-bold text-xs">{fmtMoeda(it.valor_total)}</td>
                         <td style={{ textAlign: 'right' }} className="font-mono text-xs">
                           {fmtMoeda(it.v_icms)}
-                          {it.p_red_bc > 0 && <div className="text-[10px] text-success">Red. {it.p_red_bc}%</div>}
+                          {it.p_red_bc > 0 && <div className="text-xs text-success">Red. {it.p_red_bc}%</div>}
                         </td>
                         <td style={{ textAlign: 'right' }} className="font-mono text-xs">
                           {fmtMoeda(it.v_pis + it.v_cofins)}
-                          <div className="text-[10px] text-muted">CST {it.cst_pis}</div>
+                          <div className="text-xs text-muted">CST {it.cst_pis}</div>
                         </td>
                       </tr>
                     ))}
@@ -1004,106 +1750,119 @@ export function Fiscal() {
                 </table>
               </div>
 
+              {/* SEÇÃO DE TRANSPORTE — UM CAMPO ABAIXO DO OUTRO, LIMPO E ESPAÇADO */}
               {previewPedido.modelo === '55' && (() => {
                 const transpSel = transportadorasCat.find((t) => t.id === previewPedido.transportadora_id) || null
                 const veicsSel = Array.isArray(transpSel?.veiculos) ? transpSel.veiculos : []
                 const exigeTransp = ['0', '1'].includes(String(previewPedido.mod_frete))
                 return (
                   <div
-                    className="p-14 rounded flex flex-col gap-10"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}
+                    style={{
+                      padding: 18,
+                      borderRadius: 10,
+                      background: 'var(--bg-2)',
+                      border: '1px solid var(--border)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 14,
+                    }}
                   >
-                    <div className="flex justify-between items-center flex-wrap gap-6">
-                      <span className="text-xs font-bold uppercase text-cyan">
-                        Transporte, Transportadora &amp; Veículo (Obrigatório para Frete 0 / 1)
-                      </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                      <div className="text-xs font-bold uppercase text-cyan flex items-center gap-6">
+                        <Truck size={15} /> Dados de Transporte, Transportadora &amp; Veículo
+                      </div>
                       {exigeTransp && !previewPedido.transportadora_id && (
-                        <span className="badge badge--warning" style={{ fontSize: 10 }}>
-                          Selecione a Transportadora para liberar a NF-e
-                        </span>
+                        <span className="badge badge--warning">Selecione a Transportadora para liberar a NF-e</span>
                       )}
                     </div>
-                    <div className="form-grid form-grid--3">
-                      <div>
-                        <label className="form-label">Modalidade do Frete *</label>
-                        <select
-                          className="form-input"
-                          value={previewPedido.mod_frete}
-                          onChange={(e) => setPreviewPedido({ ...previewPedido, mod_frete: e.target.value })}
-                        >
-                          <option value="0">0 — Por conta do Emitente (CIF)</option>
-                          <option value="1">1 — Por conta do Destinatário (FOB)</option>
-                          <option value="2">2 — Por conta de Terceiros</option>
-                          <option value="3">3 — Transporte Próprio (Remetente)</option>
-                          <option value="4">4 — Transporte Próprio (Destinatário)</option>
-                          <option value="9">9 — Sem Ocorrência de Transporte</option>
-                        </select>
-                      </div>
-                      <div style={{ gridColumn: 'span 2' }}>
-                        <label className="form-label">
-                          Transportadora {exigeTransp ? '* (Obrigatória)' : '(Opcional)'}
-                        </label>
-                        <select
-                          className="form-input"
-                          value={previewPedido.transportadora_id}
-                          onChange={(e) => {
-                            const tid = e.target.value
-                            const tr = transportadorasCat.find((x) => x.id === tid) || null
-                            const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
-                            setPreviewPedido({
-                              ...previewPedido,
-                              transportadora_id: tid,
-                              veiculo_id: vPad?.id || '',
-                              veiculo_placa: vPad?.placa || tr?.placa_padrao || '',
-                              veiculo_uf: vPad?.uf_placa || tr?.uf || previewPedido.veiculo_uf || 'SP',
-                              transportadora_antt: vPad?.rntrc_antt || tr?.rntrc_antt || '',
-                            })
-                          }}
-                        >
-                          <option value="">-- Selecione a transportadora --</option>
-                          {transportadorasCat.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.razao_social} {t.cnpj_cpf ? `(${t.cnpj_cpf})` : ''} {t.cidade ? `• ${t.cidade}/${t.uf}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+
+                    {/* 1. Modalidade do Frete */}
+                    <div>
+                      <label className="form-label">1. Modalidade do Frete *</label>
+                      <select
+                        className="form-input"
+                        value={previewPedido.mod_frete}
+                        onChange={(e) => setPreviewPedido({ ...previewPedido, mod_frete: e.target.value })}
+                      >
+                        <option value="0">0 — Por conta do Emitente (CIF)</option>
+                        <option value="1">1 — Por conta do Destinatário (FOB)</option>
+                        <option value="2">2 — Por conta de Terceiros</option>
+                        <option value="3">3 — Transporte Próprio por conta do Remetente</option>
+                        <option value="4">4 — Transporte Próprio por conta do Destinatário</option>
+                        <option value="9">9 — Sem Ocorrência de Transporte</option>
+                      </select>
                     </div>
 
-                    <div className="form-grid form-grid--4">
-                      <div>
-                        <label className="form-label">Veículo Cadastrado</label>
-                        <select
-                          className="form-input"
-                          value={previewPedido.veiculo_id}
-                          disabled={!transpSel || veicsSel.length === 0}
-                          onChange={(e) => {
-                            const vid = e.target.value
-                            const v = veicsSel.find((x) => x.id === vid) || null
-                            setPreviewPedido({
-                              ...previewPedido,
-                              veiculo_id: vid,
-                              veiculo_placa: v?.placa || previewPedido.veiculo_placa,
-                              veiculo_uf: v?.uf_placa || previewPedido.veiculo_uf,
-                              transportadora_antt: v?.rntrc_antt || transpSel?.rntrc_antt || previewPedido.transportadora_antt,
-                            })
-                          }}
-                        >
-                          <option value="">
-                            {veicsSel.length === 0 ? 'Sem veículos cadastrados' : '-- Selecione o caminhão --'}
+                    {/* 2. Transportadora */}
+                    <div>
+                      <label className="form-label">
+                        2. Transportadora {exigeTransp ? '* (Obrigatória para Frete 0 / 1)' : '(Opcional)'}
+                      </label>
+                      <select
+                        className="form-input"
+                        value={previewPedido.transportadora_id}
+                        onChange={(e) => {
+                          const tid = e.target.value
+                          const tr = transportadorasCat.find((x) => x.id === tid) || null
+                          const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
+                          setPreviewPedido({
+                            ...previewPedido,
+                            transportadora_id: tid,
+                            veiculo_id: vPad?.id || '',
+                            veiculo_placa: vPad?.placa || tr?.placa_padrao || '',
+                            veiculo_uf: vPad?.uf_placa || tr?.uf || previewPedido.veiculo_uf || 'SP',
+                            transportadora_antt: vPad?.rntrc_antt || tr?.rntrc_antt || '',
+                          })
+                        }}
+                      >
+                        <option value="">-- Selecione a transportadora --</option>
+                        {transportadorasCat.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.razao_social} {t.cnpj_cpf ? `(${t.cnpj_cpf})` : ''} {t.cidade ? `• ${t.cidade}/${t.uf}` : ''}
                           </option>
-                          {veicsSel.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.placa} ({v.uf_placa}) {v.modelo ? `— ${v.modelo}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 3. Veículo Cadastrado */}
+                    <div>
+                      <label className="form-label">3. Veículo Cadastrado na Transportadora</label>
+                      <select
+                        className="form-input"
+                        value={previewPedido.veiculo_id}
+                        disabled={!transpSel || veicsSel.length === 0}
+                        onChange={(e) => {
+                          const vid = e.target.value
+                          const v = veicsSel.find((x) => x.id === vid) || null
+                          setPreviewPedido({
+                            ...previewPedido,
+                            veiculo_id: vid,
+                            veiculo_placa: v?.placa || previewPedido.veiculo_placa,
+                            veiculo_uf: v?.uf_placa || previewPedido.veiculo_uf,
+                            transportadora_antt: v?.rntrc_antt || transpSel?.rntrc_antt || previewPedido.transportadora_antt,
+                          })
+                        }}
+                      >
+                        <option value="">
+                          {veicsSel.length === 0
+                            ? 'Nenhum veículo cadastrado na frota (digite a placa abaixo)'
+                            : '-- Escolha o veículo da frota --'}
+                        </option>
+                        {veicsSel.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.placa} ({v.uf_placa}) {v.modelo ? `— ${v.modelo}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 4. Placa, UF, ANTT e Espécie Volumes */}
+                    <div className="form-grid form-grid--3">
                       <div>
-                        <label className="form-label">Placa</label>
+                        <label className="form-label">Placa do Veículo</label>
                         <input
                           className="form-input font-mono"
-                          placeholder="ABC1D23"
+                          placeholder="Ex: JZA0982"
                           value={previewPedido.veiculo_placa}
                           onChange={(e) =>
                             setPreviewPedido({ ...previewPedido, veiculo_placa: e.target.value.toUpperCase() })
@@ -1111,7 +1870,7 @@ export function Fiscal() {
                         />
                       </div>
                       <div>
-                        <label className="form-label">UF Placa</label>
+                        <label className="form-label">UF da Placa</label>
                         <input
                           maxLength={2}
                           className="form-input font-mono"
@@ -1122,11 +1881,11 @@ export function Fiscal() {
                         />
                       </div>
                       <div>
-                        <label className="form-label">ANTT / Espécie Vol.</label>
-                        <div className="flex gap-6">
+                        <label className="form-label">Código ANTT / Espécie</label>
+                        <div style={{ display: 'flex', gap: 8 }}>
                           <input
                             className="form-input font-mono"
-                            placeholder="ANTT"
+                            placeholder="ANTT (opcional)"
                             value={previewPedido.transportadora_antt}
                             onChange={(e) =>
                               setPreviewPedido({ ...previewPedido, transportadora_antt: e.target.value.toUpperCase() })
@@ -1134,7 +1893,7 @@ export function Fiscal() {
                           />
                           <input
                             className="form-input"
-                            style={{ width: 92 }}
+                            style={{ width: 95 }}
                             placeholder="CAIXA"
                             value={previewPedido.especie_volumes}
                             onChange={(e) =>
@@ -1148,20 +1907,33 @@ export function Fiscal() {
                 )
               })()}
 
+              {/* FATURA / DUPLICATAS */}
               {Array.isArray(previewPedido.preview.duplicatas) && previewPedido.preview.duplicatas.length > 0 && (
-                <div className="p-10 rounded flex flex-wrap items-center gap-10 text-xs" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-                  <span className="font-bold uppercase text-muted">Fatura / Duplicatas:</span>
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    background: 'var(--bg-2)',
+                    border: '1px solid var(--border)',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 10,
+                  }}
+                >
+                  <span className="text-xs font-bold uppercase text-muted">Fatura / Duplicatas (Boleto):</span>
                   {previewPedido.preview.duplicatas.map((d) => (
                     <span key={d.numero} className="badge badge--neutral font-mono">
-                      #{d.numero} • {d.vencimento.split('-').reverse().join('/')} • {fmtMoeda(d.valor)}
+                      Parcela #{d.numero} • Venc. {fmtData(d.vencimento)} • {fmtMoeda(d.valor)}
                     </span>
                   ))}
                 </div>
               )}
 
+              {/* FRETE DESTACADO & OBSERVAÇÃO */}
               <div className="form-grid form-grid--2">
                 <div>
-                  <label className="form-label">Frete Destacado (R$)</label>
+                  <label className="form-label">Frete Destacado na Nota (R$)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1172,7 +1944,7 @@ export function Fiscal() {
                   />
                 </div>
                 <div>
-                  <label className="form-label">Informação Adicional Extra (Opcional)</label>
+                  <label className="form-label">Informação Complementar Extra (Opcional)</label>
                   <input
                     type="text"
                     className="form-input"
@@ -1183,8 +1955,21 @@ export function Fiscal() {
                 </div>
               </div>
 
-              <div className="p-12 rounded flex flex-wrap justify-between items-center gap-12" style={{ background: 'var(--bg-2)' }}>
-                <div className="text-xs flex gap-16 flex-wrap">
+              {/* BARRA DE TOTAIS */}
+              <div
+                style={{
+                  padding: '14px 18px',
+                  borderRadius: 8,
+                  background: 'var(--bg-2)',
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 12,
+                }}
+              >
+                <div className="text-xs" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                   <span>BC ICMS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_icms_base)}</strong></span>
                   <span>ICMS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_icms)}</strong></span>
                   <span>PIS/COFINS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_pis + previewPedido.preview.totais.valor_cofins)}</strong></span>
@@ -1196,23 +1981,278 @@ export function Fiscal() {
               </div>
             </div>
 
-            <div className="p-16 border-t border-border flex justify-end gap-8" style={{ background: 'var(--bg-2)' }}>
+            <div
+              style={{
+                padding: '16px 22px',
+                background: 'var(--bg-2)',
+                borderTop: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+              }}
+            >
               <button type="button" className="btn btn--ghost" onClick={() => setPreviewPedido(null)}>
                 Cancelar
               </button>
               <button type="button" className="btn btn--success" disabled={emitindo} onClick={confirmarEmissaoPedido}>
-                <Send size={15} /> {emitindo ? 'Transmitindo...' : `Autorizar e Emitir ${previewPedido.modelo === '65' ? 'NFC-e' : 'NF-e'}`}
+                <Send size={15} /> {emitindo ? 'Transmitindo...' : `Autorizar e Emitir ${previewPedido.modelo === '65' ? 'NFC-e' : 'NF-e (+ Boleto)'}`}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* ── MODAL 2: TELA DIFERENTE PARA FATURAMENTO EM LOTE (2+ PEDIDOS SELECIONADOS) ── */}
+      {modalLote && (() => {
+        const transpSel = transportadorasCat.find((t) => t.id === modalLote.transportadora_id) || null
+        const veicsSel = Array.isArray(transpSel?.veiculos) ? transpSel.veiculos : []
+        const totalLote = modalLote.pedidos.reduce((s, p) => s + Number(p.valor_total || 0), 0)
+        const totalKgLote = modalLote.pedidos.reduce(
+          (s, p) => s + Number(p.peso_separado_kg > 0 ? p.peso_separado_kg : p.peso_solicitado_kg || 0),
+          0,
+        )
+        return (
+          <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalLote(null)}>
+            <div
+              className="card"
+              style={{
+                width: '96%',
+                maxWidth: 920,
+                maxHeight: '92vh',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: 0,
+                background: 'var(--bg-1)',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '16px 22px',
+                  background: 'var(--bg-2)',
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                <div>
+                  <h3 className="text-base font-bold m-0 flex items-center gap-8">
+                    <Layers size={19} className="text-cyan" /> Faturamento em Lote — {modalLote.pedidos.length} Pedidos Selecionados
+                  </h3>
+                  <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+                    Escolha a Modalidade de Frete, Transportadora e Veículo uma única vez: o sistema replica para todas as notas e já abre o Pacotão (NF + Boleto + Romaneio)!
+                  </div>
+                </div>
+                <button type="button" className="btn-icon" onClick={() => setModalLote(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div style={{ padding: 22, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* CONFIGURAÇÃO DE TRANSPORTE REPLICADA PARA TODAS AS NOTAS DO LOTE */}
+                <div
+                  style={{
+                    padding: 18,
+                    borderRadius: 10,
+                    background: 'var(--bg-2)',
+                    border: '1px solid var(--border)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 14,
+                  }}
+                >
+                  <div className="text-xs font-bold uppercase text-cyan">
+                    Transporte Padrão Copiado para Todos os {modalLote.pedidos.length} Pedidos do Lote
+                  </div>
+
+                  <div>
+                    <label className="form-label">1. Modalidade do Frete *</label>
+                    <select
+                      className="form-input"
+                      value={modalLote.mod_frete}
+                      onChange={(e) => setModalLote({ ...modalLote, mod_frete: e.target.value })}
+                    >
+                      <option value="0">0 — Por conta do Emitente (CIF)</option>
+                      <option value="1">1 — Por conta do Destinatário (FOB)</option>
+                      <option value="3">3 — Transporte Próprio (Remetente)</option>
+                      <option value="9">9 — Sem Ocorrência de Transporte</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="form-label">2. Transportadora Padrão do Lote *</label>
+                    <select
+                      className="form-input"
+                      value={modalLote.transportadora_id}
+                      onChange={(e) => {
+                        const tid = e.target.value
+                        const tr = transportadorasCat.find((x) => x.id === tid) || null
+                        const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
+                        setModalLote({
+                          ...modalLote,
+                          transportadora_id: tid,
+                          veiculo_id: vPad?.id || '',
+                          veiculo_placa: vPad?.placa || tr?.placa_padrao || '',
+                          veiculo_uf: vPad?.uf_placa || tr?.uf || 'SP',
+                          transportadora_antt: vPad?.rntrc_antt || tr?.rntrc_antt || '',
+                        })
+                      }}
+                    >
+                      <option value="">-- Selecione a transportadora para copiar para todas as NFs --</option>
+                      {transportadorasCat.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.razao_social} {t.cnpj_cpf ? `(${t.cnpj_cpf})` : ''} {t.cidade ? `• ${t.cidade}/${t.uf}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-grid form-grid--3">
+                    <div>
+                      <label className="form-label">3. Veículo da Frota</label>
+                      <select
+                        className="form-input"
+                        value={modalLote.veiculo_id}
+                        disabled={!transpSel || veicsSel.length === 0}
+                        onChange={(e) => {
+                          const v = veicsSel.find((x) => x.id === e.target.value) || null
+                          setModalLote({
+                            ...modalLote,
+                            veiculo_id: e.target.value,
+                            veiculo_placa: v?.placa || modalLote.veiculo_placa,
+                            veiculo_uf: v?.uf_placa || modalLote.veiculo_uf,
+                            transportadora_antt: v?.rntrc_antt || transpSel?.rntrc_antt || modalLote.transportadora_antt,
+                          })
+                        }}
+                      >
+                        <option value="">{veicsSel.length === 0 ? 'Sem veículos cadastrados' : '-- Escolha o caminhão --'}</option>
+                        {veicsSel.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.placa} ({v.uf_placa}) {v.modelo ? `— ${v.modelo}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Placa do Veículo</label>
+                      <input
+                        className="form-input font-mono"
+                        placeholder="Ex: JZA0982"
+                        value={modalLote.veiculo_placa}
+                        onChange={(e) => setModalLote({ ...modalLote, veiculo_placa: e.target.value.toUpperCase() })}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">UF Placa</label>
+                      <input
+                        maxLength={2}
+                        className="form-input font-mono"
+                        value={modalLote.veiculo_uf}
+                        onChange={(e) => setModalLote({ ...modalLote, veiculo_uf: e.target.value.toUpperCase() })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* RELAÇÃO DOS PEDIDOS QUE SERÃO FATURADOS */}
+                <div className="table-wrap" style={{ border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Pedido</th>
+                        <th>Status</th>
+                        <th>Cliente / UF</th>
+                        <th>Condição Pagto</th>
+                        <th style={{ textAlign: 'right' }}>Peso / Caixas</th>
+                        <th style={{ textAlign: 'right' }}>Valor NF</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modalLote.pedidos.map((p) => {
+                        const badge = obterBadgeStatusFila(p.status)
+                        const peso = p.peso_separado_kg > 0 ? p.peso_separado_kg : p.peso_solicitado_kg
+                        return (
+                          <tr key={p.id}>
+                            <td className="font-mono font-bold text-xs text-cyan">{p.codigo}</td>
+                            <td>
+                              <span
+                                className="badge"
+                                style={{ ...badge.style, padding: '2px 8px', borderRadius: 999, fontSize: 10.5 }}
+                              >
+                                {badge.label}
+                              </span>
+                            </td>
+                            <td className="font-bold text-xs">
+                              {p.cliente_nome} ({p.cliente_uf})
+                            </td>
+                            <td className="text-xs">{p.forma_pagamento || 'À VISTA'}</td>
+                            <td style={{ textAlign: 'right' }} className="font-mono text-xs">
+                              {Number(peso || 0).toFixed(2)} kg {p.qtd_caixas_separadas > 0 ? `(${p.qtd_caixas_separadas} cx)` : ''}
+                            </td>
+                            <td style={{ textAlign: 'right' }} className="font-mono font-bold text-xs text-success">
+                              {fmtMoeda(p.valor_total)}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div
+                  style={{
+                    padding: '14px 18px',
+                    borderRadius: 8,
+                    background: 'var(--bg-2)',
+                    border: '1px solid var(--border)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 10,
+                  }}
+                >
+                  <div className="text-xs">
+                    Total de Notas a Emitir: <strong>{modalLote.pedidos.length} NF-e(s)</strong> • Peso Total:{' '}
+                    <strong className="font-mono">{totalKgLote.toFixed(2)} kg</strong>
+                  </div>
+                  <div className="text-base font-bold font-mono text-cyan">
+                    Total do Lote: {fmtMoeda(totalLote)}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '16px 22px',
+                  background: 'var(--bg-2)',
+                  borderTop: '1px solid var(--border)',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 10,
+                }}
+              >
+                <button type="button" className="btn btn--ghost" onClick={() => setModalLote(null)}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn btn--success" disabled={emitindo} onClick={confirmarEmissaoLote}>
+                  <Send size={15} />{' '}
+                  {emitindo
+                    ? 'Faturando Lote...'
+                    : `Autorizar ${modalLote.pedidos.length} NF-es e Abrir Pacotão (NF + Boleto + Romaneio)`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* MODAL CANCELAMENTO / CC-e */}
       {modalEvento && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalEvento(null)}>
           <div className="card" style={{ width: '96%', maxWidth: 520, padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
-            <div className="flex justify-between items-center p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
               <h3 className="text-base font-bold m-0">
                 {modalEvento.tipo === 'CANCELAR' ? 'Cancelar Nota Fiscal' : 'Emitir Carta de Correção (CC-e)'} — Nº {modalEvento.nota.numero}
               </h3>
@@ -1220,7 +2260,7 @@ export function Fiscal() {
                 <X size={18} />
               </button>
             </div>
-            <form className="p-20 flex flex-col gap-12" onSubmit={confirmarEventoModal}>
+            <form style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={confirmarEventoModal}>
               <div>
                 <label className="form-label">
                   {modalEvento.tipo === 'CANCELAR'
@@ -1241,7 +2281,7 @@ export function Fiscal() {
                   }
                 />
               </div>
-              <div className="flex justify-end gap-8 pt-8 border-t border-border">
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                 <button type="button" className="btn btn--ghost" onClick={() => setModalEvento(null)}>
                   Voltar
                 </button>
@@ -1257,17 +2297,17 @@ export function Fiscal() {
         </div>
       )}
 
-      {/* MODAL EMISSÃO AVULSA (NF-e 55 OU NFC-e 65) */}
+      {/* MODAL EMISSÃO AVULSA */}
       {modalAvulsa && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModalAvulsa(false)}>
-          <div className="card" style={{ width: '96%', maxWidth: 620, padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
-            <div className="flex justify-between items-center p-16" style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
+          <div className="card" style={{ width: '96%', maxWidth: 640, padding: 0, background: 'var(--bg-1)', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
               <h3 className="text-base font-bold m-0">Emissão Avulsa — NF-e (55) ou Cupom NFC-e (65)</h3>
               <button type="button" className="btn-icon" onClick={() => setModalAvulsa(false)}>
                 <X size={18} />
               </button>
             </div>
-            <form className="p-20 flex flex-col gap-12" onSubmit={handleEmitirAvulsa}>
+            <form style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={handleEmitirAvulsa}>
               <div className="form-grid form-grid--2">
                 <div>
                   <label className="form-label">Modelo *</label>
@@ -1346,48 +2386,46 @@ export function Fiscal() {
                 const veicsAv = Array.isArray(trAv?.veiculos) ? trAv.veiculos : []
                 const exige = ['0', '1'].includes(String(avulsaForm.mod_frete))
                 return (
-                  <div className="p-12 rounded flex flex-col gap-8" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-                    <div className="form-grid form-grid--2">
-                      <div>
-                        <label className="form-label">Modalidade Frete *</label>
-                        <select
-                          className="form-input"
-                          value={avulsaForm.mod_frete}
-                          onChange={(e) => setAvulsaForm({ ...avulsaForm, mod_frete: e.target.value })}
-                        >
-                          <option value="0">0 — Emitente (CIF)</option>
-                          <option value="1">1 — Destinatário (FOB)</option>
-                          <option value="3">3 — Próprio Remetente</option>
-                          <option value="9">9 — Sem Frete</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="form-label">Transportadora {exige ? '*' : '(Opcional)'}</label>
-                        <select
-                          className="form-input"
-                          required={exige}
-                          value={avulsaForm.transportadora_id}
-                          onChange={(e) => {
-                            const tid = e.target.value
-                            const tr = transportadorasCat.find((x) => x.id === tid) || null
-                            const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
-                            setAvulsaForm({
-                              ...avulsaForm,
-                              transportadora_id: tid,
-                              veiculo_id: vPad?.id || '',
-                              veiculo_placa: vPad?.placa || tr?.placa_padrao || '',
-                              veiculo_uf: vPad?.uf_placa || tr?.uf || 'SP',
-                            })
-                          }}
-                        >
-                          <option value="">-- Selecione --</option>
-                          {transportadorasCat.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.razao_social}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                  <div style={{ padding: 14, borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <label className="form-label">1. Modalidade Frete *</label>
+                      <select
+                        className="form-input"
+                        value={avulsaForm.mod_frete}
+                        onChange={(e) => setAvulsaForm({ ...avulsaForm, mod_frete: e.target.value })}
+                      >
+                        <option value="0">0 — Emitente (CIF)</option>
+                        <option value="1">1 — Destinatário (FOB)</option>
+                        <option value="3">3 — Próprio Remetente</option>
+                        <option value="9">9 — Sem Frete</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">2. Transportadora {exige ? '*' : '(Opcional)'}</label>
+                      <select
+                        className="form-input"
+                        required={exige}
+                        value={avulsaForm.transportadora_id}
+                        onChange={(e) => {
+                          const tid = e.target.value
+                          const tr = transportadorasCat.find((x) => x.id === tid) || null
+                          const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
+                          setAvulsaForm({
+                            ...avulsaForm,
+                            transportadora_id: tid,
+                            veiculo_id: vPad?.id || '',
+                            veiculo_placa: vPad?.placa || tr?.placa_padrao || '',
+                            veiculo_uf: vPad?.uf_placa || tr?.uf || 'SP',
+                          })
+                        }}
+                      >
+                        <option value="">-- Selecione --</option>
+                        {transportadorasCat.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.razao_social}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="form-grid form-grid--3">
                       <div>
@@ -1443,7 +2481,7 @@ export function Fiscal() {
                   <input required type="number" step="0.01" min="0.01" className="form-input font-mono" value={avulsaForm.valor_unitario} onChange={(e) => setAvulsaForm({ ...avulsaForm, valor_unitario: e.target.value })} />
                 </div>
               </div>
-              <div className="flex justify-end gap-8 pt-10 border-t border-border">
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                 <button type="button" className="btn btn--ghost" onClick={() => setModalAvulsa(false)}>
                   Cancelar
                 </button>
@@ -1456,11 +2494,21 @@ export function Fiscal() {
         </div>
       )}
 
-      {/* MODAL DANFE / CUPOM NFC-e */}
+      {/* MODAL DE IMPRESSÃO INDIVIDUAL (1 NOTA: DANFE + BOLETO + ROMANEIO) */}
       <DanfePrintModal
         nota={notaDanfe}
         onClose={() => setNotaDanfe(null)}
         onBaixarXml={baixarXmlNota}
+      />
+
+      {/* MODAL DIFERENTE DE IMPRESSÃO EM LOTE (2+ NOTAS: PACOTÃO CLIENTE POR CLIENTE) */}
+      <PacoteLotePrintModal
+        notas={pacoteLoteNotas}
+        onClose={() => setPacoteLoteNotas(null)}
+        onAbrirNotaIndividual={(n) => {
+          setPacoteLoteNotas(null)
+          setNotaDanfe(n)
+        }}
       />
     </div>
   )

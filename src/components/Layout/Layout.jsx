@@ -636,7 +636,7 @@ function Sidebar({ collapsed = false, onCollapse }) {
           )}
           {temPermissao(operador, 'parametros_comerciais') && (
             <NavLink to="/parametros-comerciais" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-              <Settings2 size={18} /> Pagamentos &amp; CFOP
+              <Settings2 size={18} /> Parâmetros Comerciais &amp; Fiscais
             </NavLink>
           )}
         </>

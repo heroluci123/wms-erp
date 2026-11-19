@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import { and, desc, eq, gte, inArray, lte, ne } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, lte, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import { env } from '../../config/env.js'
@@ -13,6 +13,7 @@ import {
   entregasTracking,
   estoqueCaixas,
   filiais,
+  financeiroContasBancarias,
   fiscalConfigFilial,
   fiscalEventos,
   fiscalNotas,
@@ -737,6 +738,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
           codigo: pedidos.codigo,
           titulo: pedidos.titulo,
           status: pedidos.status,
+          previsao_entrega: pedidos.previsaoEntrega,
           cliente_id: pedidos.clienteId,
           cliente_texto: pedidos.cliente,
           cliente_fantasia: clientes.nomeFantasia,
@@ -747,6 +749,11 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
           numero_nf: pedidos.numeroNf,
           chave_nfe: pedidos.chaveNfe,
           created_at: pedidos.createdAt,
+          forma_pagamento: sql<string | null>`(SELECT fp.descricao FROM formas_pagamento fp WHERE fp.id = "pedidos"."forma_pagamento_id" LIMIT 1)`,
+          qtd_itens: sql<number>`(SELECT COUNT(*)::int FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id")`,
+          peso_solicitado_kg: sql<string>`COALESCE((SELECT ROUND(SUM(pi.qtd_kg_solicitada), 3) FROM pedidos_itens pi WHERE pi.pedido_id = "pedidos"."id"), 0)`,
+          peso_separado_kg: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
+          qtd_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
         })
         .from(pedidos)
         .leftJoin(clientes, eq(clientes.id, pedidos.clienteId))
@@ -759,7 +766,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
           ),
         )
         .orderBy(desc(pedidos.createdAt))
-        .limit(120),
+        .limit(200),
       conn.db
         .select()
         .from(devolucoes)
@@ -788,10 +795,16 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         codigo: p.codigo,
         titulo: p.titulo,
         status: p.status,
+        previsao_entrega: p.previsao_entrega,
         cliente_id: p.cliente_id,
         cliente_nome: p.cliente_fantasia || p.cliente_razao || p.cliente_texto || 'Cliente',
         cliente_doc: p.cliente_doc || '',
         cliente_uf: p.cliente_uf || 'SP',
+        forma_pagamento: p.forma_pagamento || 'À VISTA',
+        qtd_itens: Number(p.qtd_itens || 0),
+        peso_solicitado_kg: toNum(p.peso_solicitado_kg, 0),
+        peso_separado_kg: toNum(p.peso_separado_kg, 0),
+        qtd_caixas_separadas: Number(p.qtd_caixas_separadas || 0),
         valor_total: toNum(p.valor_total, 0),
         created_at: p.created_at,
       }))
@@ -1160,6 +1173,139 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
     return reply.status(201).send({ success: true, ...nota })
   })
 
+  // ── EMITIR NF-e / NFC-e EM LOTE (MÚLTIPLOS PEDIDOS DE UMA SÓ VEZ) ──────────
+  app.post('/api/fiscal/notas/emitir-lote', { preHandler: writePerm }, async (req, reply) => {
+    const ctx = req.authCtx!
+    const body = (req.body || {}) as {
+      modelo?: '55' | '65'
+      mod_frete?: string
+      transportadora_id?: string | null
+      veiculo_id?: string | null
+      veiculo_placa?: string
+      veiculo_uf?: string
+      transportadora_antt?: string
+      especie_volumes?: string
+      natureza_operacao?: string
+      inf_complementar?: string
+      pedidos?: Array<{
+        pedido_id: string
+        mod_frete?: string
+        transportadora_id?: string | null
+        veiculo_id?: string | null
+        veiculo_placa?: string
+        veiculo_uf?: string
+        transportadora_antt?: string
+        especie_volumes?: string
+        valor_frete?: number
+        inf_complementar?: string
+      }>
+    }
+
+    const modelo: '55' | '65' = body.modelo === '65' ? '65' : '55'
+    const listaPedidos = Array.isArray(body.pedidos) ? body.pedidos : []
+    if (listaPedidos.length === 0) {
+      throw new HttpError(400, 'Selecione ao menos 1 pedido para faturar em lote.')
+    }
+
+    const notasIdsEmitidas = await conn.db.transaction(async (tx) => {
+      const ids: string[] = []
+      for (const item of listaPedidos) {
+        const pedidoId = parseUuidOrBadRequest(item.pedido_id, 'pedido_id')
+        const [jaAut] = await tx
+          .select({ id: fiscalNotas.id })
+          .from(fiscalNotas)
+          .where(
+            and(
+              eq(fiscalNotas.tenantId, ctx.tenantId),
+              eq(fiscalNotas.pedidoId, pedidoId),
+              eq(fiscalNotas.status, 'AUTORIZADA'),
+            ),
+          )
+          .limit(1)
+        if (jaAut) {
+          ids.push(jaAut.id)
+          continue
+        }
+
+        const dados = await montarDadosPedidoFiscal(tx, ctx.tenantId, ctx.filialId, pedidoId)
+
+        const modFreteFinal = item.mod_frete ?? body.mod_frete
+        const transpIdFinal =
+          item.transportadora_id !== undefined
+            ? item.transportadora_id
+            : body.transportadora_id !== undefined
+              ? body.transportadora_id
+              : dados.sugestaoTransporte?.transportadora_id || null
+
+        const transporte = await resolverTransporteFiscal(tx, ctx.tenantId, modelo, dados.emitente.uf, {
+          mod_frete: modFreteFinal,
+          transportadora_id: transpIdFinal,
+          veiculo_id: item.veiculo_id ?? body.veiculo_id ?? null,
+          veiculo_placa:
+            item.veiculo_placa || body.veiculo_placa || dados.sugestaoTransporte?.veiculo_placa || '',
+          veiculo_uf: item.veiculo_uf || body.veiculo_uf || '',
+          transportadora_antt: item.transportadora_antt || body.transportadora_antt || '',
+          especie_volumes: item.especie_volumes || body.especie_volumes || 'CAIXA',
+        })
+
+        const emitida = await emitirDocumentoFiscalTx(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          modelo,
+          tipoOperacao: 'SAIDA',
+          finalidade: '1',
+          naturezaOperacao: body.natureza_operacao?.trim() || 'VENDA DE MERCADORIA',
+          pedidoId: dados.ped.id,
+          clienteId: dados.ped.clienteId,
+          destinatario: dados.destinatario,
+          itensRaw: dados.itensRaw,
+          valorFrete: Number(item.valor_frete || 0),
+          pesoBrutoKg: dados.pesoBrutoTotal,
+          pesoLiquidoKg: dados.pesoLiqTotal,
+          qtdVolumes: dados.qtdVolumes,
+          transporte,
+          duplicatas: dados.duplicatas,
+          vendedorNome: dados.vendedorNome,
+          condicaoPagamentoLabel: dados.condicaoPagamentoLabel,
+          formaPagamentoLabel: dados.condicaoPagamentoLabel || '99 - Outros',
+          infComplementarExtra: [
+            `Pedido: ${dados.ped.codigo}`,
+            dados.vendedorNome ? `Vendedor: ${dados.vendedorNome}` : '',
+            dados.condicaoPagamentoLabel ? `Cond. Pagto: ${dados.condicaoPagamentoLabel}` : '',
+            item.inf_complementar?.trim() || body.inf_complementar?.trim() || '',
+          ]
+            .filter(Boolean)
+            .join(' • '),
+          operadorId: ctx.operador.id,
+          operadorNome: ctx.operador.nome,
+        })
+
+        await tx
+          .update(pedidos)
+          .set({
+            numeroNf: String(emitida.numero),
+            chaveNfe: emitida.chave_acesso,
+            updatedAt: new Date(),
+          })
+          .where(eq(pedidos.id, dados.ped.id))
+
+        ids.push(emitida.id)
+      }
+      return ids
+    })
+
+    const notasCompletas = await Promise.all(
+      notasIdsEmitidas.map((nid) => montarDetalheCompletoNota(conn.db, ctx.tenantId, nid)),
+    )
+
+    return reply.status(201).send({
+      success: true,
+      total_emitidas: notasCompletas.length,
+      nota_ids: notasIdsEmitidas,
+      notas: notasCompletas,
+    })
+  })
+
   // ── EMITIR NF-e DE DEVOLUÇÃO A PARTIR DE DEVOLUÇÃO FÍSICA ──────────────────
   app.post('/api/fiscal/notas/emitir-devolucao/:devolucaoId', { preHandler: writePerm }, async (req, reply) => {
     const ctx = req.authCtx!
@@ -1362,10 +1508,14 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         status: fiscalNotas.status,
         natureza_operacao: fiscalNotas.naturezaOperacao,
         pedido_id: fiscalNotas.pedidoId,
+        pedido_codigo: sql<string | null>`(SELECT p.codigo FROM pedidos p WHERE p.id = "fiscal_notas"."pedido_id" LIMIT 1)`,
         devolucao_id: fiscalNotas.devolucaoId,
         destinatario_nome: fiscalNotas.destinatarioNome,
         destinatario_doc: fiscalNotas.destinatarioDoc,
         destinatario_uf: fiscalNotas.destinatarioUf,
+        transportadora_nome: fiscalNotas.transportadoraNome,
+        veiculo_placa: fiscalNotas.veiculoPlaca,
+        qtd_volumes: fiscalNotas.qtdVolumes,
         valor_produtos: fiscalNotas.valorProdutos,
         valor_icms: fiscalNotas.valorIcms,
         valor_pis: fiscalNotas.valorPis,
@@ -1402,9 +1552,11 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         if (!bNorm) return true
         return (
           String(r.numero).includes(bNorm) ||
+          String(r.pedido_codigo || '').toLowerCase().includes(bNorm) ||
           String(r.chave_acesso || '').toLowerCase().includes(bNorm) ||
           String(r.destinatario_nome || '').toLowerCase().includes(bNorm) ||
-          String(r.destinatario_doc || '').includes(bNorm)
+          String(r.destinatario_doc || '').includes(bNorm) ||
+          String(r.transportadora_nome || '').toLowerCase().includes(bNorm)
         )
       })
 
@@ -1424,95 +1576,341 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
     }
   })
 
-  app.get('/api/fiscal/notas/:id', { preHandler: readPerm }, async (req) => {
-    const ctx = req.authCtx!
-    const id = parseUuidOrBadRequest((req.params as { id: string }).id, 'nota_id')
-    const [nota] = await conn.db
+  // Helper completo que monta DANFE + Boletos (Banco ou Simulação FEBRABAN) + Romaneio de Produtos do Pedido
+  async function montarDetalheCompletoNota(tx: DbOrTx, tenantId: string, notaId: string) {
+    const [nota] = await tx
       .select()
       .from(fiscalNotas)
-      .where(and(eq(fiscalNotas.id, id), eq(fiscalNotas.tenantId, ctx.tenantId)))
+      .where(and(eq(fiscalNotas.id, notaId), eq(fiscalNotas.tenantId, tenantId)))
       .limit(1)
     if (!nota) throw new HttpError(404, 'Nota fiscal não encontrada.')
 
-    const [eventos, emitente] = await Promise.all([
-      conn.db
+    const [eventos, emitente, contasBancarias, pedRow] = await Promise.all([
+      tx
         .select()
         .from(fiscalEventos)
         .where(eq(fiscalEventos.notaId, nota.id))
         .orderBy(desc(fiscalEventos.createdAt)),
-      obterContextoEmitente(conn.db, ctx.tenantId, nota.filialId),
+      obterContextoEmitente(tx, tenantId, nota.filialId),
+      tx
+        .select()
+        .from(financeiroContasBancarias)
+        .where(and(eq(financeiroContasBancarias.tenantId, tenantId), eq(financeiroContasBancarias.ativo, 1))),
+      nota.pedidoId
+        ? tx.select().from(pedidos).where(eq(pedidos.id, nota.pedidoId)).limit(1).then((r) => r[0] || null)
+        : Promise.resolve(null),
     ])
 
-    return {
-      success: true,
-      data: {
-        id: nota.id,
-        modelo: nota.modelo,
-        tipo_operacao: nota.tipoOperacao,
-        finalidade: nota.finalidade,
-        ambiente: nota.ambiente,
-        provedor_usado: nota.provedorUsado,
-        serie: nota.serie,
-        numero: nota.numero,
-        chave_acesso: nota.chaveAcesso,
-        protocolo_autorizacao: nota.protocoloAutorizacao,
-        data_autorizacao: nota.dataAutorizacao,
-        status: nota.status,
-        natureza_operacao: nota.naturezaOperacao,
-        destinatario_nome: nota.destinatarioNome,
-        destinatario_doc: nota.destinatarioDoc,
-        destinatario_ie: nota.destinatarioIe,
-        destinatario_uf: nota.destinatarioUf,
-        destinatario_cidade: nota.destinatarioCidade,
-        destinatario_endereco: nota.destinatarioEndereco,
-        forma_pagamento_label: nota.formaPagamentoLabel,
-        valor_produtos: toNum(nota.valorProdutos, 0),
-        valor_desconto: toNum(nota.valorDesconto, 0),
-        valor_frete: toNum(nota.valorFrete, 0),
-        valor_icms_base: toNum(nota.valorIcmsBase, 0),
-        valor_icms: toNum(nota.valorIcms, 0),
-        valor_icms_st: toNum(nota.valorIcmsSt, 0),
-        valor_pis: toNum(nota.valorPis, 0),
-        valor_cofins: toNum(nota.valorCofins, 0),
-        valor_ibs: toNum(nota.valorIbs, 0),
-        valor_cbs: toNum(nota.valorCbs, 0),
-        valor_total_nf: toNum(nota.valorTotalNf, 0),
-        mod_frete: nota.modFrete || '0',
-        transportadora_id: nota.transportadoraId || null,
-        transportadora_nome: nota.transportadoraNome || '',
-        transportadora_doc: nota.transportadoraDoc || '',
-        transportadora_ie: nota.transportadoraIe || '',
-        transportadora_endereco: nota.transportadoraEndereco || '',
-        transportadora_cidade: nota.transportadoraCidade || '',
-        transportadora_uf: nota.transportadoraUf || '',
-        transportadora_antt: nota.transportadoraAntt || '',
-        veiculo_placa: nota.veiculoPlaca || '',
-        veiculo_uf: nota.veiculoUf || '',
-        especie_volumes: nota.especieVolumes || 'CAIXA',
-        peso_bruto_kg: toNum(nota.pesoBrutoKg, 0),
-        peso_liquido_kg: toNum(nota.pesoLiquidoKg, 0),
-        qtd_volumes: nota.qtdVolumes,
-        duplicatas: Array.isArray(nota.duplicatasJson) ? nota.duplicatasJson : [],
-        vendedor_nome: nota.vendedorNome || '',
-        condicao_pagamento_label: nota.condicaoPagamentoLabel || '',
-        itens: nota.itensJson || [],
-        xml_conteudo: nota.xmlConteudo,
-        inf_complementar: nota.infComplementar,
-        motivo_cancelamento: nota.motivoCancelamento,
-        emitida_por_nome: nota.emitidaPorNome,
-        created_at: nota.createdAt,
-        emitente,
-        eventos: eventos.map((e) => ({
-          id: e.id,
-          tipo_evento: e.tipoEvento,
-          sequencia: e.sequencia,
-          descricao: e.descricao,
-          protocolo: e.protocolo,
-          operador_nome: e.operadorNome,
-          created_at: e.createdAt,
-        })),
-      },
+    let cliRow: typeof clientes.$inferSelect | null = null
+    const cliTargetId = nota.clienteId || pedRow?.clienteId || null
+    if (cliTargetId) {
+      cliRow = await tx
+        .select()
+        .from(clientes)
+        .where(eq(clientes.id, cliTargetId))
+        .limit(1)
+        .then((r) => r[0] || null)
     }
+
+    // Seleciona conta bancária vinculada ao local de cobrança do pedido, ou conta corrente cadastrada com agência/conta
+    const contaBancoReal =
+      (pedRow?.localCobrancaId
+        ? contasBancarias.find((c) => c.localCobrancaId === pedRow.localCobrancaId && c.agencia && c.conta)
+        : null) ||
+      contasBancarias.find((c) => c.tipo === 'CONTA_CORRENTE' && c.agencia && c.conta) ||
+      null
+
+    const bancoSimulado = !contaBancoReal
+    const bancoCodigo = onlyDigits(contaBancoReal?.bancoCodigo || '001').padStart(3, '0').slice(0, 3) || '001'
+    const bancoNome = contaBancoReal
+      ? contaBancoReal.nome
+      : 'BANCO DO BRASIL S.A. (SIMULAÇÃO)'
+    const agenciaStr = contaBancoReal?.agencia || '1234-5'
+    const contaStr = contaBancoReal?.conta || '00056789-0'
+    const carteiraStr = '17'
+
+    const dupsSalvas = Array.isArray(nota.duplicatasJson) ? (nota.duplicatasJson as Array<Record<string, unknown>>) : []
+    const dtEmissaoIso = nota.dataAutorizacao
+      ? new Date(nota.dataAutorizacao).toISOString().slice(0, 10)
+      : new Date(nota.createdAt).toISOString().slice(0, 10)
+    const valorNfNum = toNum(nota.valorTotalNf, 0)
+
+    const baseParcelasBoleto =
+      dupsSalvas.length > 0
+        ? dupsSalvas.map((d, idx) => ({
+            numero: String(d.numero || String(idx + 1).padStart(3, '0')),
+            vencimento: String(d.vencimento || pedRow?.previsaoEntrega || dtEmissaoIso).slice(0, 10),
+            valor: toNum(d.valor, valorNfNum),
+          }))
+        : [
+            {
+              numero: '001',
+              vencimento: String(pedRow?.previsaoEntrega || dtEmissaoIso).slice(0, 10),
+              valor: valorNfNum,
+            },
+          ]
+
+    const boletos = baseParcelasBoleto.map((parc, idx) => {
+      const nossoNumero = `${String(nota.numero).padStart(7, '0')}${String(idx + 1).padStart(2, '0')}`
+      const valorCentavos = String(Math.round(Math.max(0, parc.valor) * 100)).padStart(10, '0').slice(-10)
+      const dtBase = new Date('1997-10-07T00:00:00Z')
+      const dtVenc = new Date(`${parc.vencimento}T00:00:00Z`)
+      const diffDias = Math.max(1000, Math.min(9999, Math.floor((dtVenc.getTime() - dtBase.getTime()) / 86400000)))
+      const fatorVenc = String(Number.isFinite(diffDias) ? diffDias : 9500).padStart(4, '0').slice(0, 4)
+      const agDigits = onlyDigits(agenciaStr).padStart(4, '0').slice(0, 4)
+      const ccDigits = onlyDigits(contaStr).padStart(8, '0').slice(0, 8)
+      const campoLivre = `${agDigits}${ccDigits}${nossoNumero}1700`.padEnd(25, '0').slice(0, 25)
+      const codigoBarras = `${bancoCodigo}91${fatorVenc}${valorCentavos}${campoLivre}`
+      const linhaDigitavel = `${bancoCodigo}9${campoLivre.slice(0, 1)}.${campoLivre.slice(1, 5)}9 ${campoLivre.slice(5, 10)}.${campoLivre.slice(10, 15)}6 ${campoLivre.slice(15, 20)}.${campoLivre.slice(20, 25)}4 1 ${fatorVenc}${valorCentavos}`
+
+      return {
+        parcela_numero: parc.numero,
+        parcela_total: baseParcelasBoleto.length,
+        nosso_numero: nossoNumero,
+        numero_documento: `${String(nota.numero).padStart(6, '0')}/${parc.numero}`,
+        data_documento: dtEmissaoIso,
+        vencimento: parc.vencimento,
+        valor: parc.valor,
+        banco_codigo: `${bancoCodigo}-9`,
+        banco_nome: bancoNome,
+        agencia_codigo_cedente: `${agenciaStr} / ${contaStr}`,
+        carteira: carteiraStr,
+        especie_doc: 'DM',
+        aceite: 'N',
+        codigo_barras: codigoBarras,
+        linha_digitavel: linhaDigitavel,
+        simulado: bancoSimulado || nota.ambiente !== 'PRODUCAO',
+        cedente: {
+          nome: emitente.razaoSocial,
+          cnpj: emitente.cnpj,
+          cidade: emitente.cidade,
+          uf: emitente.uf,
+        },
+        sacado: {
+          nome: nota.destinatarioNome,
+          doc: nota.destinatarioDoc,
+          endereco:
+            nota.destinatarioEndereco ||
+            [cliRow?.endereco, cliRow?.numero, cliRow?.bairro].filter(Boolean).join(', '),
+          cidade: nota.destinatarioCidade || cliRow?.cidade || '',
+          uf: nota.destinatarioUf || cliRow?.uf || 'SP',
+          cep: cliRow?.cep || '',
+        },
+        instrucoes: [
+          'Pagável em qualquer banco ou via Internet Banking até o vencimento.',
+          'Após o vencimento cobrar multa de 2,00% e juros de mora de 0,033% ao dia.',
+          `Referente à NF-e Nº ${String(nota.numero).padStart(6, '0')} (Série ${nota.serie})${pedRow ? ` • Pedido ${pedRow.codigo}` : ''}.`,
+        ],
+      }
+    })
+
+    // Monta Romaneio de Produtos (Relação de Itens do Pedido / NF — distinto do romaneio de embarque)
+    let itensRomaneioProdutos: Array<{
+      codigo: string
+      descricao: string
+      unidade: string
+      qtd_caixas: number
+      peso_kg: number
+      preco_unitario: number
+      valor_total: number
+      lotes: string
+      observacao: string
+    }> = []
+
+    if (pedRow) {
+      const [itensPed, caixasRom] = await Promise.all([
+        tx
+          .select({
+            produtoId: pedidosItens.produtoId,
+            codigo: produtos.codigo,
+            descricao: produtos.descricao,
+            unidade: produtos.unidade,
+            qtdKgSolicitada: pedidosItens.qtdKgSolicitada,
+            qtdCaixasSolicitada: pedidosItens.qtdCaixasSolicitada,
+            precoUnitario: pedidosItens.precoUnitario,
+            observacao: pedidosItens.observacao,
+          })
+          .from(pedidosItens)
+          .innerJoin(produtos, eq(produtos.id, pedidosItens.produtoId))
+          .where(eq(pedidosItens.pedidoId, pedRow.id)),
+        tx
+          .select({
+            produtoId: romaneiosItens.produtoId,
+            pesoKg: romaneiosItens.pesoKg,
+            lote: estoqueCaixas.lote,
+          })
+          .from(romaneiosItens)
+          .innerJoin(romaneios, eq(romaneios.id, romaneiosItens.romaneioId))
+          .leftJoin(estoqueCaixas, eq(estoqueCaixas.id, romaneiosItens.caixaId))
+          .where(eq(romaneios.pedidoId, pedRow.id)),
+      ])
+
+      const porProd = new Map<string, { cxs: number; kg: number; lotes: Set<string> }>()
+      for (const cx of caixasRom) {
+        const cur = porProd.get(cx.produtoId) || { cxs: 0, kg: 0, lotes: new Set<string>() }
+        cur.cxs += 1
+        cur.kg += toNum(cx.pesoKg, 0)
+        if (cx.lote) cur.lotes.add(cx.lote)
+        porProd.set(cx.produtoId, cur)
+      }
+
+      itensRomaneioProdutos = itensPed.map((it) => {
+        const sep = porProd.get(it.produtoId)
+        const pesoFinal = sep && sep.kg > 0 ? Number(sep.kg.toFixed(3)) : toNum(it.qtdKgSolicitada, 0)
+        const cxsFinal =
+          sep && sep.cxs > 0
+            ? sep.cxs
+            : it.qtdCaixasSolicitada != null && toNum(it.qtdCaixasSolicitada, 0) >= 1
+              ? Math.round(toNum(it.qtdCaixasSolicitada, 1))
+              : 1
+        const preco = toNum(it.precoUnitario, 0)
+        return {
+          codigo: it.codigo || '-',
+          descricao: it.descricao,
+          unidade: 'KG',
+          qtd_caixas: cxsFinal,
+          peso_kg: pesoFinal,
+          preco_unitario: preco,
+          valor_total: Number((pesoFinal * preco).toFixed(2)),
+          lotes: sep ? Array.from(sep.lotes).slice(0, 3).join(', ') : '',
+          observacao: it.observacao || '',
+        }
+      })
+    } else {
+      const itensNota = Array.isArray(nota.itensJson) ? (nota.itensJson as Array<Record<string, unknown>>) : []
+      itensRomaneioProdutos = itensNota.map((it) => ({
+        codigo: String(it.codigo || '-'),
+        descricao: String(it.descricao || 'PRODUTO'),
+        unidade: String(it.unidade || 'KG'),
+        qtd_caixas: 1,
+        peso_kg: toNum(it.qtd, 0),
+        preco_unitario: toNum(it.valor_unitario, 0),
+        valor_total: toNum(it.valor_total, 0),
+        lotes: String(it.lote || ''),
+        observacao: '',
+      }))
+    }
+
+    const totalCaixasRom = itensRomaneioProdutos.reduce((s, i) => s + (i.qtd_caixas || 0), 0)
+    const totalPesoRom = Number(itensRomaneioProdutos.reduce((s, i) => s + (i.peso_kg || 0), 0).toFixed(3))
+
+    return {
+      id: nota.id,
+      modelo: nota.modelo,
+      tipo_operacao: nota.tipoOperacao,
+      finalidade: nota.finalidade,
+      ambiente: nota.ambiente,
+      provedor_usado: nota.provedorUsado,
+      serie: nota.serie,
+      numero: nota.numero,
+      chave_acesso: nota.chaveAcesso,
+      protocolo_autorizacao: nota.protocoloAutorizacao,
+      data_autorizacao: nota.dataAutorizacao,
+      status: nota.status,
+      natureza_operacao: nota.naturezaOperacao,
+      pedido_id: nota.pedidoId,
+      pedido_codigo: pedRow?.codigo || '',
+      pedido_titulo: pedRow?.titulo || '',
+      destinatario_nome: nota.destinatarioNome,
+      destinatario_doc: nota.destinatarioDoc,
+      destinatario_ie: nota.destinatarioIe,
+      destinatario_uf: nota.destinatarioUf,
+      destinatario_cidade: nota.destinatarioCidade,
+      destinatario_endereco: nota.destinatarioEndereco,
+      forma_pagamento_label: nota.formaPagamentoLabel,
+      valor_produtos: toNum(nota.valorProdutos, 0),
+      valor_desconto: toNum(nota.valorDesconto, 0),
+      valor_frete: toNum(nota.valorFrete, 0),
+      valor_icms_base: toNum(nota.valorIcmsBase, 0),
+      valor_icms: toNum(nota.valorIcms, 0),
+      valor_icms_st: toNum(nota.valorIcmsSt, 0),
+      valor_pis: toNum(nota.valorPis, 0),
+      valor_cofins: toNum(nota.valorCofins, 0),
+      valor_ibs: toNum(nota.valorIbs, 0),
+      valor_cbs: toNum(nota.valorCbs, 0),
+      valor_total_nf: valorNfNum,
+      mod_frete: nota.modFrete || '0',
+      transportadora_id: nota.transportadoraId || null,
+      transportadora_nome: nota.transportadoraNome || '',
+      transportadora_doc: nota.transportadoraDoc || '',
+      transportadora_ie: nota.transportadoraIe || '',
+      transportadora_endereco: nota.transportadoraEndereco || '',
+      transportadora_cidade: nota.transportadoraCidade || '',
+      transportadora_uf: nota.transportadoraUf || '',
+      transportadora_antt: nota.transportadoraAntt || '',
+      veiculo_placa: nota.veiculoPlaca || '',
+      veiculo_uf: nota.veiculoUf || '',
+      especie_volumes: nota.especieVolumes || 'CAIXA',
+      peso_bruto_kg: toNum(nota.pesoBrutoKg, 0) || totalPesoRom,
+      peso_liquido_kg: toNum(nota.pesoLiquidoKg, 0) || totalPesoRom,
+      qtd_volumes: nota.qtdVolumes || totalCaixasRom || 1,
+      duplicatas: Array.isArray(nota.duplicatasJson) ? nota.duplicatasJson : [],
+      vendedor_nome: nota.vendedorNome || '',
+      condicao_pagamento_label: nota.condicaoPagamentoLabel || nota.formaPagamentoLabel || '',
+      itens: nota.itensJson || [],
+      boletos,
+      romaneio_produtos: {
+        pedido_codigo: pedRow?.codigo || `NF-${nota.numero}`,
+        pedido_titulo: pedRow?.titulo || nota.naturezaOperacao,
+        previsao_entrega: pedRow?.previsaoEntrega || dtEmissaoIso,
+        observacoes: pedRow?.observacoes || '',
+        vendedor_nome: nota.vendedorNome || '',
+        condicao_pagamento: nota.condicaoPagamentoLabel || nota.formaPagamentoLabel || 'À VISTA',
+        cliente: {
+          razao_social: cliRow?.razaoSocial || nota.destinatarioNome,
+          nome_fantasia: cliRow?.nomeFantasia || nota.destinatarioNome,
+          cnpj_cpf: cliRow?.cnpjCpf || nota.destinatarioDoc,
+          inscricao_estadual: cliRow?.inscricaoEstadual || nota.destinatarioIe,
+          endereco:
+            [cliRow?.endereco, cliRow?.numero, cliRow?.complemento].filter(Boolean).join(', ') ||
+            nota.destinatarioEndereco,
+          bairro: cliRow?.bairro || '',
+          cidade: cliRow?.cidade || nota.destinatarioCidade,
+          uf: cliRow?.uf || nota.destinatarioUf,
+          cep: cliRow?.cep || '',
+          telefone: cliRow?.telefone || '',
+        },
+        total_caixas: totalCaixasRom || nota.qtdVolumes || 1,
+        total_peso_kg: totalPesoRom || toNum(nota.pesoLiquidoKg, 0),
+        valor_total: valorNfNum,
+        itens: itensRomaneioProdutos,
+      },
+      xml_conteudo: nota.xmlConteudo,
+      inf_complementar: nota.infComplementar,
+      motivo_cancelamento: nota.motivoCancelamento,
+      emitida_por_nome: nota.emitidaPorNome,
+      created_at: nota.createdAt,
+      emitente,
+      eventos: eventos.map((e) => ({
+        id: e.id,
+        tipo_evento: e.tipoEvento,
+        sequencia: e.sequencia,
+        descricao: e.descricao,
+        protocolo: e.protocolo,
+        operador_nome: e.operadorNome,
+        created_at: e.createdAt,
+      })),
+    }
+  }
+
+  app.get('/api/fiscal/notas/:id', { preHandler: readPerm }, async (req) => {
+    const ctx = req.authCtx!
+    const id = parseUuidOrBadRequest((req.params as { id: string }).id, 'nota_id')
+    const data = await montarDetalheCompletoNota(conn.db, ctx.tenantId, id)
+    return { success: true, data }
+  })
+
+  app.post('/api/fiscal/notas/pacote-impressao', { preHandler: readPerm }, async (req) => {
+    const ctx = req.authCtx!
+    const body = (req.body || {}) as { nota_ids?: string[] }
+    const ids = Array.isArray(body.nota_ids) ? body.nota_ids.slice(0, 100) : []
+    if (ids.length === 0) {
+      throw new HttpError(400, 'Informe ao menos 1 nota fiscal para montar o pacote de impressão.')
+    }
+    const notas = await Promise.all(
+      ids.map((id) => montarDetalheCompletoNota(conn.db, ctx.tenantId, parseUuidOrBadRequest(id, 'nota_id'))),
+    )
+    return { success: true, total: notas.length, notas }
   })
 
   app.get('/api/fiscal/notas/:id/xml', { preHandler: readPerm }, async (req) => {

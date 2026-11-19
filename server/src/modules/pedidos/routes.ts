@@ -24,7 +24,7 @@ import {
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
 import { calcularESalvarParcelas } from './parcelasHelper.js'
-import { registrarPendenciaTravaEstoque, verificarEstoquePedido } from './travaEstoqueHelper.js'
+import { formatarResumoTravaEstoque, registrarPendenciaTravaEstoque, verificarEstoquePedido } from './travaEstoqueHelper.js'
 import { sincronizarTitulosPedidoVenda } from '../financeiro/integracaoHelper.js'
 import {
   assertEnderecosNaoBloqueados,
@@ -57,6 +57,20 @@ interface ItemPedidoInput {
   alerta_reclamacao?: string
 }
 
+function limparMotivoTrava(raw?: string | null, status?: string): string {
+  const s = String(raw || '').trim()
+  if (s) {
+    return s
+      .replace(/^PED-\d+\s*[—-]\s*[^:]+:\s*/i, '')
+      .replace(/\.?\s*Cadeado aguardando libera[çc][ãa]o p\/ opera[çc][ãa]o\.?$/i, '')
+      .trim()
+  }
+  if (status === 'BLOQUEADO_ESTOQUE') {
+    return 'Estoque insuficiente ou comprometido por outro pedido em aberto'
+  }
+  return ''
+}
+
 function consolidarItensPedido(itens: ItemPedidoInput[]) {
   const consolidados = new Map<
     string,
@@ -82,14 +96,22 @@ function consolidarItensPedido(itens: ItemPedidoInput[]) {
     if (!Number.isFinite(kg) || kg <= 0) {
       throw new HttpError(400, 'Todos os itens do pedido devem ter peso (kg) maior que zero.')
     }
-    const cx =
-      item.qtd_caixas_solicitada != null && toNum(item.qtd_caixas_solicitada, 0) > 0
-        ? Math.trunc(toNum(item.qtd_caixas_solicitada, 0))
-        : null
     const unid = item.unidade_solicitada === 'CX' ? 'CX' : 'KG'
+    const rawCx = item.qtd_caixas_solicitada != null ? toNum(item.qtd_caixas_solicitada, 0) : 0
+    if (unid === 'CX' || (item.qtd_caixas_solicitada != null && String(item.qtd_caixas_solicitada).trim() !== '')) {
+      if (rawCx > 0 && (!Number.isInteger(rawCx) || rawCx < 1)) {
+        throw new HttpError(400, 'Caixas previstas devem ser sempre um número inteiro maior ou igual a 1 (sem vírgula).')
+      }
+      if (unid === 'CX' && rawCx < 1) {
+        throw new HttpError(400, 'Quando a unidade for Caixas (CX), informe no mínimo 1 caixa inteira.')
+      }
+    }
+    const cx = rawCx >= 1 ? Math.max(1, Math.round(rawCx)) : null
     const qtdExib =
       item.qtd_solicitada_exibicao != null && toNum(item.qtd_solicitada_exibicao, 0) > 0
-        ? toNum(item.qtd_solicitada_exibicao, kg)
+        ? unid === 'CX' && cx
+          ? cx
+          : toNum(item.qtd_solicitada_exibicao, kg)
         : unid === 'CX' && cx
           ? cx
           : kg
@@ -287,6 +309,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             total_kg_separado: sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
             total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
             qtd_conferidas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id" AND ri.conferido = 1), 0)`,
+            motivo_trava_raw: sql<string | null>`(SELECT ps.titulo FROM pendencias_setor ps WHERE ps.referencia_id = "pedidos"."id" AND ps.status != 'CONCLUIDA' ORDER BY ps.created_at DESC LIMIT 1)`,
           })
           .from(pedidos)
           .where(and(...conds))
@@ -322,6 +345,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           valor_total: toNum(r.valor_total, 0),
           total_kg_solicitado: toNum(r.total_kg_solicitado, 0),
           total_kg_separado: toNum(r.total_kg_separado, 0),
+          motivo_trava: limparMotivoTrava(r.motivo_trava_raw, r.status),
         })),
         kpis_gerais: kpisGerais,
         total_geral: totalGeral,
@@ -783,6 +807,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         codigo,
         status,
         trava_estoque: status === 'BLOQUEADO_ESTOQUE',
+        motivo_trava: status === 'BLOQUEADO_ESTOQUE' ? formatarResumoTravaEstoque(itensInsuficientes) : '',
         itens_insuficientes: itensInsuficientes,
       }
     })
