@@ -37,6 +37,7 @@ export const produtos = pgTable(
     ncm: text('ncm').notNull().default(''),
     cest: text('cest').notNull().default(''),
     origemMercadoria: text('origem_mercadoria').notNull().default('0'),
+    registroDipoa: text('registro_dipoa').notNull().default(''),
     ativo: integer('ativo').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

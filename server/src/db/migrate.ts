@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS produtos (
   ncm TEXT NOT NULL DEFAULT '',
   cest TEXT NOT NULL DEFAULT '',
   origem_mercadoria TEXT NOT NULL DEFAULT '0',
+  registro_dipoa TEXT NOT NULL DEFAULT '',
   ativo INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1361,6 +1362,7 @@ ALTER TABLE pedidos_compra ALTER COLUMN fornecedor_id DROP NOT NULL;
 ALTER TABLE financeiro_movimentacoes ADD COLUMN IF NOT EXISTS ofx_fitid TEXT NOT NULL DEFAULT '';
 ALTER TABLE financeiro_movimentacoes ADD COLUMN IF NOT EXISTS ofx_memo TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_fin_mov_ofx_fitid ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, ofx_fitid);
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS registro_dipoa TEXT NOT NULL DEFAULT '';
 `
 
 export interface SeedDefaultsResult {

@@ -59,6 +59,7 @@ export function Produtos() {
     ncm: '',
     cest: '',
     origem_mercadoria: '0',
+    registro_dipoa: '',
     pais_ids: [],
     rendimentos_map: {},
   })
@@ -160,6 +161,7 @@ export function Produtos() {
       ncm: p.ncm || '',
       cest: p.cest || '',
       origem_mercadoria: p.origem_mercadoria || '0',
+      registro_dipoa: p.registro_dipoa || '',
       pais_ids: p.pais_ids ? p.pais_ids.toString().split(',').map(s => s.trim()).filter(Boolean).map(v => /^\d+$/.test(v) ? Number(v) : v) : [],
       rendimentos_map: rendMap,
     })
@@ -215,6 +217,7 @@ export function Produtos() {
       ncm: '',
       cest: '',
       origem_mercadoria: '0',
+      registro_dipoa: '',
       pais_ids: [],
       rendimentos_map: {},
     })
@@ -548,11 +551,27 @@ export function Produtos() {
                     </div>
                   </div>
                   <div className="flex gap-16 flex-wrap">
-                    <div className="form-group flex-1 min-w-[150px]">
+                    <div className="form-group flex-1 min-w-[140px]">
+                      <label className="form-label">
+                        Registro DIPOA (Produto){!/embalag|insumo/i.test(formData.tipo_produto || '') ? ' *' : ''}
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={formData.registro_dipoa}
+                        onChange={e => setFormData({...formData, registro_dipoa: e.target.value.toUpperCase()})}
+                        placeholder="Ex: 005 (Picanha) / 007"
+                        required={!formData.id && !/embalag|insumo/i.test(formData.tipo_produto || '')}
+                      />
+                      <span className="text-[11px] text-muted mt-4 block">
+                        Sai na etiqueta testeira junto ao SISP/SISBI da filial (ex: REG. DIPOA/SISP 007/1929).
+                      </span>
+                    </div>
+                    <div className="form-group flex-1 min-w-[140px]">
                       <label className="form-label">NCM</label>
                       <input type="text" className="form-input font-mono" value={formData.ncm} onChange={e => setFormData({...formData, ncm: e.target.value})} placeholder="Ex: 02013000" />
                     </div>
-                    <div className="form-group flex-1 min-w-[150px]">
+                    <div className="form-group flex-1 min-w-[120px]">
                       <label className="form-label">CEST</label>
                       <input type="text" className="form-input font-mono" value={formData.cest} onChange={e => setFormData({...formData, cest: e.target.value})} placeholder="Opcional" />
                     </div>

@@ -63,7 +63,7 @@ const FilialSchema = z.object({
   uf: z.string().nullish().transform((v) => (v ?? 'SP').trim().toUpperCase().slice(0, 2) || 'SP'),
   cidade: optStr(''),
   codigo_ibge: optStr(''),
-  registro_sanitario_tipo: z.enum(['DIPOA', 'SIF', 'SISBI', 'SIM', 'NENHUM']).default('SIF'),
+  registro_sanitario_tipo: z.enum(['SISP', 'SISBI', 'SIF', 'DIPOA', 'SIM', 'NENHUM']).default('SISP'),
   registro_sanitario_num: optStr(''),
   is_padrao: z.union([z.boolean(), z.number()]).optional().default(0),
 })

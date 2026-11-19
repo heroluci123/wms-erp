@@ -3,6 +3,40 @@ import JsBarcode from 'jsbarcode'
 import { Printer, Download, X, Tag, CheckCircle2 } from 'lucide-react'
 import { fmtDataBR, fmtKg2, fmtKg3, gerarLotePorData } from '../../utils/rastreabilidade'
 import { lerConfigEstacao } from '../../utils/estacaoConfig'
+import { useAppStore } from '../../store/appStore'
+
+function obterFilialAtivaStore() {
+  try {
+    const st = useAppStore.getState?.()
+    if (!st) return null
+    const lista = Array.isArray(st.filiaisDisponiveis) ? st.filiaisDisponiveis : []
+    return (
+      lista.find((f) => String(f.id) === String(st.filialAtivaId)) ||
+      lista.find((f) => Number(f.is_padrao) === 1) ||
+      lista[0] ||
+      null
+    )
+  } catch {
+    return null
+  }
+}
+
+export function montarSeloSanitarioEtiqueta({ registroDipoa = '', registroTipo = '', registroNum = '' } = {}) {
+  const dipoa = String(registroDipoa || '').trim().toUpperCase()
+  const tipo = String(registroTipo || '').trim().toUpperCase()
+  const num = String(registroNum || '').trim().toUpperCase()
+
+  if (tipo && tipo !== 'NENHUM' && num) {
+    if (dipoa) {
+      return tipo === 'DIPOA' ? `REG. DIPOA ${dipoa}/${num}` : `REG. DIPOA/${tipo} ${dipoa}/${num}`
+    }
+    return `REG. ${tipo} Nº ${num}`
+  }
+  if (dipoa) {
+    return `REG. DIPOA Nº ${dipoa}`
+  }
+  return ''
+}
 
 function escHtml(str) {
   return String(str ?? '')
@@ -28,6 +62,23 @@ function normalizarEtiqueta(raw) {
   const pecasRaw = Number(raw?.qtd_pecas ?? raw?.pecas ?? 0)
   const qtdPecas = Number.isFinite(pecasRaw) && pecasRaw > 0 ? Math.trunc(pecasRaw) : null
 
+  const filialAtiva = obterFilialAtivaStore()
+  const empresaNome = String(
+    raw?.empresa_nome ||
+      filialAtiva?.empresa_nome_fantasia ||
+      filialAtiva?.empresa_razao_social ||
+      filialAtiva?.nome ||
+      'TRICARNES ALIMENTOS',
+  )
+    .trim()
+    .toUpperCase()
+  const registroDipoa = String(raw?.registro_dipoa ?? raw?.produto_registro_dipoa ?? '').trim()
+  const seloSanitario = montarSeloSanitarioEtiqueta({
+    registroDipoa,
+    registroTipo: raw?.registro_sanitario_tipo || filialAtiva?.registro_sanitario_tipo || '',
+    registroNum: raw?.registro_sanitario_num || filialAtiva?.registro_sanitario_num || '',
+  })
+
   return {
     ean,
     codigo: String(raw?.produto_codigo || raw?.codigo || '-').trim(),
@@ -41,6 +92,9 @@ function normalizarEtiqueta(raw) {
     qtd_pecas: qtdPecas,
     origem_tipo: badgeOrigem,
     ean_origem: raw?.ean_origem || '',
+    empresa_nome: empresaNome,
+    registro_dipoa: registroDipoa,
+    selo_sanitario: seloSanitario,
   }
 }
 
@@ -66,7 +120,7 @@ export function gerarZplEtiqueta100x70(raw) {
     '^LH0,0',
     '^FO24,18^GB752,524,3^FS',
     '^FO24,62^GB752,2,2^FS',
-    '^FO38,28^A0N,26,26^FDTRICARNES ALIMENTOS LTDA^FS',
+    `^FO38,28^A0N,26,26^FD${e.empresa_nome.slice(0, 28)}^FS`,
     `^FO450,28^A0N,20,20^FD${e.origem_tipo.slice(0, 26)}^FS`,
     `^FO38,74^A0N,30,30^FD${desc1}^FS`,
     desc2 ? `^FO38,108^A0N,26,26^FD${desc2}^FS` : '',
@@ -77,7 +131,8 @@ export function gerarZplEtiqueta100x70(raw) {
     `^FO38,262^A0N,34,34^FDPESO LIQ: ${liqTxt}   QTD: ${pecasTxt}^FS`,
     '^FO24,308^GB752,2,2^FS',
     `^FO90,330^BY2,3,105^BCN,105,Y,N,N^FD${e.ean}^FS`,
-    e.ean_origem ? `^FO38,512^A0N,18,18^FDORIGEM EAN: ${e.ean_origem}^FS` : '',
+    e.ean_origem ? `^FO38,512^A0N,17,17^FDORIGEM: ${e.ean_origem}^FS` : '',
+    e.selo_sanitario ? `^FO380,512^A0N,17,17^FB382,1,0,R^FD${e.selo_sanitario}^FS` : '',
     '^XZ',
   ].filter(Boolean).join('\n')
 }
@@ -132,7 +187,7 @@ export function montarHtmlEtiqueta100x70(etiquetas) {
     <div class="zlabel">
       <div class="zheader">
         <div>
-          <div class="zbrand">TRICARNES ALIMENTOS</div>
+          <div class="zbrand">${escHtml(e.empresa_nome)}</div>
           <div class="zsub">WMS RASTREABILIDADE • COD. ${escHtml(e.codigo)}</div>
         </div>
         <div class="zbadge">${escHtml(e.origem_tipo)}</div>
@@ -176,7 +231,14 @@ export function montarHtmlEtiqueta100x70(etiquetas) {
 
       <div class="zbarcode-wrap">
         ${gerarBarcodeSvgHtml(e.ean)}
-        ${e.ean_origem ? `<div class="zorigem">Origem: EAN ${escHtml(e.ean_origem)}</div>` : ''}
+        ${
+          e.ean_origem || e.selo_sanitario
+            ? `<div class="zfooter-sanitario">
+                 <span>${e.ean_origem ? `Origem: ${escHtml(e.ean_origem)}` : ''}</span>
+                 <span class="zselo">${escHtml(e.selo_sanitario)}</span>
+               </div>`
+            : ''
+        }
       </div>
     </div>
   `).join('')
@@ -208,8 +270,9 @@ export function montarHtmlEtiqueta100x70(etiquetas) {
       .zpeso-item strong { font-size: 8.8pt; font-weight: 800; }
       .zpeso-liq strong { font-size: 10.5pt; font-weight: 900; }
       .zbarcode-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 0.8mm; }
-      .zbarcode-wrap svg { max-width: 92mm; height: 15.5mm; }
-      .zorigem { font-size: 6pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: 0.3mm; }
+      .zbarcode-wrap svg { max-width: 92mm; height: 14.5mm; }
+      .zfooter-sanitario { width: 100%; display: flex; justify-content: space-between; align-items: center; font-size: 5.8pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: 0.3mm; color: #111; }
+      .zselo { margin-left: auto; letter-spacing: 0.2px; }
     </style>
   </head>
   <body>${cardsHtml}</body>
@@ -372,7 +435,7 @@ export function EtiquetaZebraCard({ etiqueta }) {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #090d16', paddingBottom: 6, marginBottom: 8 }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: '0.4px' }}>TRICARNES ALIMENTOS</div>
+          <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: '0.4px' }}>{e.empresa_nome}</div>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#334155' }}>COD. {e.codigo}</div>
         </div>
         <span style={{
@@ -433,9 +496,14 @@ export function EtiquetaZebraCard({ etiqueta }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <BarcodeSvg value={e.ean} />
-        {e.ean_origem && (
-          <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#334155', marginTop: 2 }}>
-            Origem EAN: {e.ean_origem}
+        {(e.ean_origem || e.selo_sanitario) && (
+          <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 9.5, fontFamily: 'monospace', color: '#334155', marginTop: 3 }}>
+            <span>{e.ean_origem ? `Origem: ${e.ean_origem}` : ''}</span>
+            {e.selo_sanitario && (
+              <span style={{ marginLeft: 'auto', fontWeight: 800, color: '#0f172a', letterSpacing: '0.2px' }}>
+                {e.selo_sanitario}
+              </span>
+            )}
           </div>
         )}
       </div>

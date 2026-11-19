@@ -3,6 +3,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import {
+  empresas,
   estoquePosicao,
   filiais,
   locais,
@@ -45,6 +46,7 @@ const ProdutoSchema = z.object({
   ncm: z.string().nullish().transform((v) => (v ?? '').trim()),
   cest: z.string().nullish().transform((v) => (v ?? '').trim()),
   origem_mercadoria: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : '0')),
+  registro_dipoa: z.string().nullish().transform((v) => (v ?? '').trim()),
   pais_ids: z.array(z.string().uuid()).optional().default([]),
   arvore_vinculos: z.array(ArvoreVinculoSchema).optional(),
 })
@@ -93,8 +95,25 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
     async (req) => {
       const ctx = req.authCtx!
       const rows = await conn.db
-        .select()
+        .select({
+          id: filiais.id,
+          empresaId: filiais.empresaId,
+          empresaRazaoSocial: empresas.razaoSocial,
+          empresaNomeFantasia: empresas.nomeFantasia,
+          codigo: filiais.codigo,
+          nome: filiais.nome,
+          tipoUnidade: filiais.tipoUnidade,
+          cnpj: filiais.cnpj,
+          inscricaoEstadual: filiais.inscricaoEstadual,
+          uf: filiais.uf,
+          cidade: filiais.cidade,
+          codigoIbge: filiais.codigoIbge,
+          registroSanitarioTipo: filiais.registroSanitarioTipo,
+          registroSanitarioNum: filiais.registroSanitarioNum,
+          isPadrao: filiais.isPadrao,
+        })
         .from(filiais)
+        .leftJoin(empresas, eq(empresas.id, filiais.empresaId))
         .where(and(eq(filiais.tenantId, ctx.tenantId), eq(filiais.ativo, 1)))
         .orderBy(asc(filiais.codigo))
       return {
@@ -103,6 +122,8 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
         data: rows.map((f) => ({
           id: f.id,
           empresa_id: f.empresaId,
+          empresa_razao_social: f.empresaRazaoSocial || '',
+          empresa_nome_fantasia: f.empresaNomeFantasia || '',
           codigo: f.codigo,
           nome: f.nome,
           tipo_unidade: f.tipoUnidade,
@@ -145,6 +166,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             p.ncm,
             p.cest,
             p.origem_mercadoria,
+            p.registro_dipoa,
             p.created_at,
             STRING_AGG(DISTINCT pai.id::text, ',') AS pais_ids,
             STRING_AGG(DISTINCT pai.descricao, ', ') AS pai_descricao,
@@ -362,6 +384,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           ncm: d.ncm,
           cest: d.cest,
           origemMercadoria: d.origem_mercadoria,
+          registroDipoa: d.registro_dipoa,
         })
 
         if (d.classificacao === 'SUBPRODUTO' && vinculos.length > 0) {
@@ -422,6 +445,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             ncm: d.ncm,
             cest: d.cest,
             origemMercadoria: d.origem_mercadoria,
+            registroDipoa: d.registro_dipoa,
             updatedAt: new Date(),
           })
           .where(and(eq(produtos.id, id), eq(produtos.tenantId, ctx.tenantId)))

@@ -121,4 +121,22 @@ export const financeiroQueries = {
     exigirApi()
     return apiRequest('/api/financeiro/comissoes/gerar-pagar', { method: 'POST', body: dados })
   },
+
+  async obterDre(filtros = {}) {
+    if (!isApiEnabled()) return null
+    const qs = buildQueryString(filtros)
+    return apiRequest(`/api/financeiro/dre${qs}`)
+  },
+
+  async obterRentabilidade(filtros = {}) {
+    if (!isApiEnabled()) return null
+    const qs = buildQueryString(filtros)
+    return apiRequest(`/api/financeiro/rentabilidade${qs}`)
+  },
+
+  async obterAnaliseCustosDesossa(filtros = {}) {
+    if (!isApiEnabled()) return { ops: [], ranking_fornecedores: [] }
+    const qs = buildQueryString(filtros)
+    return (await apiRequest(`/api/ops/analise-custos${qs}`)).data || { ops: [], ranking_fornecedores: [] }
+  },
 }

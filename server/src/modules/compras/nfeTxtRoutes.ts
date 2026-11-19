@@ -1369,6 +1369,7 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
             produto_id: estoqueCaixas.produtoId,
             produto_codigo: produtos.codigo,
             produto_descricao: produtos.descricao,
+            registro_dipoa: produtos.registroDipoa,
             endereco: estoqueCaixas.endereco,
             lote: estoqueCaixas.lote,
             data_producao: estoqueCaixas.dataProducao,

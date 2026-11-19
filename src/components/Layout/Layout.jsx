@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3 } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -495,6 +495,9 @@ function Sidebar({ collapsed = false, onCollapse }) {
           <div className="sidebar__section-label">Financeiro</div>
           <NavLink to="/financeiro" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
             <DollarSign size={18} /> Financeiro (Pagar/Receber)
+          </NavLink>
+          <NavLink to="/dre" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+            <BarChart3 size={18} /> DRE &amp; Margem Real
           </NavLink>
         </>
       )}

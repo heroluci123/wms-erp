@@ -855,6 +855,7 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
             codigo: produtos.codigo,
             descricao: produtos.descricao,
             valorUnitario: produtos.valorUnitario,
+            registroDipoa: produtos.registroDipoa,
           })
           .from(produtos)
           .where(and(eq(produtos.id, produtoId), eq(produtos.tenantId, ctx.tenantId)))
@@ -966,6 +967,7 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           produto_id: prod.id,
           produto_codigo: prod.codigo,
           produto_descricao: prod.descricao,
+          registro_dipoa: prod.registroDipoa || '',
           endereco: enderecoRetorno,
           lote: pesagem.lote,
           data_producao: pesagem.dataProducao,

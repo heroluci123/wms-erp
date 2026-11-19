@@ -185,6 +185,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           descricao: produtos.descricao,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          registro_dipoa: produtos.registroDipoa,
           grupo: produtos.grupo,
           tipo_produto: produtos.tipoProduto,
           status_curva: produtos.statusCurva,
@@ -264,6 +265,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          registro_dipoa: produtos.registroDipoa,
           endereco: estoqueCaixas.endereco,
           lote: estoqueCaixas.lote,
           data_producao: estoqueCaixas.dataProducao,
@@ -317,6 +319,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          registro_dipoa: produtos.registroDipoa,
           produto_ean_padrao: produtos.ean,
           palete_id: estoqueCaixas.paleteId,
           palete_codigo: paletes.codigo,
@@ -1007,6 +1010,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          registro_dipoa: produtos.registroDipoa,
           endereco: estoqueCaixas.endereco,
           lote: estoqueCaixas.lote,
           data_producao: estoqueCaixas.dataProducao,
@@ -1130,7 +1134,12 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
       }
 
       const [prod] = await tx
-        .select({ id: produtos.id, codigo: produtos.codigo, descricao: produtos.descricao })
+        .select({
+          id: produtos.id,
+          codigo: produtos.codigo,
+          descricao: produtos.descricao,
+          registroDipoa: produtos.registroDipoa,
+        })
         .from(produtos)
         .where(and(eq(produtos.id, produtoId), eq(produtos.tenantId, ctx.tenantId)))
         .limit(1)
@@ -1370,6 +1379,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         produto_id: prod.id,
         produto_codigo: prod.codigo,
         produto_descricao: prod.descricao,
+        registro_dipoa: prod.registroDipoa || '',
         palete_id: paleteIdFinal,
         endereco: endEfetivo,
         lote: pesagem.lote,
@@ -1923,6 +1933,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          registro_dipoa: produtos.registroDipoa,
           endereco: estoqueCaixas.endereco,
           lote: estoqueCaixas.lote,
           data_producao: estoqueCaixas.dataProducao,
@@ -2049,7 +2060,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
       const cleanEan = String(body.ean_origem || '').trim()
       const origRes = body.caixa_origem_id
         ? await tx.execute(sql`
-            SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao, pal.endereco_atual AS palete_endereco
+            SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao, p.registro_dipoa AS registro_dipoa, pal.endereco_atual AS palete_endereco
             FROM estoque_caixas ec
             JOIN produtos p ON p.id = ec.produto_id
             LEFT JOIN paletes pal ON pal.id = ec.palete_id
@@ -2057,7 +2068,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
             FOR UPDATE OF ec
           `)
         : await tx.execute(sql`
-            SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao, pal.endereco_atual AS palete_endereco
+            SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao, p.registro_dipoa AS registro_dipoa, pal.endereco_atual AS palete_endereco
             FROM estoque_caixas ec
             JOIN produtos p ON p.id = ec.produto_id
             LEFT JOIN paletes pal ON pal.id = ec.palete_id
@@ -2074,6 +2085,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
             produto_id: string
             produto_codigo: string
             produto_descricao: string
+            registro_dipoa: string
             palete_id: string | null
             palete_endereco: string | null
             endereco: string | null
@@ -2244,6 +2256,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: orig.produto_id,
           produto_codigo: orig.produto_codigo,
           produto_descricao: orig.produto_descricao,
+          registro_dipoa: orig.registro_dipoa || '',
           lote: loteFinal,
           data_producao: orig.data_producao,
           validade: orig.validade,

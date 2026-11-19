@@ -346,18 +346,19 @@ export function EmpresasFiliais() {
                   </select>
                 </div>
                 <div>
-                  <label className="form-label">Registro Sanitário</label>
+                  <label className="form-label">Registro Sanitário (Filial)</label>
                   <select className="form-input" value={formFil.registro_sanitario_tipo} onChange={(e) => setFormFil({ ...formFil, registro_sanitario_tipo: e.target.value })}>
-                    <option value="SIF">SIF</option>
+                    <option value="SISP">SISP (Estadual SP)</option>
+                    <option value="SISBI">SISBI (Equivalência Nacional)</option>
+                    <option value="SIF">SIF (Federal MAPA)</option>
+                    <option value="SIM">SIM (Municipal)</option>
                     <option value="DIPOA">DIPOA</option>
-                    <option value="SISBI">SISBI</option>
-                    <option value="SIM">SIM</option>
                     <option value="NENHUM">Nenhum</option>
                   </select>
                 </div>
                 <div>
-                  <label className="form-label">Nº Registro (ex: 007 / 1929)</label>
-                  <input className="form-input" value={formFil.registro_sanitario_num} onChange={(e) => setFormFil({ ...formFil, registro_sanitario_num: e.target.value })} placeholder="Ex: 007 / 1929" />
+                  <label className="form-label">Nº Registro da Filial (ex: 1929 / 2173)</label>
+                  <input className="form-input font-mono" value={formFil.registro_sanitario_num} onChange={(e) => setFormFil({ ...formFil, registro_sanitario_num: e.target.value })} placeholder="Ex: 1929 (SISP) ou 2173 (SISBI)" />
                 </div>
               </div>
               <div className="form-grid form-grid--3">

@@ -234,6 +234,7 @@ export async function criar({
   ncm,
   cest,
   origem_mercadoria,
+  registro_dipoa,
   pais_ids,
   arvore_vinculos,
 }) {
@@ -258,6 +259,7 @@ export async function criar({
           ncm,
           cest,
           origem_mercadoria,
+          registro_dipoa: registro_dipoa || '',
           pais_ids: pais_ids || [],
           arvore_vinculos,
         },
@@ -328,6 +330,7 @@ export async function atualizar({
   ncm,
   cest,
   origem_mercadoria,
+  registro_dipoa,
   pais_ids,
   arvore_vinculos,
 }) {
@@ -352,6 +355,7 @@ export async function atualizar({
           ncm,
           cest,
           origem_mercadoria,
+          registro_dipoa: registro_dipoa || '',
           pais_ids: pais_ids || [],
           arvore_vinculos,
         },
