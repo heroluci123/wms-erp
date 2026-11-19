@@ -4,6 +4,7 @@ import type { DbConnection } from '../../db/client.js'
 import {
   clientes,
   estoqueCaixas,
+  fiscalNotas,
   formasPagamento,
   locaisCobranca,
   marchantes,
@@ -29,6 +30,7 @@ import {
   assertEnderecosNaoBloqueados,
   gerarCodigoDocumento,
   hojeIsoLocal,
+  lerTenantFeatures,
   normalizarDataIso,
   parseUuidOrBadRequest,
   recalcularPosicaoEnderecos,
@@ -2021,6 +2023,37 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             .update(pedidos)
             .set({ status: 'AGUARDANDO_CONFERENCIA', separadoAt: new Date(), updatedAt: new Date() })
             .where(eq(pedidos.id, rom.pedidoId))
+
+          // Se a trava fiscal (exigir_nf_para_expedir) estiver ligada e o pedido ainda não tiver NF-e, gera pendência no setor FATURAMENTO
+          const features = await lerTenantFeatures(tx, ctx.tenantId)
+          if (Boolean(features.exigir_nf_para_expedir) && pedRow && !pedRow.chaveNfe && !pedRow.numeroNf) {
+            const [jaPend] = await tx
+              .select({ id: pendenciasSetor.id })
+              .from(pendenciasSetor)
+              .where(
+                and(
+                  eq(pendenciasSetor.tenantId, ctx.tenantId),
+                  eq(pendenciasSetor.referenciaId, pedRow.id),
+                  eq(pendenciasSetor.tipoPendencia, 'PEDIDO_AGUARDANDO_FATURAMENTO'),
+                  eq(pendenciasSetor.status, 'PENDENTE'),
+                ),
+              )
+              .limit(1)
+            if (!jaPend) {
+              await tx.insert(pendenciasSetor).values({
+                id: uuidv7(),
+                tenantId: ctx.tenantId,
+                filialId: ctx.filialId,
+                setorDestino: 'FATURAMENTO',
+                tipoPendencia: 'PEDIDO_AGUARDANDO_FATURAMENTO',
+                referenciaTabela: 'pedidos',
+                referenciaId: pedRow.id,
+                titulo: `Pedido ${pedRow.codigo} (${clienteExato}) separado — emitir NF-e para liberar carregamento`,
+                prioridade: 2,
+                status: 'PENDENTE',
+              })
+            }
+          }
         }
       })
 
@@ -2220,6 +2253,38 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             409,
             `Ainda existem ${naoConferidas.length} caixa(s) não conferida(s). Confira 100% da carga antes de expedir.`,
           )
+        }
+
+        // Trava Fiscal configurável por empresa: exigir NF-e faturada antes de expedir
+        const features = await lerTenantFeatures(tx, ctx.tenantId)
+        if (Boolean(features.exigir_nf_para_expedir) && rom.pedidoId) {
+          const [pedNf] = await tx
+            .select({ id: pedidos.id, codigo: pedidos.codigo, numeroNf: pedidos.numeroNf, chaveNfe: pedidos.chaveNfe })
+            .from(pedidos)
+            .where(eq(pedidos.id, rom.pedidoId))
+            .limit(1)
+          const temNfPedido = Boolean(pedNf?.chaveNfe || pedNf?.numeroNf)
+          let temNfAutorizada = temNfPedido
+          if (!temNfAutorizada && pedNf) {
+            const [nfRow] = await tx
+              .select({ id: fiscalNotas.id })
+              .from(fiscalNotas)
+              .where(
+                and(
+                  eq(fiscalNotas.tenantId, ctx.tenantId),
+                  eq(fiscalNotas.pedidoId, pedNf.id),
+                  eq(fiscalNotas.status, 'AUTORIZADA'),
+                ),
+              )
+              .limit(1)
+            temNfAutorizada = Boolean(nfRow)
+          }
+          if (!temNfAutorizada) {
+            throw new HttpError(
+              409,
+              `Bloqueio Fiscal: o pedido ${pedNf?.codigo || rom.codigo} ainda não foi faturado (sem NF-e autorizada). Emita a NF-e no Módulo Fiscal antes de expedir/carregar.`,
+            )
+          }
         }
 
         const cIds = itens.map((i) => i.caixaId).filter(Boolean) as string[]

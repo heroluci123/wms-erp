@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import {
@@ -19,6 +19,7 @@ import {
   rotas,
   tiposVeiculo,
   transportadoras,
+  transportadoraVeiculos,
   vendedores,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
@@ -148,10 +149,32 @@ const TransportadoraSchema = z.object({
   nome_fantasia: optStr(''),
   cnpj_cpf: optStr(''),
   inscricao_estadual: optStr(''),
+  endereco: optStr(''),
+  numero: optStr(''),
+  bairro: optStr(''),
+  cep: optStr(''),
   uf: z.string().nullish().transform((v) => (v ?? 'SP').trim().toUpperCase().slice(0, 2) || 'SP'),
   cidade: optStr(''),
   telefone: optStr(''),
-  placa_padrao: z.string().nullish().transform((v) => (v ?? '').trim().toUpperCase()),
+  rntrc_antt: optStr(''),
+  placa_padrao: z.string().nullish().transform((v) => (v ?? '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '')),
+})
+
+const TransportadoraVeiculoSchema = z.object({
+  placa: z
+    .string()
+    .trim()
+    .min(6, 'Informe a placa do veículo (ex: ABC1D23).')
+    .transform((v) => v.toUpperCase().replace(/[^A-Z0-9]/g, '')),
+  uf_placa: z.string().nullish().transform((v) => (v ?? 'SP').trim().toUpperCase().slice(0, 2) || 'SP'),
+  modelo: optStr(''),
+  rntrc_antt: optStr(''),
+  capacidade_kg: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(String(v).replace(',', '.'))),
+    z.number().min(0).nullable(),
+  ),
+  motorista_padrao: optStr(''),
+  padrao: z.union([z.boolean(), z.number()]).optional().default(0),
 })
 
 const RotaSchema = z.object({
@@ -1127,27 +1150,72 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
   // ── TRANSPORTADORAS & ROTAS ─────────────────────────────────────────────────
   app.get(
     '/api/cadastros/transportadoras',
-    { preHandler: requirePermission(['transportadoras', 'pedidos', 'saida', 'expedicao'], { write: false }) },
+    {
+      preHandler: requirePermission(
+        ['transportadoras', 'pedidos', 'saida', 'expedicao', 'fiscal', 'roteirizacao'],
+        { write: false },
+      ),
+    },
     async (req) => {
       const ctx = req.authCtx!
-      const rows = await conn.db
-        .select({
-          id: transportadoras.id,
-          codigo: transportadoras.codigo,
-          razao_social: transportadoras.razaoSocial,
-          nome_fantasia: transportadoras.nomeFantasia,
-          cnpj_cpf: transportadoras.cnpjCpf,
-          inscricao_estadual: transportadoras.inscricaoEstadual,
-          uf: transportadoras.uf,
-          cidade: transportadoras.cidade,
-          telefone: transportadoras.telefone,
-          placa_padrao: transportadoras.placaPadrao,
-          ativo: transportadoras.ativo,
+      const [rows, veics] = await Promise.all([
+        conn.db
+          .select({
+            id: transportadoras.id,
+            codigo: transportadoras.codigo,
+            razao_social: transportadoras.razaoSocial,
+            nome_fantasia: transportadoras.nomeFantasia,
+            cnpj_cpf: transportadoras.cnpjCpf,
+            inscricao_estadual: transportadoras.inscricaoEstadual,
+            endereco: transportadoras.endereco,
+            numero: transportadoras.numero,
+            bairro: transportadoras.bairro,
+            cep: transportadoras.cep,
+            uf: transportadoras.uf,
+            cidade: transportadoras.cidade,
+            telefone: transportadoras.telefone,
+            rntrc_antt: transportadoras.rntrcAntt,
+            placa_padrao: transportadoras.placaPadrao,
+            ativo: transportadoras.ativo,
+          })
+          .from(transportadoras)
+          .where(and(eq(transportadoras.tenantId, ctx.tenantId), eq(transportadoras.ativo, 1)))
+          .orderBy(asc(transportadoras.razaoSocial)),
+        conn.db
+          .select({
+            id: transportadoraVeiculos.id,
+            transportadora_id: transportadoraVeiculos.transportadoraId,
+            placa: transportadoraVeiculos.placa,
+            uf_placa: transportadoraVeiculos.ufPlaca,
+            modelo: transportadoraVeiculos.modelo,
+            rntrc_antt: transportadoraVeiculos.rntrcAntt,
+            capacidade_kg: transportadoraVeiculos.capacidadeKg,
+            motorista_padrao: transportadoraVeiculos.motoristaPadrao,
+            padrao: transportadoraVeiculos.padrao,
+          })
+          .from(transportadoraVeiculos)
+          .where(and(eq(transportadoraVeiculos.tenantId, ctx.tenantId), eq(transportadoraVeiculos.ativo, 1)))
+          .orderBy(desc(transportadoraVeiculos.padrao), asc(transportadoraVeiculos.placa)),
+      ])
+
+      const veicsPorTransp = new Map<string, Array<Record<string, unknown>>>()
+      for (const v of veics) {
+        const list = veicsPorTransp.get(v.transportadora_id) || []
+        list.push({
+          ...v,
+          capacidade_kg: v.capacidade_kg != null ? Number(v.capacidade_kg) : null,
+          padrao: Boolean(v.padrao),
         })
-        .from(transportadoras)
-        .where(and(eq(transportadoras.tenantId, ctx.tenantId), eq(transportadoras.ativo, 1)))
-        .orderBy(asc(transportadoras.razaoSocial))
-      return { success: true, data: rows }
+        veicsPorTransp.set(v.transportadora_id, list)
+      }
+
+      return {
+        success: true,
+        data: rows.map((r) => ({
+          ...r,
+          veiculos: veicsPorTransp.get(r.id) || [],
+        })),
+      }
     }
   )
 
@@ -1167,9 +1235,14 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         nomeFantasia: d.nome_fantasia || d.razao_social,
         cnpjCpf: d.cnpj_cpf,
         inscricaoEstadual: d.inscricao_estadual,
+        endereco: d.endereco,
+        numero: d.numero,
+        bairro: d.bairro,
+        cep: d.cep,
         uf: d.uf,
         cidade: d.cidade,
         telefone: d.telefone,
+        rntrcAntt: d.rntrc_antt,
         placaPadrao: d.placa_padrao,
       })
       return codResolvido
@@ -1193,9 +1266,14 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           nomeFantasia: d.nome_fantasia || d.razao_social,
           cnpjCpf: d.cnpj_cpf,
           inscricaoEstadual: d.inscricao_estadual,
+          endereco: d.endereco,
+          numero: d.numero,
+          bairro: d.bairro,
+          cep: d.cep,
           uf: d.uf,
           cidade: d.cidade,
           telefone: d.telefone,
+          rntrcAntt: d.rntrc_antt,
           placaPadrao: d.placa_padrao,
         })
         .where(and(eq(transportadoras.id, id), eq(transportadoras.tenantId, ctx.tenantId)))
@@ -1213,6 +1291,245 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
       .where(and(eq(transportadoras.id, id), eq(transportadoras.tenantId, ctx.tenantId)))
     return { success: true }
   })
+
+  // ── VEÍCULOS INDIVIDUAIS POR TRANSPORTADORA ────────────────────────────────
+  app.get(
+    '/api/cadastros/transportadoras/:id/veiculos',
+    {
+      preHandler: requirePermission(
+        ['transportadoras', 'pedidos', 'saida', 'expedicao', 'fiscal', 'roteirizacao'],
+        { write: false },
+      ),
+    },
+    async (req) => {
+      const ctx = req.authCtx!
+      const transpId = String((req.params as { id: string }).id || '').trim()
+      const rows = await conn.db
+        .select({
+          id: transportadoraVeiculos.id,
+          transportadora_id: transportadoraVeiculos.transportadoraId,
+          placa: transportadoraVeiculos.placa,
+          uf_placa: transportadoraVeiculos.ufPlaca,
+          modelo: transportadoraVeiculos.modelo,
+          rntrc_antt: transportadoraVeiculos.rntrcAntt,
+          capacidade_kg: transportadoraVeiculos.capacidadeKg,
+          motorista_padrao: transportadoraVeiculos.motoristaPadrao,
+          padrao: transportadoraVeiculos.padrao,
+        })
+        .from(transportadoraVeiculos)
+        .where(
+          and(
+            eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+            eq(transportadoraVeiculos.transportadoraId, transpId),
+            eq(transportadoraVeiculos.ativo, 1),
+          ),
+        )
+        .orderBy(desc(transportadoraVeiculos.padrao), asc(transportadoraVeiculos.placa))
+      return {
+        success: true,
+        data: rows.map((r) => ({
+          ...r,
+          capacidade_kg: r.capacidade_kg != null ? Number(r.capacidade_kg) : null,
+          padrao: Boolean(r.padrao),
+        })),
+      }
+    },
+  )
+
+  app.post(
+    '/api/cadastros/transportadoras/:id/veiculos',
+    { preHandler: requirePermission('transportadoras') },
+    async (req, reply) => {
+      const ctx = req.authCtx!
+      const transpId = String((req.params as { id: string }).id || '').trim()
+      const parsed = TransportadoraVeiculoSchema.safeParse(req.body)
+      if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados do veículo inválidos.')
+      const d = parsed.data
+
+      const id = await conn.db.transaction(async (tx) => {
+        const [transp] = await tx
+          .select({ id: transportadoras.id, placaPadrao: transportadoras.placaPadrao })
+          .from(transportadoras)
+          .where(and(eq(transportadoras.id, transpId), eq(transportadoras.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!transp) throw new HttpError(404, 'Transportadora não encontrada.')
+
+        const [dup] = await tx
+          .select({ id: transportadoraVeiculos.id, ativo: transportadoraVeiculos.ativo })
+          .from(transportadoraVeiculos)
+          .where(
+            and(
+              eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+              eq(transportadoraVeiculos.transportadoraId, transpId),
+              eq(transportadoraVeiculos.placa, d.placa),
+            ),
+          )
+          .limit(1)
+
+        const existentes = await tx
+          .select({ id: transportadoraVeiculos.id })
+          .from(transportadoraVeiculos)
+          .where(
+            and(
+              eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+              eq(transportadoraVeiculos.transportadoraId, transpId),
+              eq(transportadoraVeiculos.ativo, 1),
+            ),
+          )
+        const isPadrao = Boolean(d.padrao) || existentes.length === 0 ? 1 : 0
+
+        if (isPadrao === 1) {
+          await tx
+            .update(transportadoraVeiculos)
+            .set({ padrao: 0 })
+            .where(
+              and(
+                eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+                eq(transportadoraVeiculos.transportadoraId, transpId),
+              ),
+            )
+        }
+
+        let veicId = uuidv7()
+        if (dup) {
+          if (dup.ativo === 1) {
+            throw new HttpError(409, `A placa ${d.placa} já está cadastrada nesta transportadora.`)
+          }
+          veicId = dup.id
+          await tx
+            .update(transportadoraVeiculos)
+            .set({
+              ufPlaca: d.uf_placa,
+              modelo: d.modelo,
+              rntrcAntt: d.rntrc_antt,
+              capacidadeKg: d.capacidade_kg != null ? String(d.capacidade_kg) : null,
+              motoristaPadrao: d.motorista_padrao,
+              padrao: isPadrao,
+              ativo: 1,
+            })
+            .where(eq(transportadoraVeiculos.id, veicId))
+        } else {
+          await tx.insert(transportadoraVeiculos).values({
+            id: veicId,
+            tenantId: ctx.tenantId,
+            transportadoraId: transpId,
+            placa: d.placa,
+            ufPlaca: d.uf_placa,
+            modelo: d.modelo,
+            rntrcAntt: d.rntrc_antt,
+            capacidadeKg: d.capacidade_kg != null ? String(d.capacidade_kg) : null,
+            motoristaPadrao: d.motorista_padrao,
+            padrao: isPadrao,
+            ativo: 1,
+          })
+        }
+
+        if (isPadrao === 1 || !transp.placaPadrao) {
+          await tx
+            .update(transportadoras)
+            .set({ placaPadrao: d.placa })
+            .where(eq(transportadoras.id, transpId))
+        }
+
+        return veicId
+      })
+
+      return reply.status(201).send({ success: true, id })
+    },
+  )
+
+  app.put(
+    '/api/cadastros/transportadoras/:id/veiculos/:veiculoId',
+    { preHandler: requirePermission('transportadoras') },
+    async (req) => {
+      const ctx = req.authCtx!
+      const p = req.params as { id: string; veiculoId: string }
+      const transpId = String(p.id || '').trim()
+      const veiculoId = String(p.veiculoId || '').trim()
+      const parsed = TransportadoraVeiculoSchema.safeParse(req.body)
+      if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados do veículo inválidos.')
+      const d = parsed.data
+
+      await conn.db.transaction(async (tx) => {
+        const [dup] = await tx
+          .select({ id: transportadoraVeiculos.id })
+          .from(transportadoraVeiculos)
+          .where(
+            and(
+              eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+              eq(transportadoraVeiculos.transportadoraId, transpId),
+              eq(transportadoraVeiculos.placa, d.placa),
+              ne(transportadoraVeiculos.id, veiculoId),
+            ),
+          )
+          .limit(1)
+        if (dup) throw new HttpError(409, `Já existe outro veículo com a placa ${d.placa} nesta transportadora.`)
+
+        const isPadrao = Boolean(d.padrao) ? 1 : 0
+        if (isPadrao === 1) {
+          await tx
+            .update(transportadoraVeiculos)
+            .set({ padrao: 0 })
+            .where(
+              and(
+                eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+                eq(transportadoraVeiculos.transportadoraId, transpId),
+              ),
+            )
+        }
+
+        await tx
+          .update(transportadoraVeiculos)
+          .set({
+            placa: d.placa,
+            ufPlaca: d.uf_placa,
+            modelo: d.modelo,
+            rntrcAntt: d.rntrc_antt,
+            capacidadeKg: d.capacidade_kg != null ? String(d.capacidade_kg) : null,
+            motoristaPadrao: d.motorista_padrao,
+            padrao: isPadrao,
+          })
+          .where(
+            and(
+              eq(transportadoraVeiculos.id, veiculoId),
+              eq(transportadoraVeiculos.transportadoraId, transpId),
+              eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+            ),
+          )
+
+        if (isPadrao === 1) {
+          await tx
+            .update(transportadoras)
+            .set({ placaPadrao: d.placa })
+            .where(eq(transportadoras.id, transpId))
+        }
+      })
+
+      return { success: true }
+    },
+  )
+
+  app.delete(
+    '/api/cadastros/transportadoras/:id/veiculos/:veiculoId',
+    { preHandler: requirePermission('transportadoras') },
+    async (req) => {
+      const ctx = req.authCtx!
+      const p = req.params as { id: string; veiculoId: string }
+      const transpId = String(p.id || '').trim()
+      const veiculoId = String(p.veiculoId || '').trim()
+      await conn.db
+        .update(transportadoraVeiculos)
+        .set({ ativo: 0, padrao: 0 })
+        .where(
+          and(
+            eq(transportadoraVeiculos.id, veiculoId),
+            eq(transportadoraVeiculos.transportadoraId, transpId),
+            eq(transportadoraVeiculos.tenantId, ctx.tenantId),
+          ),
+        )
+      return { success: true }
+    },
+  )
 
   app.get(
     '/api/cadastros/rotas',

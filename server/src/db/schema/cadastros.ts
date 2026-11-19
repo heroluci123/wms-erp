@@ -308,14 +308,45 @@ export const transportadoras = pgTable(
     nomeFantasia: text('nome_fantasia').notNull(),
     cnpjCpf: text('cnpj_cpf').notNull().default(''),
     inscricaoEstadual: text('inscricao_estadual').notNull().default(''),
+    endereco: text('endereco').notNull().default(''),
+    numero: text('numero').notNull().default(''),
+    bairro: text('bairro').notNull().default(''),
+    cep: text('cep').notNull().default(''),
     uf: text('uf').notNull().default('SP'),
     cidade: text('cidade').notNull().default(''),
     telefone: text('telefone').notNull().default(''),
+    rntrcAntt: text('rntrc_antt').notNull().default(''),
     placaPadrao: text('placa_padrao').notNull().default(''),
     ativo: integer('ativo').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('idx_transportadoras_tenant').on(t.tenantId)]
+)
+
+export const transportadoraVeiculos = pgTable(
+  'transportadora_veiculos',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    transportadoraId: uuid('transportadora_id')
+      .notNull()
+      .references(() => transportadoras.id, { onDelete: 'cascade' }),
+    placa: text('placa').notNull(),
+    ufPlaca: text('uf_placa').notNull().default('SP'),
+    modelo: text('modelo').notNull().default(''),
+    rntrcAntt: text('rntrc_antt').notNull().default(''),
+    capacidadeKg: numeric('capacidade_kg', { precision: 14, scale: 2 }),
+    motoristaPadrao: text('motorista_padrao').notNull().default(''),
+    padrao: integer('padrao').notNull().default(0),
+    ativo: integer('ativo').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_transp_veic_tenant_transp').on(t.tenantId, t.transportadoraId),
+    uniqueIndex('uq_transp_veic_placa').on(t.tenantId, t.transportadoraId, t.placa),
+  ]
 )
 
 export const clienteProdutoEspec = pgTable(

@@ -89,7 +89,7 @@ async function prepararItensCompra(
 export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection): void {
   const { requirePermission } = createAuthMiddleware(app, conn)
 
-  // Configurações de trava/módulos do tenant (consumida por Compras, Recebimento e Roteirização)
+  // Configurações de trava/módulos do tenant (consumida por Compras, Recebimento, Expedição e Roteirização)
   app.get(
     '/api/configuracoes/modulos',
     { preHandler: requirePermission(null, { write: false, bloquearCliente: true }) },
@@ -104,6 +104,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           impressao_romaneio_padrao:
             String(raw.impressao_romaneio_padrao || 'OPCAO_B') === 'OPCAO_A' ? 'OPCAO_A' : 'OPCAO_B',
           exigir_temperatura_recebimento: Boolean(raw.exigir_temperatura_recebimento),
+          exigir_nf_para_expedir: Boolean(raw.exigir_nf_para_expedir),
           tolerancia_recebimento_pct:
             raw.tolerancia_recebimento_pct != null && Number.isFinite(Number(raw.tolerancia_recebimento_pct))
               ? Number(raw.tolerancia_recebimento_pct)
@@ -115,7 +116,15 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
 
   app.patch(
     '/api/configuracoes/modulos',
-    { preHandler: requirePermission(['compras', 'roteirizacao', 'configurar_sistema', 'parametros_comerciais']) },
+    {
+      preHandler: requirePermission([
+        'compras',
+        'roteirizacao',
+        'configurar_sistema',
+        'parametros_comerciais',
+        'fiscal',
+      ]),
+    },
     async (req) => {
       const ctx = req.authCtx!
       const body = (req.body || {}) as {
@@ -123,6 +132,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         rastreio_motorista_ativo?: boolean
         impressao_romaneio_padrao?: string
         exigir_temperatura_recebimento?: boolean
+        exigir_nf_para_expedir?: boolean
         tolerancia_recebimento_pct?: number
       }
       const atual = await lerTenantFeatures(conn.db, ctx.tenantId)
@@ -138,6 +148,9 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       }
       if (body.exigir_temperatura_recebimento !== undefined) {
         next.exigir_temperatura_recebimento = Boolean(body.exigir_temperatura_recebimento)
+      }
+      if (body.exigir_nf_para_expedir !== undefined) {
+        next.exigir_nf_para_expedir = Boolean(body.exigir_nf_para_expedir)
       }
       if (body.tolerancia_recebimento_pct !== undefined) {
         const tol = Math.min(25, Math.max(0, Number(body.tolerancia_recebimento_pct)))

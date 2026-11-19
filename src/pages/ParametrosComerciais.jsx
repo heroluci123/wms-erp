@@ -49,10 +49,11 @@ export function ParametrosComerciais() {
   const [simTipo, setSimTipo] = useState('SAIDA')
   const [simResultado, setSimResultado] = useState(null)
 
-  // Parâmetros Recebimento & Doca
+  // Parâmetros Recebimento, Doca & Expedição Fiscal
   const [recCfg, setRecCfg] = useState({
     trava_recebimento_sem_pc: true,
     exigir_temperatura_recebimento: false,
+    exigir_nf_para_expedir: false,
     tolerancia_recebimento_pct: 3,
   })
   const [salvandoRecCfg, setSalvandoRecCfg] = useState(false)
@@ -69,6 +70,7 @@ export function ParametrosComerciais() {
         setRecCfg({
           trava_recebimento_sem_pc: Boolean(modCfg.trava_recebimento_sem_pc),
           exigir_temperatura_recebimento: Boolean(modCfg.exigir_temperatura_recebimento),
+          exigir_nf_para_expedir: Boolean(modCfg.exigir_nf_para_expedir),
           tolerancia_recebimento_pct:
             modCfg.tolerancia_recebimento_pct != null ? Number(modCfg.tolerancia_recebimento_pct) : 3,
         })
@@ -678,9 +680,10 @@ export function ParametrosComerciais() {
                     await comprasQueries.salvarConfigModulos({
                       trava_recebimento_sem_pc: recCfg.trava_recebimento_sem_pc,
                       exigir_temperatura_recebimento: recCfg.exigir_temperatura_recebimento,
+                      exigir_nf_para_expedir: recCfg.exigir_nf_para_expedir,
                       tolerancia_recebimento_pct: Number(recCfg.tolerancia_recebimento_pct || 3),
                     })
-                    toastSuccess('Parâmetros Salvos ✅', 'Regras de Recebimento e Temperatura atualizadas!')
+                    toastSuccess('Parâmetros Salvos ✅', 'Regras de Doca, Temperatura e Trava Fiscal atualizadas!')
                   } catch (err) {
                     toastError('Erro', err.message)
                   } finally {
@@ -727,9 +730,31 @@ export function ParametrosComerciais() {
                   Exigir Pedido de Compra aprovado para qualquer bipagem/recebimento na doca
                 </label>
 
+                <div
+                  className="p-14 rounded flex flex-col gap-6"
+                  style={{
+                    background: recCfg.exigir_nf_para_expedir ? 'rgba(16,185,129,0.08)' : 'var(--bg-2)',
+                    border: recCfg.exigir_nf_para_expedir
+                      ? '1px solid rgba(16,185,129,0.35)'
+                      : '1px solid var(--border)',
+                  }}
+                >
+                  <label className="flex items-center gap-8 text-sm font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(recCfg.exigir_nf_para_expedir)}
+                      onChange={(e) => setRecCfg((p) => ({ ...p, exigir_nf_para_expedir: e.target.checked }))}
+                    />
+                    Exigir NF-e faturada antes de expedir / despachar caminhão (Trava Fiscal de Carregamento)
+                  </label>
+                  <span className="text-xs text-muted" style={{ paddingLeft: 24 }}>
+                    Quando <strong>ATIVADA</strong>, pedidos separados geram pendência automática no Faturamento e a expedição/despacho do caminhão fica bloqueada até emitir a NF-e no Módulo Fiscal. Mantenha <strong>DESATIVADA</strong> para contas sem faturamento interno (ex.: PAVAN).
+                  </span>
+                </div>
+
                 <div className="flex justify-end">
                   <button type="submit" className="btn btn--primary" disabled={!isApiEnabled() || salvandoRecCfg}>
-                    <CheckCircle2 size={16} /> {salvandoRecCfg ? 'Salvando...' : 'Salvar Parâmetros de Recebimento'}
+                    <CheckCircle2 size={16} /> {salvandoRecCfg ? 'Salvando...' : 'Salvar Parâmetros Operacionais'}
                   </button>
                 </div>
               </form>

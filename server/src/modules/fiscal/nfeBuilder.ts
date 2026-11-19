@@ -121,6 +121,13 @@ export interface ItemFiscalCalculado {
   cst_cofins: string
   p_cofins: number
   v_cofins: number
+  // Reforma Tributária 2026 (LC 214/2025 — IBS / CBS)
+  c_class_trib: string
+  v_bc_ibs_cbs: number
+  p_ibs_uf: number
+  v_ibs_uf: number
+  p_cbs: number
+  v_cbs: number
   regra_origem: string
   lote?: string
   validade?: string
@@ -229,13 +236,13 @@ export function calcularTributacaoItem(params: {
   } else {
     // Lucro Presumido ou Lucro Real
     if (ehCarne && mesmaUf) {
-      // Cesta Básica Carnes (ex: RICMS/SP redução p/ carga efetiva de 7%)
+      // Cesta Básica Carnes SP — Art. 74 Anexo II RICMS/SP: alíquota 12% c/ redução de BC 41,67% (carga efetiva = 7,00%)
       cstCsosn = '20'
-      pIcms = 18
-      pRedBc = 61.11
+      pIcms = 12
+      pRedBc = 41.67
       vBcIcms = Number((vLiquido * (1 - pRedBc / 100)).toFixed(2))
       vIcms = Number((vBcIcms * (pIcms / 100)).toFixed(2))
-      regraOrigem = 'CESTA_BASICA_CARNES_RED_BC_7PCT'
+      regraOrigem = 'CESTA_BASICA_CARNES_ART74_SP_7PCT'
     } else if (mesmaUf) {
       cstCsosn = '00'
       pIcms = 18
@@ -282,6 +289,15 @@ export function calcularTributacaoItem(params: {
     vCofins = Number((vLiquido * 0.03).toFixed(2))
   }
 
+  // Reforma Tributária 2026 (LC 214/2025 — Cesta Básica Nacional Carnes cClassTrib 200003 = 0% IBS/CBS; demais = 000001 c/ alíquota teste 0,10% IBS UF + 0,90% CBS)
+  const cClassTrib = ehCarne ? '200003' : '000001'
+  const incideIbsCbsTeste = regime !== 'SIMPLES' && !ehCarne
+  const vBcIbsCbs = incideIbsCbsTeste ? vLiquido : 0
+  const pIbsUf = incideIbsCbsTeste ? 0.1 : 0
+  const vIbsUf = incideIbsCbsTeste ? Number((vBcIbsCbs * 0.001).toFixed(2)) : 0
+  const pCbs = incideIbsCbsTeste ? 0.9 : 0
+  const vCbs = incideIbsCbsTeste ? Number((vBcIbsCbs * 0.009).toFixed(2)) : 0
+
   return {
     n_item: params.nItem,
     produto_id: params.produtoId || null,
@@ -308,6 +324,12 @@ export function calcularTributacaoItem(params: {
     cst_cofins: cstCofins,
     p_cofins: pCofins,
     v_cofins: vCofins,
+    c_class_trib: cClassTrib,
+    v_bc_ibs_cbs: vBcIbsCbs,
+    p_ibs_uf: pIbsUf,
+    v_ibs_uf: vIbsUf,
+    p_cbs: pCbs,
+    v_cbs: vCbs,
     regra_origem: regraOrigem,
     lote: params.lote || '',
     validade: params.validade || '',
@@ -355,11 +377,36 @@ export function gerarXmlNfe400(params: {
     vST: number
     vPIS: number
     vCOFINS: number
+    vIBS?: number
+    vCBS?: number
     vNF: number
     pesoBruto: number
     pesoLiquido: number
     qtdVolumes: number
   }
+  transporte?: {
+    modFrete: string
+    transportadora?: {
+      nome: string
+      doc?: string
+      ie?: string
+      endereco?: string
+      cidade?: string
+      uf?: string
+      antt?: string
+    } | null
+    veiculo?: {
+      placa: string
+      uf?: string
+      rntrc?: string
+    } | null
+    especieVolumes?: string
+  }
+  duplicatas?: Array<{
+    numero: string
+    vencimento: string
+    valor: number
+  }>
   tPag?: string
   infComplementar?: string
 }): string {
@@ -460,6 +507,54 @@ export function gerarXmlNfe400(params: {
 
   const digestVal = crypto.createHash('sha256').update(`${params.chave}|${params.totais.vNF}`).digest('base64')
 
+  const modFreteXml = params.modelo === '65' ? '9' : escXml(params.transporte?.modFrete || '0')
+  const transpObj = params.transporte?.transportadora
+  const transpDoc = onlyDigits(transpObj?.doc || '')
+  const transportaXml =
+    params.modelo === '55' && transpObj?.nome
+      ? `<transporta>
+          ${transpDoc.length === 14 ? `<CNPJ>${transpDoc}</CNPJ>` : transpDoc.length === 11 ? `<CPF>${transpDoc}</CPF>` : ''}
+          <xNome>${escXml(transpObj.nome)}</xNome>
+          ${onlyDigits(transpObj.ie) ? `<IE>${onlyDigits(transpObj.ie)}</IE>` : ''}
+          ${transpObj.endereco ? `<xEnder>${escXml(transpObj.endereco)}</xEnder>` : ''}
+          ${transpObj.cidade ? `<xMun>${escXml(transpObj.cidade)}</xMun>` : ''}
+          ${transpObj.uf ? `<UF>${escXml(transpObj.uf.toUpperCase())}</UF>` : ''}
+        </transporta>`
+      : ''
+
+  const veicObj = params.transporte?.veiculo
+  const placaLimpa = String(veicObj?.placa || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const veicXml =
+    params.modelo === '55' && placaLimpa
+      ? `<veicTransp>
+          <placa>${escXml(placaLimpa)}</placa>
+          <UF>${escXml((veicObj?.uf || params.emitente.uf || 'SP').toUpperCase())}</UF>
+          ${veicObj?.rntrc || transpObj?.antt ? `<RNTC>${escXml(veicObj?.rntrc || transpObj?.antt)}</RNTC>` : ''}
+        </veicTransp>`
+      : ''
+
+  const dups = Array.isArray(params.duplicatas) ? params.duplicatas.filter((d) => Number(d.valor) > 0) : []
+  const cobrXml =
+    params.modelo === '55' && dups.length > 0
+      ? `<cobr>
+        <fat>
+          <nFat>${String(params.numero).padStart(6, '0')}</nFat>
+          <vOrig>${params.totais.vNF.toFixed(2)}</vOrig>
+          <vDesc>${params.totais.vDesc.toFixed(2)}</vDesc>
+          <vLiq>${params.totais.vNF.toFixed(2)}</vLiq>
+        </fat>
+        ${dups
+          .map(
+            (d, idx) => `<dup>
+          <nDup>${escXml(d.numero || String(idx + 1).padStart(3, '0'))}</nDup>
+          <dVenc>${escXml(String(d.vencimento).slice(0, 10))}</dVenc>
+          <vDup>${Number(d.valor).toFixed(2)}</vDup>
+        </dup>`,
+          )
+          .join('\n        ')}
+      </cobr>`
+      : ''
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
   <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
@@ -528,18 +623,21 @@ export function gerarXmlNfe400(params: {
         </ICMSTot>
       </total>
       <transp>
-        <modFrete>${params.modelo === '65' ? '9' : '0'}</modFrete>
+        <modFrete>${modFreteXml}</modFrete>
+        ${transportaXml}
+        ${veicXml}
         ${
           params.modelo === '55' && (params.totais.qtdVolumes > 0 || params.totais.pesoLiquido > 0)
             ? `<vol>
           <qVol>${params.totais.qtdVolumes || 1}</qVol>
-          <esp>CAIXAS</esp>
+          <esp>${escXml(params.transporte?.especieVolumes || 'CAIXA')}</esp>
           <pesoL>${params.totais.pesoLiquido.toFixed(3)}</pesoL>
           <pesoB>${(params.totais.pesoBruto || params.totais.pesoLiquido).toFixed(3)}</pesoB>
         </vol>`
             : ''
         }
       </transp>
+      ${cobrXml}
       <pag>
         <detPag>
           <tPag>${escXml(params.tPag || '99')}</tPag>

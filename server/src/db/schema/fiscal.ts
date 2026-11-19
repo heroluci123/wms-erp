@@ -12,7 +12,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { tenants, filiais } from './saas.js'
 import { operadores } from './auth.js'
-import { clientes } from './cadastros.js'
+import { clientes, transportadoras } from './cadastros.js'
 import { devolucoes, pedidos } from './operacao.js'
 
 export const fiscalConfigFilial = pgTable(
@@ -90,10 +90,27 @@ export const fiscalNotas = pgTable(
     valorIcmsSt: numeric('valor_icms_st', { precision: 14, scale: 2 }).notNull().default('0'),
     valorPis: numeric('valor_pis', { precision: 14, scale: 2 }).notNull().default('0'),
     valorCofins: numeric('valor_cofins', { precision: 14, scale: 2 }).notNull().default('0'),
+    valorIbs: numeric('valor_ibs', { precision: 14, scale: 2 }).notNull().default('0'),
+    valorCbs: numeric('valor_cbs', { precision: 14, scale: 2 }).notNull().default('0'),
     valorTotalNf: numeric('valor_total_nf', { precision: 14, scale: 2 }).notNull().default('0'),
+    modFrete: text('mod_frete').notNull().default('0'), // 0=Emitente(CIF) 1=Destinatario(FOB) 2=Terceiros 3=Proprio Rem 4=Proprio Dest 9=Sem Frete
+    transportadoraId: uuid('transportadora_id').references(() => transportadoras.id, { onDelete: 'set null' }),
+    transportadoraNome: text('transportadora_nome').notNull().default(''),
+    transportadoraDoc: text('transportadora_doc').notNull().default(''),
+    transportadoraIe: text('transportadora_ie').notNull().default(''),
+    transportadoraEndereco: text('transportadora_endereco').notNull().default(''),
+    transportadoraCidade: text('transportadora_cidade').notNull().default(''),
+    transportadoraUf: text('transportadora_uf').notNull().default(''),
+    transportadoraAntt: text('transportadora_antt').notNull().default(''),
+    veiculoPlaca: text('veiculo_placa').notNull().default(''),
+    veiculoUf: text('veiculo_uf').notNull().default(''),
+    especieVolumes: text('especie_volumes').notNull().default('CAIXA'),
     pesoBrutoKg: numeric('peso_bruto_kg', { precision: 14, scale: 3 }).notNull().default('0'),
     pesoLiquidoKg: numeric('peso_liquido_kg', { precision: 14, scale: 3 }).notNull().default('0'),
     qtdVolumes: integer('qtd_volumes').notNull().default(0),
+    duplicatasJson: jsonb('duplicatas_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    vendedorNome: text('vendedor_nome').notNull().default(''),
+    condicaoPagamentoLabel: text('condicao_pagamento_label').notNull().default(''),
     itensJson: jsonb('itens_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
     xmlConteudo: text('xml_conteudo').notNull().default(''),
     xmlCancelamento: text('xml_cancelamento').notNull().default(''),

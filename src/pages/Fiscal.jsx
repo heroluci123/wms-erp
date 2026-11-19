@@ -85,6 +85,7 @@ export function Fiscal() {
   const [modalEvento, setModalEvento] = useState(null) // { tipo: 'CANCELAR' | 'CCE', nota, texto }
   const [modalAvulsa, setModalAvulsa] = useState(false)
   const [produtosCat, setProdutosCat] = useState([])
+  const [transportadorasCat, setTransportadorasCat] = useState([])
   const [avulsaForm, setAvulsaForm] = useState({
     modelo: '65',
     destinatario_nome: 'CONSUMIDOR FINAL',
@@ -92,6 +93,11 @@ export function Fiscal() {
     destinatario_uf: 'SP',
     forma_pagamento_label: '17 - PIX',
     t_pag: '17',
+    mod_frete: '0',
+    transportadora_id: '',
+    veiculo_id: '',
+    veiculo_placa: '',
+    veiculo_uf: 'SP',
     produto_id: '',
     codigo: '001',
     descricao: '',
@@ -113,7 +119,7 @@ export function Fiscal() {
     if (!apiAtiva) return
     setLoading(true)
     try {
-      const [cfgRes, filaRes, notasRes, evRes, prodsRes] = await Promise.all([
+      const [cfgRes, filaRes, notasRes, evRes, prodsRes, transpsRes] = await Promise.all([
         fiscalQueries.obterConfig(),
         fiscalQueries.listarFilaEmissao(),
         fiscalQueries.listarNotas({
@@ -123,6 +129,7 @@ export function Fiscal() {
         }),
         fiscalQueries.listarEventos(),
         cadastrosQueries.listarProdutos?.().catch(() => []) || Promise.resolve([]),
+        cadastrosQueries.listarTransportadoras?.().catch(() => []) || Promise.resolve([]),
       ])
       setConfig(cfgRes)
       setFila({ pedidos: filaRes?.pedidos || [], devolucoes: filaRes?.devolucoes || [] })
@@ -140,6 +147,7 @@ export function Fiscal() {
       )
       setEventos(evRes || [])
       if (Array.isArray(prodsRes)) setProdutosCat(prodsRes)
+      if (Array.isArray(transpsRes)) setTransportadorasCat(transpsRes)
     } catch (err) {
       toastError('Erro ao carregar Módulo Fiscal', err.message)
     } finally {
@@ -168,10 +176,21 @@ export function Fiscal() {
   const abrirPreviewPedido = async (ped, modelo = '55') => {
     try {
       const prev = await fiscalQueries.previewPedido(ped.id, modelo)
+      const sugId = prev?.sugestao_transporte?.transportadora_id || ''
+      const sugTransp = transportadorasCat.find((t) => t.id === sugId) || null
+      const veicPadrao =
+        sugTransp?.veiculos?.find((v) => v.padrao) || sugTransp?.veiculos?.[0] || null
       setPreviewPedido({
         pedido: ped,
         preview: prev,
         modelo,
+        mod_frete: modelo === '65' ? '9' : '0',
+        transportadora_id: sugId,
+        veiculo_id: veicPadrao?.id || '',
+        veiculo_placa: prev?.sugestao_transporte?.veiculo_placa || veicPadrao?.placa || sugTransp?.placa_padrao || '',
+        veiculo_uf: veicPadrao?.uf_placa || sugTransp?.uf || prev?.emitente?.uf || 'SP',
+        transportadora_antt: veicPadrao?.rntrc_antt || sugTransp?.rntrc_antt || '',
+        especie_volumes: 'CAIXA',
         valor_frete: '0',
         inf_complementar: '',
       })
@@ -182,10 +201,25 @@ export function Fiscal() {
 
   const confirmarEmissaoPedido = async () => {
     if (!previewPedido) return
+    const exigeTransp =
+      previewPedido.modelo === '55' && ['0', '1'].includes(String(previewPedido.mod_frete))
+    if (exigeTransp && !previewPedido.transportadora_id) {
+      return toastError(
+        'Transportadora obrigatória',
+        'Para NF-e Modelo 55 com frete 0 (Emitente/CIF) ou 1 (Destinatário/FOB), selecione a Transportadora antes de emitir.',
+      )
+    }
     setEmitindo(true)
     try {
       const res = await fiscalQueries.emitirPedido(previewPedido.pedido.id, {
         modelo: previewPedido.modelo,
+        mod_frete: previewPedido.mod_frete,
+        transportadora_id: previewPedido.transportadora_id || null,
+        veiculo_id: previewPedido.veiculo_id || null,
+        veiculo_placa: previewPedido.veiculo_placa || '',
+        veiculo_uf: previewPedido.veiculo_uf || '',
+        transportadora_antt: previewPedido.transportadora_antt || '',
+        especie_volumes: previewPedido.especie_volumes || 'CAIXA',
         valor_frete: Number(String(previewPedido.valor_frete || 0).replace(',', '.')),
         inf_complementar: previewPedido.inf_complementar,
       })
@@ -227,6 +261,16 @@ export function Fiscal() {
 
   const handleEmitirAvulsa = async (e) => {
     e.preventDefault()
+    if (
+      avulsaForm.modelo === '55' &&
+      ['0', '1'].includes(String(avulsaForm.mod_frete)) &&
+      !avulsaForm.transportadora_id
+    ) {
+      return toastError(
+        'Transportadora obrigatória',
+        'Para NF-e 55 com frete 0 (CIF) ou 1 (FOB), selecione a Transportadora.',
+      )
+    }
     setEmitindo(true)
     try {
       const res = await fiscalQueries.emitirAvulsa({
@@ -236,6 +280,11 @@ export function Fiscal() {
         destinatario_uf: avulsaForm.destinatario_uf,
         forma_pagamento_label: avulsaForm.forma_pagamento_label,
         t_pag: avulsaForm.t_pag,
+        mod_frete: avulsaForm.modelo === '65' ? '9' : avulsaForm.mod_frete,
+        transportadora_id: avulsaForm.modelo === '55' ? avulsaForm.transportadora_id || null : null,
+        veiculo_id: avulsaForm.modelo === '55' ? avulsaForm.veiculo_id || null : null,
+        veiculo_placa: avulsaForm.modelo === '55' ? avulsaForm.veiculo_placa || '' : '',
+        veiculo_uf: avulsaForm.modelo === '55' ? avulsaForm.veiculo_uf || '' : '',
         itens: [
           {
             produto_id: avulsaForm.produto_id || null,
@@ -955,6 +1004,161 @@ export function Fiscal() {
                 </table>
               </div>
 
+              {previewPedido.modelo === '55' && (() => {
+                const transpSel = transportadorasCat.find((t) => t.id === previewPedido.transportadora_id) || null
+                const veicsSel = Array.isArray(transpSel?.veiculos) ? transpSel.veiculos : []
+                const exigeTransp = ['0', '1'].includes(String(previewPedido.mod_frete))
+                return (
+                  <div
+                    className="p-14 rounded flex flex-col gap-10"
+                    style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}
+                  >
+                    <div className="flex justify-between items-center flex-wrap gap-6">
+                      <span className="text-xs font-bold uppercase text-cyan">
+                        Transporte, Transportadora &amp; Veículo (Obrigatório para Frete 0 / 1)
+                      </span>
+                      {exigeTransp && !previewPedido.transportadora_id && (
+                        <span className="badge badge--warning" style={{ fontSize: 10 }}>
+                          Selecione a Transportadora para liberar a NF-e
+                        </span>
+                      )}
+                    </div>
+                    <div className="form-grid form-grid--3">
+                      <div>
+                        <label className="form-label">Modalidade do Frete *</label>
+                        <select
+                          className="form-input"
+                          value={previewPedido.mod_frete}
+                          onChange={(e) => setPreviewPedido({ ...previewPedido, mod_frete: e.target.value })}
+                        >
+                          <option value="0">0 — Por conta do Emitente (CIF)</option>
+                          <option value="1">1 — Por conta do Destinatário (FOB)</option>
+                          <option value="2">2 — Por conta de Terceiros</option>
+                          <option value="3">3 — Transporte Próprio (Remetente)</option>
+                          <option value="4">4 — Transporte Próprio (Destinatário)</option>
+                          <option value="9">9 — Sem Ocorrência de Transporte</option>
+                        </select>
+                      </div>
+                      <div style={{ gridColumn: 'span 2' }}>
+                        <label className="form-label">
+                          Transportadora {exigeTransp ? '* (Obrigatória)' : '(Opcional)'}
+                        </label>
+                        <select
+                          className="form-input"
+                          value={previewPedido.transportadora_id}
+                          onChange={(e) => {
+                            const tid = e.target.value
+                            const tr = transportadorasCat.find((x) => x.id === tid) || null
+                            const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
+                            setPreviewPedido({
+                              ...previewPedido,
+                              transportadora_id: tid,
+                              veiculo_id: vPad?.id || '',
+                              veiculo_placa: vPad?.placa || tr?.placa_padrao || '',
+                              veiculo_uf: vPad?.uf_placa || tr?.uf || previewPedido.veiculo_uf || 'SP',
+                              transportadora_antt: vPad?.rntrc_antt || tr?.rntrc_antt || '',
+                            })
+                          }}
+                        >
+                          <option value="">-- Selecione a transportadora --</option>
+                          {transportadorasCat.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.razao_social} {t.cnpj_cpf ? `(${t.cnpj_cpf})` : ''} {t.cidade ? `• ${t.cidade}/${t.uf}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="form-grid form-grid--4">
+                      <div>
+                        <label className="form-label">Veículo Cadastrado</label>
+                        <select
+                          className="form-input"
+                          value={previewPedido.veiculo_id}
+                          disabled={!transpSel || veicsSel.length === 0}
+                          onChange={(e) => {
+                            const vid = e.target.value
+                            const v = veicsSel.find((x) => x.id === vid) || null
+                            setPreviewPedido({
+                              ...previewPedido,
+                              veiculo_id: vid,
+                              veiculo_placa: v?.placa || previewPedido.veiculo_placa,
+                              veiculo_uf: v?.uf_placa || previewPedido.veiculo_uf,
+                              transportadora_antt: v?.rntrc_antt || transpSel?.rntrc_antt || previewPedido.transportadora_antt,
+                            })
+                          }}
+                        >
+                          <option value="">
+                            {veicsSel.length === 0 ? 'Sem veículos cadastrados' : '-- Selecione o caminhão --'}
+                          </option>
+                          {veicsSel.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.placa} ({v.uf_placa}) {v.modelo ? `— ${v.modelo}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">Placa</label>
+                        <input
+                          className="form-input font-mono"
+                          placeholder="ABC1D23"
+                          value={previewPedido.veiculo_placa}
+                          onChange={(e) =>
+                            setPreviewPedido({ ...previewPedido, veiculo_placa: e.target.value.toUpperCase() })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label">UF Placa</label>
+                        <input
+                          maxLength={2}
+                          className="form-input font-mono"
+                          value={previewPedido.veiculo_uf}
+                          onChange={(e) =>
+                            setPreviewPedido({ ...previewPedido, veiculo_uf: e.target.value.toUpperCase() })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label">ANTT / Espécie Vol.</label>
+                        <div className="flex gap-6">
+                          <input
+                            className="form-input font-mono"
+                            placeholder="ANTT"
+                            value={previewPedido.transportadora_antt}
+                            onChange={(e) =>
+                              setPreviewPedido({ ...previewPedido, transportadora_antt: e.target.value.toUpperCase() })
+                            }
+                          />
+                          <input
+                            className="form-input"
+                            style={{ width: 92 }}
+                            placeholder="CAIXA"
+                            value={previewPedido.especie_volumes}
+                            onChange={(e) =>
+                              setPreviewPedido({ ...previewPedido, especie_volumes: e.target.value.toUpperCase() })
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {Array.isArray(previewPedido.preview.duplicatas) && previewPedido.preview.duplicatas.length > 0 && (
+                <div className="p-10 rounded flex flex-wrap items-center gap-10 text-xs" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                  <span className="font-bold uppercase text-muted">Fatura / Duplicatas:</span>
+                  {previewPedido.preview.duplicatas.map((d) => (
+                    <span key={d.numero} className="badge badge--neutral font-mono">
+                      #{d.numero} • {d.vencimento.split('-').reverse().join('/')} • {fmtMoeda(d.valor)}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <div className="form-grid form-grid--2">
                 <div>
                   <label className="form-label">Frete Destacado (R$)</label>
@@ -972,7 +1176,7 @@ export function Fiscal() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Ex: Entregar na porta fundos / placa..."
+                    placeholder="Ex: Entregar na porta fundos / horário comercial..."
                     value={previewPedido.inf_complementar}
                     onChange={(e) => setPreviewPedido({ ...previewPedido, inf_complementar: e.target.value })}
                   />
@@ -984,6 +1188,7 @@ export function Fiscal() {
                   <span>BC ICMS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_icms_base)}</strong></span>
                   <span>ICMS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_icms)}</strong></span>
                   <span>PIS/COFINS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_pis + previewPedido.preview.totais.valor_cofins)}</strong></span>
+                  <span>IBS/CBS (2026): <strong className="font-mono">{fmtMoeda(Number(previewPedido.preview.totais.valor_ibs || 0) + Number(previewPedido.preview.totais.valor_cbs || 0))}</strong></span>
                 </div>
                 <div className="text-base font-bold font-mono text-cyan">
                   Total NF: {fmtMoeda(previewPedido.preview.totais.valor_total_nf + Number(previewPedido.valor_frete || 0))}
@@ -1136,6 +1341,98 @@ export function Fiscal() {
                   <input required className="form-input font-mono" value={avulsaForm.ncm} onChange={(e) => setAvulsaForm({ ...avulsaForm, ncm: e.target.value })} />
                 </div>
               </div>
+              {avulsaForm.modelo === '55' && (() => {
+                const trAv = transportadorasCat.find((t) => t.id === avulsaForm.transportadora_id) || null
+                const veicsAv = Array.isArray(trAv?.veiculos) ? trAv.veiculos : []
+                const exige = ['0', '1'].includes(String(avulsaForm.mod_frete))
+                return (
+                  <div className="p-12 rounded flex flex-col gap-8" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                    <div className="form-grid form-grid--2">
+                      <div>
+                        <label className="form-label">Modalidade Frete *</label>
+                        <select
+                          className="form-input"
+                          value={avulsaForm.mod_frete}
+                          onChange={(e) => setAvulsaForm({ ...avulsaForm, mod_frete: e.target.value })}
+                        >
+                          <option value="0">0 — Emitente (CIF)</option>
+                          <option value="1">1 — Destinatário (FOB)</option>
+                          <option value="3">3 — Próprio Remetente</option>
+                          <option value="9">9 — Sem Frete</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">Transportadora {exige ? '*' : '(Opcional)'}</label>
+                        <select
+                          className="form-input"
+                          required={exige}
+                          value={avulsaForm.transportadora_id}
+                          onChange={(e) => {
+                            const tid = e.target.value
+                            const tr = transportadorasCat.find((x) => x.id === tid) || null
+                            const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
+                            setAvulsaForm({
+                              ...avulsaForm,
+                              transportadora_id: tid,
+                              veiculo_id: vPad?.id || '',
+                              veiculo_placa: vPad?.placa || tr?.placa_padrao || '',
+                              veiculo_uf: vPad?.uf_placa || tr?.uf || 'SP',
+                            })
+                          }}
+                        >
+                          <option value="">-- Selecione --</option>
+                          {transportadorasCat.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.razao_social}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-grid form-grid--3">
+                      <div>
+                        <label className="form-label">Veículo da Frota</label>
+                        <select
+                          className="form-input"
+                          value={avulsaForm.veiculo_id}
+                          disabled={veicsAv.length === 0}
+                          onChange={(e) => {
+                            const v = veicsAv.find((x) => x.id === e.target.value)
+                            setAvulsaForm({
+                              ...avulsaForm,
+                              veiculo_id: e.target.value,
+                              veiculo_placa: v?.placa || avulsaForm.veiculo_placa,
+                              veiculo_uf: v?.uf_placa || avulsaForm.veiculo_uf,
+                            })
+                          }}
+                        >
+                          <option value="">{veicsAv.length === 0 ? 'Livre' : '-- Escolha --'}</option>
+                          {veicsAv.map((v) => (
+                            <option key={v.id} value={v.id}>{v.placa} ({v.uf_placa})</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">Placa</label>
+                        <input
+                          className="form-input font-mono"
+                          value={avulsaForm.veiculo_placa}
+                          onChange={(e) => setAvulsaForm({ ...avulsaForm, veiculo_placa: e.target.value.toUpperCase() })}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label">UF</label>
+                        <input
+                          maxLength={2}
+                          className="form-input font-mono"
+                          value={avulsaForm.veiculo_uf}
+                          onChange={(e) => setAvulsaForm({ ...avulsaForm, veiculo_uf: e.target.value.toUpperCase() })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
               <div className="form-grid form-grid--2">
                 <div>
                   <label className="form-label">Quantidade (kg/un) *</label>

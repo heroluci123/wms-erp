@@ -8,18 +8,28 @@ import {
   clientes,
   devolucaoItens,
   devolucoes,
+  embarques,
   empresas,
+  entregasTracking,
   estoqueCaixas,
   filiais,
   fiscalConfigFilial,
   fiscalEventos,
   fiscalNotas,
+  formasPagamento,
+  locaisCobranca,
   matrizTributaria,
   pedidos,
   pedidosItens,
+  pedidosParcelas,
+  pendenciasSetor,
   produtos,
   romaneios,
   romaneiosItens,
+  rotas,
+  transportadoras,
+  transportadoraVeiculos,
+  vendedores,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
@@ -72,6 +82,13 @@ const EmitirAvulsaSchema = z.object({
   forma_pagamento_label: z.string().nullish().transform((v) => (v ?? '17 - PIX').trim()),
   t_pag: z.string().nullish().transform((v) => (v ?? '17').trim()),
   valor_frete: z.coerce.number().min(0).optional().default(0),
+  mod_frete: z.enum(['0', '1', '2', '3', '4', '9']).optional(),
+  transportadora_id: z.string().uuid().nullish(),
+  veiculo_id: z.string().uuid().nullish(),
+  veiculo_placa: z.string().nullish().transform((v) => (v ?? '').trim().toUpperCase()),
+  veiculo_uf: z.string().nullish().transform((v) => (v ?? '').trim().toUpperCase().slice(0, 2)),
+  transportadora_antt: z.string().nullish().transform((v) => (v ?? '').trim()),
+  especie_volumes: z.string().nullish().transform((v) => (v ?? 'CAIXA').trim().toUpperCase()),
   inf_complementar: z.string().nullish().transform((v) => (v ?? '').trim()),
   itens: z
     .array(
@@ -171,6 +188,139 @@ async function obterContextoEmitente(tx: DbOrTx, tenantId: string, filialId: str
   }
 }
 
+export interface TransporteResolvidoFiscal {
+  modFrete: string
+  transportadoraId: string | null
+  transportadoraNome: string
+  transportadoraDoc: string
+  transportadoraIe: string
+  transportadoraEndereco: string
+  transportadoraCidade: string
+  transportadoraUf: string
+  transportadoraAntt: string
+  veiculoPlaca: string
+  veiculoUf: string
+  especieVolumes: string
+}
+
+async function resolverTransporteFiscal(
+  tx: DbOrTx,
+  tenantId: string,
+  modelo: '55' | '65',
+  ufFallback: string,
+  input?: {
+    mod_frete?: string | null
+    transportadora_id?: string | null
+    veiculo_id?: string | null
+    veiculo_placa?: string | null
+    veiculo_uf?: string | null
+    transportadora_antt?: string | null
+    especie_volumes?: string | null
+  },
+): Promise<TransporteResolvidoFiscal> {
+  const especieVolumes = (input?.especie_volumes || 'CAIXA').trim().toUpperCase() || 'CAIXA'
+  if (modelo === '65') {
+    return {
+      modFrete: '9',
+      transportadoraId: null,
+      transportadoraNome: '',
+      transportadoraDoc: '',
+      transportadoraIe: '',
+      transportadoraEndereco: '',
+      transportadoraCidade: '',
+      transportadoraUf: '',
+      transportadoraAntt: '',
+      veiculoPlaca: '',
+      veiculoUf: '',
+      especieVolumes,
+    }
+  }
+
+  // Se caller não informou mod_frete na API, assume '3' (Transporte Próprio) quando não há transportadora, ou '0' (CIF) quando informada
+  const modFreteRaw = String(input?.mod_frete ?? '').trim()
+  const modFrete = ['0', '1', '2', '3', '4', '9'].includes(modFreteRaw)
+    ? modFreteRaw
+    : input?.transportadora_id
+      ? '0'
+      : '3'
+
+  const transpId = input?.transportadora_id ? String(input.transportadora_id).trim() : null
+
+  if ((modFrete === '0' || modFrete === '1') && !transpId) {
+    throw new HttpError(
+      400,
+      `Para NF-e Modelo 55 com modalidade de frete ${modFrete === '0' ? '0 - Por conta do Emitente (CIF)' : '1 - Por conta do Destinatário (FOB)'}, é obrigatório informar a Transportadora.`,
+    )
+  }
+
+  let transp: typeof transportadoras.$inferSelect | null = null
+  if (transpId) {
+    const [t] = await tx
+      .select()
+      .from(transportadoras)
+      .where(and(eq(transportadoras.id, transpId), eq(transportadoras.tenantId, tenantId)))
+      .limit(1)
+    if (!t) throw new HttpError(404, 'Transportadora selecionada não encontrada.')
+    transp = t
+  }
+
+  let veic: typeof transportadoraVeiculos.$inferSelect | null = null
+  if (input?.veiculo_id && transp) {
+    const [v] = await tx
+      .select()
+      .from(transportadoraVeiculos)
+      .where(
+        and(
+          eq(transportadoraVeiculos.id, input.veiculo_id),
+          eq(transportadoraVeiculos.transportadoraId, transp.id),
+          eq(transportadoraVeiculos.tenantId, tenantId),
+        ),
+      )
+      .limit(1)
+    veic = v || null
+  } else if (transp && !input?.veiculo_placa) {
+    const [vPadrao] = await tx
+      .select()
+      .from(transportadoraVeiculos)
+      .where(
+        and(
+          eq(transportadoraVeiculos.transportadoraId, transp.id),
+          eq(transportadoraVeiculos.tenantId, tenantId),
+          eq(transportadoraVeiculos.ativo, 1),
+        ),
+      )
+      .orderBy(desc(transportadoraVeiculos.padrao))
+      .limit(1)
+    veic = vPadrao || null
+  }
+
+  const veiculoPlaca = String(input?.veiculo_placa || veic?.placa || transp?.placaPadrao || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+  const veiculoUf = String(input?.veiculo_uf || veic?.ufPlaca || transp?.uf || ufFallback || 'SP')
+    .toUpperCase()
+    .slice(0, 2)
+  const transportadoraAntt = String(input?.transportadora_antt || veic?.rntrcAntt || transp?.rntrcAntt || '').trim()
+  const enderecoTransp = transp
+    ? [transp.endereco, transp.numero, transp.bairro].filter(Boolean).join(', ')
+    : ''
+
+  return {
+    modFrete,
+    transportadoraId: transp?.id || null,
+    transportadoraNome: transp?.razaoSocial || transp?.nomeFantasia || '',
+    transportadoraDoc: onlyDigits(transp?.cnpjCpf || ''),
+    transportadoraIe: transp?.inscricaoEstadual || '',
+    transportadoraEndereco: enderecoTransp,
+    transportadoraCidade: transp?.cidade || '',
+    transportadoraUf: transp?.uf || '',
+    transportadoraAntt,
+    veiculoPlaca,
+    veiculoUf: veiculoPlaca ? veiculoUf : '',
+    especieVolumes,
+  }
+}
+
 export async function emitirDocumentoFiscalTx(
   tx: DbOrTx,
   params: {
@@ -210,6 +360,10 @@ export async function emitirDocumentoFiscalTx(
     pesoBrutoKg?: number
     pesoLiquidoKg?: number
     qtdVolumes?: number
+    transporte?: TransporteResolvidoFiscal
+    duplicatas?: Array<{ numero: string; vencimento: string; valor: number }>
+    vendedorNome?: string
+    condicaoPagamentoLabel?: string
     formaPagamentoLabel?: string
     tPag?: string
     infComplementarExtra?: string
@@ -260,6 +414,8 @@ export async function emitirDocumentoFiscalTx(
   const vST = Number(itensCalc.reduce((s, i) => s + i.v_icms_st, 0).toFixed(2))
   const vPIS = Number(itensCalc.reduce((s, i) => s + i.v_pis, 0).toFixed(2))
   const vCOFINS = Number(itensCalc.reduce((s, i) => s + i.v_cofins, 0).toFixed(2))
+  const vIBS = Number(itensCalc.reduce((s, i) => s + (i.v_ibs_uf || 0), 0).toFixed(2))
+  const vCBS = Number(itensCalc.reduce((s, i) => s + (i.v_cbs || 0), 0).toFixed(2))
   const vNF = Math.max(0, Number((vProd - vDesc + vFrete + vST).toFixed(2)))
   const pesoLiq =
     params.pesoLiquidoKg && params.pesoLiquidoKg > 0
@@ -267,6 +423,22 @@ export async function emitirDocumentoFiscalTx(
       : Number(itensCalc.reduce((s, i) => s + (i.unidade === 'KG' ? i.qtd : 0), 0).toFixed(3))
   const pesoBruto =
     params.pesoBrutoKg && params.pesoBrutoKg > 0 ? Number(params.pesoBrutoKg.toFixed(3)) : pesoLiq
+
+  const transpRes = params.transporte || {
+    modFrete: params.modelo === '65' ? '9' : '3',
+    transportadoraId: null,
+    transportadoraNome: '',
+    transportadoraDoc: '',
+    transportadoraIe: '',
+    transportadoraEndereco: '',
+    transportadoraCidade: '',
+    transportadoraUf: '',
+    transportadoraAntt: '',
+    veiculoPlaca: '',
+    veiculoUf: '',
+    especieVolumes: 'CAIXA',
+  }
+  const duplicatasFinais = Array.isArray(params.duplicatas) ? params.duplicatas : []
 
   const agora = new Date()
   const { chave, cNF, cDV } = gerarChaveAcessoNfe({
@@ -305,11 +477,36 @@ export async function emitirDocumentoFiscalTx(
       vST,
       vPIS,
       vCOFINS,
+      vIBS,
+      vCBS,
       vNF,
       pesoBruto,
       pesoLiquido: pesoLiq,
       qtdVolumes: params.qtdVolumes || 0,
     },
+    transporte: {
+      modFrete: transpRes.modFrete,
+      transportadora: transpRes.transportadoraNome
+        ? {
+            nome: transpRes.transportadoraNome,
+            doc: transpRes.transportadoraDoc,
+            ie: transpRes.transportadoraIe,
+            endereco: transpRes.transportadoraEndereco,
+            cidade: transpRes.transportadoraCidade,
+            uf: transpRes.transportadoraUf,
+            antt: transpRes.transportadoraAntt,
+          }
+        : null,
+      veiculo: transpRes.veiculoPlaca
+        ? {
+            placa: transpRes.veiculoPlaca,
+            uf: transpRes.veiculoUf,
+            rntrc: transpRes.transportadoraAntt,
+          }
+        : null,
+      especieVolumes: transpRes.especieVolumes,
+    },
+    duplicatas: duplicatasFinais,
     tPag: params.tPag || '99',
     infComplementar: infComp,
   })
@@ -349,16 +546,52 @@ export async function emitirDocumentoFiscalTx(
     valorIcmsSt: toDec(vST, 2),
     valorPis: toDec(vPIS, 2),
     valorCofins: toDec(vCOFINS, 2),
+    valorIbs: toDec(vIBS, 2),
+    valorCbs: toDec(vCBS, 2),
     valorTotalNf: toDec(vNF, 2),
+    modFrete: transpRes.modFrete,
+    transportadoraId: transpRes.transportadoraId,
+    transportadoraNome: transpRes.transportadoraNome,
+    transportadoraDoc: transpRes.transportadoraDoc,
+    transportadoraIe: transpRes.transportadoraIe,
+    transportadoraEndereco: transpRes.transportadoraEndereco,
+    transportadoraCidade: transpRes.transportadoraCidade,
+    transportadoraUf: transpRes.transportadoraUf,
+    transportadoraAntt: transpRes.transportadoraAntt,
+    veiculoPlaca: transpRes.veiculoPlaca,
+    veiculoUf: transpRes.veiculoUf,
+    especieVolumes: transpRes.especieVolumes,
     pesoBrutoKg: toDec(pesoBruto, 3),
     pesoLiquidoKg: toDec(pesoLiq, 3),
     qtdVolumes: params.qtdVolumes || 0,
+    duplicatasJson: duplicatasFinais as unknown as Array<Record<string, unknown>>,
+    vendedorNome: params.vendedorNome || '',
+    condicaoPagamentoLabel: params.condicaoPagamentoLabel || '',
     itensJson: itensCalc as unknown as Array<Record<string, unknown>>,
     xmlConteudo: xml,
     infComplementar: infComp,
     emitidaPorId: params.operadorId || null,
     emitidaPorNome: params.operadorNome || 'Sistema',
   })
+
+  // Conclui pendência de FATURAMENTO se o pedido aguardava NF-e para carregamento
+  if (params.pedidoId) {
+    await tx
+      .update(pendenciasSetor)
+      .set({
+        status: 'CONCLUIDA',
+        concluidaPorId: params.operadorId || null,
+        concluidaAt: agora,
+      })
+      .where(
+        and(
+          eq(pendenciasSetor.tenantId, params.tenantId),
+          eq(pendenciasSetor.referenciaId, params.pedidoId),
+          eq(pendenciasSetor.tipoPendencia, 'PEDIDO_AGUARDANDO_FATURAMENTO'),
+          eq(pendenciasSetor.status, 'PENDENTE'),
+        ),
+      )
+  }
 
   // Incrementa o próximo número da série atomicamente
   await tx
@@ -594,42 +827,89 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
     if (!ped) throw new HttpError(404, 'Pedido de venda não encontrado.')
     if (ped.status === 'CANCELADO') throw new HttpError(400, 'Não é possível emitir NF-e de pedido cancelado.')
 
-    const [cli, itensPed, romsItens, emitente, regrasMatriz] = await Promise.all([
-      ped.clienteId
-        ? tx.select().from(clientes).where(eq(clientes.id, ped.clienteId)).limit(1).then((r) => r[0] || null)
-        : Promise.resolve(null),
-      tx
-        .select({
-          produtoId: pedidosItens.produtoId,
-          codigo: produtos.codigo,
-          descricao: produtos.descricao,
-          ncm: produtos.ncm,
-          cest: produtos.cest,
-          orig: produtos.origemMercadoria,
-          unidade: produtos.unidade,
-          qtdKg: pedidosItens.qtdKgSolicitada,
-          precoUnit: pedidosItens.precoUnitario,
-          descontoVal: pedidosItens.descontoValor,
-          cfopAplicado: pedidosItens.cfopAplicado,
-        })
-        .from(pedidosItens)
-        .innerJoin(produtos, eq(produtos.id, pedidosItens.produtoId))
-        .where(eq(pedidosItens.pedidoId, ped.id)),
-      tx
-        .select({
-          produtoId: romaneiosItens.produtoId,
-          pesoKg: romaneiosItens.pesoKg,
-          pesoBruto: estoqueCaixas.pesoBrutoKg,
-          lote: estoqueCaixas.lote,
-          validade: estoqueCaixas.validade,
-        })
-        .from(romaneiosItens)
-        .innerJoin(romaneios, eq(romaneios.id, romaneiosItens.romaneioId))
-        .leftJoin(estoqueCaixas, eq(estoqueCaixas.id, romaneiosItens.caixaId))
-        .where(eq(romaneios.pedidoId, ped.id)),
-      obterContextoEmitente(tx, tenantId, filialId),
-      tx.select().from(matrizTributaria).where(eq(matrizTributaria.tenantId, tenantId)),
-    ])
+    const [cli, itensPed, romsItens, emitente, regrasMatriz, parcelasPed, vendRow, fpRow, lcRow, embLink] =
+      await Promise.all([
+        ped.clienteId
+          ? tx.select().from(clientes).where(eq(clientes.id, ped.clienteId)).limit(1).then((r) => r[0] || null)
+          : Promise.resolve(null),
+        tx
+          .select({
+            produtoId: pedidosItens.produtoId,
+            codigo: produtos.codigo,
+            descricao: produtos.descricao,
+            ncm: produtos.ncm,
+            cest: produtos.cest,
+            orig: produtos.origemMercadoria,
+            unidade: produtos.unidade,
+            qtdKg: pedidosItens.qtdKgSolicitada,
+            precoUnit: pedidosItens.precoUnitario,
+            descontoVal: pedidosItens.descontoValor,
+            cfopAplicado: pedidosItens.cfopAplicado,
+          })
+          .from(pedidosItens)
+          .innerJoin(produtos, eq(produtos.id, pedidosItens.produtoId))
+          .where(eq(pedidosItens.pedidoId, ped.id)),
+        tx
+          .select({
+            produtoId: romaneiosItens.produtoId,
+            pesoKg: romaneiosItens.pesoKg,
+            pesoBruto: estoqueCaixas.pesoBrutoKg,
+            lote: estoqueCaixas.lote,
+            validade: estoqueCaixas.validade,
+          })
+          .from(romaneiosItens)
+          .innerJoin(romaneios, eq(romaneios.id, romaneiosItens.romaneioId))
+          .leftJoin(estoqueCaixas, eq(estoqueCaixas.id, romaneiosItens.caixaId))
+          .where(eq(romaneios.pedidoId, ped.id)),
+        obterContextoEmitente(tx, tenantId, filialId),
+        tx.select().from(matrizTributaria).where(eq(matrizTributaria.tenantId, tenantId)),
+        tx
+          .select()
+          .from(pedidosParcelas)
+          .where(eq(pedidosParcelas.pedidoId, ped.id)),
+        ped.vendedorId
+          ? tx.select({ nome: vendedores.nome }).from(vendedores).where(eq(vendedores.id, ped.vendedorId)).limit(1).then((r) => r[0] || null)
+          : Promise.resolve(null),
+        ped.formaPagamentoId
+          ? tx.select({ descricao: formasPagamento.descricao }).from(formasPagamento).where(eq(formasPagamento.id, ped.formaPagamentoId)).limit(1).then((r) => r[0] || null)
+          : Promise.resolve(null),
+        ped.localCobrancaId
+          ? tx.select({ nome: locaisCobranca.nome }).from(locaisCobranca).where(eq(locaisCobranca.id, ped.localCobrancaId)).limit(1).then((r) => r[0] || null)
+          : Promise.resolve(null),
+        tx
+          .select({
+            transportadoraId: embarques.transportadoraId,
+            veiculoPlaca: embarques.veiculoPlaca,
+          })
+          .from(entregasTracking)
+          .innerJoin(embarques, eq(embarques.id, entregasTracking.embarqueId))
+          .where(eq(entregasTracking.pedidoId, ped.id))
+          .limit(1)
+          .then((r) => r[0] || null),
+      ])
+
+    let sugTranspId = embLink?.transportadoraId || null
+    let sugPlaca = embLink?.veiculoPlaca || ''
+    if (!sugTranspId && cli?.rotaPadraoNome) {
+      const [rotaRow] = await tx
+        .select({ transportadoraId: rotas.transportadoraId, veiculoPadrao: rotas.veiculoPadrao })
+        .from(rotas)
+        .where(and(eq(rotas.tenantId, tenantId), eq(rotas.nome, cli.rotaPadraoNome)))
+        .limit(1)
+      if (rotaRow?.transportadoraId) sugTranspId = rotaRow.transportadoraId
+      if (!sugPlaca && rotaRow?.veiculoPadrao) sugPlaca = rotaRow.veiculoPadrao
+    }
+
+    const duplicatas = parcelasPed
+      .sort((a, b) => Number(a.numeroParcela || 0) - Number(b.numeroParcela || 0))
+      .map((p) => ({
+        numero: String(p.numeroParcela).padStart(3, '0'),
+        vencimento: String(p.vencimento).slice(0, 10),
+        valor: toNum(p.valor, 0),
+      }))
+
+    const vendedorNome = vendRow?.nome || ''
+    const condicaoPagamentoLabel = [fpRow?.descricao, lcRow?.nome].filter(Boolean).join(' • ')
 
     if (itensPed.length === 0) throw new HttpError(400, 'Pedido sem itens para faturamento fiscal.')
 
@@ -679,7 +959,24 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
       }
     })
 
-    return { ped, cli, destinatario, itensRaw, emitente, regrasMatriz, qtdVolumes, pesoBrutoTotal, pesoLiqTotal }
+    return {
+      ped,
+      cli,
+      destinatario,
+      itensRaw,
+      emitente,
+      regrasMatriz,
+      qtdVolumes,
+      pesoBrutoTotal,
+      pesoLiqTotal,
+      duplicatas,
+      vendedorNome,
+      condicaoPagamentoLabel,
+      sugestaoTransporte: {
+        transportadora_id: sugTranspId,
+        veiculo_placa: sugPlaca,
+      },
+    }
   }
 
   // ── PRÉ-VISUALIZAÇÃO TRIBUTÁRIA DO PEDIDO ANTES DA EMISSÃO ─────────────────
@@ -689,8 +986,20 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
     const body = (req.body || {}) as { modelo?: '55' | '65' }
     const modelo: '55' | '65' = body.modelo === '65' ? '65' : '55'
 
-    const { ped, destinatario, itensRaw, emitente, regrasMatriz, qtdVolumes, pesoBrutoTotal, pesoLiqTotal } =
-      await montarDadosPedidoFiscal(conn.db, ctx.tenantId, ctx.filialId, pedidoId)
+    const {
+      ped,
+      destinatario,
+      itensRaw,
+      emitente,
+      regrasMatriz,
+      qtdVolumes,
+      pesoBrutoTotal,
+      pesoLiqTotal,
+      duplicatas,
+      vendedorNome,
+      condicaoPagamentoLabel,
+      sugestaoTransporte,
+    } = await montarDadosPedidoFiscal(conn.db, ctx.tenantId, ctx.filialId, pedidoId)
 
     const itensCalc = itensRaw.map((it, idx) =>
       calcularTributacaoItem({
@@ -724,6 +1033,8 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
     const vST = Number(itensCalc.reduce((s, i) => s + i.v_icms_st, 0).toFixed(2))
     const vPIS = Number(itensCalc.reduce((s, i) => s + i.v_pis, 0).toFixed(2))
     const vCOFINS = Number(itensCalc.reduce((s, i) => s + i.v_cofins, 0).toFixed(2))
+    const vIBS = Number(itensCalc.reduce((s, i) => s + (i.v_ibs_uf || 0), 0).toFixed(2))
+    const vCBS = Number(itensCalc.reduce((s, i) => s + (i.v_cbs || 0), 0).toFixed(2))
     const vNF = Math.max(0, Number((vProd - vDesc + vST).toFixed(2)))
 
     return {
@@ -732,6 +1043,10 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
       modelo,
       emitente,
       destinatario,
+      vendedor_nome: vendedorNome,
+      condicao_pagamento_label: condicaoPagamentoLabel,
+      duplicatas,
+      sugestao_transporte: sugestaoTransporte,
       itens: itensCalc,
       totais: {
         valor_produtos: vProd,
@@ -741,6 +1056,8 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         valor_icms_st: vST,
         valor_pis: vPIS,
         valor_cofins: vCOFINS,
+        valor_ibs: vIBS,
+        valor_cbs: vCBS,
         valor_total_nf: vNF,
         qtd_volumes: qtdVolumes,
         peso_bruto_kg: Number(pesoBrutoTotal.toFixed(3)),
@@ -757,6 +1074,13 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
       modelo?: '55' | '65'
       natureza_operacao?: string
       valor_frete?: number
+      mod_frete?: string
+      transportadora_id?: string | null
+      veiculo_id?: string | null
+      veiculo_placa?: string
+      veiculo_uf?: string
+      transportadora_antt?: string
+      especie_volumes?: string
       inf_complementar?: string
     }
     const modelo: '55' | '65' = body.modelo === '65' ? '65' : '55'
@@ -779,6 +1103,16 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
 
       const dados = await montarDadosPedidoFiscal(tx, ctx.tenantId, ctx.filialId, pedidoId)
 
+      const transporte = await resolverTransporteFiscal(tx, ctx.tenantId, modelo, dados.emitente.uf, {
+        mod_frete: body.mod_frete,
+        transportadora_id: body.transportadora_id,
+        veiculo_id: body.veiculo_id,
+        veiculo_placa: body.veiculo_placa,
+        veiculo_uf: body.veiculo_uf,
+        transportadora_antt: body.transportadora_antt,
+        especie_volumes: body.especie_volumes,
+      })
+
       const emitida = await emitirDocumentoFiscalTx(tx, {
         tenantId: ctx.tenantId,
         filialId: ctx.filialId,
@@ -794,8 +1128,15 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         pesoBrutoKg: dados.pesoBrutoTotal,
         pesoLiquidoKg: dados.pesoLiqTotal,
         qtdVolumes: dados.qtdVolumes,
+        transporte,
+        duplicatas: dados.duplicatas,
+        vendedorNome: dados.vendedorNome,
+        condicaoPagamentoLabel: dados.condicaoPagamentoLabel,
+        formaPagamentoLabel: dados.condicaoPagamentoLabel || '99 - Outros',
         infComplementarExtra: [
           `Pedido: ${dados.ped.codigo}`,
+          dados.vendedorNome ? `Vendedor: ${dados.vendedorNome}` : '',
+          dados.condicaoPagamentoLabel ? `Cond. Pagto: ${dados.condicaoPagamentoLabel}` : '',
           body.inf_complementar?.trim() || '',
         ]
           .filter(Boolean)
@@ -929,6 +1270,16 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
           .then((r) => r[0] || null)
       }
 
+      const transporte = await resolverTransporteFiscal(tx, ctx.tenantId, d.modelo, d.destinatario_uf || 'SP', {
+        mod_frete: d.mod_frete,
+        transportadora_id: d.transportadora_id,
+        veiculo_id: d.veiculo_id,
+        veiculo_placa: d.veiculo_placa,
+        veiculo_uf: d.veiculo_uf,
+        transportadora_antt: d.transportadora_antt,
+        especie_volumes: d.especie_volumes,
+      })
+
       return emitirDocumentoFiscalTx(tx, {
         tenantId: ctx.tenantId,
         filialId: ctx.filialId,
@@ -964,6 +1315,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
           valorDesconto: it.valor_desconto,
         })),
         valorFrete: d.valor_frete,
+        transporte,
         formaPagamentoLabel: d.forma_pagamento_label,
         tPag: d.t_pag,
         infComplementarExtra: d.inf_complementar,
@@ -1122,10 +1474,27 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         valor_icms_st: toNum(nota.valorIcmsSt, 0),
         valor_pis: toNum(nota.valorPis, 0),
         valor_cofins: toNum(nota.valorCofins, 0),
+        valor_ibs: toNum(nota.valorIbs, 0),
+        valor_cbs: toNum(nota.valorCbs, 0),
         valor_total_nf: toNum(nota.valorTotalNf, 0),
+        mod_frete: nota.modFrete || '0',
+        transportadora_id: nota.transportadoraId || null,
+        transportadora_nome: nota.transportadoraNome || '',
+        transportadora_doc: nota.transportadoraDoc || '',
+        transportadora_ie: nota.transportadoraIe || '',
+        transportadora_endereco: nota.transportadoraEndereco || '',
+        transportadora_cidade: nota.transportadoraCidade || '',
+        transportadora_uf: nota.transportadoraUf || '',
+        transportadora_antt: nota.transportadoraAntt || '',
+        veiculo_placa: nota.veiculoPlaca || '',
+        veiculo_uf: nota.veiculoUf || '',
+        especie_volumes: nota.especieVolumes || 'CAIXA',
         peso_bruto_kg: toNum(nota.pesoBrutoKg, 0),
         peso_liquido_kg: toNum(nota.pesoLiquidoKg, 0),
         qtd_volumes: nota.qtdVolumes,
+        duplicatas: Array.isArray(nota.duplicatasJson) ? nota.duplicatasJson : [],
+        vendedor_nome: nota.vendedorNome || '',
+        condicao_pagamento_label: nota.condicaoPagamentoLabel || '',
         itens: nota.itensJson || [],
         xml_conteudo: nota.xmlConteudo,
         inf_complementar: nota.infComplementar,

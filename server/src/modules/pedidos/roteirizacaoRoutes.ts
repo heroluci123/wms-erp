@@ -6,6 +6,7 @@ import {
   embarques,
   entregasTracking,
   estoqueCaixas,
+  fiscalNotas,
   pedidos,
   pedidosItens,
   produtos,
@@ -1347,6 +1348,8 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             pedido_id: entregasTracking.pedidoId,
             pedido_codigo: pedidos.codigo,
             pedido_status: pedidos.status,
+            numero_nf: pedidos.numeroNf,
+            chave_nfe: pedidos.chaveNfe,
           })
           .from(entregasTracking)
           .innerJoin(pedidos, eq(pedidos.id, entregasTracking.pedidoId))
@@ -1357,6 +1360,31 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         }
 
         const pedIds = stops.map((s) => s.pedido_id)
+
+        // Trava Fiscal configurável por empresa: bloqueia despachar caminhão com pedidos sem NF-e autorizada
+        const features = await lerTenantFeatures(tx, ctx.tenantId)
+        if (Boolean(features.exigir_nf_para_expedir)) {
+          const notasAut = await tx
+            .select({ pedidoId: fiscalNotas.pedidoId })
+            .from(fiscalNotas)
+            .where(
+              and(
+                eq(fiscalNotas.tenantId, ctx.tenantId),
+                inArray(fiscalNotas.pedidoId, pedIds),
+                eq(fiscalNotas.status, 'AUTORIZADA'),
+              ),
+            )
+          const setComNf = new Set(notasAut.map((n) => n.pedidoId).filter(Boolean))
+          const pedidosSemNf = stops
+            .filter((s) => !s.chave_nfe && !s.numero_nf && !setComNf.has(s.pedido_id))
+            .map((s) => s.pedido_codigo)
+          if (pedidosSemNf.length > 0) {
+            throw new HttpError(
+              409,
+              `Bloqueio Fiscal: pedido(s) ${pedidosSemNf.join(', ')} ainda não possuem NF-e autorizada. Fature-os no Módulo Fiscal antes de despachar o veículo.`,
+            )
+          }
+        }
         const romRows = await tx
           .select()
           .from(romaneios)

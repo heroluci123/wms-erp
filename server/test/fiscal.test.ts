@@ -185,27 +185,115 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
     const itCarne = prev.itens.find((i: any) => i.produto_id === carneId)
     const itCarvao = prev.itens.find((i: any) => i.produto_id === carvaoId)
 
-    // Carne Bovina (Presumido SP->SP): CST 20, redução BC 61,11%, ICMS efetivo 7% (= R$ 70,00), PIS/COFINS CST 06 = R$ 0
+    // Carne Bovina (Presumido SP->SP, Art. 74 Anexo II RICMS/SP): CST 20, alíq. 12%, redução BC 41,67%, ICMS efetivo 7% (= R$ 70,00), PIS/COFINS CST 06 = R$ 0, Reforma 2026 cClassTrib 200003 (IBS/CBS = 0)
     assert.equal(itCarne.cfop, '5102')
     assert.equal(itCarne.cst_csosn, '20')
-    assert.equal(itCarne.p_red_bc, 61.11)
+    assert.equal(itCarne.p_icms, 12)
+    assert.equal(itCarne.p_red_bc, 41.67)
     assert.equal(itCarne.v_icms, 70)
     assert.equal(itCarne.cst_pis, '06')
     assert.equal(itCarne.v_pis, 0)
     assert.equal(itCarne.v_cofins, 0)
+    assert.equal(itCarne.c_class_trib, '200003')
+    assert.equal(itCarne.v_ibs_uf, 0)
+    assert.equal(itCarne.v_cbs, 0)
 
-    // Carvão (Presumido SP->SP): CST 00, ICMS 18% (= R$ 18,00), PIS 0,65% (= R$ 0,65), COFINS 3% (= R$ 3,00)
+    // Carvão (Presumido SP->SP): CST 00, ICMS 18% (= R$ 18,00), PIS 0,65% (= R$ 0,65), COFINS 3% (= R$ 3,00), Reforma 2026 cClassTrib 000001 (0,10% IBS = R$ 0,10; 0,90% CBS = R$ 0,90)
     assert.equal(itCarvao.cst_csosn, '00')
     assert.equal(itCarvao.v_icms, 18)
     assert.equal(itCarvao.v_pis, 0.65)
     assert.equal(itCarvao.v_cofins, 3)
+    assert.equal(itCarvao.c_class_trib, '000001')
+    assert.equal(itCarvao.v_ibs_uf, 0.1)
+    assert.equal(itCarvao.v_cbs, 0.9)
 
-    // 5. Emitir NF-e Modelo 55 -> validar Chave 44 dígitos (Módulo 11), XML 4.00 e trava de duplicidade 409
+    // 4.5 Cadastrar Transportadora com endereço completo + 2 Veículos individuais + validar obrigatoriedade em frete CIF/FOB (0 e 1)
+    const resTransp = await app.inject({
+      method: 'POST',
+      url: '/api/cadastros/transportadoras',
+      headers,
+      payload: {
+        codigo: 'TR-FISC1',
+        razao_social: 'FRIGOEX LOGISTICA REFRIGERADA LTDA',
+        nome_fantasia: 'FrigoEx',
+        cnpj_cpf: '44555666000177',
+        inscricao_estadual: '330123456789',
+        endereco: 'ROD ANHANGUERA',
+        numero: 'KM 22',
+        bairro: 'PERUS',
+        cep: '05201-000',
+        cidade: 'SAO PAULO',
+        uf: 'SP',
+        telefone: '(11) 3333-4444',
+        rntrc_antt: '12345678',
+      },
+    })
+    assert.equal(resTransp.statusCode, 201, resTransp.body)
+    const transpId = resTransp.json().id as string
+
+    const resVeic1 = await app.inject({
+      method: 'POST',
+      url: `/api/cadastros/transportadoras/${transpId}/veiculos`,
+      headers,
+      payload: {
+        placa: 'ABC-1D23',
+        uf_placa: 'SP',
+        modelo: 'VW DELIVERY BAU -18C',
+        capacidade_kg: 3500,
+        motorista_padrao: 'CARLOS',
+        padrao: true,
+      },
+    })
+    assert.equal(resVeic1.statusCode, 201, resVeic1.body)
+    const veic1Id = resVeic1.json().id as string
+
+    const resVeic2 = await app.inject({
+      method: 'POST',
+      url: `/api/cadastros/transportadoras/${transpId}/veiculos`,
+      headers,
+      payload: {
+        placa: 'XYZ9K88',
+        uf_placa: 'MG',
+        modelo: 'MERCEDES ACCELO FRIGO',
+        capacidade_kg: 5000,
+      },
+    })
+    assert.equal(resVeic2.statusCode, 201, resVeic2.body)
+
+    const resListTransp = await app.inject({ method: 'GET', url: '/api/cadastros/transportadoras', headers })
+    assert.equal(resListTransp.statusCode, 200)
+    const transpEncontrada = resListTransp.json().data.find((t: any) => t.id === transpId)
+    assert.equal(transpEncontrada.veiculos.length, 2, 'Transportadora deve retornar seus veículos individuais')
+    assert.equal(transpEncontrada.placa_padrao, 'ABC1D23')
+
+    // Rejeitar NF-e 55 com mod_frete 0 (CIF) ou 1 (FOB) sem transportadora_id
+    const resSemTransp0 = await app.inject({
+      method: 'POST',
+      url: `/api/fiscal/notas/emitir-pedido/${pedId}`,
+      headers,
+      payload: { modelo: '55', mod_frete: '0' },
+    })
+    assert.equal(resSemTransp0.statusCode, 400, 'Frete CIF (0) na NF-e 55 deve exigir transportadora')
+
+    const resSemTransp1 = await app.inject({
+      method: 'POST',
+      url: `/api/fiscal/notas/emitir-pedido/${pedId}`,
+      headers,
+      payload: { modelo: '55', mod_frete: '1' },
+    })
+    assert.equal(resSemTransp1.statusCode, 400, 'Frete FOB (1) na NF-e 55 deve exigir transportadora')
+
+    // 5. Emitir NF-e Modelo 55 com Transportadora + Veículo -> validar Chave 44 dígitos (Módulo 11), XML 4.00 (<transporta>, <veicTransp>) e trava de duplicidade 409
     const resEmit = await app.inject({
       method: 'POST',
       url: `/api/fiscal/notas/emitir-pedido/${pedId}`,
       headers,
-      payload: { modelo: '55' },
+      payload: {
+        modelo: '55',
+        mod_frete: '0',
+        transportadora_id: transpId,
+        veiculo_id: veic1Id,
+      },
     })
     assert.equal(resEmit.statusCode, 201, resEmit.body)
     const nfe = resEmit.json()
@@ -224,7 +312,19 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
     assert.ok(xmlStr.includes('<nfeProc versao="4.00"'), 'XML deve estar no padrão nfeProc 4.00')
     assert.ok(xmlStr.includes('<ICMS20>'), 'XML deve conter tag ICMS20 para carne com redução de base')
     assert.ok(xmlStr.includes('<PISNT><CST>06</CST></PISNT>'), 'XML deve conter PIS alíquota zero CST 06')
+    assert.ok(xmlStr.includes('<modFrete>0</modFrete>'), 'XML deve gravar modalidade de frete 0')
+    assert.ok(xmlStr.includes('<xNome>FRIGOEX LOGISTICA REFRIGERADA LTDA</xNome>'), 'XML deve incluir <transporta>')
+    assert.ok(xmlStr.includes('<placa>ABC1D23</placa>'), 'XML deve incluir <veicTransp>')
     assert.ok(xmlStr.includes(`<chNFe>${nfe.chave_acesso}</chNFe>`))
+
+    const resDetNota = await app.inject({ method: 'GET', url: `/api/fiscal/notas/${nfe.id}`, headers })
+    assert.equal(resDetNota.statusCode, 200)
+    const detNota = resDetNota.json().data
+    assert.equal(detNota.transportadora_nome, 'FRIGOEX LOGISTICA REFRIGERADA LTDA')
+    assert.equal(detNota.veiculo_placa, 'ABC1D23')
+    assert.equal(detNota.transportadora_antt, '12345678')
+    assert.equal(detNota.valor_ibs, 0.1)
+    assert.equal(detNota.valor_cbs, 0.9)
 
     // Bloquear emissão duplicada no mesmo pedido
     const resEmitDup = await app.inject({
@@ -324,6 +424,130 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
     assert.equal(cofre.resumo.qtd_canceladas, 1)
     assert.equal(cofre.resumo.qtd_eventos, 3) // 1 CC-e + 1 Cancelamento + 1 Inutilização
     assert.equal(cofre.arquivos.length, 6)
+
+    // 10. Trava configurável de Expedição sem NF-e (exigir_nf_para_expedir)
+    const resCfgModOff = await app.inject({ method: 'GET', url: '/api/configuracoes/modulos', headers })
+    assert.equal(resCfgModOff.statusCode, 200)
+    assert.equal(resCfgModOff.json().data.exigir_nf_para_expedir, false, 'Trava fiscal deve iniciar DESLIGADA (compatível com PAVAN)')
+
+    const resLigarTrava = await app.inject({
+      method: 'PATCH',
+      url: '/api/configuracoes/modulos',
+      headers,
+      payload: { exigir_nf_para_expedir: true },
+    })
+    assert.equal(resLigarTrava.statusCode, 200)
+
+    // Criar local, palete e caixa em estoque + pedido + romaneio separado/conferido SEM NF-e
+    const resLoc = await app.inject({
+      method: 'POST',
+      url: '/api/cadastros/locais',
+      headers,
+      payload: { endereco: 'F-01-01', capacidade_max_caixas: 50, tipo_armazenamento: 'FRIO' },
+    })
+    assert.equal(resLoc.statusCode, 201, resLoc.body)
+
+    const resPal = await app.inject({ method: 'POST', url: '/api/paletes', headers })
+    assert.equal(resPal.statusCode, 201, resPal.body)
+    const paleteId = resPal.json().palete.id as string
+
+    const resRec = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/caixa',
+      headers,
+      payload: {
+        palete_id: paleteId,
+        ean_caixa: '7891234567001',
+        produto_id: carneId,
+        data_producao: '2026-11-18',
+        validade: '2027-06-01',
+        peso_bruto_kg: 13.5,
+        tara_kg: 1.0,
+        qtd_pecas: 4,
+      },
+    })
+    assert.equal(resRec.statusCode, 201, resRec.body)
+
+    const resPed2 = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Pedido Trava Fiscal',
+        cliente_id: cliId,
+        cliente: 'CHURRASCARIA FOGO DE CHAO SP LTDA',
+        liberar: true,
+        itens: [{ produto_id: carneId, qtd_kg_solicitada: 12.5, preco_unitario: 100 }],
+      },
+    })
+    assert.equal(resPed2.statusCode, 201, resPed2.body)
+    const ped2Id = resPed2.json().id as string
+
+    const resIni = await app.inject({
+      method: 'POST',
+      url: `/api/saida/iniciar-pedido/${ped2Id}`,
+      headers,
+    })
+    assert.equal(resIni.statusCode, 200, resIni.body)
+    const romId = resIni.json().romaneio.id as string
+
+    const resBip = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/caixa`,
+      headers,
+      payload: { ean_caixa: '7891234567001' },
+    })
+    assert.equal(resBip.statusCode, 200, resBip.body)
+    assert.equal(resBip.json().success, true)
+
+    const resFinMont = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/finalizar-montagem`,
+      headers,
+    })
+    assert.equal(resFinMont.statusCode, 200, resFinMont.body)
+
+    // Deve ter aberto pendência automática em FATURAMENTO
+    const resPendFat = await app.inject({ method: 'GET', url: '/api/pendencias?setor=FATURAMENTO', headers })
+    assert.equal(resPendFat.statusCode, 200)
+    assert.ok(
+      (resPendFat.json().data || []).some(
+        (p: any) => p.tipo_pendencia === 'PEDIDO_AGUARDANDO_FATURAMENTO' && p.referencia_id === ped2Id,
+      ),
+      `Esperava pendência PEDIDO_AGUARDANDO_FATURAMENTO para ped2Id: ${resPendFat.body}`,
+    )
+
+    const resConf = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/conferir`,
+      headers,
+      payload: { codigo: '7891234567001' },
+    })
+    assert.equal(resConf.statusCode, 200, resConf.body)
+
+    // Tentar expedir SEM NF-e com a trava ligada -> DEVE BLOQUEAR COM 409!
+    const resExpBloq = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/expedir`,
+      headers,
+    })
+    assert.equal(resExpBloq.statusCode, 409, `Expedição sem NF-e deveria retornar 409, veio ${resExpBloq.statusCode}: ${resExpBloq.body}`)
+
+    // Emitir NF-e do pedido 2 (com transportadora) -> agora a expedição DEVE LIBERAR 200 OK!
+    const resEmit2 = await app.inject({
+      method: 'POST',
+      url: `/api/fiscal/notas/emitir-pedido/${ped2Id}`,
+      headers,
+      payload: { modelo: '55', mod_frete: '0', transportadora_id: transpId, veiculo_id: veic1Id },
+    })
+    assert.equal(resEmit2.statusCode, 201, resEmit2.body)
+
+    const resExpOk = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/expedir`,
+      headers,
+    })
+    assert.equal(resExpOk.statusCode, 200, `Após emitir NF-e, expedição deve ser liberada: ${resExpOk.body}`)
   } finally {
     await app.close()
     await conn.close()

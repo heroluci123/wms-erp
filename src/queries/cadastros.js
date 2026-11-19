@@ -172,6 +172,32 @@ export const cadastrosQueries = {
     return apiRequest(`/api/cadastros/transportadoras/${id}`, { method: 'DELETE' })
   },
 
+  async listarVeiculosTransportadora(transportadoraId) {
+    if (!isApiEnabled() || !transportadoraId) return []
+    return (await apiRequest(`/api/cadastros/transportadoras/${transportadoraId}/veiculos`)).data || []
+  },
+
+  async salvarVeiculoTransportadora(transportadoraId, dados) {
+    exigirApi('Veículos da Transportadora')
+    if (dados.id) {
+      return apiRequest(`/api/cadastros/transportadoras/${transportadoraId}/veiculos/${dados.id}`, {
+        method: 'PUT',
+        body: dados,
+      })
+    }
+    return apiRequest(`/api/cadastros/transportadoras/${transportadoraId}/veiculos`, {
+      method: 'POST',
+      body: dados,
+    })
+  },
+
+  async excluirVeiculoTransportadora(transportadoraId, veiculoId) {
+    exigirApi('Veículos da Transportadora')
+    return apiRequest(`/api/cadastros/transportadoras/${transportadoraId}/veiculos/${veiculoId}`, {
+      method: 'DELETE',
+    })
+  },
+
   async listarRotas() {
     if (!isApiEnabled()) return []
     return (await apiRequest('/api/cadastros/rotas')).data || []

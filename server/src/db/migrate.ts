@@ -336,14 +336,36 @@ CREATE TABLE IF NOT EXISTS transportadoras (
   nome_fantasia TEXT NOT NULL,
   cnpj_cpf TEXT NOT NULL DEFAULT '',
   inscricao_estadual TEXT NOT NULL DEFAULT '',
+  endereco TEXT NOT NULL DEFAULT '',
+  numero TEXT NOT NULL DEFAULT '',
+  bairro TEXT NOT NULL DEFAULT '',
+  cep TEXT NOT NULL DEFAULT '',
   uf TEXT NOT NULL DEFAULT 'SP',
   cidade TEXT NOT NULL DEFAULT '',
   telefone TEXT NOT NULL DEFAULT '',
+  rntrc_antt TEXT NOT NULL DEFAULT '',
   placa_padrao TEXT NOT NULL DEFAULT '',
   ativo INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_transportadoras_tenant ON transportadoras(tenant_id);
+
+CREATE TABLE IF NOT EXISTS transportadora_veiculos (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  transportadora_id UUID NOT NULL REFERENCES transportadoras(id) ON DELETE CASCADE,
+  placa TEXT NOT NULL,
+  uf_placa TEXT NOT NULL DEFAULT 'SP',
+  modelo TEXT NOT NULL DEFAULT '',
+  rntrc_antt TEXT NOT NULL DEFAULT '',
+  capacidade_kg NUMERIC(14,2),
+  motorista_padrao TEXT NOT NULL DEFAULT '',
+  padrao INTEGER NOT NULL DEFAULT 0,
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_transp_veic_tenant_transp ON transportadora_veiculos(tenant_id, transportadora_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_transp_veic_placa ON transportadora_veiculos(tenant_id, transportadora_id, placa);
 
 CREATE TABLE IF NOT EXISTS tipos_veiculo (
   id UUID PRIMARY KEY,
@@ -1344,10 +1366,27 @@ CREATE TABLE IF NOT EXISTS fiscal_notas (
   valor_icms_st NUMERIC(14,2) NOT NULL DEFAULT 0,
   valor_pis NUMERIC(14,2) NOT NULL DEFAULT 0,
   valor_cofins NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_ibs NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_cbs NUMERIC(14,2) NOT NULL DEFAULT 0,
   valor_total_nf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  mod_frete TEXT NOT NULL DEFAULT '0',
+  transportadora_id UUID REFERENCES transportadoras(id) ON DELETE SET NULL,
+  transportadora_nome TEXT NOT NULL DEFAULT '',
+  transportadora_doc TEXT NOT NULL DEFAULT '',
+  transportadora_ie TEXT NOT NULL DEFAULT '',
+  transportadora_endereco TEXT NOT NULL DEFAULT '',
+  transportadora_cidade TEXT NOT NULL DEFAULT '',
+  transportadora_uf TEXT NOT NULL DEFAULT '',
+  transportadora_antt TEXT NOT NULL DEFAULT '',
+  veiculo_placa TEXT NOT NULL DEFAULT '',
+  veiculo_uf TEXT NOT NULL DEFAULT '',
+  especie_volumes TEXT NOT NULL DEFAULT 'CAIXA',
   peso_bruto_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
   peso_liquido_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
   qtd_volumes INTEGER NOT NULL DEFAULT 0,
+  duplicatas_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  vendedor_nome TEXT NOT NULL DEFAULT '',
+  condicao_pagamento_label TEXT NOT NULL DEFAULT '',
   itens_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   xml_conteudo TEXT NOT NULL DEFAULT '',
   xml_cancelamento TEXT NOT NULL DEFAULT '',
@@ -1462,6 +1501,28 @@ ALTER TABLE financeiro_movimentacoes ADD COLUMN IF NOT EXISTS ofx_fitid TEXT NOT
 ALTER TABLE financeiro_movimentacoes ADD COLUMN IF NOT EXISTS ofx_memo TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_fin_mov_ofx_fitid ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, ofx_fitid);
 ALTER TABLE produtos ADD COLUMN IF NOT EXISTS registro_dipoa TEXT NOT NULL DEFAULT '';
+ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS endereco TEXT NOT NULL DEFAULT '';
+ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS numero TEXT NOT NULL DEFAULT '';
+ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS bairro TEXT NOT NULL DEFAULT '';
+ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS cep TEXT NOT NULL DEFAULT '';
+ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS rntrc_antt TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS valor_ibs NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS valor_cbs NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS mod_frete TEXT NOT NULL DEFAULT '0';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_id UUID REFERENCES transportadoras(id) ON DELETE SET NULL;
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_nome TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_doc TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_ie TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_endereco TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_cidade TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_uf TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS transportadora_antt TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS veiculo_placa TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS veiculo_uf TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS especie_volumes TEXT NOT NULL DEFAULT 'CAIXA';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS duplicatas_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS vendedor_nome TEXT NOT NULL DEFAULT '';
+ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS condicao_pagamento_label TEXT NOT NULL DEFAULT '';
 `
 
 export interface SeedDefaultsResult {
