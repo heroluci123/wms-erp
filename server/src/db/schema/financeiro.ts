@@ -123,6 +123,8 @@ export const financeiroMovimentacoes = pgTable(
     valor: numeric('valor', { precision: 14, scale: 2 }).notNull(),
     formaPagamento: text('forma_pagamento').notNull().default(''),
     historico: text('historico').notNull(),
+    ofxFitid: text('ofx_fitid').notNull().default(''),
+    ofxMemo: text('ofx_memo').notNull().default(''),
     operadorId: uuid('operador_id').references(() => operadores.id, { onDelete: 'set null' }),
     operadorNome: text('operador_nome').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -130,5 +132,6 @@ export const financeiroMovimentacoes = pgTable(
   (t) => [
     index('idx_fin_mov_conta_data').on(t.tenantId, t.contaBancariaId, t.dataMovimento),
     index('idx_fin_mov_titulo').on(t.tituloId),
+    index('idx_fin_mov_ofx_fitid').on(t.tenantId, t.contaBancariaId, t.ofxFitid),
   ]
 )

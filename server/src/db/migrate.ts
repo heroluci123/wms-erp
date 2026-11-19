@@ -1276,12 +1276,15 @@ CREATE TABLE IF NOT EXISTS financeiro_movimentacoes (
   valor NUMERIC(14,2) NOT NULL,
   forma_pagamento TEXT NOT NULL DEFAULT '',
   historico TEXT NOT NULL,
+  ofx_fitid TEXT NOT NULL DEFAULT '',
+  ofx_memo TEXT NOT NULL DEFAULT '',
   operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
   operador_nome TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_fin_mov_conta_data ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, data_movimento);
 CREATE INDEX IF NOT EXISTS idx_fin_mov_titulo ON financeiro_movimentacoes(titulo_id);
+CREATE INDEX IF NOT EXISTS idx_fin_mov_ofx_fitid ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, ofx_fitid);
 `
 
 const POST_MIGRATIONS_SQL = `
@@ -1356,6 +1359,9 @@ ALTER TABLE clientes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DE
 UPDATE fornecedores SET inativado_em = COALESCE(inativado_em, created_at) WHERE ativo = 0 AND inativado_em IS NULL;
 UPDATE clientes SET inativado_em = COALESCE(inativado_em, created_at) WHERE ativo = 0 AND inativado_em IS NULL;
 ALTER TABLE pedidos_compra ALTER COLUMN fornecedor_id DROP NOT NULL;
+ALTER TABLE financeiro_movimentacoes ADD COLUMN IF NOT EXISTS ofx_fitid TEXT NOT NULL DEFAULT '';
+ALTER TABLE financeiro_movimentacoes ADD COLUMN IF NOT EXISTS ofx_memo TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_fin_mov_ofx_fitid ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, ofx_fitid);
 `
 
 export interface SeedDefaultsResult {

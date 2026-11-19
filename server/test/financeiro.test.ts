@@ -500,6 +500,197 @@ test('Módulo Financeiro: Bancos, Pagar (XML/PC), Receber (Pedidos), Baixa Parci
     assert.equal(dash.kpis.pagar_aberto, 3000) // XML 2.550 + PC 400 + Comissão 50
     assert.equal(dash.kpis.saldo_projetado, 10300) // 11.000 + 2.300 - 3.000
     assert.equal(dash.fluxo_projetado.length, 31)
+
+    // 11. Baixa em Lote: liquidar as 2 parcelas do PC (R$ 200 + R$ 200 = R$ 400) no Itaú em 1 clique
+    const resLote = await app.inject({
+      method: 'POST',
+      url: '/api/financeiro/titulos/baixar-lote',
+      headers,
+      payload: {
+        titulo_ids: titsPc.map((t: any) => t.id),
+        conta_bancaria_id: itauId,
+        forma_pagamento: 'PIX',
+        observacoes: 'Pagamento em lote PC',
+      },
+    })
+    assert.equal(resLote.statusCode, 200, resLote.body)
+    assert.equal(resLote.json().total_baixados, 2)
+    assert.equal(resLote.json().valor_total_baixado, 400)
+    assert.equal(resLote.json().saldo_conta_atual, 9100) // 9.500 - 400
+
+    // 12. Conciliação Bancária .OFX (formato real Itaú/BB SGML c/ vírgula decimal, auto-match, juros automáticos e anti-duplicidade FITID)
+    const ofxSgml = `OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+ENCODING:USASCII
+CHARSET:1252
+
+<OFX>
+<BANKMSGSRSV1>
+<STMTTRNRS>
+<STMTRS>
+<CURDEF>BRL
+<BANKACCTFROM>
+<BANKID>0341
+<ACCTID>0412554321
+<ACCTTYPE>CHECKING
+</BANKACCTFROM>
+<BANKTRANLIST>
+<DTSTART>20261101000000[-3:BRT]
+<DTEND>20261130235959[-3:BRT]
+<STMTTRN>
+<TRNTYPE>CREDIT
+<DTPOSTED>20261119100000[-3:BRT]
+<TRNAMT>1000.00
+<FITID>ITAU20261119001
+<MEMO>PIX RECEBIDO CHURRASCARIA BOI NOBRE 77888999000122
+</STMTTRN>
+<STMTTRN>
+<TRNTYPE>DEBIT
+<DTPOSTED>20261205120000[-3:BRT]
+<TRNAMT>-1400.00
+<FITID>ITAU20261205002
+<MEMO>PAGTO BOLETO FRIGORIFICO FINANCEIRO NF 5501
+</STMTTRN>
+<STMTTRN>
+<TRNTYPE>DEBIT
+<DTPOSTED>20261119150000[-3:BRT]
+<TRNAMT>-49,90
+<FITID>ITAU20261119003
+<MEMO>TARIFA MANUTENCAO CONTA PJ
+</STMTTRN>
+<STMTTRN>
+<TRNTYPE>CREDIT
+<DTPOSTED>20261119160000[-3:BRT]
+<TRNAMT>515.00
+<FITID>ITAU20261119004
+<MEMO>PIX RECEBIDO BOI NOBRE LTDA
+</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL>
+<BALAMT>9165.10
+<DTASOF>20261119235959[-3:BRT]
+</LEDGERBAL>
+</STMTRS>
+</STMTTRNRS>
+</BANKMSGSRSV1>
+</OFX>`
+
+    const resOfxPrev = await app.inject({
+      method: 'POST',
+      url: '/api/financeiro/ofx/preview',
+      headers,
+      payload: { conta_bancaria_id: itauId, ofx_conteudo: ofxSgml },
+    })
+    assert.equal(resOfxPrev.statusCode, 200, resOfxPrev.body)
+    const prev = resOfxPrev.json()
+    assert.equal(prev.cabecalho.bank_id, '0341')
+    assert.equal(prev.cabecalho.saldo_extrato, 9165.1)
+    assert.equal(prev.resumo.total_linhas, 4)
+    assert.equal(prev.resumo.novas, 4)
+    assert.equal(prev.resumo.ja_conciliadas, 0)
+
+    const lnPix1000 = prev.linhas.find((l: any) => l.fitid === 'ITAU20261119001')
+    const lnBol1400 = prev.linhas.find((l: any) => l.fitid === 'ITAU20261205002')
+    const lnTarifa = prev.linhas.find((l: any) => l.fitid === 'ITAU20261119003')
+    const lnPix515 = prev.linhas.find((l: any) => l.fitid === 'ITAU20261119004')
+
+    assert.equal(lnPix1000.match_nivel, 'EXATO')
+    assert.equal(lnPix1000.acao_sugerida, 'BAIXAR_TITULO')
+    assert.equal(lnPix1000.titulo_sugerido_id, titsPedLiq[1].id, 'PIX R$ 1000 deve casar com a 2a parcela do Boi Nobre')
+
+    assert.equal(lnBol1400.match_nivel, 'EXATO')
+    assert.equal(lnBol1400.acao_sugerida, 'BAIXAR_TITULO')
+    assert.equal(lnBol1400.titulo_sugerido.saldo_aberto, 1400)
+
+    assert.equal(lnTarifa.valor, 49.9, 'Valor OFX com vírgula brasileira (-49,90) deve ser interpretado')
+    assert.equal(lnTarifa.match_nivel, 'SEM_MATCH')
+    assert.equal(lnTarifa.acao_sugerida, 'LANCAR_AVULSO')
+
+    assert.equal(lnPix515.titulo_sugerido_id, titsPedFat[0].id, 'PIX R$ 515 (+R$ 15 juros) deve sugerir título de R$ 500')
+
+    // Confirmar conciliação das 4 linhas em 1 transação atômica
+    const resOfxCommit = await app.inject({
+      method: 'POST',
+      url: '/api/financeiro/ofx/conciliar',
+      headers,
+      payload: {
+        conta_bancaria_id: itauId,
+        itens: prev.linhas.map((l: any) => ({
+          fitid: l.fitid,
+          tipo: l.tipo,
+          data_movimento: l.data_movimento,
+          valor: l.valor,
+          memo: l.memo,
+          acao: l.acao_sugerida,
+          titulo_id: l.titulo_sugerido_id,
+          forma_pagamento: l.forma_sugerida,
+          historico: l.memo,
+        })),
+      },
+    })
+    assert.equal(resOfxCommit.statusCode, 200, resOfxCommit.body)
+    assert.equal(resOfxCommit.json().baixados, 3)
+    assert.equal(resOfxCommit.json().lancados_avulsos, 1)
+    assert.equal(resOfxCommit.json().saldo_conta_atual, 9165.1) // 9100 + 1000 - 1400 - 49.90 + 515
+
+    // Verificar se o título de R$ 500 liquidado por R$ 515 registrou automaticamente R$ 15 de juros
+    const resRecPosOfx = await app.inject({ method: 'GET', url: '/api/financeiro/titulos?tipo=RECEBER&status=PAGO', headers })
+    const titFatPago = resRecPosOfx.json().data.find((t: any) => t.id === titsPedFat[0].id)
+    assert.ok(titFatPago, 'Título de R$ 500 deve estar PAGO após conciliação OFX')
+    assert.equal(titFatPago.valor_juros_multa, 15)
+    assert.equal(titFatPago.valor_pago, 515)
+
+    // Trava anti-duplicidade FITID: re-upload do mesmo OFX marca todas 4 linhas como já conciliadas e não duplica
+    const resOfxPrevDup = await app.inject({
+      method: 'POST',
+      url: '/api/financeiro/ofx/preview',
+      headers,
+      payload: { conta_bancaria_id: itauId, ofx_conteudo: ofxSgml },
+    })
+    assert.equal(resOfxPrevDup.statusCode, 200)
+    assert.equal(resOfxPrevDup.json().resumo.ja_conciliadas, 4)
+    assert.equal(resOfxPrevDup.json().resumo.novas, 0)
+
+    const resOfxCommitDup = await app.inject({
+      method: 'POST',
+      url: '/api/financeiro/ofx/conciliar',
+      headers,
+      payload: {
+        conta_bancaria_id: itauId,
+        itens: prev.linhas.map((l: any) => ({
+          fitid: l.fitid,
+          tipo: l.tipo,
+          data_movimento: l.data_movimento,
+          valor: l.valor,
+          memo: l.memo,
+          acao: 'LANCAR_AVULSO',
+        })),
+      },
+    })
+    assert.equal(resOfxCommitDup.statusCode, 200)
+    assert.equal(resOfxCommitDup.json().duplicados_ignorados, 4)
+    assert.equal(resOfxCommitDup.json().saldo_conta_atual, 9165.1)
+
+    // Estornar o título R$ 1.000 libera o FITID daquela linha para poder reconferir no OFX
+    const resEstOfx = await app.inject({
+      method: 'POST',
+      url: `/api/financeiro/titulos/${titsPedLiq[1].id}/estornar`,
+      headers,
+      payload: { motivo: 'Reconciliar depois' },
+    })
+    assert.equal(resEstOfx.statusCode, 200)
+    assert.equal(resEstOfx.json().saldo_conta_atual, 8165.1)
+
+    const resOfxPosEst = await app.inject({
+      method: 'POST',
+      url: '/api/financeiro/ofx/preview',
+      headers,
+      payload: { conta_bancaria_id: itauId, ofx_conteudo: ofxSgml },
+    })
+    assert.equal(resOfxPosEst.statusCode, 200)
+    assert.equal(resOfxPosEst.json().resumo.novas, 1, 'Estornar título conciliado deve liberar o FITID para nova conciliação')
+    assert.equal(resOfxPosEst.json().resumo.ja_conciliadas, 3)
   } finally {
     await app.close()
     await conn.close()

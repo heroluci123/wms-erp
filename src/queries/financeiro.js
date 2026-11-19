@@ -52,6 +52,21 @@ export const financeiroQueries = {
     return apiRequest(`/api/financeiro/titulos/${id}/baixar`, { method: 'POST', body: dados })
   },
 
+  async baixarLote(dados) {
+    exigirApi()
+    return apiRequest('/api/financeiro/titulos/baixar-lote', { method: 'POST', body: dados })
+  },
+
+  async previewOfx(dados) {
+    exigirApi()
+    return apiRequest('/api/financeiro/ofx/preview', { method: 'POST', body: dados })
+  },
+
+  async conciliarOfx(dados) {
+    exigirApi()
+    return apiRequest('/api/financeiro/ofx/conciliar', { method: 'POST', body: dados })
+  },
+
   async estornarTitulo(id, motivo = '') {
     exigirApi()
     return apiRequest(`/api/financeiro/titulos/${id}/estornar`, { method: 'POST', body: { motivo } })

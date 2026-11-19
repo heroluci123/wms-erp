@@ -506,6 +506,8 @@ export async function baixarTitulo(
     dataPagamento?: string | null
     formaPagamento?: string
     observacoes?: string
+    ofxFitid?: string
+    ofxMemo?: string
     operadorId?: string | null
     operadorNome?: string
   },
@@ -589,6 +591,8 @@ export async function baixarTitulo(
     valor: toDec(pagoAgora, 2),
     formaPagamento: forma,
     historico: `${tit.tipo === 'RECEBER' ? 'Recebimento' : 'Pagamento'} ${tit.codigo} — ${tit.descricao}${novoStatus === 'PARCIAL' ? ' (Parcial)' : ''}`,
+    ofxFitid: String(params.ofxFitid || '').trim(),
+    ofxMemo: String(params.ofxMemo || '').trim(),
     operadorId: params.operadorId || null,
     operadorNome: params.operadorNome || 'Sistema',
   })
@@ -631,6 +635,12 @@ export async function estornarTitulo(
   const hoje = hojeIsoLocal()
 
   if (valorPago > 0) {
+    // Libera eventual FITID OFX das movimentações anteriores desse título para permitir reconferência
+    await tx
+      .update(financeiroMovimentacoes)
+      .set({ ofxFitid: '' })
+      .where(and(eq(financeiroMovimentacoes.tenantId, params.tenantId), eq(financeiroMovimentacoes.tituloId, tit.id)))
+
     await tx.insert(financeiroMovimentacoes).values({
       id: uuidv7(),
       tenantId: params.tenantId,

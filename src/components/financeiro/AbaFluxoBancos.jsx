@@ -246,7 +246,14 @@ export function AbaFluxoCaixa({ contas = [], fluxoProjetado = [], onAtualizar, t
                       )}
                     </td>
                     <td className="text-xs">
-                      <div className="font-bold">{m.historico}</div>
+                      <div className="font-bold flex items-center gap-6">
+                        <span>{m.historico}</span>
+                        {m.ofx_fitid && (
+                          <span className="badge badge--info" style={{ fontSize: 10, padding: '1px 5px' }}>
+                            OFX
+                          </span>
+                        )}
+                      </div>
                       <div className="text-muted">
                         {m.categoria} {m.titulo_codigo ? `• ${m.titulo_codigo}` : ''}
                       </div>

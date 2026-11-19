@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowDownCircle,
   ArrowUpCircle,
   Ban,
   CheckCircle2,
+  CheckSquare,
   Coins,
   DollarSign,
+  FileSpreadsheet,
   Landmark,
   Plus,
   RefreshCw,
@@ -23,6 +25,7 @@ import { ModalBaixaTitulo } from '../components/financeiro/ModalBaixaTitulo'
 import { ModalNovoTitulo } from '../components/financeiro/ModalNovoTitulo'
 import { AbaContasBancos, AbaFluxoCaixa } from '../components/financeiro/AbaFluxoBancos'
 import { AbaComissoesInadimplencia } from '../components/financeiro/AbaComissoesInadimplencia'
+import { AbaConciliacaoOfx } from '../components/financeiro/AbaConciliacaoOfx'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -69,9 +72,14 @@ export function Financeiro() {
   const [loading, setLoading] = useState(false)
   const [sincronizando, setSincronizando] = useState(false)
 
-  // Modais
+  // Modais & Baixa em Lote
   const [modalNovoTipo, setModalNovoTipo] = useState(null) // 'PAGAR' | 'RECEBER' | null
   const [tituloBaixa, setTituloBaixa] = useState(null)
+  const [selecionadosIds, setSelecionadosIds] = useState([])
+  const [loteContaId, setLoteContaId] = useState('')
+  const [loteForma, setLoteForma] = useState('PIX')
+  const [loteData, setLoteData] = useState(() => new Date().toISOString().slice(0, 10))
+  const [baixandoLote, setBaixandoLote] = useState(false)
 
   const carregarBase = useCallback(async () => {
     if (!apiAtiva) return
@@ -126,7 +134,81 @@ export function Financeiro() {
 
   useEffect(() => {
     carregarTitulos()
+    setSelecionadosIds([])
   }, [carregarTitulos])
+
+  useEffect(() => {
+    if (!loteContaId && contas.length > 0) {
+      const padrao = contas.find((c) => c.padrao === 1) || contas[0]
+      setLoteContaId(padrao?.id || '')
+    }
+  }, [contas, loteContaId])
+
+  const titulosBaixaveis = useMemo(
+    () => titulos.filter((t) => (t.status === 'ABERTO' || t.status === 'PARCIAL') && Number(t.saldo_aberto) > 0),
+    [titulos],
+  )
+
+  const selecionadosSet = useMemo(() => new Set(selecionadosIds), [selecionadosIds])
+
+  const resumoLote = useMemo(() => {
+    const escolhidos = titulosBaixaveis.filter((t) => selecionadosSet.has(t.id))
+    return {
+      qtd: escolhidos.length,
+      total: escolhidos.reduce((s, t) => s + Number(t.saldo_aberto || 0), 0),
+    }
+  }, [titulosBaixaveis, selecionadosSet])
+
+  const alternarSelecao = (id) => {
+    setSelecionadosIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const alternarTodosVisiveis = () => {
+    if (titulosBaixaveis.length === 0) return
+    const todosMarcados = titulosBaixaveis.every((t) => selecionadosSet.has(t.id))
+    setSelecionadosIds(todosMarcados ? [] : titulosBaixaveis.map((t) => t.id))
+  }
+
+  const handleBaixarLote = async () => {
+    if (resumoLote.qtd === 0) return
+    if (!loteContaId) {
+      toastError('Conta obrigatória', 'Selecione a conta bancária ou caixa para a baixa em lote.')
+      return
+    }
+    const contaObj = contas.find((c) => c.id === loteContaId)
+    const ok = await confirmar({
+      title: `Confirmar Baixa em Lote (${resumoLote.qtd} título${resumoLote.qtd > 1 ? 's' : ''})`,
+      message: `Deseja ${aba === 'PAGAR' ? 'pagar' : 'receber'} ${resumoLote.qtd} título(s) totalizando ${fmtMoeda(
+        resumoLote.total,
+      )} via ${loteForma} na conta ${contaObj ? `${contaObj.codigo} — ${contaObj.nome}` : ''}?`,
+      type: 'info',
+      confirmLabel: `Sim, ${aba === 'PAGAR' ? 'Pagar' : 'Receber'} Lote`,
+    })
+    if (!ok) return
+
+    setBaixandoLote(true)
+    try {
+      const res = await financeiroQueries.baixarLote({
+        titulo_ids: selecionadosIds,
+        conta_bancaria_id: loteContaId,
+        data_pagamento: loteData,
+        forma_pagamento: loteForma,
+        observacoes: `Baixa em lote (${resumoLote.qtd} títulos)`,
+      })
+      toastSuccess(
+        'Baixa em Lote Concluída ✅',
+        `${res.total_baixados} título(s) liquidados (${fmtMoeda(res.valor_total_baixado)}) • Novo saldo: ${fmtMoeda(
+          res.saldo_conta_atual,
+        )}`,
+      )
+      setSelecionadosIds([])
+      await atualizarTudo()
+    } catch (err) {
+      toastError('Erro na baixa em lote', err.message)
+    } finally {
+      setBaixandoLote(false)
+    }
+  }
 
   const atualizarTudo = async () => {
     await Promise.all([carregarBase(), carregarTitulos()])
@@ -310,6 +392,7 @@ export function Financeiro() {
         {[
           { id: 'PAGAR', label: 'Contas a Pagar', icon: ArrowUpCircle },
           { id: 'RECEBER', label: 'Contas a Receber', icon: ArrowDownCircle },
+          { id: 'OFX', label: 'Conciliação OFX', icon: FileSpreadsheet },
           { id: 'FLUXO', label: 'Fluxo de Caixa & Extrato', icon: TrendingUp },
           { id: 'BANCOS', label: 'Contas & Bancos', icon: Landmark },
           { id: 'COMISSOES', label: 'Comissões & Inadimplência', icon: Coins },
@@ -404,11 +487,95 @@ export function Financeiro() {
             </div>
           </div>
 
+          {resumoLote.qtd > 0 && (
+            <div
+              className="card flex flex-wrap items-center justify-between gap-12"
+              style={{
+                padding: '12px 14px',
+                borderColor: 'var(--accent)',
+                background: 'linear-gradient(135deg, rgba(14,165,233,0.10), rgba(16,185,129,0.08))',
+              }}
+            >
+              <div className="flex items-center gap-10 flex-wrap">
+                <span className="badge badge--info">
+                  <CheckSquare size={13} /> {resumoLote.qtd} selecionado(s)
+                </span>
+                <span className="text-sm font-bold font-mono text-primary">
+                  Total: {fmtMoeda(resumoLote.total)}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-8">
+                <select
+                  className="form-input"
+                  style={{ width: 210, height: 34, fontSize: 12, padding: '4px 8px' }}
+                  value={loteContaId}
+                  onChange={(e) => setLoteContaId(e.target.value)}
+                >
+                  <option value="">Conta bancária / caixa...</option>
+                  {contas.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.codigo} — {c.nome}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-input"
+                  style={{ width: 120, height: 34, fontSize: 12, padding: '4px 8px' }}
+                  value={loteForma}
+                  onChange={(e) => setLoteForma(e.target.value)}
+                >
+                  {['PIX', 'BOLETO', 'TED', 'DINHEIRO', 'CARTAO', 'CHEQUE', 'DEBITO_CONTA'].map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ width: 145, height: 34, fontSize: 12, padding: '4px 8px' }}
+                  value={loteData}
+                  onChange={(e) => setLoteData(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn--success btn--sm"
+                  disabled={baixandoLote}
+                  onClick={handleBaixarLote}
+                >
+                  <CheckCircle2 size={14} />{' '}
+                  {baixandoLote
+                    ? 'Baixando...'
+                    : `${aba === 'PAGAR' ? 'Pagar' : 'Receber'} ${resumoLote.qtd} em Lote`}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => setSelecionadosIds([])}
+                >
+                  Limpar
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
+                    <th style={{ width: 34, textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        title="Selecionar todos os títulos em aberto visíveis"
+                        disabled={titulosBaixaveis.length === 0}
+                        checked={
+                          titulosBaixaveis.length > 0 && titulosBaixaveis.every((t) => selecionadosSet.has(t.id))
+                        }
+                        onChange={alternarTodosVisiveis}
+                      />
+                    </th>
                     <th>Cód. / Origem</th>
                     <th>Vencimento</th>
                     <th>{aba === 'PAGAR' ? 'Fornecedor / Centro Custo' : 'Cliente / Vendedor'}</th>
@@ -422,19 +589,31 @@ export function Financeiro() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={8} className="text-center p-24 text-muted">
+                      <td colSpan={9} className="text-center p-24 text-muted">
                         Carregando títulos...
                       </td>
                     </tr>
                   ) : titulos.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center p-24 text-muted">
+                      <td colSpan={9} className="text-center p-24 text-muted">
                         Nenhum título encontrado neste filtro. Use <strong>Sincronizar Compras &amp; Vendas</strong> ou crie um lançamento manual.
                       </td>
                     </tr>
                   ) : (
-                    titulos.map((t) => (
+                    titulos.map((t) => {
+                      const podeSelecionar =
+                        (t.status === 'ABERTO' || t.status === 'PARCIAL') && Number(t.saldo_aberto) > 0
+                      return (
                       <tr key={t.id}>
+                        <td style={{ textAlign: 'center' }}>
+                          {podeSelecionar ? (
+                            <input
+                              type="checkbox"
+                              checked={selecionadosSet.has(t.id)}
+                              onChange={() => alternarSelecao(t.id)}
+                            />
+                          ) : null}
+                        </td>
                         <td>
                           <div className="font-mono font-bold text-xs text-cyan">{t.codigo}</div>
                           <div className="text-xs text-muted">{ORIGEM_LABEL[t.origem] || t.origem}</div>
@@ -513,13 +692,24 @@ export function Financeiro() {
                           </div>
                         </td>
                       </tr>
-                    ))
+                    )
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
         </div>
+      )}
+
+      {/* ABA OFX: CONCILIAÇÃO BANCÁRIA AUTOMÁTICA */}
+      {aba === 'OFX' && (
+        <AbaConciliacaoOfx
+          contas={contas}
+          onAtualizar={atualizarTudo}
+          toastSuccess={toastSuccess}
+          toastError={toastError}
+        />
       )}
 
       {/* ABA 3: FLUXO DE CAIXA & EXTRATO */}

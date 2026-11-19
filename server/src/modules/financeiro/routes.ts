@@ -36,6 +36,7 @@ import {
   recalcularSaldoConta,
   sincronizarTitulosPedidoVenda,
 } from './integracaoHelper.js'
+import { detectarFormaPagamentoOfx, parseOfxContent } from './ofxParser.js'
 
 const optStr = (fb = '') =>
   z
@@ -119,6 +120,59 @@ const TransferenciaSchema = z.object({
   valor: z.coerce.number().positive('Informe o valor da transferência.'),
   historico: optStr(''),
 })
+
+const BaixaLoteSchema = z.object({
+  titulo_ids: z.array(z.string().uuid()).min(1, 'Selecione ao menos 1 título para baixar em lote.').max(200),
+  conta_bancaria_id: z.string().uuid('Selecione a conta bancária ou caixa.'),
+  data_pagamento: optStr(''),
+  forma_pagamento: optStr('PIX'),
+  observacoes: optStr(''),
+})
+
+const OfxPreviewSchema = z.object({
+  conta_bancaria_id: z.string().uuid('Selecione a conta bancária do extrato.'),
+  ofx_conteudo: z.string().min(20, 'Selecione um arquivo .OFX válido.'),
+})
+
+const OfxConciliarItemSchema = z.object({
+  fitid: z.string().trim().min(1),
+  tipo: z.enum(['ENTRADA', 'SAIDA']),
+  data_movimento: z.string().trim().min(8),
+  valor: z.coerce.number().positive(),
+  memo: optStr(''),
+  acao: z.enum(['BAIXAR_TITULO', 'LANCAR_AVULSO', 'IGNORAR']),
+  titulo_id: optNullableUuid.optional(),
+  forma_pagamento: optStr(''),
+  historico: optStr(''),
+  quitar_diferenca_desconto: z.boolean().optional().default(false),
+})
+
+const OfxConciliarSchema = z.object({
+  conta_bancaria_id: z.string().uuid('Selecione a conta bancária.'),
+  itens: z.array(OfxConciliarItemSchema).min(1, 'Nenhum item para conciliar.').max(1000),
+})
+
+function normalizarTextoMatch(s: string): string {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const STOPWORDS_MATCH = new Set([
+  'LTDA', 'EIRELI', 'ME', 'EPP', 'SA', 'S', 'DE', 'DA', 'DO', 'DOS', 'DAS',
+  'COMERCIO', 'INDUSTRIA', 'ALIMENTOS', 'DISTRIBUIDORA', 'PIX', 'PAGTO', 'RECEBIDO',
+  'ENVIADO', 'BOLETO', 'TED', 'DOC', 'TRANSF', 'TRANSFERENCIA', 'PAGAMENTO', 'CREDITO', 'DEBITO',
+])
+
+function extrairTokensMatch(s: string): string[] {
+  return normalizarTextoMatch(s)
+    .split(' ')
+    .filter((w) => w.length >= 3 && !STOPWORDS_MATCH.has(w))
+}
 
 function addDaysIso(isoDate: string, days: number): string {
   const base = normalizarDataIso(isoDate) || hojeIsoLocal()
@@ -807,6 +861,7 @@ export function registerFinanceiroRoutes(app: FastifyInstance, conn: DbConnectio
         valor: financeiroMovimentacoes.valor,
         forma_pagamento: financeiroMovimentacoes.formaPagamento,
         historico: financeiroMovimentacoes.historico,
+        ofx_fitid: financeiroMovimentacoes.ofxFitid,
         operador_nome: financeiroMovimentacoes.operadorNome,
         created_at: financeiroMovimentacoes.createdAt,
       })
@@ -1312,5 +1367,459 @@ export function registerFinanceiroRoutes(app: FastifyInstance, conn: DbConnectio
     })
 
     return reply.status(201).send({ success: true, ...out })
+  })
+
+  // ── BAIXA EM LOTE DE TÍTULOS SELECIONADOS ───────────────────────────────────
+  app.post('/api/financeiro/titulos/baixar-lote', { preHandler: writePerm }, async (req) => {
+    const ctx = req.authCtx!
+    const parsed = BaixaLoteSchema.safeParse(req.body)
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados inválidos.')
+    const d = parsed.data
+    const idsUnicos = Array.from(new Set(d.titulo_ids))
+    const dataPag = normalizarDataIso(d.data_pagamento) || hojeIsoLocal()
+
+    const resumo = await conn.db.transaction(async (tx) => {
+      const tits = await tx
+        .select()
+        .from(financeiroTitulos)
+        .where(
+          and(
+            eq(financeiroTitulos.tenantId, ctx.tenantId),
+            inArray(financeiroTitulos.id, idsUnicos),
+          ),
+        )
+
+      if (tits.length !== idsUnicos.length) {
+        throw new HttpError(404, 'Um ou mais títulos selecionados não foram encontrados.')
+      }
+
+      let valorTotal = 0
+      let saldoConta = 0
+      for (const tit of tits) {
+        if (!['ABERTO', 'PARCIAL'].includes(tit.status)) {
+          throw new HttpError(400, `Título ${tit.codigo} não está em aberto (status: ${tit.status}).`)
+        }
+        const saldo = toNum(tit.saldoAberto, 0)
+        if (saldo <= 0) continue
+        const res = await baixarTitulo(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          tituloId: tit.id,
+          contaBancariaId: d.conta_bancaria_id,
+          valorPago: saldo,
+          dataPagamento: dataPag,
+          formaPagamento: d.forma_pagamento || 'PIX',
+          observacoes: d.observacoes || 'Baixa em lote',
+          operadorId: ctx.operador.id,
+          operadorNome: ctx.operador.nome,
+        })
+        valorTotal += saldo
+        saldoConta = res.saldo_conta_atual
+      }
+
+      return {
+        total_baixados: tits.length,
+        valor_total_baixado: Number(valorTotal.toFixed(2)),
+        saldo_conta_atual: saldoConta,
+      }
+    })
+
+    return { success: true, ...resumo }
+  })
+
+  // ── CONCILIAÇÃO BANCÁRIA .OFX (PREVIEW COM AUTO-MATCH + CONFIRMAÇÃO ATÔMICA) ──
+  app.post('/api/financeiro/ofx/preview', { preHandler: readPerm }, async (req) => {
+    const ctx = req.authCtx!
+    const parsed = OfxPreviewSchema.safeParse(req.body)
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados inválidos.')
+    const d = parsed.data
+
+    const [conta] = await conn.db
+      .select()
+      .from(financeiroContasBancarias)
+      .where(
+        and(
+          eq(financeiroContasBancarias.id, d.conta_bancaria_id),
+          eq(financeiroContasBancarias.tenantId, ctx.tenantId),
+          eq(financeiroContasBancarias.ativo, 1),
+        ),
+      )
+      .limit(1)
+    if (!conta) throw new HttpError(404, 'Conta bancária selecionada não encontrada.')
+
+    let ofx
+    try {
+      ofx = parseOfxContent(d.ofx_conteudo)
+    } catch (err: any) {
+      throw new HttpError(400, err?.message || 'Não foi possível interpretar o arquivo OFX.')
+    }
+
+    if (ofx.transacoes.length === 0) {
+      throw new HttpError(400, 'Nenhuma movimentação encontrada dentro do arquivo OFX.')
+    }
+
+    const fitids = ofx.transacoes.map((t) => t.fitid)
+    const [jaConciliadasRows, titulosAbertosRows] = await Promise.all([
+      conn.db
+        .select({ fitid: financeiroMovimentacoes.ofxFitid })
+        .from(financeiroMovimentacoes)
+        .where(
+          and(
+            eq(financeiroMovimentacoes.tenantId, ctx.tenantId),
+            eq(financeiroMovimentacoes.contaBancariaId, d.conta_bancaria_id),
+            inArray(financeiroMovimentacoes.ofxFitid, fitids),
+          ),
+        ),
+      conn.db
+        .select({
+          id: financeiroTitulos.id,
+          codigo: financeiroTitulos.codigo,
+          tipo: financeiroTitulos.tipo,
+          descricao: financeiroTitulos.descricao,
+          numero_documento: financeiroTitulos.numeroDocumento,
+          data_vencimento: financeiroTitulos.dataVencimento,
+          saldo_aberto: financeiroTitulos.saldoAberto,
+          valor_original: financeiroTitulos.valorOriginal,
+          status: financeiroTitulos.status,
+          fornecedor_nome: fornecedores.nomeFantasia,
+          fornecedor_razao: fornecedores.razaoSocial,
+          fornecedor_cnpj: fornecedores.cnpjCpf,
+          cliente_nome: clientes.nomeFantasia,
+          cliente_razao: clientes.razaoSocial,
+          cliente_cnpj: clientes.cnpjCpf,
+        })
+        .from(financeiroTitulos)
+        .leftJoin(fornecedores, eq(fornecedores.id, financeiroTitulos.fornecedorId))
+        .leftJoin(clientes, eq(clientes.id, financeiroTitulos.clienteId))
+        .where(
+          and(
+            eq(financeiroTitulos.tenantId, ctx.tenantId),
+            inArray(financeiroTitulos.status, ['ABERTO', 'PARCIAL']),
+          ),
+        )
+        .orderBy(asc(financeiroTitulos.dataVencimento)),
+    ])
+
+    const fitidsExistentes = new Set(jaConciliadasRows.map((r) => r.fitid).filter(Boolean))
+
+    const titulosCatalogo = titulosAbertosRows.map((t) => {
+      const parceiro =
+        t.tipo === 'PAGAR'
+          ? t.fornecedor_nome || t.fornecedor_razao || ''
+          : t.cliente_nome || t.cliente_razao || ''
+      const razao = t.tipo === 'PAGAR' ? t.fornecedor_razao || '' : t.cliente_razao || ''
+      const cnpjDigits = String(t.tipo === 'PAGAR' ? t.fornecedor_cnpj || '' : t.cliente_cnpj || '').replace(/\D/g, '')
+      const saldo = toNum(t.saldo_aberto, 0)
+      return {
+        id: t.id,
+        codigo: t.codigo,
+        tipo: t.tipo as 'PAGAR' | 'RECEBER',
+        descricao: t.descricao,
+        numero_documento: t.numero_documento || '',
+        parceiro_nome: parceiro,
+        data_vencimento: String(t.data_vencimento).slice(0, 10),
+        saldo_aberto: saldo,
+        valor_original: toNum(t.valor_original, 0),
+        status: t.status,
+        _tokens: extrairTokensMatch(`${parceiro} ${razao} ${t.descricao}`),
+        _cnpj: cnpjDigits,
+        _docDigits: String(t.numero_documento || '').replace(/\D/g, ''),
+      }
+    })
+
+    // Calcula todos os pares (linha OFX × título aberto) elegíveis e faz atribuição 1-para-1 gulosa pela maior pontuação
+    interface CandidateMatch {
+      trnIdx: number
+      tituloId: string
+      score: number
+      motivos: string[]
+    }
+    const candidatos: CandidateMatch[] = []
+
+    ofx.transacoes.forEach((trn, trnIdx) => {
+      if (fitidsExistentes.has(trn.fitid)) return
+      const tipoEsperado = trn.tipo === 'ENTRADA' ? 'RECEBER' : 'PAGAR'
+      const memoNorm = normalizarTextoMatch(`${trn.memo} ${trn.checknum}`)
+      const memoDigits = `${trn.memo} ${trn.checknum}`.replace(/\D/g, '')
+      const memoTokens = new Set(extrairTokensMatch(trn.memo))
+
+      for (const tit of titulosCatalogo) {
+        if (tit.tipo !== tipoEsperado) continue
+        if (tit.saldo_aberto <= 0) continue
+
+        let score = 0
+        const motivos: string[] = []
+        const diffVal = Math.abs(tit.saldo_aberto - trn.valor)
+        const diffPct = tit.saldo_aberto > 0 ? diffVal / tit.saldo_aberto : 1
+
+        if (diffVal <= 0.01) {
+          score += 60
+          motivos.push('Valor exato')
+        } else if (diffPct <= 0.02 || diffVal <= 15) {
+          score += 35
+          motivos.push('Valor próximo (±2%)')
+        } else {
+          // Sem proximidade de valor, exige forte evidência de documento/CNPJ para sugerir
+          if (!tit._cnpj || tit._cnpj.length < 11 || !memoDigits.includes(tit._cnpj)) {
+            continue
+          }
+        }
+
+        // Match por CNPJ / CPF ou nº de documento/NF no memo do banco
+        let matchParceiro = false
+        if (tit._cnpj.length >= 11 && memoDigits.includes(tit._cnpj)) {
+          score += 30
+          motivos.push('CNPJ/CPF no extrato')
+          matchParceiro = true
+        } else if (tit._docDigits.length >= 3 && memoDigits.includes(tit._docDigits)) {
+          score += 25
+          motivos.push(`Doc/NF ${tit.numero_documento}`)
+          matchParceiro = true
+        } else if (tit._tokens.length > 0) {
+          const hits = tit._tokens.filter((tk) => memoTokens.has(tk) || memoNorm.includes(tk))
+          if (hits.length >= 2 || (hits.length === 1 && hits[0].length >= 5)) {
+            score += 25
+            motivos.push(`Nome (${hits[0]})`)
+            matchParceiro = true
+          }
+        }
+
+        const diasDiff = Math.abs(diffDaysIso(tit.data_vencimento, trn.data_movimento))
+        if (diasDiff <= 2) {
+          score += 15
+          motivos.push('Vencimento exato/±2d')
+        } else if (diasDiff <= 7) {
+          score += 10
+          motivos.push('Vencimento ±7d')
+        } else if (diasDiff <= 20) {
+          score += 5
+        }
+
+        if (score >= 55 || (score >= 50 && matchParceiro)) {
+          candidatos.push({ trnIdx, tituloId: tit.id, score, motivos })
+        }
+      }
+    })
+
+    candidatos.sort((a, b) => b.score - a.score)
+    const trnMatched = new Map<number, CandidateMatch>()
+    const titUsed = new Set<string>()
+    for (const c of candidatos) {
+      if (trnMatched.has(c.trnIdx) || titUsed.has(c.tituloId)) continue
+      trnMatched.set(c.trnIdx, c)
+      titUsed.add(c.tituloId)
+    }
+
+    const titMap = new Map(titulosCatalogo.map((t) => [t.id, t]))
+
+    const linhas = ofx.transacoes.map((trn, idx) => {
+      const jaConc = fitidsExistentes.has(trn.fitid)
+      const match = trnMatched.get(idx) || null
+      const tit = match ? titMap.get(match.tituloId) || null : null
+      const matchNivel = jaConc
+        ? 'JA_CONCILIADA'
+        : match
+          ? match.score >= 75
+            ? 'EXATO'
+            : 'SUGERIDO'
+          : 'SEM_MATCH'
+
+      const acaoSugerida = jaConc
+        ? 'IGNORAR'
+        : tit
+          ? 'BAIXAR_TITULO'
+          : 'LANCAR_AVULSO'
+
+      return {
+        ...trn,
+        ja_conciliada: jaConc,
+        match_nivel: matchNivel,
+        match_score: match?.score || 0,
+        match_motivos: match?.motivos || [],
+        acao_sugerida: acaoSugerida,
+        titulo_sugerido_id: tit?.id || null,
+        titulo_sugerido: tit
+          ? {
+              id: tit.id,
+              codigo: tit.codigo,
+              tipo: tit.tipo,
+              descricao: tit.descricao,
+              parceiro_nome: tit.parceiro_nome,
+              data_vencimento: tit.data_vencimento,
+              saldo_aberto: tit.saldo_aberto,
+            }
+          : null,
+      }
+    })
+
+    const resumo = {
+      total_linhas: linhas.length,
+      ja_conciliadas: linhas.filter((l) => l.ja_conciliada).length,
+      novas: linhas.filter((l) => !l.ja_conciliada).length,
+      match_exato: linhas.filter((l) => l.match_nivel === 'EXATO').length,
+      match_sugerido: linhas.filter((l) => l.match_nivel === 'SUGERIDO').length,
+      sem_match: linhas.filter((l) => l.match_nivel === 'SEM_MATCH').length,
+      total_entradas: Number(
+        linhas.filter((l) => !l.ja_conciliada && l.tipo === 'ENTRADA').reduce((s, l) => s + l.valor, 0).toFixed(2),
+      ),
+      total_saidas: Number(
+        linhas.filter((l) => !l.ja_conciliada && l.tipo === 'SAIDA').reduce((s, l) => s + l.valor, 0).toFixed(2),
+      ),
+    }
+
+    return {
+      success: true,
+      cabecalho: {
+        bank_id: ofx.bank_id,
+        acct_id: ofx.acct_id,
+        acct_type: ofx.acct_type,
+        currency: ofx.currency,
+        dt_start: ofx.dt_start,
+        dt_end: ofx.dt_end,
+        saldo_extrato: ofx.saldo_extrato,
+        conta_erp_nome: conta.nome,
+        conta_erp_saldo_atual: toNum(conta.saldoAtual, 0),
+      },
+      resumo,
+      linhas,
+      titulos_abertos: titulosCatalogo.map(({ _tokens, _cnpj, _docDigits, ...pub }) => pub),
+    }
+  })
+
+  app.post('/api/financeiro/ofx/conciliar', { preHandler: writePerm }, async (req) => {
+    const ctx = req.authCtx!
+    const parsed = OfxConciliarSchema.safeParse(req.body)
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message || 'Dados inválidos.')
+    const d = parsed.data
+
+    const resultado = await conn.db.transaction(async (tx) => {
+      const [conta] = await tx
+        .select()
+        .from(financeiroContasBancarias)
+        .where(
+          and(
+            eq(financeiroContasBancarias.id, d.conta_bancaria_id),
+            eq(financeiroContasBancarias.tenantId, ctx.tenantId),
+            eq(financeiroContasBancarias.ativo, 1),
+          ),
+        )
+        .limit(1)
+      if (!conta) throw new HttpError(404, 'Conta bancária selecionada não encontrada.')
+
+      const fitidsReq = d.itens.map((i) => i.fitid)
+      const existentesRows = await tx
+        .select({ fitid: financeiroMovimentacoes.ofxFitid })
+        .from(financeiroMovimentacoes)
+        .where(
+          and(
+            eq(financeiroMovimentacoes.tenantId, ctx.tenantId),
+            eq(financeiroMovimentacoes.contaBancariaId, d.conta_bancaria_id),
+            inArray(financeiroMovimentacoes.ofxFitid, fitidsReq),
+          ),
+        )
+      const fitidsJaGravados = new Set(existentesRows.map((r) => r.fitid).filter(Boolean))
+
+      let baixados = 0
+      let lancadosAvulsos = 0
+      let ignorados = 0
+      let duplicadosIgnorados = 0
+
+      for (const item of d.itens) {
+        if (item.acao === 'IGNORAR') {
+          ignorados += 1
+          continue
+        }
+        if (fitidsJaGravados.has(item.fitid)) {
+          duplicadosIgnorados += 1
+          continue
+        }
+
+        const dataMov = normalizarDataIso(item.data_movimento) || hojeIsoLocal()
+        const forma = (item.forma_pagamento || detectarFormaPagamentoOfx(item.memo, '')).toUpperCase()
+
+        if (item.acao === 'BAIXAR_TITULO') {
+          if (!item.titulo_id) {
+            throw new HttpError(400, `Selecione o título para conciliar a movimentação "${item.memo || item.fitid}".`)
+          }
+          const [tit] = await tx
+            .select()
+            .from(financeiroTitulos)
+            .where(
+              and(
+                eq(financeiroTitulos.id, item.titulo_id),
+                eq(financeiroTitulos.tenantId, ctx.tenantId),
+              ),
+            )
+            .limit(1)
+          if (!tit) throw new HttpError(404, 'Título vinculado na conciliação OFX não encontrado.')
+          const tipoEsperado = item.tipo === 'ENTRADA' ? 'RECEBER' : 'PAGAR'
+          if (tit.tipo !== tipoEsperado) {
+            throw new HttpError(
+              400,
+              `Movimentação de ${item.tipo} não pode baixar título de ${tit.tipo} (${tit.codigo}).`,
+            )
+          }
+
+          const saldoAberto = toNum(tit.saldoAberto, 0)
+          // Se o banco pagou/recebeu um pouco acima do saldo aberto, lança diferença automaticamente como Juros/Multa
+          const jurosAuto =
+            item.valor > saldoAberto + 0.009 ? Number((item.valor - saldoAberto).toFixed(2)) : 0
+          // Se o usuário marcou "quitar diferença como desconto" e o valor veio menor, aplica desconto
+          const descontoAuto =
+            item.quitar_diferenca_desconto && item.valor < saldoAberto - 0.009
+              ? Number((saldoAberto - item.valor).toFixed(2))
+              : 0
+
+          await baixarTitulo(tx, {
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            tituloId: tit.id,
+            contaBancariaId: d.conta_bancaria_id,
+            valorPago: item.valor,
+            valorDesconto: descontoAuto,
+            valorJurosMulta: jurosAuto,
+            dataPagamento: dataMov,
+            formaPagamento: forma,
+            observacoes: `Conciliação OFX${item.memo ? `: ${item.memo}` : ''}`,
+            ofxFitid: item.fitid,
+            ofxMemo: item.memo,
+            operadorId: ctx.operador.id,
+            operadorNome: ctx.operador.nome,
+          })
+          fitidsJaGravados.add(item.fitid)
+          baixados += 1
+        } else if (item.acao === 'LANCAR_AVULSO') {
+          await tx.insert(financeiroMovimentacoes).values({
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            contaBancariaId: d.conta_bancaria_id,
+            tipo: item.tipo,
+            categoria: 'CONCILIACAO_OFX',
+            dataMovimento: dataMov,
+            valor: toDec(item.valor, 2),
+            formaPagamento: forma,
+            historico: (item.historico || item.memo || `Lançamento OFX ${item.fitid}`).trim(),
+            ofxFitid: item.fitid,
+            ofxMemo: item.memo,
+            operadorId: ctx.operador.id,
+            operadorNome: ctx.operador.nome,
+          })
+          fitidsJaGravados.add(item.fitid)
+          lancadosAvulsos += 1
+        }
+      }
+
+      const saldoContaAtual = await recalcularSaldoConta(tx, ctx.tenantId, d.conta_bancaria_id)
+      return {
+        baixados,
+        lancados_avulsos: lancadosAvulsos,
+        ignorados,
+        duplicados_ignorados: duplicadosIgnorados,
+        saldo_conta_atual: saldoContaAtual,
+      }
+    })
+
+    return { success: true, ...resultado }
   })
 }
