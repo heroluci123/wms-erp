@@ -1284,7 +1284,6 @@ CREATE TABLE IF NOT EXISTS financeiro_movimentacoes (
 );
 CREATE INDEX IF NOT EXISTS idx_fin_mov_conta_data ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, data_movimento);
 CREATE INDEX IF NOT EXISTS idx_fin_mov_titulo ON financeiro_movimentacoes(titulo_id);
-CREATE INDEX IF NOT EXISTS idx_fin_mov_ofx_fitid ON financeiro_movimentacoes(tenant_id, conta_bancaria_id, ofx_fitid);
 `
 
 const POST_MIGRATIONS_SQL = `
