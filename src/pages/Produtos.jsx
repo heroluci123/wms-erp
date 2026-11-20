@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Search, Edit2, Trash2, X, Download, Save, Box, Layers } from 'lucide-react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { Plus, Search, Edit2, Trash2, X, Download, Save, Box, Layers, ChevronLeft, ChevronRight } from 'lucide-react'
 import * as produtosQueries from '../queries/produtos'
 import { ModalDialog } from '../components/shared/ModalDialog'
 import {
@@ -240,20 +240,63 @@ export function Produtos() {
   }
 
   const [filtroClassificacao, setFiltroClassificacao] = useState('TODOS')
+  const [paginaAtual, setPaginaAtual] = useState(1)
+  const [itensPorPagina, setItensPorPagina] = useState(50)
 
-  const filtrados = produtos.filter(p => {
-    const buscaOk = p.descricao.toLowerCase().includes(busca.toLowerCase()) ||
-      (p.codigo && String(p.codigo).toLowerCase().includes(busca.toLowerCase()))
-    
-    const classOk =
-      filtroClassificacao === 'TODOS' ? true :
-      filtroClassificacao === 'SEM_CLASSIFICACAO' ? !p.classificacao :
-      p.classificacao === filtroClassificacao
-    
-    return buscaOk && classOk
-  })
+  const contagens = useMemo(() => {
+    let mp = 0
+    let sub = 0
+    let sem = 0
+    for (const p of produtos) {
+      if (p.classificacao === 'MATERIA_PRIMA') mp += 1
+      else if (p.classificacao === 'SUBPRODUTO') sub += 1
+      else if (!p.classificacao) sem += 1
+    }
+    return {
+      TODOS: produtos.length,
+      MATERIA_PRIMA: mp,
+      SUBPRODUTO: sub,
+      SEM_CLASSIFICACAO: sem,
+    }
+  }, [produtos])
 
-  const materiasPrimas = produtos.filter(p => p.classificacao === 'MATERIA_PRIMA' && p.id !== formData.id)
+  const filtrados = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    return produtos.filter((p) => {
+      const buscaOk =
+        !q ||
+        (p.descricao && p.descricao.toLowerCase().includes(q)) ||
+        (p.codigo && String(p.codigo).toLowerCase().includes(q)) ||
+        (p.codigo_auxiliar && String(p.codigo_auxiliar).toLowerCase().includes(q)) ||
+        (p.ean && String(p.ean).toLowerCase().includes(q))
+
+      const classOk =
+        filtroClassificacao === 'TODOS'
+          ? true
+          : filtroClassificacao === 'SEM_CLASSIFICACAO'
+            ? !p.classificacao
+            : p.classificacao === filtroClassificacao
+
+      return buscaOk && classOk
+    })
+  }, [produtos, busca, filtroClassificacao])
+
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / itensPorPagina))
+  const paginaSegura = Math.min(paginaAtual, totalPaginas)
+  const indiceInicio = (paginaSegura - 1) * itensPorPagina
+  const paginados = useMemo(
+    () => filtrados.slice(indiceInicio, indiceInicio + itensPorPagina),
+    [filtrados, indiceInicio, itensPorPagina]
+  )
+
+  useEffect(() => {
+    setPaginaAtual(1)
+  }, [busca, filtroClassificacao, itensPorPagina])
+
+  const materiasPrimas = useMemo(
+    () => produtos.filter((p) => p.classificacao === 'MATERIA_PRIMA' && p.id !== formData.id),
+    [produtos, formData.id]
+  )
 
   return (
     <div className="fade-in" style={{ maxWidth: 1400, margin: '0 auto', paddingBottom: 24 }}>
@@ -355,13 +398,7 @@ export function Produtos() {
                   {f.value === 'SEM_CLASSIFICACAO' && filtroClassificacao !== 'SEM_CLASSIFICACAO'
                     ? `⚠️ ${f.label}`
                     : f.label}{' '}
-                  (
-                  {f.value === 'TODOS'
-                    ? produtos.length
-                    : f.value === 'SEM_CLASSIFICACAO'
-                      ? produtos.filter((p) => !p.classificacao).length
-                      : produtos.filter((p) => p.classificacao === f.value).length}
-                  )
+                  ({contagens[f.value] ?? 0})
                 </button>
               ))}
             </div>
@@ -386,7 +423,7 @@ export function Produtos() {
                 </tr>
               </thead>
               <tbody>
-                {filtrados.map((p) => (
+                {paginados.map((p) => (
                   <tr
                     key={p.id}
                     id={`row-produto-${p.id}`}
@@ -479,6 +516,87 @@ export function Produtos() {
             </table>
           )}
         </div>
+
+        {/* BARRA DE PAGINAÇÃO */}
+        {!loading && filtrados.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '12px 16px',
+              background: 'var(--bg-2)',
+              borderTop: '1px solid var(--border)',
+              fontSize: 12.5,
+            }}
+          >
+            <div className="text-muted">
+              Mostrando <strong style={{ color: 'var(--text-primary)' }}>{indiceInicio + 1}</strong>–
+              <strong style={{ color: 'var(--text-primary)' }}>
+                {Math.min(indiceInicio + itensPorPagina, filtrados.length)}
+              </strong>{' '}
+              de <strong style={{ color: 'var(--text-primary)' }}>{filtrados.length.toLocaleString('pt-BR')}</strong>{' '}
+              produtos
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <label className="text-muted flex items-center gap-6">
+                Por página:
+                <select
+                  className="form-input"
+                  style={{ width: 76, padding: '4px 8px', fontSize: 12 }}
+                  value={itensPorPagina}
+                  onChange={(e) => setItensPorPagina(Number(e.target.value))}
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                </select>
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  disabled={paginaSegura <= 1}
+                  onClick={() => setPaginaAtual(1)}
+                  title="Primeira página"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  disabled={paginaSegura <= 1}
+                  onClick={() => setPaginaAtual((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft size={14} /> Anterior
+                </button>
+                <span className="font-mono text-xs" style={{ padding: '0 6px', color: 'var(--text-secondary)' }}>
+                  Pág. {paginaSegura} / {totalPaginas}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  disabled={paginaSegura >= totalPaginas}
+                  onClick={() => setPaginaAtual((p) => Math.min(totalPaginas, p + 1))}
+                >
+                  Próxima <ChevronRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  disabled={paginaSegura >= totalPaginas}
+                  onClick={() => setPaginaAtual(totalPaginas)}
+                  title="Última página"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODAL DE NOVO / EDITAR PRODUTO — COM SCROLL LIMPO, CABEÇALHO/RODAPÉ FIXOS E Z-INDEX ACIMA DA SIDEBAR */}
