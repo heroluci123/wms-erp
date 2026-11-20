@@ -939,3 +939,264 @@ test('WMS Stage A: Paridade UI (Cadastros, EAN Editor, Consulta, Mover Endereco,
     await conn.close()
   }
 })
+
+test('WMS Parte 2E: Edicao de Pedidos em Separacao/Conferencia + Travas de Bipagem, Estoque e NF-e', async () => {
+  const { conn, app, headers, mpId, paId, taraId } = await setupBaseApp()
+  try {
+    // 1. Receber estoque: PA = 18 kg + 10 kg (28 kg), MP = 20 kg
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/caixa',
+      headers,
+      payload: {
+        ean_caixa: '7890007700011',
+        produto_id: paId,
+        endereco: 'A-01-01',
+        data_producao: '2026-11-16',
+        validade: '2026-12-30',
+        peso_bruto_kg: 19.0,
+        tara_id: taraId,
+        tara_kg: 1.0,
+        qtd_pecas: 4,
+      },
+    })
+    assert.equal(r1.statusCode, 201)
+
+    const r2 = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/caixa',
+      headers,
+      payload: {
+        ean_caixa: '7890007700028',
+        produto_id: paId,
+        endereco: 'A-01-01',
+        data_producao: '2026-11-16',
+        validade: '2026-12-30',
+        peso_bruto_kg: 11.0,
+        tara_id: taraId,
+        tara_kg: 1.0,
+        qtd_pecas: 2,
+      },
+    })
+    assert.equal(r2.statusCode, 201)
+
+    const r3 = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/caixa',
+      headers,
+      payload: {
+        ean_caixa: '7890007700035',
+        produto_id: mpId,
+        endereco: 'A-01-01',
+        data_producao: '2026-11-16',
+        validade: '2026-12-30',
+        peso_bruto_kg: 21.0,
+        tara_id: taraId,
+        tara_kg: 1.0,
+        qtd_pecas: 4,
+      },
+    })
+    assert.equal(r3.statusCode, 201)
+
+    // 2. Criar pedido liberado com PA (20kg) + MP (10kg) e iniciar separacao (EM_SEPARACAO, 0kg bipado)
+    const pedRes = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        liberar: true,
+        itens: [
+          { produto_id: paId, qtd_kg_solicitada: 20, qtd_caixas_solicitada: 1, preco_unitario: 45 },
+          { produto_id: mpId, qtd_kg_solicitada: 10, qtd_caixas_solicitada: 1, preco_unitario: 30 },
+        ],
+      },
+    })
+    assert.equal(pedRes.statusCode, 201)
+    const pedId = pedRes.json().id
+
+    const iniRes = await app.inject({
+      method: 'POST',
+      url: `/api/saida/iniciar-pedido/${pedId}`,
+      headers,
+    })
+    assert.equal(iniRes.statusCode, 200)
+    const romId = iniRes.json().romaneio.id
+
+    // 3. Ainda com 0kg bipado em EM_SEPARACAO -> pode remover MP e manter PA
+    const editZeroRes = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [{ produto_id: paId, qtd_kg_solicitada: 20, qtd_caixas_solicitada: 1, preco_unitario: 45 }],
+      },
+    })
+    assert.equal(editZeroRes.statusCode, 200, editZeroRes.body)
+    assert.equal(editZeroRes.json().status, 'EM_SEPARACAO')
+
+    // 4. Bipar 1 caixa de 18kg de PA no romaneio
+    const bip1 = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/caixa`,
+      headers,
+      payload: { ean_caixa: '7890007700011' },
+    })
+    assert.equal(bip1.statusCode, 200, bip1.body)
+    assert.equal(bip1.json().success, true)
+
+    // 5. TRAVA: tentar reduzir PA de 20kg para 17kg (< 18kg bipado) -> 409
+    const editMenorRes = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [{ produto_id: paId, qtd_kg_solicitada: 17, qtd_caixas_solicitada: 1, preco_unitario: 45 }],
+      },
+    })
+    assert.equal(editMenorRes.statusCode, 409)
+    assert.match(editMenorRes.json().error, /Trava de Separação/i)
+
+    // 6. TRAVA: tentar excluir item PA que ja tem 18kg bipado -> 409
+    const editDelRes = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [{ produto_id: mpId, qtd_kg_solicitada: 10, qtd_caixas_solicitada: 1, preco_unitario: 30 }],
+      },
+    })
+    assert.equal(editDelRes.statusCode, 409)
+    assert.match(editDelRes.json().error, /Trava de Separação/i)
+
+    // 7. PERMITIDO: reduzir PA para 19kg (>= 18kg bipado) e incluir MP (10kg, tem 20kg em estoque)
+    const editOkRes = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao Atualizada',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [
+          { produto_id: paId, qtd_kg_solicitada: 19, qtd_caixas_solicitada: 1, preco_unitario: 45 },
+          { produto_id: mpId, qtd_kg_solicitada: 10, qtd_caixas_solicitada: 1, preco_unitario: 30 },
+        ],
+      },
+    })
+    assert.equal(editOkRes.statusCode, 200, editOkRes.body)
+    assert.equal(editOkRes.json().status, 'EM_SEPARACAO')
+    assert.equal(editOkRes.json().trava_estoque, false)
+
+    // 8. TRAVA ESTOQUE NA EDICAO: aumentar PA para 50kg (falta 32kg, so tem 10kg disponivel) -> BLOQUEADO_ESTOQUE
+    const editTravaEstRes = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao Atualizada',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [{ produto_id: paId, qtd_kg_solicitada: 50, qtd_caixas_solicitada: 3, preco_unitario: 45 }],
+      },
+    })
+    assert.equal(editTravaEstRes.statusCode, 200, editTravaEstRes.body)
+    assert.equal(editTravaEstRes.json().status, 'BLOQUEADO_ESTOQUE')
+    assert.equal(editTravaEstRes.json().trava_estoque, true)
+    assert.ok(editTravaEstRes.json().motivo_trava.length > 0)
+
+    // Enquanto BLOQUEADO_ESTOQUE, nao pode bipar novas caixas no romaneio
+    const bipBloq = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/caixa`,
+      headers,
+      payload: { ean_caixa: '7890007700028' },
+    })
+    assert.equal(bipBloq.statusCode, 409)
+    assert.match(bipBloq.json().error, /Trava de Estoque/i)
+
+    // 9. Liberar Cadeado deve restaurar para EM_SEPARACAO (pois ja possui romaneio ativo)
+    const libCadeado = await app.inject({
+      method: 'POST',
+      url: `/api/pedidos/${pedId}/liberar`,
+      headers,
+      payload: { ignorar_trava_estoque: true },
+    })
+    assert.equal(libCadeado.statusCode, 200, libCadeado.body)
+    assert.equal(libCadeado.json().status, 'EM_SEPARACAO')
+
+    // 10. Ajustar PA para 18kg exatos (= bipado) e finalizar separacao -> AGUARDANDO_CONFERENCIA
+    const editExato = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao Atualizada',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [{ produto_id: paId, qtd_kg_solicitada: 18, qtd_caixas_solicitada: 1, preco_unitario: 45 }],
+      },
+    })
+    assert.equal(editExato.statusCode, 200, editExato.body)
+
+    const finRes = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/finalizar-montagem`,
+      headers,
+    })
+    assert.equal(finRes.statusCode, 200, finRes.body)
+
+    // 11. Em AGUARDANDO_CONFERENCIA, incluir novo item MP (10kg) reabre para EM_SEPARACAO
+    const editReabrir = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Carga Edicao Separacao Atualizada',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [
+          { produto_id: paId, qtd_kg_solicitada: 18, qtd_caixas_solicitada: 1, preco_unitario: 45 },
+          { produto_id: mpId, qtd_kg_solicitada: 10, qtd_caixas_solicitada: 1, preco_unitario: 30 },
+        ],
+      },
+    })
+    assert.equal(editReabrir.statusCode, 200, editReabrir.body)
+    assert.equal(editReabrir.json().status, 'EM_SEPARACAO')
+    assert.equal(editReabrir.json().reaberto_para_separacao, true)
+
+    // 12. Emitir NF-e autorizada -> bloqueia novas edicoes (409)
+    const nfRes = await app.inject({
+      method: 'POST',
+      url: `/api/fiscal/notas/emitir-pedido/${pedId}`,
+      headers,
+      payload: {
+        modelo: '55',
+        mod_frete: '9',
+      },
+    })
+    assert.equal(nfRes.statusCode, 201, nfRes.body)
+
+    const editAposNf = await app.inject({
+      method: 'PUT',
+      url: `/api/pedidos/${pedId}`,
+      headers,
+      payload: {
+        titulo: 'Tentativa Pos NF',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        itens: [
+          { produto_id: paId, qtd_kg_solicitada: 18, qtd_caixas_solicitada: 1, preco_unitario: 45 },
+          { produto_id: mpId, qtd_kg_solicitada: 10, qtd_caixas_solicitada: 1, preco_unitario: 30 },
+        ],
+      },
+    })
+    assert.equal(editAposNf.statusCode, 409)
+    assert.match(editAposNf.json().error, /NF-e\/NFC-e autorizada/i)
+  } finally {
+    await app.close()
+    await conn.close()
+  }
+})

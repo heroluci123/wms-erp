@@ -310,6 +310,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             total_caixas_separadas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id"), 0)`,
             qtd_conferidas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id" AND ri.conferido = 1), 0)`,
             motivo_trava_raw: sql<string | null>`(SELECT ps.titulo FROM pendencias_setor ps WHERE ps.referencia_id = "pedidos"."id" AND ps.status != 'CONCLUIDA' ORDER BY ps.created_at DESC LIMIT 1)`,
+            tem_nf_autorizada: sql<boolean>`EXISTS (SELECT 1 FROM fiscal_notas fn WHERE fn.pedido_id = "pedidos"."id" AND fn.status = 'AUTORIZADA' AND fn.tipo_operacao = 'SAIDA')`,
           })
           .from(pedidos)
           .where(and(...conds))
@@ -346,6 +347,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           total_kg_solicitado: toNum(r.total_kg_solicitado, 0),
           total_kg_separado: toNum(r.total_kg_separado, 0),
           motivo_trava: limparMotivoTrava(r.motivo_trava_raw, r.status),
+          tem_nf_autorizada: Boolean(r.tem_nf_autorizada),
         })),
         kpis_gerais: kpisGerais,
         total_geral: totalGeral,
@@ -472,6 +474,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           grupo: produtos.grupo,
           estoque_disponivel_kg: sql<string>`COALESCE((SELECT ROUND(SUM(ec.peso_kg), 3) FROM estoque_caixas ec WHERE ec.tenant_id = ${ctx.tenantId} AND ec.filial_id = ${ctx.filialId} AND ec.produto_id = ${pedidosItens.produtoId} AND ec.status = 'DISPONIVEL'), 0)`,
           estoque_disponivel_caixas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM estoque_caixas ec WHERE ec.tenant_id = ${ctx.tenantId} AND ec.filial_id = ${ctx.filialId} AND ec.produto_id = ${pedidosItens.produtoId} AND ec.status = 'DISPONIVEL'), 0)`,
+          peso_medio_cx: sql<string>`COALESCE((SELECT ROUND(AVG(ec.peso_kg), 4) FROM estoque_caixas ec WHERE ec.tenant_id = ${ctx.tenantId} AND ec.filial_id = ${ctx.filialId} AND ec.produto_id = ${pedidosItens.produtoId} AND ec.status = 'DISPONIVEL'), ${produtos.pesoPadraoCx}, 0)`,
           kg_separado: romId
             ? sql<string>`COALESCE((SELECT ROUND(SUM(ri.peso_kg), 3) FROM romaneios_itens ri WHERE ri.romaneio_id = ${romId} AND ri.produto_id = ${pedidosItens.produtoId}), 0)`
             : sql<string>`'0.000'`,
@@ -511,7 +514,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             .orderBy(romaneiosItens.createdAt)
         : []
 
-      const [parcelasRows, vendRow, fpRow, lcRow, natRow] = await Promise.all([
+      const [parcelasRows, vendRow, fpRow, lcRow, natRow, nfAuthRow] = await Promise.all([
         conn.db
           .select()
           .from(pedidosParcelas)
@@ -529,6 +532,18 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         pedido.naturezaId
           ? conn.db.select({ descricao: naturezasOperacao.descricao }).from(naturezasOperacao).where(eq(naturezasOperacao.id, pedido.naturezaId)).limit(1)
           : Promise.resolve([]),
+        conn.db
+          .select({ id: fiscalNotas.id, numero: fiscalNotas.numero, serie: fiscalNotas.serie })
+          .from(fiscalNotas)
+          .where(
+            and(
+              eq(fiscalNotas.tenantId, ctx.tenantId),
+              eq(fiscalNotas.pedidoId, pedidoId),
+              eq(fiscalNotas.status, 'AUTORIZADA'),
+              eq(fiscalNotas.tipoOperacao, 'SAIDA'),
+            ),
+          )
+          .limit(1),
       ])
 
       return {
@@ -556,6 +571,8 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           origem_pedido: pedido.origemPedido,
           setor_solicitante: pedido.setorSolicitante,
           status: pedido.status,
+          tem_nf_autorizada: Boolean(nfAuthRow[0]),
+          nf_autorizada_numero: nfAuthRow[0]?.numero ?? null,
           rastreio_token: pedido.rastreioToken,
           criado_por_nome: pedido.criadoPorNome,
           created_at: pedido.createdAt,
@@ -583,6 +600,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             preco_unitario: toNum(it.preco_unitario, 0),
             desconto_pct: toNum(it.desconto_pct, 0),
             estoque_disponivel_kg: toNum(it.estoque_disponivel_kg, 0),
+            peso_medio_cx: toNum(it.peso_medio_cx, 0),
             kg_separado: toNum(it.kg_separado, 0),
           })),
           caixas: caixasRomaneio.map((c) => ({ ...c, peso_kg: toNum(c.peso_kg, 0) })),
@@ -849,25 +867,194 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         .where(and(eq(pedidos.id, pedidoId), eq(pedidos.tenantId, ctx.tenantId)))
         .limit(1)
       if (!atual) throw new HttpError(404, 'Pedido não encontrado.')
-      if (!['RASCUNHO', 'LIBERADO', 'BLOQUEADO_ESTOQUE'].includes(atual.status)) {
-        throw new HttpError(409, `Não é possível editar itens de um pedido no status ${atual.status}.`)
+      if (['EXPEDIDO', 'CANCELADO'].includes(atual.status)) {
+        throw new HttpError(409, `Não é possível editar um pedido no status ${atual.status}.`)
       }
 
-      let nextStatus =
-        body.liberar === true ? 'LIBERADO' : body.liberar === false ? 'RASCUNHO' : atual.status
-      let itensInsuficientes: Awaited<ReturnType<typeof verificarEstoquePedido>>['insuficientes'] = []
-      if (nextStatus === 'LIBERADO' && body.ignorar_trava_estoque !== true) {
-        const estoqueCheck = await verificarEstoquePedido(tx, {
-          tenantId: ctx.tenantId,
-          filialId: ctx.filialId,
-          ignorePedidoId: pedidoId,
-          itens: itensConsolidados,
-        })
-        if (!estoqueCheck.suficiente) {
-          nextStatus = 'BLOQUEADO_ESTOQUE'
-          itensInsuficientes = estoqueCheck.insuficientes
+      const [nfAutorizada] = await tx
+        .select({ id: fiscalNotas.id, numero: fiscalNotas.numero, serie: fiscalNotas.serie })
+        .from(fiscalNotas)
+        .where(
+          and(
+            eq(fiscalNotas.tenantId, ctx.tenantId),
+            eq(fiscalNotas.pedidoId, pedidoId),
+            eq(fiscalNotas.status, 'AUTORIZADA'),
+            eq(fiscalNotas.tipoOperacao, 'SAIDA'),
+          ),
+        )
+        .limit(1)
+      if (nfAutorizada) {
+        throw new HttpError(
+          409,
+          `Pedido já possui NF-e/NFC-e autorizada (Nº ${nfAutorizada.numero} / Série ${nfAutorizada.serie}) e não pode ser editado. Cancele a nota fiscal antes de alterar o pedido.`,
+        )
+      }
+
+      const [itensAnteriores, romAtivoRows, bipadoRows] = await Promise.all([
+        tx
+          .select({
+            produtoId: pedidosItens.produtoId,
+            qtdKgSolicitada: pedidosItens.qtdKgSolicitada,
+          })
+          .from(pedidosItens)
+          .where(eq(pedidosItens.pedidoId, pedidoId)),
+        tx
+          .select()
+          .from(romaneios)
+          .where(
+            and(
+              eq(romaneios.pedidoId, pedidoId),
+              eq(romaneios.tenantId, ctx.tenantId),
+              sql`${romaneios.status} != 'EXPEDIDO'`,
+            ),
+          )
+          .orderBy(desc(romaneios.createdAt))
+          .limit(1),
+        tx
+          .select({
+            produto_id: romaneiosItens.produtoId,
+            kg_bipado: sql<string>`COALESCE(ROUND(SUM(${romaneiosItens.pesoKg}), 3), 0)`,
+            caixas_bipadas: sql<number>`COUNT(*)::int`,
+            codigo: produtos.codigo,
+            descricao: produtos.descricao,
+          })
+          .from(romaneiosItens)
+          .innerJoin(romaneios, eq(romaneios.id, romaneiosItens.romaneioId))
+          .innerJoin(produtos, eq(produtos.id, romaneiosItens.produtoId))
+          .where(and(eq(romaneios.pedidoId, pedidoId), eq(romaneios.tenantId, ctx.tenantId)))
+          .groupBy(romaneiosItens.produtoId, produtos.codigo, produtos.descricao),
+      ])
+
+      const romAtivo = romAtivoRows[0] || null
+      const bipadoMap = new Map(
+        bipadoRows.map((r) => [
+          r.produto_id,
+          {
+            kg_bipado: toNum(r.kg_bipado, 0),
+            caixas_bipadas: Number(r.caixas_bipadas || 0),
+            codigo: r.codigo || '',
+            descricao: r.descricao || 'Produto',
+          },
+        ]),
+      )
+      const anterioresMap = new Map(
+        itensAnteriores.map((a) => [a.produtoId, toNum(a.qtdKgSolicitada, 0)]),
+      )
+      const novosMap = new Map(itensConsolidados.map((it) => [it.produto_id, it]))
+
+      // Trava 1: Não permitir excluir item que já teve caixa/peso bipado no romaneio
+      for (const ant of itensAnteriores) {
+        const bip = bipadoMap.get(ant.produtoId)
+        if (bip && (bip.kg_bipado > 0 || bip.caixas_bipadas > 0) && !novosMap.has(ant.produtoId)) {
+          const label = `${bip.codigo ? `[${bip.codigo}] ` : ''}${bip.descricao}`
+          throw new HttpError(
+            409,
+            `Trava de Separação: o item ${label} já possui ${bip.kg_bipado.toFixed(2)} kg (${bip.caixas_bipadas} cx) bipados e não pode ser removido do pedido. Estorne a(s) caixa(s) na Separação antes de excluir.`,
+          )
         }
       }
+
+      // Trava 2 e 3: Não permitir reduzir peso ou caixas abaixo do que já foi bipado
+      for (const it of itensConsolidados) {
+        const bip = bipadoMap.get(it.produto_id)
+        if (!bip) continue
+        const label = `${bip.codigo ? `[${bip.codigo}] ` : ''}${bip.descricao}`
+        if (bip.kg_bipado > 0 && it.qtd_kg_solicitada + 0.001 < bip.kg_bipado) {
+          throw new HttpError(
+            409,
+            `Trava de Separação: o item ${label} já teve ${bip.kg_bipado.toFixed(2)} kg (${bip.caixas_bipadas} cx) bipados. Não é possível reduzir o pedido para ${it.qtd_kg_solicitada.toFixed(2)} kg (mínimo permitido: ${bip.kg_bipado.toFixed(2)} kg).`,
+          )
+        }
+        if (
+          bip.caixas_bipadas > 0 &&
+          it.qtd_caixas_solicitada != null &&
+          it.qtd_caixas_solicitada < bip.caixas_bipadas
+        ) {
+          throw new HttpError(
+            409,
+            `Trava de Separação: o item ${label} já possui ${bip.caixas_bipadas} caixa(s) bipada(s). Não é possível reduzir Caixas Previstas para ${it.qtd_caixas_solicitada} cx (mínimo permitido: ${bip.caixas_bipadas} cx).`,
+          )
+        }
+      }
+
+      // Estoque necessário adicional = solicitado menos o que já está reservado/bipado neste pedido
+      const itensFaltandoSeparar = itensConsolidados
+        .map((it) => {
+          const jaBipado = bipadoMap.get(it.produto_id)?.kg_bipado || 0
+          return {
+            produto_id: it.produto_id,
+            qtd_kg_solicitada: Math.max(0, Number((it.qtd_kg_solicitada - jaBipado).toFixed(3))),
+          }
+        })
+        .filter((it) => it.qtd_kg_solicitada > 0.001)
+
+      const jaEmOperacao = ['EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(atual.status)
+      let reabertoParaSeparacao = false
+      let nextStatus = atual.status
+      let itensInsuficientes: Awaited<ReturnType<typeof verificarEstoquePedido>>['insuficientes'] = []
+
+      if (jaEmOperacao) {
+        if (body.ignorar_trava_estoque !== true && itensFaltandoSeparar.length > 0) {
+          const estoqueCheck = await verificarEstoquePedido(tx, {
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            ignorePedidoId: pedidoId,
+            itens: itensFaltandoSeparar,
+          })
+          if (!estoqueCheck.suficiente) {
+            nextStatus = 'BLOQUEADO_ESTOQUE'
+            itensInsuficientes = estoqueCheck.insuficientes
+          }
+        }
+        if (nextStatus !== 'BLOQUEADO_ESTOQUE' && ['AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(atual.status)) {
+          const temNovoOuAumentado = itensConsolidados.some((it) => {
+            const antKg = anterioresMap.get(it.produto_id)
+            const jaBipado = bipadoMap.get(it.produto_id)?.kg_bipado || 0
+            const faltando = it.qtd_kg_solicitada > jaBipado + 0.001
+            const aumentouOuNovo = antKg === undefined || it.qtd_kg_solicitada > antKg + 0.001
+            return faltando && aumentouOuNovo
+          })
+          if (temNovoOuAumentado) {
+            nextStatus = 'EM_SEPARACAO'
+            reabertoParaSeparacao = true
+            if (romAtivo && romAtivo.status !== 'MONTANDO') {
+              await tx
+                .update(romaneios)
+                .set({ status: 'MONTANDO', conferidoAt: null, operadorConferenciaNome: null })
+                .where(eq(romaneios.id, romAtivo.id))
+            }
+          }
+        }
+      } else {
+        nextStatus =
+          body.liberar === true ? 'LIBERADO' : body.liberar === false ? 'RASCUNHO' : atual.status
+        if (nextStatus === 'LIBERADO' && body.ignorar_trava_estoque !== true && itensFaltandoSeparar.length > 0) {
+          const estoqueCheck = await verificarEstoquePedido(tx, {
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            ignorePedidoId: pedidoId,
+            itens: itensFaltandoSeparar,
+          })
+          if (!estoqueCheck.suficiente) {
+            nextStatus = 'BLOQUEADO_ESTOQUE'
+            itensInsuficientes = estoqueCheck.insuficientes
+          }
+        }
+        if (nextStatus === 'LIBERADO' && romAtivo) {
+          if (romAtivo.status === 'MONTANDO' || itensFaltandoSeparar.length > 0) {
+            nextStatus = 'EM_SEPARACAO'
+            if (romAtivo.status !== 'MONTANDO') {
+              await tx
+                .update(romaneios)
+                .set({ status: 'MONTANDO', conferidoAt: null, operadorConferenciaNome: null })
+                .where(eq(romaneios.id, romAtivo.id))
+            }
+          } else {
+            nextStatus = 'AGUARDANDO_CONFERENCIA'
+          }
+        }
+      }
+
       const valorTotal = itensConsolidados.reduce(
         (acc, it) =>
           acc + Math.max(0, it.qtd_kg_solicitada * it.preco_unitario * (1 - it.desconto_pct / 100) - it.desconto_valor),
@@ -881,6 +1068,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             : null
           : atual.formaPagamentoId
 
+      const clienteFinal = body.cliente ? body.cliente.trim() : atual.cliente
+      const previsaoFinal = normalizarDataIso(body.previsao_entrega)
+
       await tx
         .update(pedidos)
         .set({
@@ -888,7 +1078,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           clienteId: body.cliente_id
             ? parseUuidOrBadRequest(body.cliente_id, 'cliente_id')
             : atual.clienteId,
-          cliente: body.cliente ? body.cliente.trim() : atual.cliente,
+          cliente: clienteFinal,
           vendedorId:
             body.vendedor_id !== undefined
               ? body.vendedor_id
@@ -915,14 +1105,28 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
                 ? 1
                 : 0
               : atual.pagamentoNaEntrega,
-          previsaoEntrega: normalizarDataIso(body.previsao_entrega),
+          previsaoEntrega: previsaoFinal,
           valorTotal: toDec(valorTotal, 2),
           observacoes: body.observacoes != null ? body.observacoes.trim() : atual.observacoes,
           status: nextStatus,
-          liberadoAt: nextStatus === 'LIBERADO' && !atual.liberadoAt ? new Date() : atual.liberadoAt,
+          liberadoAt:
+            ['LIBERADO', 'EM_SEPARACAO'].includes(nextStatus) && !atual.liberadoAt
+              ? new Date()
+              : atual.liberadoAt,
           updatedAt: new Date(),
         })
         .where(eq(pedidos.id, pedidoId))
+
+      if (romAtivo) {
+        const rotuloClienteRom = clienteFinal ? `${tituloTrim} (${clienteFinal})` : tituloTrim
+        await tx
+          .update(romaneios)
+          .set({
+            cliente: rotuloClienteRom,
+            previsaoEntrega: previsaoFinal,
+          })
+          .where(eq(romaneios.id, romAtivo.id))
+      }
 
       await tx.delete(pedidosItens).where(eq(pedidosItens.pedidoId, pedidoId))
       await tx.insert(pedidosItens).values(
@@ -968,21 +1172,29 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           filialId: ctx.filialId,
           pedidoId,
           codigoPedido: atual.codigo,
-          clienteNome: body.cliente ? body.cliente.trim() : atual.cliente,
+          clienteNome: clienteFinal,
           insuficientes: itensInsuficientes,
         })
       }
 
-      if (nextStatus === 'LIBERADO') {
+      if (['LIBERADO', 'EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(nextStatus)) {
         await tx
           .update(pendenciasSetor)
           .set({ status: 'CONCLUIDA', concluidaPorId: ctx.operador.id, concluidaAt: new Date() })
-          .where(and(eq(pendenciasSetor.tenantId, ctx.tenantId), eq(pendenciasSetor.referenciaId, pedidoId)))
+          .where(
+            and(
+              eq(pendenciasSetor.tenantId, ctx.tenantId),
+              eq(pendenciasSetor.referenciaId, pedidoId),
+              eq(pendenciasSetor.tipoPendencia, 'TRAVA_ESTOQUE_PEDIDO'),
+            ),
+          )
       }
 
       return {
         status: nextStatus,
         trava_estoque: nextStatus === 'BLOQUEADO_ESTOQUE',
+        motivo_trava: nextStatus === 'BLOQUEADO_ESTOQUE' ? formatarResumoTravaEstoque(itensInsuficientes) : '',
+        reaberto_para_separacao: reabertoParaSeparacao,
         itens_insuficientes: itensInsuficientes,
       }
     })
@@ -1004,28 +1216,61 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         .limit(1)
       if (!ped) throw new HttpError(404, 'Pedido não encontrado.')
       if (ped.status === 'LIBERADO') {
-        return { id: pedidoId, codigo: ped.codigo, status: 'LIBERADO', trava_estoque: false, itens_insuficientes: [] }
+        return { id: pedidoId, codigo: ped.codigo, status: 'LIBERADO', trava_estoque: false, motivo_trava: '', itens_insuficientes: [] }
       }
       if (!['RASCUNHO', 'BLOQUEADO_ESTOQUE'].includes(ped.status)) {
         throw new HttpError(400, 'Somente pedidos em RASCUNHO ou com Trava de Estoque podem ser liberados.')
       }
 
-      const itensPed = await tx
-        .select({ produto_id: pedidosItens.produtoId, qtd_kg_solicitada: pedidosItens.qtdKgSolicitada })
-        .from(pedidosItens)
-        .where(eq(pedidosItens.pedidoId, pedidoId))
-
-      const estoqueCheck = ignorarTrava
-        ? { suficiente: true, insuficientes: [] }
-        : await verificarEstoquePedido(tx, {
-            tenantId: ctx.tenantId,
-            filialId: ctx.filialId,
-            ignorePedidoId: pedidoId,
-            itens: itensPed.map((i) => ({
-              produto_id: i.produto_id,
-              qtd_kg_solicitada: toNum(i.qtd_kg_solicitada, 0),
-            })),
+      const [itensPed, romAtivoRows, bipadoRows] = await Promise.all([
+        tx
+          .select({ produto_id: pedidosItens.produtoId, qtd_kg_solicitada: pedidosItens.qtdKgSolicitada })
+          .from(pedidosItens)
+          .where(eq(pedidosItens.pedidoId, pedidoId)),
+        tx
+          .select()
+          .from(romaneios)
+          .where(
+            and(
+              eq(romaneios.pedidoId, pedidoId),
+              eq(romaneios.tenantId, ctx.tenantId),
+              sql`${romaneios.status} != 'EXPEDIDO'`,
+            ),
+          )
+          .orderBy(desc(romaneios.createdAt))
+          .limit(1),
+        tx
+          .select({
+            produto_id: romaneiosItens.produtoId,
+            kg_bipado: sql<string>`COALESCE(ROUND(SUM(${romaneiosItens.pesoKg}), 3), 0)`,
           })
+          .from(romaneiosItens)
+          .innerJoin(romaneios, eq(romaneios.id, romaneiosItens.romaneioId))
+          .where(and(eq(romaneios.pedidoId, pedidoId), eq(romaneios.tenantId, ctx.tenantId)))
+          .groupBy(romaneiosItens.produtoId),
+      ])
+
+      const romAtivo = romAtivoRows[0] || null
+      const bipadoMap = new Map(bipadoRows.map((b) => [b.produto_id, toNum(b.kg_bipado, 0)]))
+      const itensFaltando = itensPed
+        .map((i) => ({
+          produto_id: i.produto_id,
+          qtd_kg_solicitada: Math.max(
+            0,
+            Number((toNum(i.qtd_kg_solicitada, 0) - (bipadoMap.get(i.produto_id) || 0)).toFixed(3)),
+          ),
+        }))
+        .filter((i) => i.qtd_kg_solicitada > 0.001)
+
+      const estoqueCheck =
+        ignorarTrava || itensFaltando.length === 0
+          ? { suficiente: true, insuficientes: [] }
+          : await verificarEstoquePedido(tx, {
+              tenantId: ctx.tenantId,
+              filialId: ctx.filialId,
+              ignorePedidoId: pedidoId,
+              itens: itensFaltando,
+            })
 
       if (!estoqueCheck.suficiente) {
         await tx
@@ -1045,13 +1290,29 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           codigo: ped.codigo,
           status: 'BLOQUEADO_ESTOQUE',
           trava_estoque: true,
+          motivo_trava: formatarResumoTravaEstoque(estoqueCheck.insuficientes),
           itens_insuficientes: estoqueCheck.insuficientes,
+        }
+      }
+
+      let statusLiberado = 'LIBERADO'
+      if (romAtivo) {
+        if (romAtivo.status === 'MONTANDO' || itensFaltando.length > 0) {
+          statusLiberado = 'EM_SEPARACAO'
+          if (romAtivo.status !== 'MONTANDO') {
+            await tx
+              .update(romaneios)
+              .set({ status: 'MONTANDO', conferidoAt: null, operadorConferenciaNome: null })
+              .where(eq(romaneios.id, romAtivo.id))
+          }
+        } else {
+          statusLiberado = 'AGUARDANDO_CONFERENCIA'
         }
       }
 
       await tx
         .update(pedidos)
-        .set({ status: 'LIBERADO', liberadoAt: ped.liberadoAt || new Date(), updatedAt: new Date() })
+        .set({ status: statusLiberado, liberadoAt: ped.liberadoAt || new Date(), updatedAt: new Date() })
         .where(eq(pedidos.id, pedidoId))
       await tx
         .update(pendenciasSetor)
@@ -1066,7 +1327,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         operadorNome: ctx.operador.nome,
       })
 
-      return { id: pedidoId, codigo: ped.codigo, status: 'LIBERADO', trava_estoque: false, itens_insuficientes: [] }
+      return {
+        id: pedidoId,
+        codigo: ped.codigo,
+        status: statusLiberado,
+        trava_estoque: false,
+        motivo_trava: '',
+        itens_insuficientes: [],
+      }
     })
 
     return { success: true, ...resLib }
@@ -1810,6 +2078,12 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             .where(eq(pedidos.id, rom.pedidoId))
             .limit(1)
           pedidoRow = ped || null
+          if (pedidoRow?.status === 'BLOQUEADO_ESTOQUE') {
+            throw new HttpError(
+              409,
+              `Pedido ${pedidoRow.codigo} está com Trava de Estoque (cadeado). Libere o cadeado em Pedidos de Venda antes de bipar novas caixas.`,
+            )
+          }
 
           const [pedItem] = await tx
             .select()

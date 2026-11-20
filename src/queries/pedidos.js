@@ -580,7 +580,7 @@ export const pedidosQueries = {
     const check = await db.execute({ sql: 'SELECT id, status, cliente_id FROM pedidos WHERE id = ?', args: [id] })
     if (check.rows.length === 0) throw new Error('Pedido não encontrado.')
     const atual = check.rows[0]
-    if (!['RASCUNHO', 'LIBERADO'].includes(atual.status)) {
+    if (!['RASCUNHO', 'LIBERADO', 'BLOQUEADO_ESTOQUE', 'EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(atual.status)) {
       throw new Error(`Não é possível editar itens de um pedido no status ${atual.status}.`)
     }
 

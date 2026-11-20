@@ -27,7 +27,8 @@ import {
   Unlock,
   Calendar,
   ArrowUpDown,
-  RotateCcw
+  RotateCcw,
+  Save
 } from 'lucide-react'
 import { pedidosQueries } from '../queries/pedidos'
 import { cadastrosQueries } from '../queries/cadastros'
@@ -151,6 +152,7 @@ export function Pedidos() {
   // Formulário Novo / Editar Pedido
   const [editId, setEditId] = useState(null)
   const [editCodigo, setEditCodigo] = useState('')
+  const [editStatus, setEditStatus] = useState(null)
   const [titulo, setTitulo] = useState('')
   const [clienteIdSelecionado, setClienteIdSelecionado] = useState(null)
   const [origemWppForcada, setOrigemWppForcada] = useState(false)
@@ -452,6 +454,7 @@ export function Pedidos() {
   const resetarFormulario = () => {
     setEditId(null)
     setEditCodigo('')
+    setEditStatus(null)
     setTitulo('')
     setClienteIdSelecionado(clientePadrao?.id || null)
     setOrigemWppForcada(false)
@@ -580,10 +583,12 @@ export function Pedidos() {
 
     const itemExistente = itensForm.find((i) => String(i.produto_id) === String(produtoSelecionado.id))
     const kgJaNoPedido = Number(String(itemExistente?.qtd_kg_solicitada || 0).replace(',', '.') || 0)
+    const kgJaBipadoNoPedido = Number(itemExistente?.kg_separado || 0)
     const cxJaNoPedido = Number(
       String(itemExistente?.qtd_caixas_solicitada || 0).replace(',', '.') ||
         (pesoPorCx > 0 ? kgJaNoPedido / pesoPorCx : 0)
     )
+    const cxJaBipadoNoPedido = Number(itemExistente?.caixas_separadas || 0)
 
     const qtdDigitada = Number(String(qtdInput).replace(',', '.'))
     const qtdValida = Number.isFinite(qtdDigitada) && qtdDigitada > 0 ? qtdDigitada : 0
@@ -605,8 +610,10 @@ export function Pedidos() {
           ? Number((qtdValida / pesoPorCx).toFixed(2))
           : 0
 
-    const projetadoKg = Number((saldoAtualKg - kgJaNoPedido - lancamentoKg).toFixed(3))
-    const projetadoCx = Number((saldoAtualCx - cxJaNoPedido - lancamentoCx).toFixed(2))
+    const faltaKgNoPedido = Math.max(0, kgJaNoPedido + lancamentoKg - kgJaBipadoNoPedido)
+    const faltaCxNoPedido = Math.max(0, cxJaNoPedido + lancamentoCx - cxJaBipadoNoPedido)
+    const projetadoKg = Number((saldoAtualKg - faltaKgNoPedido).toFixed(3))
+    const projetadoCx = Number((saldoAtualCx - faltaCxNoPedido).toFixed(2))
 
     return {
       pesoMedioCadastro,
@@ -650,11 +657,17 @@ export function Pedidos() {
     try {
       const ped = await pedidosQueries.obterPedido(pedId)
       if (!ped) return toastError('Pedido não encontrado.')
-      if (!['RASCUNHO', 'LIBERADO', 'BLOQUEADO_ESTOQUE'].includes(ped.status)) {
-        return toastWarning('Somente pedidos em Rascunho, Trava de Estoque ou Liberado podem ser editados.')
+      if (['EXPEDIDO', 'CANCELADO'].includes(ped.status)) {
+        return toastWarning(`Pedidos no status ${STATUS_BADGE[ped.status]?.label || ped.status} não podem ser editados.`)
+      }
+      if (ped.tem_nf_autorizada) {
+        return toastWarning(
+          `Este pedido já possui NF-e/NFC-e autorizada${ped.nf_autorizada_numero ? ` (Nº ${ped.nf_autorizada_numero})` : ''} e não pode mais ser editado.`
+        )
       }
       setEditId(ped.id)
       setEditCodigo(ped.codigo)
+      setEditStatus(ped.status)
       setTitulo(ped.titulo || '')
       setClienteIdSelecionado(ped.cliente_id || clientePadrao?.id || null)
       setOrigemWppForcada(ped.origem_pedido === 'WHATSAPP')
@@ -672,23 +685,29 @@ export function Pedidos() {
       setPrevisaoEntrega(ped.previsao_entrega ? String(ped.previsao_entrega).slice(0, 10) : '')
       setObservacoes(ped.observacoes || '')
       setItensForm(
-        (ped.itens || []).map((it) => ({
-          produto_id: it.produto_id,
-          produto_codigo: it.produto_codigo,
-          produto_descricao: it.produto_descricao,
-          codigo_aux: it.codigo_aux || '',
-          saldo_kg: Number(it.estoque_disponivel_kg || 0),
-          qtd_caixas_estoque: Number(it.estoque_disponivel_caixas || 0),
-          peso_medio_cx: Number(it.peso_medio_cx || 0),
-          qtd_kg_solicitada: String(it.qtd_kg_solicitada),
-          qtd_caixas_solicitada: it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : '',
-          unidade_solicitada: it.unidade_solicitada === 'CX' ? 'CX' : 'KG',
-          qtd_solicitada_exibicao: it.qtd_solicitada_exibicao != null ? Number(it.qtd_solicitada_exibicao) : Number(it.qtd_kg_solicitada),
-          preco_unitario: it.preco_unitario != null ? String(it.preco_unitario) : '0',
-          cfop_aplicado: it.cfop_aplicado || '',
-          observacao: it.observacao || '',
-          alerta_reclamacao: it.alerta_reclamacao || '',
-        }))
+        (ped.itens || []).map((it) => {
+          const prodCatalogo = produtos.find((p) => String(p.id) === String(it.produto_id))
+          const pm = Number(it.peso_medio_cx || prodCatalogo?.peso_medio_cx || prodCatalogo?.peso_padrao_cx || 0)
+          return {
+            produto_id: it.produto_id,
+            produto_codigo: it.produto_codigo,
+            produto_descricao: it.produto_descricao,
+            codigo_aux: it.codigo_aux || '',
+            saldo_kg: Number(it.estoque_disponivel_kg || 0),
+            qtd_caixas_estoque: Number(it.estoque_disponivel_caixas || 0),
+            peso_medio_cx: pm,
+            qtd_kg_solicitada: String(it.qtd_kg_solicitada),
+            qtd_caixas_solicitada: it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : '',
+            unidade_solicitada: it.unidade_solicitada === 'CX' ? 'CX' : 'KG',
+            qtd_solicitada_exibicao: it.qtd_solicitada_exibicao != null ? Number(it.qtd_solicitada_exibicao) : Number(it.qtd_kg_solicitada),
+            preco_unitario: it.preco_unitario != null ? String(it.preco_unitario) : '0',
+            cfop_aplicado: it.cfop_aplicado || '',
+            observacao: it.observacao || '',
+            alerta_reclamacao: it.alerta_reclamacao || '',
+            kg_separado: Number(it.kg_separado || 0),
+            caixas_separadas: Number(it.caixas_separadas || 0),
+          }
+        })
       )
       limparCamposItem(false)
       setAba('FORM')
@@ -784,6 +803,8 @@ export function Pedidos() {
           cfop_aplicado: cfopSugerido?.cfop_completo || '',
           observacao: obsItemInput.trim(),
           alerta_reclamacao: espec?.alerta_reclamacao ? (espec.alerta_descricao || 'Reclamação anterior registrada') : '',
+          kg_separado: 0,
+          caixas_separadas: 0,
         }
       ]
     })
@@ -818,6 +839,28 @@ export function Pedidos() {
     if (!titulo.trim()) return toastWarning('Informe o Título do Pedido (será impresso no Romaneio de Embarque).')
     if (itensForm.length === 0) return toastWarning('Adicione pelo menos 1 item ao pedido.')
 
+    for (const i of itensForm) {
+      const kgSol = Number(String(i.qtd_kg_solicitada).replace(',', '.'))
+      const kgSep = Number(i.kg_separado || 0)
+      const cxSep = Number(i.caixas_separadas || 0)
+      const cxSol = i.qtd_caixas_solicitada !== '' && i.qtd_caixas_solicitada != null
+        ? Number(String(i.qtd_caixas_solicitada).replace(',', '.'))
+        : null
+      if (!Number.isFinite(kgSol) || kgSol <= 0) {
+        return toastWarning(`Informe um peso válido maior que zero para "${i.produto_descricao}".`)
+      }
+      if (kgSep > 0 && kgSol + 0.001 < kgSep) {
+        return toastError(
+          `Trava de Separação: "${i.produto_descricao}" já teve ${fmtKg(kgSep)} bipados (${cxSep} cx). Não é possível diminuir o pedido para ${fmtKg(kgSol)} (mínimo: ${fmtKg(kgSep)}).`
+        )
+      }
+      if (cxSep > 0 && cxSol !== null && cxSol < cxSep) {
+        return toastError(
+          `Trava de Separação: "${i.produto_descricao}" já possui ${cxSep} caixa(s) bipada(s). Não é possível diminuir Caixas Previstas para ${cxSol} cx.`
+        )
+      }
+    }
+
     const payloadItens = itensForm.map((i) => ({
       produto_id: i.produto_id,
       qtd_kg_solicitada: Number(String(i.qtd_kg_solicitada).replace(',', '.')),
@@ -835,6 +878,9 @@ export function Pedidos() {
 
     const cliId = clienteAtivo?.id || null
     const cliNome = clienteAtivo?.razao_social || 'BEEF CONTAINER LIMITADA'
+    const editEmOperacao = Boolean(
+      editId && ['EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(editStatus)
+    )
 
     setLoading(true)
     let savedId = editId
@@ -855,13 +901,19 @@ export function Pedidos() {
           previsao_entrega: previsaoEntrega || null,
           observacoes,
           itens: payloadItens,
-          liberar
+          liberar: editEmOperacao ? undefined : liberar
         })
         travaDisparada = Boolean(resEdit?.trava_estoque)
         if (travaDisparada) {
           toastWarning(
             `🔒 Trava (${editCodigo}): ${resEdit?.motivo_trava || 'Saldo insuficiente/comprometido'}. Pedido bloqueado com cadeado!`
           )
+        } else if (resEdit?.reaberto_para_separacao) {
+          toastSuccess(
+            `Pedido ${editCodigo} atualizado e reaberto para separação dos itens incluídos/alterados!`
+          )
+        } else if (editEmOperacao) {
+          toastSuccess(`Pedido ${editCodigo} atualizado com sucesso!`)
         } else {
           toastSuccess(
             liberar
@@ -1143,7 +1195,9 @@ export function Pedidos() {
       const prodLive = produtos.find((p) => String(p.id) === String(item.produto_id))
       const saldoKg = Number(prodLive?.saldo_kg ?? item.saldo_kg ?? 0)
       const solKg = Number(String(item.qtd_kg_solicitada).replace(',', '.') || 0)
-      return solKg > saldoKg + 0.001
+      const jaSepKg = Number(item.kg_separado || 0)
+      const restanteKg = Math.max(0, solKg - jaSepKg)
+      return restanteKg > saldoKg + 0.001
     })
   }, [itensForm, produtos])
 
@@ -1721,15 +1775,24 @@ export function Pedidos() {
                                   <Copy size={14} /> Clonar
                                 </button>
                               )}
-                              {['RASCUNHO', 'LIBERADO', 'BLOQUEADO_ESTOQUE'].includes(ped.status) && podeGerenciarPedidos && (
+                              {!['EXPEDIDO', 'CANCELADO'].includes(ped.status) && !ped.tem_nf_autorizada && podeGerenciarPedidos && (
                                 <button
                                   type="button"
                                   className="btn btn--secondary btn--sm"
-                                  title="Editar Pedido"
+                                  title="Editar Pedido (incluir itens ou ajustar pesos respeitando trava de bipagem)"
                                   onClick={() => abrirEditarPedido(ped.id)}
                                 >
                                   <Edit3 size={14} /> Editar
                                 </button>
+                              )}
+                              {!['EXPEDIDO', 'CANCELADO'].includes(ped.status) && ped.tem_nf_autorizada && (
+                                <span
+                                  className="badge badge--success"
+                                  style={{ fontSize: 11, padding: '4px 8px' }}
+                                  title="Pedido já faturado com NF-e autorizada — edição bloqueada"
+                                >
+                                  <Lock size={11} /> NF-e Emitida
+                                </span>
                               )}
                               {!['EXPEDIDO', 'CANCELADO'].includes(ped.status) && podeGerenciarPedidos && (
                                 <button
@@ -1758,7 +1821,14 @@ export function Pedidos() {
         <div className="card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
-              <h2 style={{ margin: 0 }}>{editId ? `Editando Pedido ${editCodigo}` : 'Novo Pedido de Saída'}</h2>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span>{editId ? `Editando Pedido ${editCodigo}` : 'Novo Pedido de Saída'}</span>
+                {editId && editStatus && STATUS_BADGE[editStatus] && (
+                  <span className={`badge ${STATUS_BADGE[editStatus].cls}`} style={{ fontSize: 12 }}>
+                    {STATUS_BADGE[editStatus].label}
+                  </span>
+                )}
+              </h2>
               <p className="text-muted text-xs" style={{ marginTop: '4px' }}>
                 Localize os produtos pelo código, pela descrição com autocomplete ou pela lupa, escolha KG ou CX e acompanhe o saldo projetado na hora.
               </p>
@@ -1774,6 +1844,29 @@ export function Pedidos() {
               Voltar ao Gerenciador
             </button>
           </div>
+
+          {editId && ['EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(editStatus) && (
+            <div
+              style={{
+                background: 'rgba(59, 130, 246, 0.12)',
+                border: '1px solid rgba(59, 130, 246, 0.4)',
+                borderRadius: 10,
+                padding: '10px 14px',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                color: '#bfdbfe',
+                fontSize: 12.5,
+              }}
+            >
+              <Lock size={16} style={{ color: '#60a5fa', flexShrink: 0 }} />
+              <div>
+                <strong>Edição em andamento ({STATUS_BADGE[editStatus]?.label || editStatus}):</strong> você pode incluir novos itens, aumentar pesos ou alterar itens ainda não bipados.
+                Itens que já tiveram caixas bipadas possuem <strong>trava mínima pelo peso/caixas já separados</strong> e não podem ser removidos sem estornar as caixas na Separação.
+              </div>
+            </div>
+          )}
 
           {/* Cartão automático do Cliente Padrão (BEEF CONTAINER LIMITADA) + opção futura de troca/cadastro */}
           <div
@@ -2468,10 +2561,17 @@ export function Pedidos() {
                     {itensForm.map((item, idx) => {
                       const kgNum = Number(String(item.qtd_kg_solicitada).replace(',', '.') || 0)
                       const cxNum = Number(String(item.qtd_caixas_solicitada).replace(',', '.') || 0)
+                      const kgBipado = Number(item.kg_separado || 0)
+                      const cxBipadas = Number(item.caixas_separadas || 0)
+                      const itemTemBipagem = kgBipado > 0 || cxBipadas > 0
+                      const kgAbaixoBipado = kgBipado > 0 && kgNum + 0.001 < kgBipado
+                      const cxAbaixoBipado = cxBipadas > 0 && item.qtd_caixas_solicitada !== '' && cxNum < cxBipadas
                       const precoNum = Number(String(item.preco_unitario || 0).replace(',', '.') || 0)
                       const subtotalItem = kgNum * precoNum
-                      const projKg = Number((Number(item.saldo_kg || 0) - kgNum).toFixed(2))
-                      const projCx = Number((Number(item.qtd_caixas_estoque || 0) - cxNum).toFixed(2))
+                      const restanteKg = Math.max(0, kgNum - kgBipado)
+                      const restanteCx = Math.max(0, cxNum - cxBipadas)
+                      const projKg = Number((Number(item.saldo_kg || 0) - restanteKg).toFixed(2))
+                      const projCx = Number((Number(item.qtd_caixas_estoque || 0) - restanteCx).toFixed(2))
                       const abaixoEstoque = projKg < 0
                       return (
                         <tr key={item.produto_id}>
@@ -2481,6 +2581,26 @@ export function Pedidos() {
                           </td>
                           <td>
                             <div style={{ fontWeight: 700 }}>{item.produto_descricao}</div>
+                            {itemTemBipagem && (
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  marginTop: '4px',
+                                  marginRight: '6px',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  background: kgAbaixoBipado || cxAbaixoBipado ? 'rgba(239, 68, 68, 0.2)' : 'rgba(59, 130, 246, 0.16)',
+                                  border: kgAbaixoBipado || cxAbaixoBipado ? '1px solid #ef4444' : '1px solid rgba(96, 165, 250, 0.45)',
+                                  color: kgAbaixoBipado || cxAbaixoBipado ? '#fca5a5' : '#93c5fd',
+                                  fontSize: '11px',
+                                  fontWeight: 700
+                                }}
+                              >
+                                <Lock size={11} /> Bipado: {fmtKg(kgBipado)} ({cxBipadas} cx) — mín. {fmtKg(kgBipado)}
+                              </div>
+                            )}
                             {item.alerta_reclamacao && (
                               <div className="badge badge--warning" style={{ fontSize: 10.5, marginTop: 4 }}>
                                 ⚠️ {item.alerta_reclamacao}
@@ -2514,8 +2634,10 @@ export function Pedidos() {
                             <input
                               type="number"
                               step="0.01"
-                              min="0.01"
+                              min={kgBipado > 0 ? kgBipado : 0.01}
                               className="form-input font-mono"
+                              style={kgAbaixoBipado ? { borderColor: '#ef4444', boxShadow: '0 0 0 1px #ef4444' } : undefined}
+                              title={kgBipado > 0 ? `Mínimo permitido: ${fmtKg(kgBipado)} já bipados` : undefined}
                               value={item.qtd_kg_solicitada}
                               onChange={(e) => {
                                 const v = e.target.value
@@ -2524,26 +2646,37 @@ export function Pedidos() {
                                   prev.map((r, i) => {
                                     if (i !== idx) return r
                                     const pm = Number(r.peso_medio_cx || 0)
+                                    const minCx = Math.max(1, Number(r.caixas_separadas || 0))
                                     return {
                                       ...r,
                                       qtd_kg_solicitada: v,
                                       unidade_solicitada: 'KG',
                                       qtd_solicitada_exibicao: kg > 0 ? kg : r.qtd_solicitada_exibicao,
-                                      qtd_caixas_solicitada: pm > 0 && kg > 0 ? String(Math.max(1, Math.round(kg / pm))) : r.qtd_caixas_solicitada
+                                      qtd_caixas_solicitada: pm > 0 && kg > 0 ? String(Math.max(minCx, Math.round(kg / pm))) : r.qtd_caixas_solicitada
                                     }
                                   })
                                 )
                               }}
                             />
+                            {kgAbaixoBipado && (
+                              <div style={{ color: '#f87171', fontSize: 10.5, fontWeight: 700, marginTop: 3 }}>
+                                Mín. {fmtKg(kgBipado)} bipados
+                              </div>
+                            )}
                           </td>
                           <td>
                             <input
                               type="number"
                               step="1"
-                              min="1"
+                              min={Math.max(1, cxBipadas)}
                               className="form-input font-mono"
+                              style={cxAbaixoBipado ? { borderColor: '#ef4444', boxShadow: '0 0 0 1px #ef4444' } : undefined}
                               placeholder="1"
-                              title="Somente números inteiros (1 ou mais caixas, sem vírgula)"
+                              title={
+                                cxBipadas > 0
+                                  ? `Mínimo permitido: ${cxBipadas} caixa(s) já bipada(s)`
+                                  : 'Somente números inteiros (1 ou mais caixas, sem vírgula)'
+                              }
                               value={item.qtd_caixas_solicitada}
                               onKeyDown={(e) => {
                                 if (['.', ',', 'e', 'E', '-', '+'].includes(e.key)) {
@@ -2570,6 +2703,11 @@ export function Pedidos() {
                                 )
                               }}
                             />
+                            {cxAbaixoBipado && (
+                              <div style={{ color: '#f87171', fontSize: 10.5, fontWeight: 700, marginTop: 3 }}>
+                                Mín. {cxBipadas} cx bipadas
+                              </div>
+                            )}
                           </td>
                           {apiAtiva && (
                             <td>
@@ -2610,13 +2748,30 @@ export function Pedidos() {
                             />
                           </td>
                           <td style={{ textAlign: 'right' }}>
-                            <button
-                              type="button"
-                              className="btn btn--danger btn--sm"
-                              onClick={() => setItensForm((prev) => prev.filter((_, i) => i !== idx))}
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            {itemTemBipagem ? (
+                              <button
+                                type="button"
+                                className="btn btn--secondary btn--sm"
+                                style={{ opacity: 0.7, cursor: 'not-allowed' }}
+                                title={`Item já possui ${fmtKg(kgBipado)} (${cxBipadas} cx) bipados e não pode ser removido`}
+                                onClick={() =>
+                                  toastError(
+                                    `Trava de Separação: "${item.produto_descricao}" já possui ${fmtKg(kgBipado)} (${cxBipadas} cx) bipados e não pode ser removido. Estorne as caixas na Separação primeiro.`
+                                  )
+                                }
+                              >
+                                <Lock size={14} />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn--danger btn--sm"
+                                title="Remover item do pedido"
+                                onClick={() => setItensForm((prev) => prev.filter((_, i) => i !== idx))}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       )
@@ -2695,6 +2850,26 @@ export function Pedidos() {
               <button type="button" className="btn btn--warning" disabled={loading} onClick={() => handleSalvarPedido(false)}>
                 <DollarSign size={16} /> Enviar Solicitação p/ Fila Supply Chain
               </button>
+            ) : editId && ['EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(editStatus) ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={loading}
+                  onClick={() => {
+                    resetarFormulario()
+                    setAba('GERENCIADOR')
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button type="button" className="btn btn--success" disabled={loading} onClick={() => handleSalvarPedido(undefined)}>
+                  <Save size={16} /> Salvar Alterações do Pedido
+                </button>
+                <button type="button" className="btn btn--primary" disabled={loading} onClick={() => handleSalvarPedido(undefined, { imprimirApos: true })}>
+                  <Printer size={16} /> Salvar &amp; Imprimir Folha Atualizada
+                </button>
+              </>
             ) : (
               <>
                 <button type="button" className="btn btn--secondary" disabled={loading} onClick={() => handleSalvarPedido(false)}>
@@ -2912,7 +3087,22 @@ export function Pedidos() {
               </>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
+              {!['EXPEDIDO', 'CANCELADO'].includes(pedidoDetalhe.status) &&
+                !pedidoDetalhe.tem_nf_autorizada &&
+                podeGerenciarPedidos && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => {
+                      const idAlvo = pedidoDetalhe.id
+                      setPedidoDetalhe(null)
+                      abrirEditarPedido(idAlvo)
+                    }}
+                  >
+                    <Edit3 size={15} /> Editar Pedido
+                  </button>
+                )}
               <button
                 type="button"
                 className="btn btn--secondary"
