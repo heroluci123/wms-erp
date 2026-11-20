@@ -856,6 +856,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
             unidade: produtos.unidade,
             qtdKg: pedidosItens.qtdKgSolicitada,
             precoUnit: pedidosItens.precoUnitario,
+            descontoPct: pedidosItens.descontoPct,
             descontoVal: pedidosItens.descontoValor,
             cfopAplicado: pedidosItens.cfopAplicado,
           })
@@ -956,6 +957,12 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
     const itensRaw = itensPed.map((it) => {
       const real = pesoRealPorProd.get(it.produtoId)
       const qtd = real && real.liq > 0 ? real.liq : toNum(it.qtdKg, 0)
+      const precoUnit = toNum(it.precoUnit, 0)
+      const brutoItem = qtd * precoUnit
+      const descPct = toNum(it.descontoPct, 0)
+      const descFixo = toNum(it.descontoVal, 0)
+      const descPctVal = descPct > 0 ? Number(((brutoItem * descPct) / 100).toFixed(2)) : 0
+      const valorDesconto = Math.min(brutoItem, Number((descPctVal + descFixo).toFixed(2)))
       return {
         produtoId: it.produtoId,
         codigo: it.codigo || '001',
@@ -966,11 +973,13 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         cfopExplicito: it.cfopAplicado || '',
         unidade: 'KG',
         qtd,
-        valorUnitario: toNum(it.precoUnit, 0),
-        valorDesconto: toNum(it.descontoVal, 0),
+        valorUnitario: precoUnit,
+        valorDesconto,
         lote: real?.lote || '',
       }
     })
+
+    const observacaoNf = String(ped.observacaoNf || '').trim()
 
     return {
       ped,
@@ -985,6 +994,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
       duplicatas,
       vendedorNome,
       condicaoPagamentoLabel,
+      observacaoNf,
       sugestaoTransporte: {
         transportadora_id: sugTranspId,
         veiculo_placa: sugPlaca,
@@ -1011,6 +1021,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
       duplicatas,
       vendedorNome,
       condicaoPagamentoLabel,
+      observacaoNf,
       sugestaoTransporte,
     } = await montarDadosPedidoFiscal(conn.db, ctx.tenantId, ctx.filialId, pedidoId)
 
@@ -1058,6 +1069,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
       destinatario,
       vendedor_nome: vendedorNome,
       condicao_pagamento_label: condicaoPagamentoLabel,
+      observacao_nf: observacaoNf,
       duplicatas,
       sugestao_transporte: sugestaoTransporte,
       itens: itensCalc,
@@ -1150,6 +1162,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
           `Pedido: ${dados.ped.codigo}`,
           dados.vendedorNome ? `Vendedor: ${dados.vendedorNome}` : '',
           dados.condicaoPagamentoLabel ? `Cond. Pagto: ${dados.condicaoPagamentoLabel}` : '',
+          dados.observacaoNf || '',
           body.inf_complementar?.trim() || '',
         ]
           .filter(Boolean)
@@ -1272,6 +1285,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
             `Pedido: ${dados.ped.codigo}`,
             dados.vendedorNome ? `Vendedor: ${dados.vendedorNome}` : '',
             dados.condicaoPagamentoLabel ? `Cond. Pagto: ${dados.condicaoPagamentoLabel}` : '',
+            dados.observacaoNf || '',
             item.inf_complementar?.trim() || body.inf_complementar?.trim() || '',
           ]
             .filter(Boolean)

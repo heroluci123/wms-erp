@@ -397,6 +397,7 @@ export const pedidos = pgTable(
     previsaoEntrega: date('previsao_entrega'),
     valorTotal: numeric('valor_total', { precision: 14, scale: 2 }).notNull().default('0'),
     observacoes: text('observacoes').notNull().default(''),
+    observacaoNf: text('observacao_nf').notNull().default(''),
     origemPedido: text('origem_pedido').notNull().default('SUPPLY_CHAIN'), // SUPPLY_CHAIN | FINANCEIRO | WHATSAPP | VENDEDOR | PORTAL | SISTEMA
     setorSolicitante: text('setor_solicitante').notNull().default('SUPPLY_CHAIN'),
     status: text('status').notNull().default('LIBERADO'),

@@ -1523,6 +1523,7 @@ ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS especie_volumes TEXT NOT NULL 
 ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS duplicatas_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS vendedor_nome TEXT NOT NULL DEFAULT '';
 ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS condicao_pagamento_label TEXT NOT NULL DEFAULT '';
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS observacao_nf TEXT NOT NULL DEFAULT '';
 `
 
 export interface SeedDefaultsResult {

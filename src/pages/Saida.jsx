@@ -17,7 +17,11 @@ import {
   ShieldAlert,
   CheckSquare,
   Search,
-  Tag
+  Tag,
+  Lock,
+  FileCheck2,
+  Calendar,
+  X
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { temPermissao } from '../utils/permissoes'
@@ -53,6 +57,8 @@ export function Saida() {
   const [pedidosFila, setPedidosFila] = useState([])
   const [romaneiosAvulsosAbertos, setRomaneiosAvulsosAbertos] = useState([])
   const [romaneioAtual, setRomaneioAtual] = useState(null)
+  const [sepBusca, setSepBusca] = useState('')
+  const [sepDataSaida, setSepDataSaida] = useState('')
 
   // Emergência: romaneio avulso escondido
   const [mostrarEmergencia, setMostrarEmergencia] = useState(false)
@@ -72,6 +78,10 @@ export function Saida() {
   const [romaneioConfAtual, setRomaneioConfAtual] = useState(null)
   const [confCodigoInput, setConfCodigoInput] = useState('')
   const [confErroBanner, setConfErroBanner] = useState('')
+  const [expBusca, setExpBusca] = useState('')
+  const [expDataInicio, setExpDataInicio] = useState('')
+  const [expDataFim, setExpDataFim] = useState('')
+  const [expFiltroFiscal, setExpFiltroFiscal] = useState('TODOS') // 'TODOS' | 'LIBERADOS' | 'BLOQUEADOS'
   const confInputRef = useRef(null)
 
   // Histórico
@@ -141,10 +151,16 @@ export function Saida() {
       setRomaneiosExpedicao(lista)
       const alvoId = manterSelecionadoId ?? romaneioConfAtual?.id
       if (alvoId) {
-        if (lista.some((r) => r.id === alvoId)) {
+        const alvoRow = lista.find((r) => r.id === alvoId)
+        if (alvoRow && !alvoRow.bloqueado_sem_nf) {
           const det = await saidaQueries.detalhesRomaneio(alvoId)
-          setRomaneioConfAtual(det)
+          setRomaneioConfAtual(det?.bloqueado_sem_nf ? null : det)
         } else {
+          if (alvoRow?.bloqueado_sem_nf && manterSelecionadoId) {
+            toastWarning(
+              `🔒 Conferência bloqueada: ${alvoRow.pedido_codigo || alvoRow.codigo} ainda não foi faturado. Emita a NF-e no Módulo Fiscal para liberar.`
+            )
+          }
           setRomaneioConfAtual(null)
         }
       }
@@ -393,6 +409,12 @@ export function Saida() {
   const processarBipeConferencia = async (codigo) => {
     const clean = String(codigo || '').trim()
     if (!clean || !romaneioConfAtual) return
+    if (romaneioConfAtual.bloqueado_sem_nf) {
+      const msg = `Conferência bloqueada: o pedido ${romaneioConfAtual.pedido_codigo || romaneioConfAtual.codigo} ainda não possui NF-e autorizada.`
+      setConfErroBanner(msg)
+      toastError(msg)
+      return
+    }
     setConfCodigoInput('')
     setConfErroBanner('')
 
@@ -514,6 +536,58 @@ export function Saida() {
     }
   }, [romaneiosHistorico])
 
+  const pedidosFilaFiltrados = useMemo(() => {
+    const q = sepBusca.trim().toLowerCase()
+    return pedidosFila.filter((ped) => {
+      if (q) {
+        const alvo = `${ped.codigo || ''} ${ped.romaneio_codigo || ''} ${ped.titulo || ''} ${ped.cliente || ''}`.toLowerCase()
+        if (!alvo.includes(q)) return false
+      }
+      if (sepDataSaida) {
+        const prevIso = ped.previsao_entrega ? String(ped.previsao_entrega).slice(0, 10) : ''
+        if (prevIso !== sepDataSaida) return false
+      }
+      return true
+    })
+  }, [pedidosFila, sepBusca, sepDataSaida])
+
+  const resumoExp = useMemo(() => {
+    let liberados = 0
+    let bloqueados = 0
+    let faturados = 0
+    let travaAtiva = false
+    for (const r of romaneiosExpedicao) {
+      if (r.exigir_nf_para_expedir) travaAtiva = true
+      if (r.tem_nf_autorizada) faturados += 1
+      if (r.bloqueado_sem_nf) bloqueados += 1
+      else liberados += 1
+    }
+    return { liberados, bloqueados, faturados, travaAtiva }
+  }, [romaneiosExpedicao])
+
+  const romaneiosExpedicaoFiltrados = useMemo(() => {
+    const q = expBusca.trim().toLowerCase()
+    const filtrados = romaneiosExpedicao.filter((r) => {
+      if (expFiltroFiscal === 'LIBERADOS' && r.bloqueado_sem_nf) return false
+      if (expFiltroFiscal === 'BLOQUEADOS' && !r.bloqueado_sem_nf) return false
+      if (q) {
+        const alvo = `${r.codigo || ''} ${r.pedido_codigo || ''} ${r.pedido_titulo || ''} ${r.pedido_cliente || ''} ${r.cliente || ''} ${r.numero_nf || ''} ${r.operador_nome || ''}`.toLowerCase()
+        if (!alvo.includes(q)) return false
+      }
+      if (expDataInicio || expDataFim) {
+        const prevIso = r.previsao_entrega ? String(r.previsao_entrega).slice(0, 10) : ''
+        if (!prevIso) return false
+        if (expDataInicio && prevIso < expDataInicio) return false
+        if (expDataFim && prevIso > expDataFim) return false
+      }
+      return true
+    })
+    return [...filtrados].sort((a, b) => {
+      const rank = (x) => (x.bloqueado_sem_nf ? 2 : x.tem_nf_autorizada ? 0 : 1)
+      return rank(a) - rank(b)
+    })
+  }, [romaneiosExpedicao, expBusca, expDataInicio, expDataFim, expFiltroFiscal])
+
   const totalPesoSep = (romaneioAtual?.itens || []).reduce((s, i) => s + Number(i.peso_kg || 0), 0)
 
   return (
@@ -620,10 +694,10 @@ export function Saida() {
 
           {/* Fila de Pedidos Liberados / Em Separação */}
           <div className="card" style={{ padding: '18px', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: '17px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ClipboardList size={20} /> Pedidos Disponíveis para Separação
+                  <ClipboardList size={20} /> Pedidos Disponíveis para Separação ({pedidosFilaFiltrados.length})
                 </h2>
                 <p className="text-muted text-xs" style={{ marginTop: '4px' }}>
                   Clique em um pedido abaixo para iniciar ou continuar a bipagem das caixas.
@@ -634,13 +708,53 @@ export function Saida() {
               </button>
             </div>
 
-            {pedidosFila.length === 0 ? (
+            {pedidosFila.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                <div style={{ position: 'relative', flex: '1 1 240px' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    className="form-input"
+                    style={{ paddingLeft: 32 }}
+                    placeholder="Filtrar por cliente, título ou código (PED/ROM)..."
+                    value={sepBusca}
+                    onChange={(e) => setSepBusca(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Calendar size={14} className="text-muted" />
+                  <span className="text-xs text-muted">Data Saída:</span>
+                  <input
+                    type="date"
+                    className="form-input"
+                    style={{ width: 150 }}
+                    value={sepDataSaida}
+                    onChange={(e) => setSepDataSaida(e.target.value)}
+                  />
+                </div>
+                {(sepBusca || sepDataSaida) && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => {
+                      setSepBusca('')
+                      setSepDataSaida('')
+                    }}
+                  >
+                    <X size={13} /> Limpar
+                  </button>
+                )}
+              </div>
+            )}
+
+            {pedidosFilaFiltrados.length === 0 ? (
               <div className="text-muted" style={{ textAlign: 'center', padding: '36px 16px' }}>
-                Nenhum pedido liberado aguardando separação no momento. Peça à gerência/administração para liberar um pedido na aba <strong>Pedidos</strong>.
+                {pedidosFila.length === 0
+                  ? <>Nenhum pedido liberado aguardando separação no momento. Peça à gerência/administração para liberar um pedido na aba <strong>Pedidos</strong>.</>
+                  : 'Nenhum pedido encontrado com os filtros aplicados.'}
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '12px' }}>
-                {pedidosFila.map((ped) => {
+                {pedidosFilaFiltrados.map((ped) => {
                   const pct =
                     Number(ped.total_kg_solicitado) > 0
                       ? Math.min(100, Math.round((Number(ped.total_kg_separado) / Number(ped.total_kg_solicitado)) * 100))
@@ -1007,252 +1121,463 @@ export function Saida() {
 
       {/* ══════════════════════ ABA 2: CONFERÊNCIA & EXPEDIÇÃO ══════════════════════ */}
       {aba === 'EXPEDICAO' && podeExpedir && (
-        <div style={{ display: 'grid', gridTemplateColumns: romaneioConfAtual ? '340px 1fr' : '1fr', gap: '16px', alignItems: 'start' }}>
-          {/* Lista de romaneios aguardando conferência/embarque */}
-          <div className="card" style={{ padding: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h2 style={{ margin: 0, fontSize: '16px' }}>Aguardando Conferência ({romaneiosExpedicao.length})</h2>
-              <button type="button" className="btn btn--secondary btn--sm" onClick={() => carregarExpedicao()}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {/* Barra de Filtros Dinâmicos (Cliente, Data de Saída e Status Fiscal) */}
+          <div className="card" style={{ padding: '14px 16px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}>
+              <div style={{ flex: '1 1 260px' }}>
+                <label className="form-label">Buscar Cliente / Pedido / Romaneio / Nº NF</label>
+                <div style={{ position: 'relative' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    className="form-input"
+                    style={{ paddingLeft: 32 }}
+                    placeholder="Digite o nome do cliente, PED-0001, ROM-0001 ou Nº da NF..."
+                    value={expBusca}
+                    onChange={(e) => setExpBusca(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="form-label">Saída de</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={expDataInicio}
+                  onChange={(e) => setExpDataInicio(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="form-label">Até</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={expDataFim}
+                  onChange={(e) => setExpDataFim(e.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                style={{ height: 38 }}
+                onClick={() => {
+                  const hoje = new Date().toISOString().slice(0, 10)
+                  setExpDataInicio(hoje)
+                  setExpDataFim(hoje)
+                }}
+              >
+                <Calendar size={14} /> Hoje
+              </button>
+              {(expBusca || expDataInicio || expDataFim || expFiltroFiscal !== 'TODOS') && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={{ height: 38 }}
+                  onClick={() => {
+                    setExpBusca('')
+                    setExpDataInicio('')
+                    setExpDataFim('')
+                    setExpFiltroFiscal('TODOS')
+                  }}
+                >
+                  <X size={14} /> Limpar
+                </button>
+              )}
+              <button type="button" className="btn btn--secondary btn--sm" style={{ height: 38 }} onClick={() => carregarExpedicao()}>
                 Atualizar
               </button>
             </div>
 
-            {romaneiosExpedicao.length === 0 ? (
-              <div className="text-muted" style={{ textAlign: 'center', padding: '28px 10px' }}>
-                Nenhuma separação finalizada aguardando conferência na expedição.
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+              {[
+                { val: 'TODOS', label: `Todos (${romaneiosExpedicao.length})`, cor: '#38bdf8' },
+                { val: 'LIBERADOS', label: `✅ Prontos p/ Conferir (${resumoExp.liberados})`, cor: '#22c55e' },
+                ...(resumoExp.travaAtiva || resumoExp.bloqueados > 0
+                  ? [{ val: 'BLOQUEADOS', label: `🔒 Bloqueados sem NF-e (${resumoExp.bloqueados})`, cor: '#ef4444' }]
+                  : []),
+              ].map((op) => {
+                const ativo = expFiltroFiscal === op.val
+                return (
+                  <button
+                    key={op.val}
+                    type="button"
+                    onClick={() => setExpFiltroFiscal(op.val)}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: `1.5px solid ${ativo ? op.cor : 'var(--border)'}`,
+                      background: ativo ? `${op.cor}22` : 'var(--bg-2)',
+                      color: ativo ? op.cor : 'var(--text-secondary)',
+                    }}
+                  >
+                    {op.label}
+                  </button>
+                )
+              })}
+              {resumoExp.travaAtiva && (
+                <span className="text-xs" style={{ marginLeft: 'auto', color: '#fca5a5', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <Lock size={12} /> Trava Fiscal ativa: somente pedidos faturados (NF-e emitida) liberam conferência
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: romaneioConfAtual ? '370px 1fr' : '1fr', gap: '16px', alignItems: 'start' }}>
+            {/* Lista de romaneios aguardando conferência/embarque */}
+            <div className="card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h2 style={{ margin: 0, fontSize: '16px' }}>
+                  Aguardando Conferência ({romaneiosExpedicaoFiltrados.length})
+                </h2>
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {romaneiosExpedicao.map((rom) => {
-                  const selecionado = romaneioConfAtual?.id === rom.id
-                  const conf = Number(rom.qtd_conferidas || 0)
-                  const tot = Number(rom.total_caixas || 0)
-                  const completo = tot > 0 && conf === tot
-                  return (
-                    <div
-                      key={rom.id}
-                      onClick={() => {
-                        setConfErroBanner('')
-                        carregarExpedicao(rom.id)
-                      }}
-                      className="card"
-                      style={{
-                        padding: '12px',
-                        cursor: 'pointer',
-                        borderColor: selecionado ? '#38bdf8' : completo ? '#22c55e' : 'rgba(148, 163, 184, 0.25)',
-                        background: selecionado ? 'rgba(56, 189, 248, 0.08)' : undefined
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span className="font-mono font-bold" style={{ fontSize: '13px' }}>
-                          {rom.codigo}{rom.pedido_codigo ? ` • ${rom.pedido_codigo}` : ''}
+
+              {romaneiosExpedicaoFiltrados.length === 0 ? (
+                <div className="text-muted" style={{ textAlign: 'center', padding: '28px 10px' }}>
+                  {romaneiosExpedicao.length === 0
+                    ? 'Nenhuma separação finalizada aguardando conferência na expedição.'
+                    : 'Nenhum pedido/romaneio encontrado com esses filtros.'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '72vh', overflowY: 'auto', paddingRight: 2 }}>
+                  {romaneiosExpedicaoFiltrados.map((rom) => {
+                    const selecionado = romaneioConfAtual?.id === rom.id
+                    const conf = Number(rom.qtd_conferidas || 0)
+                    const tot = Number(rom.total_caixas || 0)
+                    const completo = tot > 0 && conf === tot
+                    const faturado = Boolean(rom.tem_nf_autorizada)
+                    const bloqueado = Boolean(rom.bloqueado_sem_nf)
+
+                    return (
+                      <div
+                        key={rom.id}
+                        aria-disabled={bloqueado}
+                        onClick={() => {
+                          if (bloqueado) {
+                            toastWarning(
+                              `🔒 Conferência bloqueada: ${rom.pedido_codigo || rom.codigo} ainda não foi faturado. Emita a NF-e no Módulo Fiscal para liberar a conferência.`
+                            )
+                            return
+                          }
+                          setConfErroBanner('')
+                          carregarExpedicao(rom.id)
+                        }}
+                        className="card"
+                        style={{
+                          padding: '12px',
+                          cursor: bloqueado ? 'not-allowed' : 'pointer',
+                          opacity: bloqueado ? 0.72 : 1,
+                          borderWidth: faturado || selecionado || bloqueado ? '1.8px' : '1px',
+                          borderStyle: bloqueado ? 'dashed' : 'solid',
+                          borderColor: bloqueado
+                            ? 'rgba(239, 68, 68, 0.58)'
+                            : selecionado
+                              ? '#38bdf8'
+                              : faturado
+                                ? '#22c55e'
+                                : completo
+                                  ? '#22c55e'
+                                  : 'rgba(148, 163, 184, 0.28)',
+                          background: bloqueado
+                            ? 'rgba(239, 68, 68, 0.07)'
+                            : selecionado
+                              ? 'rgba(56, 189, 248, 0.14)'
+                              : faturado
+                                ? 'rgba(34, 197, 94, 0.08)'
+                                : undefined,
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        {/* Faixa superior de status fiscal bem visível */}
+                        {bloqueado ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '4px 8px',
+                              borderRadius: 6,
+                              background: 'rgba(239, 68, 68, 0.18)',
+                              color: '#fca5a5',
+                              fontSize: 11,
+                              fontWeight: 800,
+                              marginBottom: 8,
+                            }}
+                          >
+                            <Lock size={12} /> TRAVADO — SEM NF-e (NÃO LIBERADO P/ CONFERIR)
+                          </div>
+                        ) : faturado ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 6,
+                              padding: '4px 8px',
+                              borderRadius: 6,
+                              background: 'rgba(34, 197, 94, 0.2)',
+                              color: '#86efac',
+                              fontSize: 11,
+                              fontWeight: 800,
+                              marginBottom: 8,
+                            }}
+                          >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <FileCheck2 size={13} /> FATURADO {rom.numero_nf ? `• NF-e ${String(rom.numero_nf).padStart(6, '0')}` : ''}
+                            </span>
+                            <span>{completo ? '100% CONF.' : 'PRONTO P/ CONFERIR'}</span>
+                          </div>
+                        ) : null}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: 6 }}>
+                          <span className="font-mono font-bold" style={{ fontSize: '13px', color: bloqueado ? '#94a3b8' : faturado ? '#4ade80' : '#38bdf8' }}>
+                            {rom.codigo}{rom.pedido_codigo ? ` • ${rom.pedido_codigo}` : ''}
+                          </span>
+                          <span className={`badge ${bloqueado ? 'badge--danger' : completo ? 'badge--success' : 'badge--warning'}`}>
+                            {bloqueado ? '🔒 Bloqueado' : `${conf}/${tot} cx conf.`}
+                          </span>
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '14px' }}>{rom.pedido_titulo || rom.cliente}</div>
+                        <div className="text-xs" style={{ marginTop: '3px', color: 'var(--text-secondary)' }}>
+                          Cliente: <strong>{rom.pedido_cliente || rom.cliente}</strong>
+                        </div>
+                        <div className="text-muted text-xs" style={{ marginTop: '4px' }}>
+                          {tot} cx • {fmtKg(rom.total_peso)} • Saída: <strong>{fmtData(rom.previsao_entrega)}</strong> • Sep.: {rom.operador_nome}
+                        </div>
+                        {bloqueado && (
+                          <div className="text-xs" style={{ marginTop: '6px', color: '#fca5a5', fontWeight: 600 }}>
+                            Emita a NF-e no Módulo Fiscal para desbloquear a conferência.
+                          </div>
+                        )}
+                        <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            style={{ flex: 1, justifyContent: 'center' }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleAbrirRomaneioImpressao(rom.id)
+                            }}
+                          >
+                            <Printer size={13} /> Imprimir Romaneio
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Painel de Conferência Caixa a Caixa */}
+            {romaneioConfAtual && (
+              <div className="card" style={{ padding: '18px', borderColor: romaneioConfAtual.tem_nf_autorizada ? '#22c55e' : '#38bdf8' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+                  <div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span className="badge badge--info font-mono">{romaneioConfAtual.codigo}</span>
+                      {romaneioConfAtual.pedido_codigo && (
+                        <span className="badge badge--purple font-mono">{romaneioConfAtual.pedido_codigo}</span>
+                      )}
+                      {romaneioConfAtual.tem_nf_autorizada && (
+                        <span className="badge badge--success font-mono">
+                          ✅ FATURADO {romaneioConfAtual.numero_nf ? `• NF-e ${String(romaneioConfAtual.numero_nf).padStart(6, '0')}` : ''}
                         </span>
-                        <span className={`badge ${completo ? 'badge--success' : 'badge--warning'}`}>
-                          {conf}/{tot} cx conf.
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: '14px' }}>{rom.pedido_titulo || rom.cliente}</div>
-                      <div className="text-muted text-xs" style={{ marginTop: '4px' }}>
-                        {tot} cx • {fmtKg(rom.total_peso)} • Separador: {rom.operador_nome}
-                      </div>
-                      <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--sm"
-                          style={{ flex: 1, justifyContent: 'center' }}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleAbrirRomaneioImpressao(rom.id)
-                          }}
-                        >
-                          <Printer size={13} /> Imprimir Romaneio
-                        </button>
-                      </div>
+                      )}
+                      <span className={`badge ${romaneioConfAtual.conferenciasSummary?.todasConferidas ? 'badge--success' : 'badge--warning'}`}>
+                        {romaneioConfAtual.conferenciasSummary?.todasConferidas
+                          ? '100% Conferido — Pronto p/ Expedir'
+                          : `Conferência: ${romaneioConfAtual.conferenciasSummary?.qtdConferidas || 0} / ${romaneioConfAtual.conferenciasSummary?.totalCaixas || 0} caixas`}
+                      </span>
                     </div>
-                  )
-                })}
+                    <h2 style={{ margin: '6px 0 2px 0' }}>
+                      {romaneioConfAtual.pedido_titulo || romaneioConfAtual.cliente}
+                    </h2>
+                    <div className="text-muted text-xs">
+                      Cliente: <strong>{romaneioConfAtual.pedido_cliente || romaneioConfAtual.cliente}</strong>
+                      {' • '}Previsão Saída: <strong>{fmtData(romaneioConfAtual.previsao_entrega)}</strong>
+                      {' • '}Separado por: <strong>{romaneioConfAtual.operador_nome}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn--warning"
+                      onClick={() => handleAbrirEtiquetasReserva(romaneioConfAtual.id, false)}
+                    >
+                      <Tag size={16} /> Etiquetas Reservado ({romaneioConfAtual.conferenciasSummary?.totalCaixas || romaneioConfAtual.itens?.length || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={() => handleAbrirRomaneioImpressao(romaneioConfAtual.id)}
+                    >
+                      <Printer size={16} /> Imprimir Romaneio de Embarque
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={() => handleReabrirSeparacao(romaneioConfAtual)}
+                    >
+                      <RotateCcw size={15} /> Reabrir Separação
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--success"
+                      disabled={loading || romaneioConfAtual.bloqueado_sem_nf || !romaneioConfAtual.conferenciasSummary?.todasConferidas}
+                      title={
+                        romaneioConfAtual.bloqueado_sem_nf
+                          ? 'Pedido sem NF-e autorizada — emita a NF-e antes de expedir'
+                          : romaneioConfAtual.conferenciasSummary?.todasConferidas
+                            ? 'Expedir carga definitivamente'
+                            : 'Bipe 100% das caixas abaixo para liberar a expedição'
+                      }
+                      onClick={() => handleExpedirCarga(romaneioConfAtual.id)}
+                    >
+                      <Truck size={16} /> EXPEDIR CARGA
+                    </button>
+                  </div>
+                </div>
+
+                {/* Barra de progresso da conferência */}
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                    <span>
+                      Progresso da Conferência Caixa a Caixa:{' '}
+                      <strong>
+                        {romaneioConfAtual.conferenciasSummary?.qtdConferidas || 0} de{' '}
+                        {romaneioConfAtual.conferenciasSummary?.totalCaixas || 0} caixas
+                      </strong>
+                    </span>
+                    <span className="font-mono">
+                      {fmtKg(romaneioConfAtual.conferenciasSummary?.pesoConferido || 0)} conferidos
+                    </span>
+                  </div>
+                  <div style={{ height: '10px', background: '#1e293b', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${
+                          romaneioConfAtual.conferenciasSummary?.totalCaixas
+                            ? Math.round(
+                                (romaneioConfAtual.conferenciasSummary.qtdConferidas /
+                                  romaneioConfAtual.conferenciasSummary.totalCaixas) *
+                                  100
+                              )
+                            : 0
+                        }%`,
+                        height: '100%',
+                        background: romaneioConfAtual.conferenciasSummary?.todasConferidas ? '#22c55e' : '#38bdf8'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Leitor de Conferência */}
+                {romaneioConfAtual.bloqueado_sem_nf ? (
+                  <div
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.14)',
+                      border: '1.5px solid #ef4444',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      color: '#fca5a5',
+                      marginBottom: '12px',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                    }}
+                  >
+                    <Lock size={18} />
+                    Conferência bloqueada: este pedido ainda não possui NF-e autorizada. Emita a nota no Módulo Fiscal para liberar a bipagem.
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      processarBipeConferencia(confCodigoInput)
+                    }}
+                    style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}
+                  >
+                    <CheckSquare size={22} className="text-info" />
+                    <input
+                      ref={confInputRef}
+                      className="form-input"
+                      autoFocus
+                      placeholder="Bipe caixa a caixa para conferir o embarque..."
+                      value={confCodigoInput}
+                      onChange={(e) => setConfCodigoInput(e.target.value)}
+                      style={{ fontSize: '15px', fontFamily: 'monospace' }}
+                    />
+                    <button type="submit" className="btn btn--primary">Conferir Caixa</button>
+                  </form>
+                )}
+
+                {confErroBanner && (
+                  <div
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.16)',
+                      border: '1px solid #ef4444',
+                      borderRadius: '6px',
+                      padding: '10px 12px',
+                      color: '#fca5a5',
+                      marginBottom: '12px',
+                      fontWeight: 700
+                    }}
+                  >
+                    ❌ {confErroBanner}
+                  </div>
+                )}
+
+                {/* Lista das caixas para conferência */}
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '130px' }}>Conferência</th>
+                        <th>Produto</th>
+                        <th>EAN Caixa</th>
+                        <th>Lote</th>
+                        <th>Validade</th>
+                        <th style={{ textAlign: 'right' }}>Peso</th>
+                        <th>Conferente</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(romaneioConfAtual.itens || []).map((cx) => {
+                        const ok = Number(cx.conferido) === 1
+                        return (
+                          <tr
+                            key={cx.id}
+                            style={{ background: ok ? 'rgba(34, 197, 94, 0.08)' : undefined }}
+                          >
+                            <td>
+                              {ok ? (
+                                <span className="badge badge--success">✅ Conferida</span>
+                              ) : (
+                                <span className="badge badge--warning">⏳ Pendente</span>
+                              )}
+                            </td>
+                            <td style={{ fontWeight: 700 }}>{cx.produto_descricao}</td>
+                            <td className="font-mono">{cx.ean_caixa}</td>
+                            <td className="font-mono">{cx.lote || '-'}</td>
+                            <td>{fmtData(cx.validade)}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtKg(cx.peso_kg)}</td>
+                            <td className="text-xs text-muted">
+                              {ok ? `${cx.conferido_por || '-'} (${fmtDataHora(cx.conferido_at)})` : '-'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
-
-          {/* Painel de Conferência Caixa a Caixa */}
-          {romaneioConfAtual && (
-            <div className="card" style={{ padding: '18px', borderColor: '#38bdf8' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span className="badge badge--info font-mono">{romaneioConfAtual.codigo}</span>
-                    {romaneioConfAtual.pedido_codigo && (
-                      <span className="badge badge--purple font-mono">{romaneioConfAtual.pedido_codigo}</span>
-                    )}
-                    <span className={`badge ${romaneioConfAtual.conferenciasSummary?.todasConferidas ? 'badge--success' : 'badge--warning'}`}>
-                      {romaneioConfAtual.conferenciasSummary?.todasConferidas
-                        ? '100% Conferido — Pronto p/ Expedir'
-                        : `Conferência: ${romaneioConfAtual.conferenciasSummary?.qtdConferidas || 0} / ${romaneioConfAtual.conferenciasSummary?.totalCaixas || 0} caixas`}
-                    </span>
-                  </div>
-                  <h2 style={{ margin: '6px 0 2px 0' }}>
-                    {romaneioConfAtual.pedido_titulo || romaneioConfAtual.cliente}
-                  </h2>
-                  <div className="text-muted text-xs">
-                    Cliente: <strong>{romaneioConfAtual.pedido_cliente || romaneioConfAtual.cliente}</strong>
-                    {' • '}Separado por: <strong>{romaneioConfAtual.operador_nome}</strong>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn btn--warning"
-                    onClick={() => handleAbrirEtiquetasReserva(romaneioConfAtual.id, false)}
-                  >
-                    <Tag size={16} /> Etiquetas Reservado ({romaneioConfAtual.conferenciasSummary?.totalCaixas || romaneioConfAtual.itens?.length || 0})
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={() => handleAbrirRomaneioImpressao(romaneioConfAtual.id)}
-                  >
-                    <Printer size={16} /> Imprimir Romaneio de Embarque
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={() => handleReabrirSeparacao(romaneioConfAtual)}
-                  >
-                    <RotateCcw size={15} /> Reabrir Separação
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--success"
-                    disabled={loading || !romaneioConfAtual.conferenciasSummary?.todasConferidas}
-                    title={
-                      romaneioConfAtual.conferenciasSummary?.todasConferidas
-                        ? 'Expedir carga definitivamente'
-                        : 'Bipe 100% das caixas abaixo para liberar a expedição'
-                    }
-                    onClick={() => handleExpedirCarga(romaneioConfAtual.id)}
-                  >
-                    <Truck size={16} /> EXPEDIR CARGA
-                  </button>
-                </div>
-              </div>
-
-              {/* Barra de progresso da conferência */}
-              <div style={{ marginBottom: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                  <span>
-                    Progresso da Conferência Caixa a Caixa:{' '}
-                    <strong>
-                      {romaneioConfAtual.conferenciasSummary?.qtdConferidas || 0} de{' '}
-                      {romaneioConfAtual.conferenciasSummary?.totalCaixas || 0} caixas
-                    </strong>
-                  </span>
-                  <span className="font-mono">
-                    {fmtKg(romaneioConfAtual.conferenciasSummary?.pesoConferido || 0)} conferidos
-                  </span>
-                </div>
-                <div style={{ height: '10px', background: '#1e293b', borderRadius: '999px', overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${
-                        romaneioConfAtual.conferenciasSummary?.totalCaixas
-                          ? Math.round(
-                              (romaneioConfAtual.conferenciasSummary.qtdConferidas /
-                                romaneioConfAtual.conferenciasSummary.totalCaixas) *
-                                100
-                            )
-                          : 0
-                      }%`,
-                      height: '100%',
-                      background: romaneioConfAtual.conferenciasSummary?.todasConferidas ? '#22c55e' : '#38bdf8'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Leitor de Conferência */}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  processarBipeConferencia(confCodigoInput)
-                }}
-                style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}
-              >
-                <CheckSquare size={22} className="text-info" />
-                <input
-                  ref={confInputRef}
-                  className="form-input"
-                  autoFocus
-                  placeholder="Bipe caixa a caixa para conferir o embarque..."
-                  value={confCodigoInput}
-                  onChange={(e) => setConfCodigoInput(e.target.value)}
-                  style={{ fontSize: '15px', fontFamily: 'monospace' }}
-                />
-                <button type="submit" className="btn btn--primary">Conferir Caixa</button>
-              </form>
-
-              {confErroBanner && (
-                <div
-                  style={{
-                    background: 'rgba(239, 68, 68, 0.16)',
-                    border: '1px solid #ef4444',
-                    borderRadius: '6px',
-                    padding: '10px 12px',
-                    color: '#fca5a5',
-                    marginBottom: '12px',
-                    fontWeight: 700
-                  }}
-                >
-                  ❌ {confErroBanner}
-                </div>
-              )}
-
-              {/* Lista das caixas para conferência */}
-              <div style={{ overflowX: 'auto' }}>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: '130px' }}>Conferência</th>
-                      <th>Produto</th>
-                      <th>EAN Caixa</th>
-                      <th>Lote</th>
-                      <th>Validade</th>
-                      <th style={{ textAlign: 'right' }}>Peso</th>
-                      <th>Conferente</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(romaneioConfAtual.itens || []).map((cx) => {
-                      const ok = Number(cx.conferido) === 1
-                      return (
-                        <tr
-                          key={cx.id}
-                          style={{ background: ok ? 'rgba(34, 197, 94, 0.08)' : undefined }}
-                        >
-                          <td>
-                            {ok ? (
-                              <span className="badge badge--success">✅ Conferida</span>
-                            ) : (
-                              <span className="badge badge--warning">⏳ Pendente</span>
-                            )}
-                          </td>
-                          <td style={{ fontWeight: 700 }}>{cx.produto_descricao}</td>
-                          <td className="font-mono">{cx.ean_caixa}</td>
-                          <td className="font-mono">{cx.lote || '-'}</td>
-                          <td>{fmtData(cx.validade)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtKg(cx.peso_kg)}</td>
-                          <td className="text-xs text-muted">
-                            {ok ? `${cx.conferido_por || '-'} (${fmtDataHora(cx.conferido_at)})` : '-'}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       )}
 

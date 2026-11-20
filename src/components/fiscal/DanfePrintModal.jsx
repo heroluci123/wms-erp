@@ -278,7 +278,7 @@ function renderizarHtmlDanfeA4(nota) {
           <div class="cell">
             <span class="brand-pill">WMSphere ERP • NF-e 4.00</span>
             <div style="font-size:11.5px;font-weight:900;line-height:1.15;margin-top:2px;">${escHtml(emit.razaoSocial || emit.nomeFantasia)}</div>
-            ${emit.nomeFantasia && emit.nomeFantasia !== emit.razaoSocial ? `<div style="font-size:8px;font-weight:700;color:#334155;">${escHtml(emit.nomeFantasia)}</div>` : ''}
+            ${emit.nomeFantasia && emit.nomeFantasia !== emit.razaoSocial ? `<div style="font-size:8px;font-weight:700;color:#000000;">${escHtml(emit.nomeFantasia)}</div>` : ''}
             <div style="margin-top:3px;font-size:8px;">${escHtml(emit.cidade || '')} - ${escHtml(emit.uf || 'SP')} • Regime: <strong>${escHtml(emit.regime || 'SIMPLES')}</strong></div>
             <div style="font-size:8px;">CNPJ: <strong>${escHtml(fmtDoc(emit.cnpj))}</strong> • IE: <strong>${escHtml(emit.ie || 'ISENTO')}</strong></div>
           </div>
@@ -296,7 +296,7 @@ function renderizarHtmlDanfeA4(nota) {
             <div style="text-align:center;">${barcodeSvg}</div>
             <span class="lbl">Chave de Acesso</span>
             <div class="mono" style="font-size:7.8px;font-weight:800;text-align:center;letter-spacing:0.2px;">${escHtml(fmtChave(nota.chave_acesso))}</div>
-            <div style="font-size:6.3px;text-align:center;color:#475569;margin-top:2px;line-height:1.2;">
+            <div style="font-size:6.3px;text-align:center;color:#000000;margin-top:2px;line-height:1.2;">
               Consulta de autenticidade no portal nacional da NF-e <strong>www.nfe.fazenda.gov.br/portal</strong> ou no site da SEFAZ Autorizadora.
             </div>
           </div>
@@ -347,7 +347,7 @@ function renderizarHtmlDanfeA4(nota) {
           <div class="cell r"><span class="lbl">Valor do Desconto</span><span class="val mono">${escHtml(fmtNum(nota.valor_desconto))}</span></div>
           <div class="cell r"><span class="lbl">PIS / COFINS</span><span class="val mono">${escHtml(fmtNum(Number(nota.valor_pis || 0) + Number(nota.valor_cofins || 0)))}</span></div>
           <div class="cell r"><span class="lbl">Valor Total do IPI</span><span class="val mono">0,00</span></div>
-          <div class="cell r" style="background:#f1f5f9;"><span class="lbl">V. Total da Nota</span><span class="val-lg mono">${escHtml(fmtMoeda(nota.valor_total_nf))}</span></div>
+          <div class="cell r" style="background:#d4d4d4;"><span class="lbl">V. Total da Nota</span><span class="val-lg mono">${escHtml(fmtMoeda(nota.valor_total_nf))}</span></div>
         </div>
         <div class="grid row-last reforma-strip" style="grid-template-columns: repeat(4, 1fr);">
           <div class="cell r"><span class="lbl">Base Cálc. IBS / CBS (2026)</span><span class="val mono">${escHtml(fmtNum(bcIbsCbsTotal))}</span></div>
@@ -416,9 +416,9 @@ function renderizarHtmlDanfeA4(nota) {
               ${nota.condicao_pagamento_label ? ` • Cond. Pagto: <strong>${escHtml(nota.condicao_pagamento_label)}</strong>` : ''}
             </div>
           </div>
-          <div class="cell" style="min-height:52px;background:#f8fafc;">
+          <div class="cell" style="min-height:52px;background:#ffffff;">
             <span class="lbl">Reservado ao Fisco</span>
-            <div class="mono" style="font-size:7px;color:#475569;margin-top:4px;">
+            <div class="mono" style="font-size:7px;color:#000000;margin-top:4px;">
               Emitida por: ${escHtml(nota.emitida_por_nome || 'Sistema')}<br/>
               Provedor: ${escHtml(nota.provedor_usado || 'SIMULACAO_LOCAL')}
             </div>
@@ -464,13 +464,13 @@ function renderizarHtmlBoletosNota(nota) {
             <div class="cell"><span class="lbl">Beneficiário / Cedente</span><span class="val">${escHtml(b.cedente?.nome)} (${escHtml(fmtDoc(b.cedente?.cnpj))})</span></div>
             <div class="cell"><span class="lbl">Agência / Cód. Beneficiário</span><span class="val mono">${escHtml(b.agencia_codigo_cedente)}</span></div>
             <div class="cell"><span class="lbl">Nosso Número</span><span class="val mono">${escHtml(b.nosso_numero)}</span></div>
-            <div class="cell r" style="background:#fef3c7;"><span class="lbl">Vencimento</span><span class="val-lg mono">${escHtml(fmtData(b.vencimento))}</span></div>
+            <div class="cell r" style="background:#d4d4d4;"><span class="lbl">Vencimento</span><span class="val-lg mono">${escHtml(fmtData(b.vencimento))}</span></div>
           </div>
           <div class="grid row-last" style="grid-template-columns: 2.2fr 1fr 0.9fr 1fr;">
             <div class="cell"><span class="lbl">Pagador / Sacado</span><span class="val">${escHtml(b.sacado?.nome)} — ${escHtml(fmtDoc(b.sacado?.doc))}</span></div>
             <div class="cell"><span class="lbl">Nº do Documento</span><span class="val mono">${escHtml(b.numero_documento)}</span></div>
             <div class="cell"><span class="lbl">Data Documento</span><span class="val mono">${escHtml(fmtData(b.data_documento))}</span></div>
-            <div class="cell r" style="background:#f1f5f9;"><span class="lbl">(=) Valor do Documento</span><span class="val-lg mono">${escHtml(fmtMoeda(b.valor))}</span></div>
+            <div class="cell r" style="background:#d4d4d4;"><span class="lbl">(=) Valor do Documento</span><span class="val-lg mono">${escHtml(fmtMoeda(b.valor))}</span></div>
           </div>
         </div>
 
@@ -478,7 +478,7 @@ function renderizarHtmlBoletosNota(nota) {
 
         <!-- FICHA DE COMPENSAÇÃO -->
         <div class="box-round">
-          <div class="grid" style="grid-template-columns: 1.5fr 0.55fr 2.8fr; background:#f8fafc;">
+          <div class="grid" style="grid-template-columns: 1.5fr 0.55fr 2.8fr; background:#ffffff;">
             <div class="cell" style="display:flex;align-items:center;font-weight:900;font-size:11px;">${escHtml(b.banco_nome)}</div>
             <div class="cell c" style="display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;">${escHtml(b.banco_codigo)}</div>
             <div class="cell r" style="display:flex;align-items:center;justify-content:flex-end;font-weight:900;font-size:10.5px;" class="mono">${escHtml(b.linha_digitavel)}</div>
@@ -486,7 +486,7 @@ function renderizarHtmlBoletosNota(nota) {
 
           <div class="grid" style="grid-template-columns: 3.6fr 1.25fr;">
             <div class="cell"><span class="lbl">Local de Pagamento</span><span class="val">PAGÁVEL EM QUALQUER BANCO OU CORTE PIX / INTERNET BANKING ATÉ O VENCIMENTO</span></div>
-            <div class="cell r" style="background:#fef3c7;"><span class="lbl">Vencimento</span><span class="val-lg mono">${escHtml(fmtData(b.vencimento))}</span></div>
+            <div class="cell r" style="background:#d4d4d4;"><span class="lbl">Vencimento</span><span class="val-lg mono">${escHtml(fmtData(b.vencimento))}</span></div>
           </div>
 
           <div class="grid" style="grid-template-columns: 3.6fr 1.25fr;">
@@ -509,7 +509,7 @@ function renderizarHtmlBoletosNota(nota) {
             <div class="cell c"><span class="lbl">Espécie</span><span class="val">R$</span></div>
             <div class="cell"><span class="lbl">Quantidade</span><span class="val">-</span></div>
             <div class="cell"><span class="lbl">Valor</span><span class="val">-</span></div>
-            <div class="cell r" style="background:#f1f5f9;"><span class="lbl">(=) Valor do Documento</span><span class="val-lg mono">${escHtml(fmtMoeda(b.valor))}</span></div>
+            <div class="cell r" style="background:#d4d4d4;"><span class="lbl">(=) Valor do Documento</span><span class="val-lg mono">${escHtml(fmtMoeda(b.valor))}</span></div>
           </div>
 
           <div class="grid" style="grid-template-columns: 3.6fr 1.25fr;">
@@ -520,7 +520,7 @@ function renderizarHtmlBoletosNota(nota) {
             <div style="display:flex;flex-direction:column;">
               <div class="cell r"><span class="lbl">(-) Desconto / Abatimento</span><span class="val mono">-</span></div>
               <div class="cell r"><span class="lbl">(+) Mora / Multa</span><span class="val mono">-</span></div>
-              <div class="cell r" style="border-bottom:1px solid #0f172a;"><span class="lbl">(=) Valor Cobrado</span><span class="val mono">-</span></div>
+              <div class="cell r" style="border-bottom:1px solid #000000;"><span class="lbl">(=) Valor Cobrado</span><span class="val mono">-</span></div>
             </div>
           </div>
 
@@ -528,7 +528,7 @@ function renderizarHtmlBoletosNota(nota) {
             <div class="cell">
               <span class="lbl">Pagador / Sacado</span>
               <div class="val">${escHtml(b.sacado?.nome)} — CNPJ/CPF: ${escHtml(fmtDoc(b.sacado?.doc))}</div>
-              <div style="font-size:8px;color:#334155;margin-top:2px;">
+              <div style="font-size:8px;color:#000000;margin-top:2px;">
                 ${escHtml(b.sacado?.endereco || 'Endereço não informado')} • ${escHtml(b.sacado?.cidade || '')}/${escHtml(b.sacado?.uf || 'SP')} ${b.sacado?.cep ? `• CEP: ${escHtml(b.sacado.cep)}` : ''}
               </div>
             </div>
@@ -537,7 +537,7 @@ function renderizarHtmlBoletosNota(nota) {
 
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:10px;padding:0 4px;">
           <div>${barcodeBoleto}</div>
-          <div style="font-size:7px;color:#475569;text-align:right;">
+          <div style="font-size:7px;color:#000000;text-align:right;">
             Ficha de Compensação — Autenticação Mecânica<br/>
             Emitido por WMSphere ERP
           </div>
@@ -575,15 +575,15 @@ function renderizarHtmlRomaneioProdutos(nota) {
   return `
     <div class="page-sheet">
       <div class="box-round" style="margin-bottom:8px;">
-        <div class="grid row-last" style="grid-template-columns: 2.3fr 1.5fr 1.2fr; background:#f8fafc;">
+        <div class="grid row-last" style="grid-template-columns: 2.3fr 1.5fr 1.2fr; background:#ffffff;">
           <div class="cell">
             <span class="brand-pill">WMSphere ERP • ROMANEIO DE PRODUTOS</span>
             <div style="font-size:13px;font-weight:900;margin-top:2px;">RELAÇÃO DE PRODUTOS DO PEDIDO / CONFERÊNCIA</div>
-            <div style="font-size:8.5px;color:#334155;margin-top:2px;">Emitente: <strong>${escHtml(emit.razaoSocial || emit.nomeFantasia)}</strong> (${escHtml(fmtDoc(emit.cnpj))})</div>
+            <div style="font-size:8.5px;color:#000000;margin-top:2px;">Emitente: <strong>${escHtml(emit.razaoSocial || emit.nomeFantasia)}</strong> (${escHtml(fmtDoc(emit.cnpj))})</div>
           </div>
           <div class="cell c" style="display:flex;flex-direction:column;justify-content:center;">
             <span class="lbl">Pedido de Venda</span>
-            <div class="mono" style="font-size:13px;font-weight:900;color:#0369a1;">${escHtml(rom.pedido_codigo)}</div>
+            <div class="mono" style="font-size:13px;font-weight:900;color:#000000;">${escHtml(rom.pedido_codigo)}</div>
             <div style="font-size:8px;font-weight:700;">${escHtml(rom.pedido_titulo)}</div>
           </div>
           <div class="cell c" style="display:flex;flex-direction:column;justify-content:center;">
@@ -634,11 +634,11 @@ function renderizarHtmlRomaneioProdutos(nota) {
       </table>
 
       <div class="box" style="margin-top:8px;">
-        <div class="grid row-last" style="grid-template-columns: repeat(4, 1fr); background:#f8fafc;">
+        <div class="grid row-last" style="grid-template-columns: repeat(4, 1fr); background:#ffffff;">
           <div class="cell"><span class="lbl">Total de Produtos</span><span class="val-lg mono">${itens.length} item(ns)</span></div>
           <div class="cell"><span class="lbl">Total de Volumes / Caixas</span><span class="val-lg mono">${rom.total_caixas} cx</span></div>
           <div class="cell r"><span class="lbl">Peso Total Separado</span><span class="val-lg mono">${fmtNum(rom.total_peso_kg, 3)} kg</span></div>
-          <div class="cell r" style="background:#e0f2fe;"><span class="lbl">Valor Total do Pedido</span><span class="val-lg mono">${fmtMoeda(rom.valor_total)}</span></div>
+          <div class="cell r" style="background:#d4d4d4;"><span class="lbl">Valor Total do Pedido</span><span class="val-lg mono">${fmtMoeda(rom.valor_total)}</span></div>
         </div>
       </div>
 
@@ -653,9 +653,9 @@ function renderizarHtmlRomaneioProdutos(nota) {
           DECLARO QUE CONFERI E RECEBI OS PRODUTOS ACIMA RELACIONADOS EM PERFEITO ESTADO E TEMPERATURA ADEQUADA:
         </div>
         <div style="display:grid;grid-template-columns: 1fr 1fr 1fr;gap:20px;margin-top:20px;text-align:center;font-size:7.5px;">
-          <div style="border-top:1px solid #0f172a;padding-top:4px;">Data e Hora da Entrega</div>
-          <div style="border-top:1px solid #0f172a;padding-top:4px;">Assinatura do Conferente / Motorista</div>
-          <div style="border-top:1px solid #0f172a;padding-top:4px;">Nome Legível, RG/CPF e Assinatura do Cliente</div>
+          <div style="border-top:1.2px solid #000000;padding-top:4px;">Data e Hora da Entrega</div>
+          <div style="border-top:1.2px solid #000000;padding-top:4px;">Assinatura do Conferente / Motorista</div>
+          <div style="border-top:1.2px solid #000000;padding-top:4px;">Nome Legível, RG/CPF e Assinatura do Cliente</div>
         </div>
       </div>
     </div>`
@@ -736,8 +736,8 @@ export function imprimirPacoteNotas(
   w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Impressão Fiscal (${lista.length} nota(s))</title>
     <style>
       @page { size: A4 portrait; margin: 6mm; }
-      * { box-sizing: border-box; }
-      body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; font-size: 8.5px; margin: 0; background: #fff; }
+      * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #000000; font-size: 8.5px; margin: 0; background: #ffffff; }
       .page-sheet { position: relative; page-break-after: always; padding-bottom: 4px; }
       .page-sheet:last-child { page-break-after: auto; }
       .center-watermark {
@@ -747,8 +747,9 @@ export function imprimirPacoteNotas(
         transform: translate(-50%, -50%) rotate(-30deg);
         font-size: 46px;
         font-weight: 900;
-        color: rgba(220, 38, 38, 0.17);
-        border: 5px solid rgba(220, 38, 38, 0.22);
+        color: transparent;
+        -webkit-text-stroke: 1.6px #000000;
+        border: 3.5px solid #000000;
         padding: 12px 28px;
         border-radius: 12px;
         text-align: center;
@@ -757,55 +758,64 @@ export function imprimirPacoteNotas(
         z-index: 20;
         letter-spacing: 2px;
         line-height: 1.1;
+        background: transparent;
       }
-      .center-watermark span { display: block; font-size: 16px; letter-spacing: 1px; margin-top: 4px; }
-      .canceled-wm { color: rgba(185, 28, 28, 0.28); border-color: rgba(185, 28, 28, 0.35); }
+      .center-watermark span {
+        display: block;
+        font-size: 15px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        margin-top: 4px;
+        color: #000000;
+        -webkit-text-stroke: 0;
+      }
+      .canceled-wm { -webkit-text-stroke: 1.8px #000000; border-color: #000000; }
 
-      .canhoto { border: 1px solid #0f172a; border-radius: 3px; display: grid; grid-template-columns: 1fr 120px; margin-bottom: 5px; }
-      .canhoto-left { border-right: 1px solid #0f172a; display: flex; flex-direction: column; }
-      .canhoto-top { padding: 3px 6px; border-bottom: 1px solid #0f172a; font-size: 7px; line-height: 1.25; }
+      .canhoto { border: 1.2px solid #000000; border-radius: 3px; display: grid; grid-template-columns: 1fr 120px; margin-bottom: 5px; }
+      .canhoto-left { border-right: 1.2px solid #000000; display: flex; flex-direction: column; }
+      .canhoto-top { padding: 3px 6px; border-bottom: 1.2px solid #000000; font-size: 7px; line-height: 1.25; color: #000000; }
       .canhoto-bot { display: grid; grid-template-columns: 135px 1fr; flex: 1; }
       .canhoto-bot > div { padding: 3px 6px; min-height: 24px; }
-      .canhoto-bot > div:first-child { border-right: 1px solid #0f172a; }
-      .canhoto-right { padding: 4px 6px; text-align: center; display: flex; flex-direction: column; justify-content: center; background: #f8fafc; }
-      .cut-line { border: none; border-top: 1px dashed #64748b; margin: 5px 0 6px; }
+      .canhoto-bot > div:first-child { border-right: 1.2px solid #000000; }
+      .canhoto-right { padding: 4px 6px; text-align: center; display: flex; flex-direction: column; justify-content: center; background: #ffffff; color: #000000; }
+      .cut-line { border: none; border-top: 1.2px dashed #000000; margin: 5px 0 6px; }
 
-      .sec { font-size: 7.2px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: #0f172a; background: #e2e8f0; border: 1px solid #0f172a; border-bottom: none; padding: 2px 6px; margin-top: 5px; border-radius: 3px 3px 0 0; display: flex; justify-content: space-between; align-items: center; }
-      .box { border: 1px solid #0f172a; border-radius: 0 0 3px 3px; overflow: hidden; }
-      .box-round { border: 1px solid #0f172a; border-radius: 3px; overflow: hidden; }
+      .sec { font-size: 7.4px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.4px; color: #000000; background: #cccccc; border: 1.2px solid #000000; border-bottom: none; padding: 2.5px 6px; margin-top: 5px; border-radius: 3px 3px 0 0; display: flex; justify-content: space-between; align-items: center; }
+      .box { border: 1.2px solid #000000; border-radius: 0 0 3px 3px; overflow: hidden; }
+      .box-round { border: 1.2px solid #000000; border-radius: 3px; overflow: hidden; }
       .grid { display: grid; }
-      .cell { border-right: 1px solid #0f172a; border-bottom: 1px solid #0f172a; padding: 2.5px 5px; min-height: 23px; }
+      .cell { border-right: 1.2px solid #000000; border-bottom: 1.2px solid #000000; padding: 2.5px 5px; min-height: 23px; background: #ffffff; color: #000000; }
       .cell:last-child { border-right: none; }
       .row-last .cell { border-bottom: none; }
-      .lbl { font-size: 6px; font-weight: 700; text-transform: uppercase; color: #475569; display: block; margin-bottom: 1px; letter-spacing: 0.2px; }
-      .val { font-size: 8.5px; font-weight: 700; color: #0f172a; word-break: break-word; }
-      .val-lg { font-size: 10.5px; font-weight: 900; }
-      .mono { font-family: 'Consolas', 'Courier New', monospace; }
+      .lbl { font-size: 6.2px; font-weight: 800; text-transform: uppercase; color: #000000; display: block; margin-bottom: 1px; letter-spacing: 0.2px; }
+      .val { font-size: 8.5px; font-weight: 700; color: #000000; word-break: break-word; }
+      .val-lg { font-size: 10.5px; font-weight: 900; color: #000000; }
+      .mono { font-family: 'Consolas', 'Courier New', monospace; color: #000000; }
       .c { text-align: center; }
       .r { text-align: right; }
       .b { font-weight: 700; }
 
-      .danfe-center { text-align: center; padding: 4px 5px !important; background: #f8fafc; }
+      .danfe-center { text-align: center; padding: 4px 5px !important; background: #ffffff; color: #000000; }
       .tipo-box { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 3px 0; }
-      .tipo-sq { border: 1.5px solid #0f172a; font-size: 11px; font-weight: 900; width: 20px; height: 20px; line-height: 17px; text-align: center; border-radius: 2px; background: #fff; }
-      .brand-pill { display: inline-block; font-size: 6.5px; font-weight: 800; letter-spacing: 0.5px; color: #0369a1; background: #e0f2fe; border: 1px solid #7dd3fc; padding: 1px 5px; border-radius: 99px; margin-bottom: 2px; }
+      .tipo-sq { border: 1.6px solid #000000; font-size: 11px; font-weight: 900; width: 20px; height: 20px; line-height: 17px; text-align: center; border-radius: 2px; background: #ffffff; color: #000000; }
+      .brand-pill { display: inline-block; font-size: 6.5px; font-weight: 900; letter-spacing: 0.5px; color: #000000; background: #ffffff; border: 1.2px solid #000000; padding: 1px 5px; border-radius: 99px; margin-bottom: 2px; }
 
-      .dups-wrap { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 6px; background: #fff; }
-      .dup-item { border: 1px solid #cbd5e1; border-radius: 2px; padding: 2px 6px; font-size: 7.5px; background: #f8fafc; min-width: 112px; display: flex; justify-content: space-between; gap: 8px; }
-      .dup-empty { font-size: 8px; padding: 2px 0; }
+      .dups-wrap { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 6px; background: #ffffff; }
+      .dup-item { border: 1.2px solid #000000; border-radius: 2px; padding: 2px 6px; font-size: 7.5px; background: #ffffff; color: #000000; min-width: 112px; display: flex; justify-content: space-between; gap: 8px; }
+      .dup-empty { font-size: 8px; padding: 2px 0; color: #000000; }
 
-      .reforma-strip { background: #f0f9ff; border-top: 1px solid #0f172a; }
-      .reforma-strip .lbl { color: #0369a1; }
+      .reforma-strip { background: #ffffff; border-top: 1.2px solid #000000; }
+      .reforma-strip .lbl { color: #000000; }
 
-      table { width: 100%; border-collapse: collapse; border: 1px solid #0f172a; font-size: 7.6px; }
-      th { background: #f1f5f9; border: 1px solid #0f172a; padding: 3px 3px; font-size: 6.3px; text-transform: uppercase; color: #0f172a; }
-      td { border-left: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; border-bottom: 1px solid #e2e8f0; padding: 2.5px 3px; vertical-align: top; }
-      tr:nth-child(even) td { background: #fafafa; }
-      .sub-code { font-size: 6.5px; color: #475569; margin-top: 1px; }
+      table { width: 100%; border-collapse: collapse; border: 1.2px solid #000000; font-size: 7.6px; color: #000000; }
+      th { background: #cccccc; border: 1.2px solid #000000; padding: 3px 3px; font-size: 6.4px; font-weight: 900; text-transform: uppercase; color: #000000; }
+      td { border-left: 1px solid #000000; border-right: 1px solid #000000; border-bottom: 1px solid #000000; padding: 2.5px 3px; vertical-align: top; color: #000000; background: #ffffff; }
+      tr:nth-child(even) td { background: #ffffff; }
+      .sub-code { font-size: 6.5px; color: #000000; font-weight: 700; margin-top: 1px; }
 
-      .watermark { background: #fef3c7; border: 1.5px solid #d97706; color: #92400e; text-align: center; font-weight: 800; padding: 3px; margin-bottom: 5px; font-size: 9px; border-radius: 3px; }
-      .canceled { background: #fee2e2; border: 2px solid #dc2626; color: #991b1b; text-align: center; font-weight: 900; padding: 5px; margin-bottom: 5px; font-size: 11px; border-radius: 3px; }
-      .footer-erp { margin-top: 5px; display: flex; justify-content: space-between; font-size: 6.8px; color: #64748b; }
+      .watermark { background: #ffffff; border: 2px solid #000000; color: #000000; text-align: center; font-weight: 900; padding: 3.5px; margin-bottom: 5px; font-size: 9px; border-radius: 3px; }
+      .canceled { background: #000000; border: 2px solid #000000; color: #ffffff; text-align: center; font-weight: 900; padding: 5px; margin-bottom: 5px; font-size: 11px; border-radius: 3px; }
+      .footer-erp { margin-top: 5px; display: flex; justify-content: space-between; font-size: 6.8px; color: #000000; font-weight: 700; }
     </style></head><body>
     ${paginas.join('\n')}
     </body></html>`)
@@ -1011,7 +1021,7 @@ export function DanfePrintModal({ nota, onClose, onBaixarXml }) {
                 letterSpacing: 0.4,
               }}
             >
-              ⚠️ DOCUMENTO EMITIDO EM HOMOLOGAÇÃO — SEM VALOR FISCAL (A impressão sai com marca d&apos;água grande no centro da folha)
+              ⚠️ DOCUMENTO EMITIDO EM HOMOLOGAÇÃO — SEM VALOR FISCAL
             </div>
           )}
 

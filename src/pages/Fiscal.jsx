@@ -1952,6 +1952,21 @@ export function Fiscal() {
                     value={previewPedido.inf_complementar}
                     onChange={(e) => setPreviewPedido({ ...previewPedido, inf_complementar: e.target.value })}
                   />
+                  {previewPedido.preview?.observacao_nf && (
+                    <div
+                      className="text-xs"
+                      style={{
+                        marginTop: 6,
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        background: 'rgba(59,130,246,0.12)',
+                        border: '1px solid rgba(59,130,246,0.35)',
+                        color: '#bfdbfe',
+                      }}
+                    >
+                      <strong>Obs. da NF já cadastrada no Pedido:</strong> {previewPedido.preview.observacao_nf}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1970,6 +1985,11 @@ export function Fiscal() {
                 }}
               >
                 <div className="text-xs" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  {Number(previewPedido.preview.totais.valor_desconto || 0) > 0 && (
+                    <span style={{ color: '#fbbf24' }}>
+                      Desconto: <strong className="font-mono">-{fmtMoeda(previewPedido.preview.totais.valor_desconto)}</strong>
+                    </span>
+                  )}
                   <span>BC ICMS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_icms_base)}</strong></span>
                   <span>ICMS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_icms)}</strong></span>
                   <span>PIS/COFINS: <strong className="font-mono">{fmtMoeda(previewPedido.preview.totais.valor_pis + previewPedido.preview.totais.valor_cofins)}</strong></span>

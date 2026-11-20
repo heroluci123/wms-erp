@@ -1200,3 +1200,94 @@ test('WMS Parte 2E: Edicao de Pedidos em Separacao/Conferencia + Travas de Bipag
     await conn.close()
   }
 })
+
+test('WMS Parte 2F: Titulo Automatico no Pedido, Desconto (% e R$) + Obs NF-e refletidos na DANFE/XML', async () => {
+  const { conn, app, headers, paId, taraId } = await setupBaseApp()
+  try {
+    // 1. Receber 20kg de PA
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/api/recebimento/caixa',
+      headers,
+      payload: {
+        ean_caixa: '7890008800011',
+        produto_id: paId,
+        endereco: 'A-01-01',
+        data_producao: '2026-11-16',
+        validade: '2026-12-30',
+        peso_bruto_kg: 21.0,
+        tara_id: taraId,
+        tara_kg: 1.0,
+        qtd_pecas: 4,
+      },
+    })
+    assert.equal(r1.statusCode, 201)
+
+    // 2. Criar pedido SEM titulo (vazio), com desconto 10% + R$ 50 e observacao_nf
+    const pedRes = await app.inject({
+      method: 'POST',
+      url: '/api/pedidos',
+      headers,
+      payload: {
+        titulo: '',
+        cliente: 'BEEF CONTAINER LIMITADA',
+        previsao_entrega: '2026-11-21',
+        observacao_nf: 'PEDIDO COMPRA CLIENTE #9981 - ENTREGAR DOCA FUNDOS',
+        liberar: true,
+        itens: [
+          {
+            produto_id: paId,
+            qtd_kg_solicitada: 20,
+            qtd_caixas_solicitada: 1,
+            preco_unitario: 100,
+            desconto_pct: 10,
+            desconto_valor: 50,
+          },
+        ],
+      },
+    })
+    assert.equal(pedRes.statusCode, 201, pedRes.body)
+    const pedId = pedRes.json().id
+
+    // Verificar titulo gerado automaticamente e valor liquido (2000 - 200 - 50 = 1750)
+    const getPed = await app.inject({ method: 'GET', url: `/api/pedidos/${pedId}`, headers })
+    assert.equal(getPed.statusCode, 200)
+    const pedData = getPed.json().data
+    assert.equal(pedData.titulo, 'BEEF CONT. 21/11')
+    assert.equal(pedData.observacao_nf, 'PEDIDO COMPRA CLIENTE #9981 - ENTREGAR DOCA FUNDOS')
+    assert.equal(Number(pedData.valor_total), 1750)
+
+    // 3. Preview fiscal deve trazer desconto (250) e observacao_nf
+    const prevRes = await app.inject({
+      method: 'POST',
+      url: `/api/fiscal/notas/preview-pedido/${pedId}`,
+      headers,
+      payload: { modelo: '55' },
+    })
+    assert.equal(prevRes.statusCode, 200, prevRes.body)
+    const prevJson = prevRes.json()
+    assert.equal(prevJson.observacao_nf, 'PEDIDO COMPRA CLIENTE #9981 - ENTREGAR DOCA FUNDOS')
+    assert.equal(Number(prevJson.totais.valor_desconto), 250)
+    assert.equal(Number(prevJson.totais.valor_total_nf), 1750)
+
+    // 4. Emitir NF-e -> consultar detalhe completo da nota e verificar valor_desconto, valor_total_nf, inf_complementar e XML
+    const emitRes = await app.inject({
+      method: 'POST',
+      url: `/api/fiscal/notas/emitir-pedido/${pedId}`,
+      headers,
+      payload: { modelo: '55', mod_frete: '9' },
+    })
+    assert.equal(emitRes.statusCode, 201, emitRes.body)
+    const nfId = emitRes.json().id
+
+    const detNfRes = await app.inject({ method: 'GET', url: `/api/fiscal/notas/${nfId}`, headers })
+    assert.equal(detNfRes.statusCode, 200, detNfRes.body)
+    const nf = detNfRes.json().nota ?? detNfRes.json().data ?? detNfRes.json()
+    assert.equal(Number(nf.valor_desconto), 250)
+    assert.equal(Number(nf.valor_total_nf), 1750)
+    assert.match(String(nf.inf_complementar || ''), /PEDIDO COMPRA CLIENTE #9981/)
+  } finally {
+    await app.close()
+    await conn.close()
+  }
+})

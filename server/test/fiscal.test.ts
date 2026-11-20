@@ -517,15 +517,28 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
       `Esperava pendência PEDIDO_AGUARDANDO_FATURAMENTO para ped2Id: ${resPendFat.body}`,
     )
 
-    const resConf = await app.inject({
+    // Na fila de Conferência, o romaneio sem NF-e deve vir marcado como bloqueado_sem_nf = true
+    const resRomListaAntes = await app.inject({
+      method: 'GET',
+      url: '/api/romaneios?status=AGUARDANDO_EXPEDICAO',
+      headers,
+    })
+    assert.equal(resRomListaAntes.statusCode, 200)
+    const romRowAntes = (resRomListaAntes.json().data || []).find((r: any) => r.id === romId)
+    assert.ok(romRowAntes, 'Romaneio deveria aparecer em AGUARDANDO_EXPEDICAO')
+    assert.equal(romRowAntes.bloqueado_sem_nf, true, 'Romaneio sem NF-e deve vir bloqueado_sem_nf = true')
+    assert.equal(romRowAntes.tem_nf_autorizada, false)
+
+    // Tentar CONFERIR sem NF-e com a trava ligada -> DEVE BLOQUEAR COM 409!
+    const resConfBloq = await app.inject({
       method: 'POST',
       url: `/api/romaneios/${romId}/conferir`,
       headers,
       payload: { codigo: '7891234567001' },
     })
-    assert.equal(resConf.statusCode, 200, resConf.body)
+    assert.equal(resConfBloq.statusCode, 409, `Conferência sem NF-e deveria retornar 409, veio ${resConfBloq.statusCode}: ${resConfBloq.body}`)
 
-    // Tentar expedir SEM NF-e com a trava ligada -> DEVE BLOQUEAR COM 409!
+    // Tentar EXPEDIR sem NF-e com a trava ligada -> DEVE BLOQUEAR COM 409!
     const resExpBloq = await app.inject({
       method: 'POST',
       url: `/api/romaneios/${romId}/expedir`,
@@ -533,7 +546,7 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
     })
     assert.equal(resExpBloq.statusCode, 409, `Expedição sem NF-e deveria retornar 409, veio ${resExpBloq.statusCode}: ${resExpBloq.body}`)
 
-    // Emitir NF-e do pedido 2 (com transportadora) -> agora a expedição DEVE LIBERAR 200 OK!
+    // Emitir NF-e do pedido 2 (com transportadora) -> agora deve desbloquear Conferência e Expedição!
     const resEmit2 = await app.inject({
       method: 'POST',
       url: `/api/fiscal/notas/emitir-pedido/${ped2Id}`,
@@ -542,12 +555,30 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
     })
     assert.equal(resEmit2.statusCode, 201, resEmit2.body)
 
+    const resRomListaDepois = await app.inject({
+      method: 'GET',
+      url: '/api/romaneios?status=AGUARDANDO_EXPEDICAO',
+      headers,
+    })
+    const romRowDepois = (resRomListaDepois.json().data || []).find((r: any) => r.id === romId)
+    assert.equal(romRowDepois.bloqueado_sem_nf, false, 'Após emitir NF-e, romaneio deve desbloquear')
+    assert.equal(romRowDepois.tem_nf_autorizada, true)
+    assert.ok(romRowDepois.numero_nf)
+
+    const resConf = await app.inject({
+      method: 'POST',
+      url: `/api/romaneios/${romId}/conferir`,
+      headers,
+      payload: { codigo: '7891234567001' },
+    })
+    assert.equal(resConf.statusCode, 200, resConf.body)
+
     const resExpOk = await app.inject({
       method: 'POST',
       url: `/api/romaneios/${romId}/expedir`,
       headers,
     })
-    assert.equal(resExpOk.statusCode, 200, `Após emitir NF-e, expedição deve ser liberada: ${resExpOk.body}`)
+    assert.equal(resExpOk.statusCode, 200, `Após emitir NF-e e conferir, expedição deve ser liberada: ${resExpOk.body}`)
 
     // 11. Bloquear caixas previstas quebradas (ex: 0.1 caixa) + Motivo explícito de trava de estoque
     const resCxQuebrada = await app.inject({

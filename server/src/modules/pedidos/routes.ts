@@ -71,6 +71,26 @@ function limparMotivoTrava(raw?: string | null, status?: string): string {
   return ''
 }
 
+function gerarTituloAutomaticoPedido(clienteNome?: string | null, previsaoEntrega?: string | null): string {
+  const clean = String(clienteNome || 'PEDIDO')
+    .trim()
+    .toUpperCase()
+    .replace(/\b(LIMITADA|LTDA\.?|EIRELI|S\/A|S\.A\.?|ME|EPP|COMERCIO|COMÉRCIO|ALIMENTOS|DISTRIBUIDORA)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const palavras = (clean || String(clienteNome || 'PEDIDO').trim().toUpperCase()).split(' ').filter(Boolean)
+  let abrev = palavras[0] || 'PEDIDO'
+  if (palavras.length >= 2) {
+    const p2 = palavras[1]
+    abrev = `${palavras[0]} ${p2.length > 4 ? `${p2.slice(0, 4)}.` : p2}`
+  }
+  if (abrev.length > 18) abrev = `${abrev.slice(0, 17).trim()}.`
+  const dataIso = normalizarDataIso(previsaoEntrega) || hojeIsoLocal()
+  const parts = String(dataIso).slice(0, 10).split('-')
+  const ddmm = parts.length === 3 ? `${parts[2]}/${parts[1]}` : ''
+  return ddmm ? `${abrev} ${ddmm}` : abrev
+}
+
 function consolidarItensPedido(itens: ItemPedidoInput[]) {
   const consolidados = new Map<
     string,
@@ -291,6 +311,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             previsao_entrega: pedidos.previsaoEntrega,
             valor_total: pedidos.valorTotal,
             observacoes: pedidos.observacoes,
+            observacao_nf: pedidos.observacaoNf,
             origem_pedido: pedidos.origemPedido,
             setor_solicitante: pedidos.setorSolicitante,
             status: pedidos.status,
@@ -568,6 +589,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           previsao_entrega: pedido.previsaoEntrega,
           valor_total: toNum(pedido.valorTotal, 0),
           observacoes: pedido.observacoes,
+          observacao_nf: pedido.observacaoNf || '',
           origem_pedido: pedido.origemPedido,
           setor_solicitante: pedido.setorSolicitante,
           status: pedido.status,
@@ -599,6 +621,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
               it.qtd_solicitada_exibicao != null ? toNum(it.qtd_solicitada_exibicao, 0) : null,
             preco_unitario: toNum(it.preco_unitario, 0),
             desconto_pct: toNum(it.desconto_pct, 0),
+            desconto_valor: toNum(it.desconto_valor, 0),
             estoque_disponivel_kg: toNum(it.estoque_disponivel_kg, 0),
             peso_medio_cx: toNum(it.peso_medio_cx, 0),
             kg_separado: toNum(it.kg_separado, 0),
@@ -623,6 +646,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       pagamento_na_entrega?: boolean | number
       previsao_entrega?: string | null
       observacoes?: string
+      observacao_nf?: string
       origem_pedido?: string
       setor_solicitante?: string
       liberar?: boolean
@@ -646,8 +670,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
     const temPermissaoLiberar = ctx.operador.permissoes?.pedidos === true || ctx.operador.nivel === 'MASTER'
     const forcarRascunho = origemPedido === 'FINANCEIRO' && (!temPermissaoLiberar || body.liberar !== true)
 
-    const tituloTrim = String(body.titulo || '').trim()
-    if (!tituloTrim) throw new HttpError(400, 'Informe o título do pedido.')
+    const tituloInformado = String(body.titulo || '').trim()
     if (!Array.isArray(body.itens) || body.itens.length === 0) {
       throw new HttpError(400, 'Adicione pelo menos um item ao pedido.')
     }
@@ -681,6 +704,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         }
       }
       if (!clienteNome) clienteNome = 'CLIENTE PADRÃO'
+      const tituloTrim = tituloInformado || gerarTituloAutomaticoPedido(clienteNome, body.previsao_entrega)
 
       const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'PEDIDO', 'PED', 4)
       let status = body.liberar === false || forcarRascunho ? 'RASCUNHO' : 'LIBERADO'
@@ -742,6 +766,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         previsaoEntrega: normalizarDataIso(body.previsao_entrega),
         valorTotal: toDec(valorTotal, 2),
         observacoes: String(body.observacoes || '').trim(),
+        observacaoNf: String(body.observacao_nf || '').trim(),
         origemPedido,
         setorSolicitante,
         status,
@@ -848,13 +873,13 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       pagamento_na_entrega?: boolean | number
       previsao_entrega?: string | null
       observacoes?: string
+      observacao_nf?: string
       liberar?: boolean
       ignorar_trava_estoque?: boolean
       itens: ItemPedidoInput[]
     }
 
-    const tituloTrim = String(body.titulo || '').trim()
-    if (!tituloTrim) throw new HttpError(400, 'Informe o título do pedido.')
+    const tituloInformado = String(body.titulo || '').trim()
     if (!Array.isArray(body.itens) || body.itens.length === 0) {
       throw new HttpError(400, 'O pedido precisa de pelo menos um item.')
     }
@@ -1070,6 +1095,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
 
       const clienteFinal = body.cliente ? body.cliente.trim() : atual.cliente
       const previsaoFinal = normalizarDataIso(body.previsao_entrega)
+      const tituloTrim = tituloInformado || gerarTituloAutomaticoPedido(clienteFinal, previsaoFinal)
 
       await tx
         .update(pedidos)
@@ -1108,6 +1134,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           previsaoEntrega: previsaoFinal,
           valorTotal: toDec(valorTotal, 2),
           observacoes: body.observacoes != null ? body.observacoes.trim() : atual.observacoes,
+          observacaoNf: body.observacao_nf != null ? String(body.observacao_nf).trim() : atual.observacaoNf,
           status: nextStatus,
           liberadoAt:
             ['LIBERADO', 'EM_SEPARACAO'].includes(nextStatus) && !atual.liberadoAt
@@ -1376,6 +1403,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         previsaoEntrega: orig.previsaoEntrega,
         valorTotal: orig.valorTotal,
         observacoes: orig.observacoes,
+        observacaoNf: orig.observacaoNf || '',
         origemPedido: orig.origemPedido,
         setorSolicitante: orig.setorSolicitante,
         status,
@@ -1825,44 +1853,65 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       }
       if (q.previsaoEntrega) conds.push(sql`DATE(${romaneios.previsaoEntrega}) = ${q.previsaoEntrega}`)
 
-      const rows = await conn.db
-        .select({
-          id: romaneios.id,
-          codigo: romaneios.codigo,
-          pedido_id: romaneios.pedidoId,
-          cliente: romaneios.cliente,
-          previsao_entrega: romaneios.previsaoEntrega,
-          status: romaneios.status,
-          operador_nome: romaneios.operadorNome,
-          operador_conferencia_nome: romaneios.operadorConferenciaNome,
-          operador_expedicao_nome: romaneios.operadorExpedicaoNome,
-          conferido_at: romaneios.conferidoAt,
-          expedido_at: romaneios.expedidoAt,
-          created_at: romaneios.createdAt,
-          pedido_codigo: pedidos.codigo,
-          pedido_titulo: pedidos.titulo,
-          pedido_cliente: pedidos.cliente,
-          pedido_status: pedidos.status,
-          total_peso: sql<string>`COALESCE(SUM(${romaneiosItens.pesoKg}), 0)`,
-          total_caixas: sql<number>`COUNT(${romaneiosItens.id})::int`,
-          qtd_produtos: sql<number>`COUNT(DISTINCT ${romaneiosItens.produtoId})::int`,
-          qtd_conferidas: sql<number>`COALESCE(SUM(CASE WHEN ${romaneiosItens.conferido} = 1 THEN 1 ELSE 0 END), 0)::int`,
-          peso_conferido: sql<string>`COALESCE(SUM(CASE WHEN ${romaneiosItens.conferido} = 1 THEN ${romaneiosItens.pesoKg} ELSE 0 END), 0)`,
-        })
-        .from(romaneios)
-        .leftJoin(pedidos, eq(pedidos.id, romaneios.pedidoId))
-        .leftJoin(romaneiosItens, eq(romaneiosItens.romaneioId, romaneios.id))
-        .where(and(...conds))
-        .groupBy(romaneios.id, pedidos.id)
-        .orderBy(desc(romaneios.createdAt))
-        .limit(200)
+      const [features, rows] = await Promise.all([
+        lerTenantFeatures(conn.db, ctx.tenantId),
+        conn.db
+          .select({
+            id: romaneios.id,
+            codigo: romaneios.codigo,
+            pedido_id: romaneios.pedidoId,
+            cliente: romaneios.cliente,
+            previsao_entrega: romaneios.previsaoEntrega,
+            status: romaneios.status,
+            operador_nome: romaneios.operadorNome,
+            operador_conferencia_nome: romaneios.operadorConferenciaNome,
+            operador_expedicao_nome: romaneios.operadorExpedicaoNome,
+            conferido_at: romaneios.conferidoAt,
+            expedido_at: romaneios.expedidoAt,
+            created_at: romaneios.createdAt,
+            pedido_codigo: pedidos.codigo,
+            pedido_titulo: pedidos.titulo,
+            pedido_cliente: pedidos.cliente,
+            pedido_status: pedidos.status,
+            pedido_numero_nf: pedidos.numeroNf,
+            pedido_chave_nfe: pedidos.chaveNfe,
+            tem_nf_autorizada_sql: sql<boolean>`EXISTS (SELECT 1 FROM fiscal_notas fn WHERE fn.pedido_id = "romaneios"."pedido_id" AND fn.status = 'AUTORIZADA' AND fn.tipo_operacao = 'SAIDA')`,
+            nf_autorizada_numero: sql<number | null>`(SELECT fn.numero FROM fiscal_notas fn WHERE fn.pedido_id = "romaneios"."pedido_id" AND fn.status = 'AUTORIZADA' AND fn.tipo_operacao = 'SAIDA' ORDER BY fn.created_at DESC LIMIT 1)`,
+            total_peso: sql<string>`COALESCE(SUM(${romaneiosItens.pesoKg}), 0)`,
+            total_caixas: sql<number>`COUNT(${romaneiosItens.id})::int`,
+            qtd_produtos: sql<number>`COUNT(DISTINCT ${romaneiosItens.produtoId})::int`,
+            qtd_conferidas: sql<number>`COALESCE(SUM(CASE WHEN ${romaneiosItens.conferido} = 1 THEN 1 ELSE 0 END), 0)::int`,
+            peso_conferido: sql<string>`COALESCE(SUM(CASE WHEN ${romaneiosItens.conferido} = 1 THEN ${romaneiosItens.pesoKg} ELSE 0 END), 0)`,
+          })
+          .from(romaneios)
+          .leftJoin(pedidos, eq(pedidos.id, romaneios.pedidoId))
+          .leftJoin(romaneiosItens, eq(romaneiosItens.romaneioId, romaneios.id))
+          .where(and(...conds))
+          .groupBy(romaneios.id, pedidos.id)
+          .orderBy(desc(romaneios.createdAt))
+          .limit(200),
+      ])
+
+      const exigirNfParaExpedir = Boolean(features.exigir_nf_para_expedir)
 
       return {
-        data: rows.map((r) => ({
-          ...r,
-          total_peso: toNum(r.total_peso, 0),
-          peso_conferido: toNum(r.peso_conferido, 0),
-        })),
+        data: rows.map((r) => {
+          const temNfAutorizada =
+            Boolean(r.tem_nf_autorizada_sql) ||
+            Boolean(String(r.pedido_chave_nfe || '').trim() && String(r.pedido_numero_nf || '').trim())
+          const numeroNf = r.nf_autorizada_numero
+            ? String(r.nf_autorizada_numero)
+            : String(r.pedido_numero_nf || '').trim() || null
+          return {
+            ...r,
+            total_peso: toNum(r.total_peso, 0),
+            peso_conferido: toNum(r.peso_conferido, 0),
+            tem_nf_autorizada: temNfAutorizada,
+            numero_nf: numeroNf,
+            exigir_nf_para_expedir: exigirNfParaExpedir,
+            bloqueado_sem_nf: exigirNfParaExpedir && Boolean(r.pedido_id) && !temNfAutorizada,
+          }
+        }),
       }
     },
   )
@@ -1941,21 +1990,69 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         .orderBy(romaneiosItens.createdAt)
 
       let pedidoItens: Array<Record<string, unknown>> = []
+      let pedidoInfo: {
+        codigo: string
+        titulo: string
+        cliente: string
+        status: string
+        numeroNf: string
+        chaveNfe: string
+      } | null = null
+      let temNfAutorizada = false
+      let numeroNf: string | null = null
+      const features = await lerTenantFeatures(conn.db, ctx.tenantId)
+      const exigirNfParaExpedir = Boolean(features.exigir_nf_para_expedir)
+
       if (rom.pedidoId) {
-        const pItens = await conn.db
-          .select({
-            id: pedidosItens.id,
-            produto_id: pedidosItens.produtoId,
-            qtd_kg_solicitada: pedidosItens.qtdKgSolicitada,
-            qtd_caixas_solicitada: pedidosItens.qtdCaixasSolicitada,
-            unidade_solicitada: pedidosItens.unidadeSolicitada,
-            observacao: pedidosItens.observacao,
-            produto_codigo: produtos.codigo,
-            produto_descricao: produtos.descricao,
-          })
-          .from(pedidosItens)
-          .innerJoin(produtos, eq(produtos.id, pedidosItens.produtoId))
-          .where(eq(pedidosItens.pedidoId, rom.pedidoId))
+        const [[pedRow], [nfRow], pItens] = await Promise.all([
+          conn.db
+            .select({
+              codigo: pedidos.codigo,
+              titulo: pedidos.titulo,
+              cliente: pedidos.cliente,
+              status: pedidos.status,
+              numeroNf: pedidos.numeroNf,
+              chaveNfe: pedidos.chaveNfe,
+            })
+            .from(pedidos)
+            .where(eq(pedidos.id, rom.pedidoId))
+            .limit(1),
+          conn.db
+            .select({ id: fiscalNotas.id, numero: fiscalNotas.numero })
+            .from(fiscalNotas)
+            .where(
+              and(
+                eq(fiscalNotas.tenantId, ctx.tenantId),
+                eq(fiscalNotas.pedidoId, rom.pedidoId),
+                eq(fiscalNotas.status, 'AUTORIZADA'),
+                eq(fiscalNotas.tipoOperacao, 'SAIDA'),
+              ),
+            )
+            .orderBy(desc(fiscalNotas.createdAt))
+            .limit(1),
+          conn.db
+            .select({
+              id: pedidosItens.id,
+              produto_id: pedidosItens.produtoId,
+              qtd_kg_solicitada: pedidosItens.qtdKgSolicitada,
+              qtd_caixas_solicitada: pedidosItens.qtdCaixasSolicitada,
+              unidade_solicitada: pedidosItens.unidadeSolicitada,
+              observacao: pedidosItens.observacao,
+              produto_codigo: produtos.codigo,
+              produto_descricao: produtos.descricao,
+            })
+            .from(pedidosItens)
+            .innerJoin(produtos, eq(produtos.id, pedidosItens.produtoId))
+            .where(eq(pedidosItens.pedidoId, rom.pedidoId)),
+        ])
+
+        pedidoInfo = pedRow || null
+        temNfAutorizada =
+          Boolean(nfRow) ||
+          Boolean(String(pedRow?.chaveNfe || '').trim() && String(pedRow?.numeroNf || '').trim())
+        numeroNf = nfRow?.numero
+          ? String(nfRow.numero)
+          : String(pedRow?.numeroNf || '').trim() || null
 
         pedidoItens = pItens.map((pi) => {
           const doProd = itens.filter((i) => i.produto_id === pi.produto_id)
@@ -1973,6 +2070,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       return {
         data: {
           ...rom,
+          pedido_codigo: pedidoInfo?.codigo || null,
+          pedido_titulo: pedidoInfo?.titulo || null,
+          pedido_cliente: pedidoInfo?.cliente || null,
+          pedido_status: pedidoInfo?.status || null,
+          tem_nf_autorizada: temNfAutorizada,
+          numero_nf: numeroNf,
+          exigir_nf_para_expedir: exigirNfParaExpedir,
+          bloqueado_sem_nf: exigirNfParaExpedir && Boolean(rom.pedidoId) && !temNfAutorizada,
           itens: itens.map((i) => ({ ...i, peso_kg: toNum(i.peso_kg, 0) })),
           pedido_itens: pedidoItens,
         },
@@ -2416,6 +2521,41 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         if (!rom) throw new HttpError(404, 'Romaneio não encontrado.')
         if (rom.status !== 'AGUARDANDO_EXPEDICAO') {
           throw new HttpError(409, `Este romaneio está no status ${rom.status} e não aceita conferência.`)
+        }
+
+        // Trava Fiscal na Conferência: se exigir_nf_para_expedir estiver ligada, bloqueia até faturar NF-e
+        if (rom.pedidoId) {
+          const features = await lerTenantFeatures(tx, ctx.tenantId)
+          if (Boolean(features.exigir_nf_para_expedir)) {
+            const [[pedNf], [nfAuth]] = await Promise.all([
+              tx
+                .select({ codigo: pedidos.codigo, numeroNf: pedidos.numeroNf, chaveNfe: pedidos.chaveNfe })
+                .from(pedidos)
+                .where(eq(pedidos.id, rom.pedidoId))
+                .limit(1),
+              tx
+                .select({ id: fiscalNotas.id })
+                .from(fiscalNotas)
+                .where(
+                  and(
+                    eq(fiscalNotas.tenantId, ctx.tenantId),
+                    eq(fiscalNotas.pedidoId, rom.pedidoId),
+                    eq(fiscalNotas.status, 'AUTORIZADA'),
+                    eq(fiscalNotas.tipoOperacao, 'SAIDA'),
+                  ),
+                )
+                .limit(1),
+            ])
+            const temNf =
+              Boolean(nfAuth) ||
+              Boolean(String(pedNf?.chaveNfe || '').trim() && String(pedNf?.numeroNf || '').trim())
+            if (!temNf) {
+              throw new HttpError(
+                409,
+                `Pedido ${pedNf?.codigo || rom.codigo} ainda não foi faturado — emita a NF-e no Módulo Fiscal antes de iniciar a conferência.`,
+              )
+            }
+          }
         }
 
         const [item] = await tx

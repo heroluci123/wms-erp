@@ -28,7 +28,9 @@ import {
   Calendar,
   ArrowUpDown,
   RotateCcw,
-  Save
+  Save,
+  FileText,
+  Percent
 } from 'lucide-react'
 import { pedidosQueries } from '../queries/pedidos'
 import { cadastrosQueries } from '../queries/cadastros'
@@ -71,6 +73,40 @@ const normTxt = (v) =>
 
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`
+
+function gerarTituloAutomaticoLocal(clienteNome, previsaoEntrega) {
+  const clean = String(clienteNome || 'PEDIDO')
+    .trim()
+    .toUpperCase()
+    .replace(/\b(LIMITADA|LTDA\.?|EIRELI|S\/A|S\.A\.?|ME|EPP|COMERCIO|COMÉRCIO|ALIMENTOS|DISTRIBUIDORA)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const palavras = (clean || String(clienteNome || 'PEDIDO').trim().toUpperCase()).split(' ').filter(Boolean)
+  let abrev = palavras[0] || 'PEDIDO'
+  if (palavras.length >= 2) {
+    const p2 = palavras[1]
+    abrev = `${palavras[0]} ${p2.length > 4 ? `${p2.slice(0, 4)}.` : p2}`
+  }
+  if (abrev.length > 18) abrev = `${abrev.slice(0, 17).trim()}.`
+  const iso = previsaoEntrega && /^\d{4}-\d{2}-\d{2}/.test(String(previsaoEntrega))
+    ? String(previsaoEntrega).slice(0, 10)
+    : new Date().toISOString().slice(0, 10)
+  const parts = iso.split('-')
+  const ddmm = parts.length === 3 ? `${parts[2]}/${parts[1]}` : ''
+  return ddmm ? `${abrev} ${ddmm}` : abrev
+}
+
+function calcularValoresItem(item) {
+  const kg = Number(String(item.qtd_kg_solicitada ?? 0).replace(',', '.') || 0)
+  const preco = Number(String(item.preco_unitario ?? 0).replace(',', '.') || 0)
+  const descPct = Math.max(0, Math.min(100, Number(String(item.desconto_pct ?? 0).replace(',', '.') || 0)))
+  const descFixo = Math.max(0, Number(String(item.desconto_valor ?? 0).replace(',', '.') || 0))
+  const bruto = Number((kg * preco).toFixed(2))
+  const descPctVal = descPct > 0 ? Number(((bruto * descPct) / 100).toFixed(2)) : 0
+  const descontoTotal = Math.min(bruto, Number((descPctVal + descFixo).toFixed(2)))
+  const liquido = Math.max(0, Number((bruto - descontoTotal).toFixed(2)))
+  return { kg, preco, descPct, descFixo, bruto, descontoTotal, liquido }
+}
 
 const temSaldoProduto = (p) => Number(p?.saldo_kg || 0) > 0 || Number(p?.qtd_caixas ?? p?.saldo_caixas ?? 0) > 0
 
@@ -153,7 +189,11 @@ export function Pedidos() {
   const [editId, setEditId] = useState(null)
   const [editCodigo, setEditCodigo] = useState('')
   const [editStatus, setEditStatus] = useState(null)
+  const [abaForm, setAbaForm] = useState('ITENS') // 'ITENS' | 'NF_DESCONTOS'
   const [titulo, setTitulo] = useState('')
+  const [observacaoNf, setObservacaoNf] = useState('')
+  const [descGlobalTipo, setDescGlobalTipo] = useState('PCT') // 'PCT' | 'VALOR'
+  const [descGlobalInput, setDescGlobalInput] = useState('')
   const [clienteIdSelecionado, setClienteIdSelecionado] = useState(null)
   const [origemWppForcada, setOrigemWppForcada] = useState(false)
   const [vendedorId, setVendedorId] = useState('')
@@ -455,7 +495,10 @@ export function Pedidos() {
     setEditId(null)
     setEditCodigo('')
     setEditStatus(null)
+    setAbaForm('ITENS')
     setTitulo('')
+    setObservacaoNf('')
+    setDescGlobalInput('')
     setClienteIdSelecionado(clientePadrao?.id || null)
     setOrigemWppForcada(false)
     setVendedorId(clientePadrao?.vendedor_padrao_id || '')
@@ -684,6 +727,9 @@ export function Pedidos() {
       setMostrarTrocaCliente(false)
       setPrevisaoEntrega(ped.previsao_entrega ? String(ped.previsao_entrega).slice(0, 10) : '')
       setObservacoes(ped.observacoes || '')
+      setObservacaoNf(ped.observacao_nf || '')
+      setAbaForm('ITENS')
+      setDescGlobalInput('')
       setItensForm(
         (ped.itens || []).map((it) => {
           const prodCatalogo = produtos.find((p) => String(p.id) === String(it.produto_id))
@@ -701,6 +747,8 @@ export function Pedidos() {
             unidade_solicitada: it.unidade_solicitada === 'CX' ? 'CX' : 'KG',
             qtd_solicitada_exibicao: it.qtd_solicitada_exibicao != null ? Number(it.qtd_solicitada_exibicao) : Number(it.qtd_kg_solicitada),
             preco_unitario: it.preco_unitario != null ? String(it.preco_unitario) : '0',
+            desconto_pct: it.desconto_pct != null && Number(it.desconto_pct) > 0 ? String(it.desconto_pct) : '',
+            desconto_valor: it.desconto_valor != null && Number(it.desconto_valor) > 0 ? String(it.desconto_valor) : '',
             cfop_aplicado: it.cfop_aplicado || '',
             observacao: it.observacao || '',
             alerta_reclamacao: it.alerta_reclamacao || '',
@@ -800,6 +848,8 @@ export function Pedidos() {
           unidade_solicitada: unidadeInput,
           qtd_solicitada_exibicao: qtdNum,
           preco_unitario: String(precoFinal),
+          desconto_pct: '',
+          desconto_valor: '',
           cfop_aplicado: cfopSugerido?.cfop_completo || '',
           observacao: obsItemInput.trim(),
           alerta_reclamacao: espec?.alerta_reclamacao ? (espec.alerta_descricao || 'Reclamação anterior registrada') : '',
@@ -835,8 +885,65 @@ export function Pedidos() {
     }
   }
 
+  const aplicarDescontoGlobal = () => {
+    if (itensForm.length === 0) {
+      return toastWarning('Adicione ao menos 1 item ao pedido antes de aplicar desconto.')
+    }
+    const val = Number(String(descGlobalInput).replace(',', '.'))
+    if (!Number.isFinite(val) || val < 0) {
+      return toastWarning('Informe um valor de desconto válido (0 ou maior).')
+    }
+    if (descGlobalTipo === 'PCT') {
+      if (val > 100) return toastWarning('Desconto percentual não pode ultrapassar 100%.')
+      setItensForm((prev) =>
+        prev.map((it) => ({
+          ...it,
+          desconto_pct: val > 0 ? String(Number(val.toFixed(2))) : '',
+          desconto_valor: '',
+        }))
+      )
+      toastSuccess(val > 0 ? `Desconto de ${val.toFixed(2)}% aplicado a todos os ${itensForm.length} item(ns).` : 'Descontos zerados.')
+      return
+    }
+    const brutoTotal = itensForm.reduce((s, it) => s + calcularValoresItem(it).bruto, 0)
+    if (brutoTotal <= 0) {
+      return toastWarning('Informe o preço (R$/kg) dos itens antes de aplicar desconto em R$.')
+    }
+    const descAlvo = Math.min(brutoTotal, Number(val.toFixed(2)))
+    let restante = descAlvo
+    const lastValidIdx = itensForm.reduce((acc, it, idx) => (calcularValoresItem(it).bruto > 0 ? idx : acc), -1)
+    setItensForm((prev) =>
+      prev.map((it, idx) => {
+        const { bruto } = calcularValoresItem(it)
+        if (bruto <= 0 || descAlvo <= 0) {
+          return { ...it, desconto_pct: '', desconto_valor: '' }
+        }
+        const fatia =
+          idx === lastValidIdx
+            ? Number(Math.min(bruto, Math.max(0, restante)).toFixed(2))
+            : Number(Math.min(bruto, (bruto / brutoTotal) * descAlvo).toFixed(2))
+        restante = Number((restante - fatia).toFixed(2))
+        return {
+          ...it,
+          desconto_pct: '',
+          desconto_valor: fatia > 0 ? String(fatia) : '',
+        }
+      })
+    )
+    toastSuccess(
+      descAlvo > 0
+        ? `Desconto de R$ ${descAlvo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} rateado proporcionalmente entre os itens.`
+        : 'Descontos zerados.'
+    )
+  }
+
+  const zerarDescontos = () => {
+    setDescGlobalInput('')
+    setItensForm((prev) => prev.map((it) => ({ ...it, desconto_pct: '', desconto_valor: '' })))
+    toastSuccess('Todos os descontos do pedido foram zerados.')
+  }
+
   const handleSalvarPedido = async (liberar, { imprimirApos = false } = {}) => {
-    if (!titulo.trim()) return toastWarning('Informe o Título do Pedido (será impresso no Romaneio de Embarque).')
     if (itensForm.length === 0) return toastWarning('Adicione pelo menos 1 item ao pedido.')
 
     for (const i of itensForm) {
@@ -870,6 +977,8 @@ export function Pedidos() {
       unidade_solicitada: i.unidade_solicitada || 'KG',
       qtd_solicitada_exibicao: i.qtd_solicitada_exibicao != null ? Number(i.qtd_solicitada_exibicao) : null,
       preco_unitario: Number(String(i.preco_unitario || 0).replace(',', '.') || 0),
+      desconto_pct: Math.max(0, Math.min(100, Number(String(i.desconto_pct || 0).replace(',', '.') || 0))),
+      desconto_valor: Math.max(0, Number(String(i.desconto_valor || 0).replace(',', '.') || 0)),
       codigo_aux: i.codigo_aux || '',
       cfop_aplicado: i.cfop_aplicado || cfopSugerido?.cfop_completo || '',
       observacao: i.observacao || '',
@@ -878,6 +987,7 @@ export function Pedidos() {
 
     const cliId = clienteAtivo?.id || null
     const cliNome = clienteAtivo?.razao_social || 'BEEF CONTAINER LIMITADA'
+    const tituloFinal = titulo.trim() || gerarTituloAutomaticoLocal(cliNome, previsaoEntrega)
     const editEmOperacao = Boolean(
       editId && ['EM_SEPARACAO', 'AGUARDANDO_CONFERENCIA', 'EM_CONFERENCIA'].includes(editStatus)
     )
@@ -889,7 +999,7 @@ export function Pedidos() {
       if (editId) {
         const resEdit = await pedidosQueries.atualizarPedido({
           id: editId,
-          titulo,
+          titulo: tituloFinal,
           cliente_id: cliId,
           cliente: cliNome,
           vendedor_id: vendedorId || null,
@@ -900,6 +1010,7 @@ export function Pedidos() {
           pagamento_na_entrega: pagamentoNaEntrega,
           previsao_entrega: previsaoEntrega || null,
           observacoes,
+          observacao_nf: observacaoNf.trim(),
           itens: payloadItens,
           liberar: editEmOperacao ? undefined : liberar
         })
@@ -923,7 +1034,7 @@ export function Pedidos() {
         }
       } else {
         const res = await pedidosQueries.criarPedido({
-          titulo,
+          titulo: tituloFinal,
           cliente_id: cliId,
           cliente: cliNome,
           vendedor_id: vendedorId || null,
@@ -934,6 +1045,7 @@ export function Pedidos() {
           pagamento_na_entrega: pagamentoNaEntrega,
           previsao_entrega: previsaoEntrega || null,
           observacoes,
+          observacao_nf: observacaoNf.trim(),
           origem_pedido: origemWppForcada ? 'WHATSAPP' : somenteFinanceiro ? 'FINANCEIRO' : undefined,
           setor_solicitante: operador?.setor || undefined,
           itens: payloadItens,
@@ -1182,12 +1294,12 @@ export function Pedidos() {
 
   const totalFormKg = itensForm.reduce((s, i) => s + Number(String(i.qtd_kg_solicitada).replace(',', '.') || 0), 0)
   const totalFormCx = itensForm.reduce((s, i) => s + Number(String(i.qtd_caixas_solicitada).replace(',', '.') || 0), 0)
-  const totalFormValor = itensForm.reduce(
-    (s, i) =>
-      s +
-      Number(String(i.qtd_kg_solicitada).replace(',', '.') || 0) *
-        Number(String(i.preco_unitario || 0).replace(',', '.') || 0),
-    0
+  const totalFormBruto = Number(itensForm.reduce((s, i) => s + calcularValoresItem(i).bruto, 0).toFixed(2))
+  const totalFormDesconto = Number(itensForm.reduce((s, i) => s + calcularValoresItem(i).descontoTotal, 0).toFixed(2))
+  const totalFormValor = Math.max(0, Number((totalFormBruto - totalFormDesconto).toFixed(2)))
+  const tituloAutomaticoPreview = gerarTituloAutomaticoLocal(
+    clienteAtivo?.razao_social || 'BEEF CONTAINER LIMITADA',
+    previsaoEntrega
   )
 
   const itensSemEstoqueForm = useMemo(() => {
@@ -1868,6 +1980,37 @@ export function Pedidos() {
             </div>
           )}
 
+          {/* Abas internas do formulário do Pedido */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+            <button
+              type="button"
+              className={`btn btn--sm ${abaForm === 'ITENS' ? 'btn--primary' : 'btn--secondary'}`}
+              onClick={() => setAbaForm('ITENS')}
+            >
+              <Package size={15} /> 1. Dados &amp; Itens do Pedido ({itensForm.length})
+            </button>
+            <button
+              type="button"
+              className={`btn btn--sm ${abaForm === 'NF_DESCONTOS' ? 'btn--primary' : 'btn--secondary'}`}
+              onClick={() => setAbaForm('NF_DESCONTOS')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <FileText size={15} /> 2. Especificações da NF &amp; Descontos
+              {totalFormDesconto > 0 && (
+                <span className="badge badge--success font-mono" style={{ fontSize: 10.5, padding: '1px 6px' }}>
+                  -R$ {totalFormDesconto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              )}
+              {observacaoNf.trim() && (
+                <span className="badge badge--info" style={{ fontSize: 10.5, padding: '1px 6px' }}>
+                  Obs. NF
+                </span>
+              )}
+            </button>
+          </div>
+
+          {abaForm === 'ITENS' && (
+            <>
           {/* Cartão automático do Cliente Padrão (BEEF CONTAINER LIMITADA) + opção futura de troca/cadastro */}
           <div
             style={{
@@ -1957,16 +2100,21 @@ export function Pedidos() {
           {/* Dados principais */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
             <div style={{ gridColumn: 'span 2' }}>
-              <label className="form-label">Título do Pedido (sai no Romaneio e na Folha do Pedido) *</label>
+              <label className="form-label">Título do Pedido (opcional — gera automático se vazio)</label>
               <input
                 className="form-input"
-                placeholder="Ex: Carga Quinta-feira / Pedido Semana 46"
+                placeholder={`Automático: ${tituloAutomaticoPreview}`}
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
               />
+              {!titulo.trim() && (
+                <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+                  Se deixar em branco, será gerado automaticamente: <strong className="font-mono" style={{ color: '#93c5fd' }}>{tituloAutomaticoPreview}</strong>
+                </div>
+              )}
             </div>
             <div>
-              <label className="form-label">Previsão de Coleta</label>
+              <label className="form-label">Previsão de Coleta / Entrega</label>
               <input
                 type="date"
                 className="form-input"
@@ -2528,9 +2676,14 @@ export function Pedidos() {
               <strong>Itens do Pedido ({itensForm.length})</strong>
               <span className="font-mono font-bold">
                 Total Solicitado: {fmtKg(totalFormKg)} {totalFormCx > 0 ? `• ~${fmtCx(totalFormCx)}` : ''}
-                {apiAtiva && totalFormValor > 0 && (
+                {apiAtiva && totalFormDesconto > 0 && (
+                  <span style={{ color: '#fbbf24', marginLeft: 10 }}>
+                    • Desc.: -R$ {totalFormDesconto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                )}
+                {apiAtiva && (totalFormValor > 0 || totalFormBruto > 0) && (
                   <span style={{ color: '#4ade80', marginLeft: 10 }}>
-                    • R$ {totalFormValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    • Líq.: R$ {totalFormValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 )}
               </span>
@@ -2566,8 +2719,9 @@ export function Pedidos() {
                       const itemTemBipagem = kgBipado > 0 || cxBipadas > 0
                       const kgAbaixoBipado = kgBipado > 0 && kgNum + 0.001 < kgBipado
                       const cxAbaixoBipado = cxBipadas > 0 && item.qtd_caixas_solicitada !== '' && cxNum < cxBipadas
-                      const precoNum = Number(String(item.preco_unitario || 0).replace(',', '.') || 0)
-                      const subtotalItem = kgNum * precoNum
+                      const calcItem = calcularValoresItem(item)
+                      const subtotalItem = calcItem.liquido
+                      const descTotalItem = calcItem.descontoTotal
                       const restanteKg = Math.max(0, kgNum - kgBipado)
                       const restanteCx = Math.max(0, cxNum - cxBipadas)
                       const projKg = Number((Number(item.saldo_kg || 0) - restanteKg).toFixed(2))
@@ -2726,7 +2880,12 @@ export function Pedidos() {
                           )}
                           {apiAtiva && (
                             <td style={{ textAlign: 'right' }} className="font-mono font-bold text-success">
-                              R$ {subtotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <div>R$ {subtotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                              {descTotalItem > 0 && (
+                                <div className="text-xs" style={{ color: '#fbbf24', fontWeight: 600 }}>
+                                  (-R$ {descTotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                                </div>
+                              )}
                             </td>
                           )}
                           <td style={{ textAlign: 'right' }} className="font-mono">
@@ -2781,6 +2940,237 @@ export function Pedidos() {
               </div>
             )}
           </div>
+            </>
+          )}
+
+          {/* ═══ ABA 2: ESPECIFICAÇÕES DA NF & DESCONTOS ═══ */}
+          {abaForm === 'NF_DESCONTOS' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+              {/* Bloco 1: Desconto Global e por Item */}
+              <div
+                style={{
+                  background: 'rgba(13, 20, 36, 0.72)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '16px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+                  <div>
+                    <div className="text-xs font-bold uppercase text-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Percent size={14} /> Descontos Comerciais do Pedido (Reflete na NF-e, Boleto e Parcelas)
+                    </div>
+                    <div className="text-xs text-muted" style={{ marginTop: 3 }}>
+                      Aplique um desconto global (% ou R$) distribuído automaticamente nos itens ou ajuste individualmente na tabela abaixo.
+                    </div>
+                  </div>
+                  {totalFormDesconto > 0 && (
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={zerarDescontos}>
+                      <RotateCcw size={13} /> Zerar Descontos
+                    </button>
+                  )}
+                </div>
+
+                {/* Desconto Global */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 10,
+                    alignItems: 'flex-end',
+                    padding: '12px',
+                    borderRadius: 8,
+                    background: 'var(--bg-2)',
+                    border: '1px solid var(--border)',
+                    marginBottom: 14,
+                  }}
+                >
+                  <div>
+                    <label className="form-label">Tipo de Desconto Global</label>
+                    <div style={{ display: 'inline-flex', background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 8, padding: 2, gap: 2 }}>
+                      <button
+                        type="button"
+                        onClick={() => setDescGlobalTipo('PCT')}
+                        style={{
+                          border: 'none',
+                          borderRadius: 6,
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          background: descGlobalTipo === 'PCT' ? 'var(--accent)' : 'transparent',
+                          color: descGlobalTipo === 'PCT' ? '#fff' : 'var(--text-secondary)',
+                        }}
+                      >
+                        % Percentual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDescGlobalTipo('VALOR')}
+                        style={{
+                          border: 'none',
+                          borderRadius: 6,
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          background: descGlobalTipo === 'VALOR' ? 'var(--accent)' : 'transparent',
+                          color: descGlobalTipo === 'VALOR' ? '#fff' : 'var(--text-secondary)',
+                        }}
+                      >
+                        R$ Valor Fixo
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ width: 160 }}>
+                    <label className="form-label">
+                      {descGlobalTipo === 'PCT' ? 'Desconto (%)' : 'Desconto Total (R$)'}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max={descGlobalTipo === 'PCT' ? '100' : undefined}
+                      className="form-input font-mono text-right"
+                      placeholder={descGlobalTipo === 'PCT' ? 'Ex: 5,00' : 'Ex: 150,00'}
+                      value={descGlobalInput}
+                      onChange={(e) => setDescGlobalInput(e.target.value)}
+                    />
+                  </div>
+                  <button type="button" className="btn btn--primary" style={{ height: 38 }} onClick={aplicarDescontoGlobal}>
+                    <Percent size={14} /> Aplicar nos Itens
+                  </button>
+
+                  {/* Resumo Bruto / Desconto / Líquido */}
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="text-xs text-muted">Total Bruto</div>
+                      <div className="font-mono font-bold" style={{ fontSize: 14 }}>
+                        R$ {totalFormBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="text-xs text-muted">(-) Descontos</div>
+                      <div className="font-mono font-bold" style={{ fontSize: 14, color: '#fbbf24' }}>
+                        -R$ {totalFormDesconto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', paddingLeft: 12, borderLeft: '1px solid var(--border)' }}>
+                      <div className="text-xs text-muted">(=) Total Líquido NF</div>
+                      <div className="font-mono font-bold" style={{ fontSize: 17, color: '#4ade80' }}>
+                        R$ {totalFormValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabela de Desconto por Item */}
+                {itensForm.length === 0 ? (
+                  <div className="text-muted text-sm" style={{ padding: 18, textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 8 }}>
+                    Adicione produtos na aba <strong>1. Dados &amp; Itens do Pedido</strong> para configurar descontos por item.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Código</th>
+                          <th>Produto</th>
+                          <th style={{ textAlign: 'right' }}>Peso</th>
+                          <th style={{ textAlign: 'right' }}>R$/kg</th>
+                          <th style={{ textAlign: 'right' }}>Bruto</th>
+                          <th style={{ width: 110, textAlign: 'right' }}>Desc. (%)</th>
+                          <th style={{ width: 125, textAlign: 'right' }}>Desc. (R$)</th>
+                          <th style={{ textAlign: 'right' }}>Total Desc.</th>
+                          <th style={{ textAlign: 'right' }}>Líquido</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itensForm.map((item, idx) => {
+                          const c = calcularValoresItem(item)
+                          return (
+                            <tr key={item.produto_id}>
+                              <td className="font-mono">{item.produto_codigo || '-'}</td>
+                              <td style={{ fontWeight: 700 }}>{item.produto_descricao}</td>
+                              <td style={{ textAlign: 'right' }} className="font-mono">{fmtKg(c.kg)}</td>
+                              <td style={{ textAlign: 'right' }} className="font-mono">
+                                R$ {c.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'right' }} className="font-mono">
+                                R$ {c.bruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  max="100"
+                                  className="form-input font-mono text-right"
+                                  placeholder="0,00"
+                                  value={item.desconto_pct ?? ''}
+                                  onChange={(e) => {
+                                    const v = e.target.value
+                                    setItensForm((prev) => prev.map((r, i) => (i === idx ? { ...r, desconto_pct: v } : r)))
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  className="form-input font-mono text-right"
+                                  placeholder="0,00"
+                                  value={item.desconto_valor ?? ''}
+                                  onChange={(e) => {
+                                    const v = e.target.value
+                                    setItensForm((prev) => prev.map((r, i) => (i === idx ? { ...r, desconto_valor: v } : r)))
+                                  }}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'right', color: c.descontoTotal > 0 ? '#fbbf24' : 'var(--text-muted)' }} className="font-mono font-bold">
+                                {c.descontoTotal > 0
+                                  ? `-R$ ${c.descontoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                  : 'R$ 0,00'}
+                              </td>
+                              <td style={{ textAlign: 'right' }} className="font-mono font-bold text-success">
+                                R$ {c.liquido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Bloco 2: Observação / Informações Complementares da NF-e */}
+              <div
+                style={{
+                  background: 'rgba(13, 20, 36, 0.72)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '16px',
+                }}
+              >
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#93c5fd', fontWeight: 700 }}>
+                  <FileText size={14} /> Observações da Nota Fiscal (Informações Complementares da DANFE / XML)
+                </label>
+                <p className="text-xs text-muted" style={{ marginTop: 2, marginBottom: 8 }}>
+                  Este texto será impresso automaticamente no quadro <strong>Dados Adicionais / Informações Complementares</strong> da NF-e (DANFE) e gravado na tag <code>&lt;infCpl&gt;</code> do XML. Use para número de pedido de compra do cliente, janela de entrega, isenções ou avisos fiscais.
+                </p>
+                <textarea
+                  className="form-input"
+                  rows={4}
+                  placeholder="Ex: Pedido de compra do cliente nº 12345 • Entregar na porta fundos das 06h às 11h • Mercadoria refrigerada 0ºC a 4ºC."
+                  value={observacaoNf}
+                  onChange={(e) => setObservacaoNf(e.target.value)}
+                  style={{ resize: 'vertical', minHeight: 92 }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Simulação de Parcelas */}
           {apiAtiva && parcelasSimuladas.length > 0 && (
