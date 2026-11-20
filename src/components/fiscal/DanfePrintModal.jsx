@@ -1321,10 +1321,10 @@ export function PacoteLotePrintModal({ notas, onClose, onAbrirNotaIndividual }) 
         >
           <div>
             <h3 className="text-base font-bold m-0 flex items-center gap-8">
-              <Layers size={19} className="text-success" /> Pacotão de Impressão em Lote — {notas.length} Nota(s) Fiscal(is)
+              <Layers size={19} className="text-success" /> Central de Impressão em Lote — {notas.length} Nota(s) Fiscal(is)
             </h3>
             <div className="text-xs text-muted" style={{ marginTop: 4 }}>
-              Imprima todas as DANFEs, Boletos e Romaneios de Produtos de uma só vez, já agrupados cliente por cliente!
+              Imprima todas as DANFEs, Boletos e Romaneios de Produtos de uma só vez, agrupados cliente por cliente.
             </div>
           </div>
           <button type="button" className="btn-icon" onClick={onClose}>
@@ -1336,7 +1336,7 @@ export function PacoteLotePrintModal({ notas, onClose, onAbrirNotaIndividual }) 
           {/* RESUMO DO LOTE */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
             <div style={{ padding: 14, borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-              <div className="text-xs text-muted uppercase font-bold">Notas no Pacote</div>
+              <div className="text-xs text-muted uppercase font-bold">Notas no Lote</div>
               <div className="text-xl font-bold font-mono text-cyan" style={{ marginTop: 6 }}>{notas.length} NF-e(s)</div>
             </div>
             <div style={{ padding: 14, borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
@@ -1355,7 +1355,7 @@ export function PacoteLotePrintModal({ notas, onClose, onAbrirNotaIndividual }) 
             </div>
           </div>
 
-          {/* SELETOR DE DOCUMENTOS DO PACOTÃO */}
+          {/* SELETOR DE DOCUMENTOS DO LOTE */}
           <div
             style={{
               padding: 16,
@@ -1368,12 +1368,12 @@ export function PacoteLotePrintModal({ notas, onClose, onAbrirNotaIndividual }) 
             }}
           >
             <div className="text-xs font-bold uppercase text-success">
-              O que deve sair no Pacotão de Impressão (agrupado pedido por pedido):
+              Documentos incluídos na impressão em lote (agrupados pedido por pedido):
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
               <label className="flex items-center gap-8 text-sm font-bold cursor-pointer">
                 <input type="checkbox" checked={incluirDanfe} onChange={(e) => setIncluirDanfe(e.target.checked)} />
-                1. DANFE NF-e (com marca d&apos;água Sem Valor Fiscal se Homologação)
+                1. DANFE NF-e (Modelo 55)
               </label>
               <label className="flex items-center gap-8 text-sm font-bold cursor-pointer">
                 <input type="checkbox" checked={incluirBoleto} onChange={(e) => setIncluirBoleto(e.target.checked)} />
@@ -1481,7 +1481,7 @@ export function PacoteLotePrintModal({ notas, onClose, onAbrirNotaIndividual }) 
                 })
               }
             >
-              <Printer size={16} /> Imprimir Pacotão Selecionado ({notas.length} Cliente(s))
+              <Printer size={16} /> Imprimir Lote Selecionado ({notas.length} Cliente(s))
             </button>
           </div>
         </div>

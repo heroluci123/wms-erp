@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify'
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import {
+  empresas,
   estoqueCaixas,
+  financeiroTitulos,
+  formasPagamento,
   fornecedorProdutoDepara,
   fornecedores,
   layoutsImportacaoTxt,
@@ -21,6 +24,7 @@ import {
   assertEnderecosNaoBloqueados,
   type DbOrTx,
   gerarCodigoDocumento,
+  hojeIsoLocal,
   lerTenantFeatures,
   normalizarDataIso,
   normalizeCaixaRow,
@@ -444,7 +448,7 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
   // ── PRÉ-VISUALIZAÇÃO DE XML NF-e DE ENTRADA ─────────────────────────────────
   app.post(
     '/api/compras/xml/parse-preview',
-    { preHandler: requirePermission(['compras', 'recebimento']) },
+    { preHandler: requirePermission(['fiscal', 'compras', 'recebimento']) },
     async (req) => {
       const ctx = req.authCtx!
       const body = (req.body || {}) as {
@@ -1455,6 +1459,853 @@ export function registerNfeTxtRoutes(app: FastifyInstance, conn: DbConnection): 
       })
 
       return { success: true, ...res }
+    },
+  )
+
+  // ── HELPER: GERAR XML NF-e 4.00 REALISTA DE COMPRA P/ TESTE A PARTIR DE UM PC ──
+  function escXml(v: string): string {
+    return String(v || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
+  function calcularDvChave43(base43: string): string {
+    let peso = 2
+    let soma = 0
+    for (let i = base43.length - 1; i >= 0; i--) {
+      soma += Number(base43[i]) * peso
+      peso = peso === 9 ? 2 : peso + 1
+    }
+    const mod = soma % 11
+    return String(mod < 2 ? 0 : 11 - mod)
+  }
+
+  function gerarXmlCompraSimulado(params: {
+    numeroNf: number
+    serie: number
+    dataEmissaoIso: string
+    emitente: { cnpj: string; razaoSocial: string; nomeFantasia: string; ie: string; cidade: string; uf: string }
+    destinatario: { cnpj: string; razaoSocial: string; uf: string }
+    itens: Array<{ codigo: string; descricao: string; ncm: string; qtdKg: number; precoUnit: number }>
+    freteValor: number
+    diasParcelas: number[]
+    pcCodigo: string
+  }) {
+    const cnpjEmit = (params.emitente.cnpj.replace(/\D/g, '') || '12345678000199').padStart(14, '0').slice(0, 14)
+    const cnpjDest = (params.destinatario.cnpj.replace(/\D/g, '') || '54142043000130').padStart(14, '0').slice(0, 14)
+    const aamm = `${params.dataEmissaoIso.slice(2, 4)}${params.dataEmissaoIso.slice(5, 7)}`
+    const cNF = String(Math.floor(10000000 + Math.random() * 89999999))
+    const nNF = String(params.numeroNf).padStart(9, '0')
+    const seriePad = String(params.serie).padStart(3, '0')
+    const base43 = `35${aamm}${cnpjEmit}55${seriePad}${nNF}1${cNF}`
+    const chave44 = `${base43}${calcularDvChave43(base43)}`
+
+    const vProdTotal = Number(
+      params.itens.reduce((s, it) => s + Number((it.qtdKg * it.precoUnit).toFixed(2)), 0).toFixed(2),
+    )
+    const vFrete = Number(Math.max(0, params.freteValor || 0).toFixed(2))
+    const vNfTotal = Number((vProdTotal + vFrete).toFixed(2))
+
+    const baseMs = new Date(`${params.dataEmissaoIso}T12:00:00Z`).getTime()
+    const diasList = params.diasParcelas.length > 0 ? params.diasParcelas : [14, 28]
+    let somaDup = 0
+    const dupsXml = diasList
+      .map((dias, idx) => {
+        const isLast = idx === diasList.length - 1
+        const vDup = isLast
+          ? Number((vNfTotal - somaDup).toFixed(2))
+          : Number((vNfTotal / diasList.length).toFixed(2))
+        somaDup += vDup
+        const dVenc = new Date(baseMs + Number(dias || 0) * 86_400_000).toISOString().slice(0, 10)
+        return `        <dup><nDup>${String(idx + 1).padStart(3, '0')}</nDup><dVenc>${dVenc}</dVenc><vDup>${vDup.toFixed(2)}</vDup></dup>`
+      })
+      .join('\n')
+
+    const detsXml = params.itens
+      .map((it, idx) => {
+        const vItem = Number((it.qtdKg * it.precoUnit).toFixed(2))
+        const freteItem = vProdTotal > 0 && vFrete > 0 ? Number(((vItem / vProdTotal) * vFrete).toFixed(2)) : 0
+        const lote = `LT${params.dataEmissaoIso.replace(/-/g, '').slice(2)}`
+        const validade = new Date(baseMs + 45 * 86_400_000).toISOString().slice(0, 10)
+        return `      <det nItem="${idx + 1}">
+        <prod>
+          <cProd>${escXml(it.codigo)}</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>${escXml(it.descricao)}</xProd>
+          <NCM>${escXml((it.ncm || '02013000').replace(/\D/g, '').padStart(8, '0').slice(0, 8))}</NCM>
+          <CFOP>5101</CFOP>
+          <uCom>KG</uCom>
+          <qCom>${it.qtdKg.toFixed(3)}</qCom>
+          <vUnCom>${it.precoUnit.toFixed(4)}</vUnCom>
+          <vProd>${vItem.toFixed(2)}</vProd>
+          ${freteItem > 0 ? `<vFrete>${freteItem.toFixed(2)}</vFrete>` : ''}
+          <rastro>
+            <nLote>${lote}</nLote>
+            <qLote>${it.qtdKg.toFixed(3)}</qLote>
+            <dFab>${params.dataEmissaoIso}</dFab>
+            <dVal>${validade}</dVal>
+          </rastro>
+        </prod>
+        <imposto>
+          <ICMS><ICMS20><orig>0</orig><CST>20</CST><pRedBC>41.67</pRedBC><vBC>${(vItem * 0.5833).toFixed(2)}</vBC><pICMS>12.00</pICMS><vICMS>${(vItem * 0.07).toFixed(2)}</vICMS></ICMS20></ICMS>
+        </imposto>
+      </det>`
+      })
+      .join('\n')
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe${chave44}" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <natOp>VENDA DE PRODUCAO DO ESTABELECIMENTO</natOp>
+        <mod>55</mod>
+        <serie>${params.serie}</serie>
+        <nNF>${params.numeroNf}</nNF>
+        <dhEmi>${params.dataEmissaoIso}T10:30:00-03:00</dhEmi>
+        <tpNF>1</tpNF>
+        <tpAmb>2</tpAmb>
+      </ide>
+      <emit>
+        <CNPJ>${cnpjEmit}</CNPJ>
+        <xNome>${escXml(params.emitente.razaoSocial)}</xNome>
+        <xFant>${escXml(params.emitente.nomeFantasia || params.emitente.razaoSocial)}</xFant>
+        <enderEmit>
+          <xMun>${escXml(params.emitente.cidade || 'SAO PAULO')}</xMun>
+          <UF>${escXml(params.emitente.uf || 'SP')}</UF>
+        </enderEmit>
+        <IE>${escXml(params.emitente.ie || 'ISENTO')}</IE>
+      </emit>
+      <dest>
+        <CNPJ>${cnpjDest}</CNPJ>
+        <xNome>${escXml(params.destinatario.razaoSocial)}</xNome>
+        <enderDest><UF>${escXml(params.destinatario.uf || 'SP')}</UF></enderDest>
+      </dest>
+${detsXml}
+      <total>
+        <ICMSTot>
+          <vBC>${(vProdTotal * 0.5833).toFixed(2)}</vBC>
+          <vICMS>${(vProdTotal * 0.07).toFixed(2)}</vICMS>
+          <vST>0.00</vST>
+          <vProd>${vProdTotal.toFixed(2)}</vProd>
+          <vFrete>${vFrete.toFixed(2)}</vFrete>
+          <vSeg>0.00</vSeg>
+          <vDesc>0.00</vDesc>
+          <vIPI>0.00</vIPI>
+          <vOutro>0.00</vOutro>
+          <vNF>${vNfTotal.toFixed(2)}</vNF>
+        </ICMSTot>
+      </total>
+      <cobr>
+        <fat><nFat>${params.numeroNf}</nFat><vOrig>${vNfTotal.toFixed(2)}</vOrig><vLiq>${vNfTotal.toFixed(2)}</vLiq></fat>
+${dupsXml}
+      </cobr>
+      <infAdic>
+        <infCpl>XML SIMULADO PARA TESTE DE ENTRADA FISCAL — REF. ${escXml(params.pcCodigo)}</infCpl>
+      </infAdic>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <tpAmb>2</tpAmb>
+      <chNFe>${chave44}</chNFe>
+      <nProt>1352600${String(params.numeroNf).padStart(8, '0')}</nProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>`
+
+    return {
+      chave_nfe: chave44,
+      numero_nf: String(params.numeroNf),
+      serie: String(params.serie),
+      nome_arquivo: `NFe_${params.numeroNf}_${params.pcCodigo}_TESTE.xml`,
+      xml_conteudo: xml,
+    }
+  }
+
+  // ── MÓDULO FISCAL: LISTAR ENTRADAS DE COMPRA (PCs PENDENTES DE NF-e + NF-es ESCRITURADAS) ──
+  app.get(
+    '/api/fiscal/entradas-compra',
+    { preHandler: requirePermission(['fiscal', 'compras', 'financeiro'], { write: false }) },
+    async (req) => {
+      const ctx = req.authCtx!
+
+      const [pcs, itensAll, recsAll, titsPagar] = await Promise.all([
+        conn.db
+          .select({
+            id: pedidosCompra.id,
+            codigo: pedidosCompra.codigo,
+            status: pedidosCompra.status,
+            fornecedor_id: pedidosCompra.fornecedorId,
+            fornecedor_nome: fornecedores.nomeFantasia,
+            fornecedor_razao: fornecedores.razaoSocial,
+            fornecedor_cnpj: fornecedores.cnpjCpf,
+            fornecedor_uf: fornecedores.uf,
+            forma_pagamento_id: pedidosCompra.formaPagamentoId,
+            forma_pagamento_desc: formasPagamento.descricao,
+            previsao_entrega: pedidosCompra.previsaoEntrega,
+            valor_total: pedidosCompra.valorTotal,
+            frete_valor: pedidosCompra.freteValor,
+            observacoes: pedidosCompra.observacoes,
+            created_at: pedidosCompra.createdAt,
+          })
+          .from(pedidosCompra)
+          .leftJoin(fornecedores, eq(fornecedores.id, pedidosCompra.fornecedorId))
+          .leftJoin(formasPagamento, eq(formasPagamento.id, pedidosCompra.formaPagamentoId))
+          .where(
+            and(
+              eq(pedidosCompra.tenantId, ctx.tenantId),
+              eq(pedidosCompra.filialId, ctx.filialId),
+              inArray(pedidosCompra.status, ['APROVADO', 'PARCIAL', 'RECEBIDO', 'AGUARDANDO_VALIDACAO', 'RASCUNHO']),
+            ),
+          )
+          .orderBy(desc(pedidosCompra.createdAt))
+          .limit(120),
+        conn.db
+          .select({
+            pedido_compra_id: pedidosCompraItens.pedidoCompraId,
+            produto_id: pedidosCompraItens.produtoId,
+            produto_codigo: produtos.codigo,
+            produto_descricao: produtos.descricao,
+            qtd_kg_solicitada: pedidosCompraItens.qtdKgSolicitada,
+            qtd_kg_recebida: pedidosCompraItens.qtdKgRecebida,
+            preco_unitario_kg: pedidosCompraItens.precoUnitarioKg,
+          })
+          .from(pedidosCompraItens)
+          .innerJoin(produtos, eq(produtos.id, pedidosCompraItens.produtoId))
+          .where(eq(pedidosCompraItens.tenantId, ctx.tenantId)),
+        conn.db
+          .select({
+            id: recebimentos.id,
+            codigo: recebimentos.codigo,
+            pedido_compra_id: recebimentos.pedidoCompraId,
+            pedido_compra_codigo: pedidosCompra.codigo,
+            fornecedor_id: recebimentos.fornecedorId,
+            fornecedor_nome: fornecedores.nomeFantasia,
+            fornecedor_razao: fornecedores.razaoSocial,
+            fornecedor_cnpj: fornecedores.cnpjCpf,
+            chave_nfe: recebimentos.chaveNfe,
+            numero_nf: recebimentos.numeroNf,
+            serie_nf: recebimentos.serieNf,
+            data_emissao_nf: recebimentos.dataEmissaoNf,
+            valor_produtos_nf: recebimentos.valorProdutosNf,
+            valor_frete_nf: recebimentos.valorFreteNf,
+            valor_desconto_nf: recebimentos.valorDescontoNf,
+            valor_total_nf: recebimentos.valorTotalNf,
+            xml_duplicatas_json: recebimentos.xmlDuplicatasJson,
+            xml_itens_json: recebimentos.xmlItensJson,
+            status_validacao: recebimentos.statusValidacao,
+            created_at: recebimentos.createdAt,
+          })
+          .from(recebimentos)
+          .leftJoin(pedidosCompra, eq(pedidosCompra.id, recebimentos.pedidoCompraId))
+          .leftJoin(fornecedores, eq(fornecedores.id, recebimentos.fornecedorId))
+          .where(and(eq(recebimentos.tenantId, ctx.tenantId), eq(recebimentos.filialId, ctx.filialId)))
+          .orderBy(desc(recebimentos.createdAt))
+          .limit(150),
+        conn.db
+          .select({
+            id: financeiroTitulos.id,
+            codigo: financeiroTitulos.codigo,
+            recebimento_id: financeiroTitulos.recebimentoId,
+            pedido_compra_id: financeiroTitulos.pedidoCompraId,
+            status: financeiroTitulos.status,
+            valor_original: financeiroTitulos.valorOriginal,
+            data_vencimento: financeiroTitulos.dataVencimento,
+            origem: financeiroTitulos.origem,
+          })
+          .from(financeiroTitulos)
+          .where(
+            and(
+              eq(financeiroTitulos.tenantId, ctx.tenantId),
+              eq(financeiroTitulos.tipo, 'PAGAR'),
+              ne(financeiroTitulos.status, 'CANCELADO'),
+            ),
+          ),
+      ])
+
+      const pcIdsComNf = new Set(
+        recsAll
+          .filter((r) => Boolean(r.pedido_compra_id && (String(r.numero_nf || '').trim() || String(r.chave_nfe || '').trim())))
+          .map((r) => r.pedido_compra_id!),
+      )
+
+      const itensPorPc = new Map<string, typeof itensAll>()
+      for (const it of itensAll) {
+        const arr = itensPorPc.get(it.pedido_compra_id) || []
+        arr.push(it)
+        itensPorPc.set(it.pedido_compra_id, arr)
+      }
+
+      const pedidosPendentes = pcs
+        .filter((pc) => !pcIdsComNf.has(pc.id))
+        .map((pc) => {
+          const its = itensPorPc.get(pc.id) || []
+          const totalKg = its.reduce((s, i) => s + toNum(i.qtd_kg_solicitada, 0), 0)
+          return {
+            ...pc,
+            valor_total: toNum(pc.valor_total, 0),
+            frete_valor: toNum(pc.frete_valor, 0),
+            total_kg_solicitado: Number(totalKg.toFixed(3)),
+            qtd_itens: its.length,
+            itens: its.map((i) => ({
+              ...i,
+              qtd_kg_solicitada: toNum(i.qtd_kg_solicitada, 0),
+              qtd_kg_recebida: toNum(i.qtd_kg_recebida, 0),
+              preco_unitario_kg: toNum(i.preco_unitario_kg, 0),
+            })),
+          }
+        })
+
+      const notasEntrada = recsAll
+        .filter((r) => Boolean(String(r.numero_nf || '').trim() || String(r.chave_nfe || '').trim()))
+        .map((r) => {
+          const tits = titsPagar.filter(
+            (t) =>
+              t.recebimento_id === r.id ||
+              (r.pedido_compra_id && t.pedido_compra_id === r.pedido_compra_id && t.origem === 'COMPRA_NFE_XML'),
+          )
+          return {
+            ...r,
+            valor_produtos_nf: toNum(r.valor_produtos_nf, 0),
+            valor_frete_nf: toNum(r.valor_frete_nf, 0),
+            valor_desconto_nf: toNum(r.valor_desconto_nf, 0),
+            valor_total_nf: toNum(r.valor_total_nf, 0),
+            qtd_itens_xml: Array.isArray(r.xml_itens_json) ? r.xml_itens_json.length : 0,
+            qtd_titulos_pagar: tits.length,
+            valor_titulos_pagar: Number(tits.reduce((s, t) => s + toNum(t.valor_original, 0), 0).toFixed(2)),
+            titulos_pagar: tits.map((t) => ({
+              id: t.id,
+              codigo: t.codigo,
+              status: t.status,
+              valor_original: toNum(t.valor_original, 0),
+              data_vencimento: t.data_vencimento,
+            })),
+          }
+        })
+
+      return {
+        success: true,
+        pedidos_pendentes: pedidosPendentes,
+        notas_entrada: notasEntrada,
+      }
+    },
+  )
+
+  // ── MÓDULO FISCAL: ESCRITURAR NF-e DE COMPRA (XML) VINCULADA A PEDIDO DE COMPRA -> CONTAS A PAGAR ──
+  app.post(
+    '/api/fiscal/entradas-compra/escriturar',
+    { preHandler: requirePermission(['fiscal', 'compras']) },
+    async (req, reply) => {
+      const ctx = req.authCtx!
+      const body = (req.body || {}) as {
+        pedido_compra_id?: string
+        xml_conteudo?: string
+        chave_bipada?: string
+        depara_vinculos?: Array<{
+          codigo_fornecedor: string
+          descricao_fornecedor?: string
+          ncm?: string
+          produto_id: string
+          fator_conversao?: number
+        }>
+      }
+
+      if (!body.pedido_compra_id) {
+        throw new HttpError(
+          400,
+          'Para dar entrada fiscal em uma NF-e de compra é obrigatório vincular a um Pedido de Compra.',
+        )
+      }
+      const pcId = parseUuidOrBadRequest(body.pedido_compra_id, 'pedido_compra_id')
+      const xmlRaw = String(body.xml_conteudo || '').trim()
+      if (!xmlRaw) {
+        throw new HttpError(400, 'Selecione ou cole o arquivo XML da NF-e de compra.')
+      }
+
+      let xmlParsed
+      try {
+        xmlParsed = parseNfeXml(xmlRaw)
+      } catch (err: any) {
+        throw new HttpError(400, err?.message || 'Arquivo XML de NF-e inválido.')
+      }
+
+      const chaveBipadaLimpa = String(body.chave_bipada || '').replace(/\D/g, '')
+      if (chaveBipadaLimpa) {
+        if (chaveBipadaLimpa.length !== 44) {
+          throw new HttpError(400, 'A chave de acesso bipada deve conter exatamente 44 dígitos.')
+        }
+        if (xmlParsed.chave_nfe && chaveBipadaLimpa !== xmlParsed.chave_nfe) {
+          throw new HttpError(
+            400,
+            `Divergência de Chave de Acesso: a chave bipada (${chaveBipadaLimpa}) não corresponde à chave do XML (${xmlParsed.chave_nfe}).`,
+          )
+        }
+      }
+
+      const resultado = await conn.db.transaction(async (tx) => {
+        const [pcRow] = await tx
+          .select()
+          .from(pedidosCompra)
+          .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (!pcRow) throw new HttpError(404, 'Pedido de Compra não encontrado.')
+        if (pcRow.status === 'CANCELADO') {
+          throw new HttpError(409, `Pedido de Compra ${pcRow.codigo} está CANCELADO e não pode receber NF-e.`)
+        }
+
+        if (xmlParsed.chave_nfe) {
+          const [dupChave] = await tx
+            .select({ id: recebimentos.id, codigo: recebimentos.codigo, numeroNf: recebimentos.numeroNf })
+            .from(recebimentos)
+            .where(
+              and(
+                eq(recebimentos.tenantId, ctx.tenantId),
+                eq(recebimentos.chaveNfe, xmlParsed.chave_nfe),
+              ),
+            )
+            .limit(1)
+          if (dupChave) {
+            throw new HttpError(
+              409,
+              `Esta NF-e (Nº ${dupChave.numeroNf || xmlParsed.numero_nf} / Chave ${xmlParsed.chave_nfe}) já foi escriturada no registro ${dupChave.codigo}!`,
+            )
+          }
+        }
+
+        // Resolver fornecedor (PC > CNPJ do XML)
+        let fornecedorRow: typeof fornecedores.$inferSelect | null = null
+        if (pcRow.fornecedorId) {
+          const [f] = await tx
+            .select()
+            .from(fornecedores)
+            .where(eq(fornecedores.id, pcRow.fornecedorId))
+            .limit(1)
+          fornecedorRow = f || null
+        }
+        if (!fornecedorRow && xmlParsed.emitente.cnpj) {
+          const allForn = await tx
+            .select()
+            .from(fornecedores)
+            .where(and(eq(fornecedores.tenantId, ctx.tenantId), eq(fornecedores.ativo, 1)))
+          fornecedorRow =
+            allForn.find((f) => f.cnpjCpf.replace(/\D/g, '') === xmlParsed.emitente.cnpj) || null
+        }
+
+        // Salvar vínculos De-Para enviados pelo usuário
+        if (fornecedorRow && Array.isArray(body.depara_vinculos)) {
+          for (const v of body.depara_vinculos) {
+            const codForn = String(v.codigo_fornecedor || '').trim()
+            if (!codForn || !v.produto_id) continue
+            const prodId = parseUuidOrBadRequest(v.produto_id, 'produto_id')
+            await tx
+              .insert(fornecedorProdutoDepara)
+              .values({
+                id: uuidv7(),
+                tenantId: ctx.tenantId,
+                fornecedorId: fornecedorRow.id,
+                codigoFornecedor: codForn,
+                descricaoFornecedor: String(v.descricao_fornecedor || '').trim(),
+                ncm: String(v.ncm || '').trim(),
+                produtoId: prodId,
+                fatorConversao: toDec(toNum(v.fator_conversao, 1) || 1, 4),
+                updatedAt: new Date(),
+              })
+              .onConflictDoUpdate({
+                target: [
+                  fornecedorProdutoDepara.tenantId,
+                  fornecedorProdutoDepara.fornecedorId,
+                  fornecedorProdutoDepara.codigoFornecedor,
+                ],
+                set: {
+                  produtoId: prodId,
+                  descricaoFornecedor: String(v.descricao_fornecedor || '').trim(),
+                  ncm: String(v.ncm || '').trim(),
+                  updatedAt: new Date(),
+                },
+              })
+          }
+        }
+
+        const { resolverProduto } = await carregarMapaProdutosEDepara(tx, ctx.tenantId, fornecedorRow?.id)
+        const extrasXml = Math.max(
+          0,
+          xmlParsed.totais.valor_frete +
+            xmlParsed.totais.valor_outras +
+            xmlParsed.totais.valor_ipi +
+            xmlParsed.totais.valor_st -
+            xmlParsed.totais.valor_desconto,
+        )
+        const baseXml =
+          xmlParsed.totais.valor_produtos > 0
+            ? xmlParsed.totais.valor_produtos
+            : xmlParsed.itens.reduce((s, i) => s + i.valor_total, 0)
+
+        const xmlItensResolvidos = xmlParsed.itens.map((it) => {
+          const res = resolverProduto(it.codigo_fornecedor, it.ean)
+          const rateio = baseXml > 0 ? (it.valor_total / baseXml) * extrasXml : 0
+          const custoRealKg =
+            it.quantidade > 0
+              ? Number(((it.valor_total + rateio) / it.quantidade).toFixed(4))
+              : it.valor_unitario
+          return {
+            ...it,
+            produto_id: res.produto?.id || null,
+            produto_codigo: res.produto?.codigo || null,
+            produto_descricao: res.produto?.descricao || null,
+            custo_unitario_com_frete: custoRealKg,
+          }
+        })
+
+        // Atualizar custo médio nos produtos mapeados
+        for (const it of xmlItensResolvidos) {
+          if (it.produto_id && it.custo_unitario_com_frete > 0) {
+            await tx
+              .update(produtos)
+              .set({
+                custoMedioKg: toDec(it.custo_unitario_com_frete, 4),
+                updatedAt: new Date(),
+              })
+              .where(and(eq(produtos.id, it.produto_id), eq(produtos.tenantId, ctx.tenantId)))
+          }
+        }
+
+        // Localizar ou criar registro de recebimento vinculado ao PC
+        const [recExist] = await tx
+          .select()
+          .from(recebimentos)
+          .where(and(eq(recebimentos.pedidoCompraId, pcRow.id), eq(recebimentos.tenantId, ctx.tenantId)))
+          .limit(1)
+
+        let recId = recExist?.id || ''
+        let recCodigo = recExist?.codigo || ''
+        if (recExist) {
+          await tx
+            .update(recebimentos)
+            .set({
+              fornecedorId: fornecedorRow?.id || recExist.fornecedorId,
+              chaveNfe: xmlParsed.chave_nfe || recExist.chaveNfe,
+              numeroNf: xmlParsed.numero_nf || recExist.numeroNf,
+              serieNf: xmlParsed.serie || recExist.serieNf,
+              dataEmissaoNf: xmlParsed.data_emissao || recExist.dataEmissaoNf,
+              valorProdutosNf: toDec(xmlParsed.totais.valor_produtos, 2),
+              valorFreteNf: toDec(xmlParsed.totais.valor_frete, 2),
+              valorOutrasDespNf: toDec(xmlParsed.totais.valor_outras, 2),
+              valorDescontoNf: toDec(xmlParsed.totais.valor_desconto, 2),
+              valorTotalNf: toDec(xmlParsed.totais.valor_nf, 2),
+              xmlItensJson: xmlItensResolvidos,
+              xmlDuplicatasJson: xmlParsed.duplicatas as unknown as Array<Record<string, unknown>>,
+              xmlConteudo: xmlRaw,
+              statusValidacao: 'VALIDADO',
+              validadoPorId: ctx.operador.id,
+              validadoAt: new Date(),
+            })
+            .where(eq(recebimentos.id, recExist.id))
+        } else {
+          recId = uuidv7()
+          recCodigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'RECEBIMENTO', 'REC', 4)
+          await tx.insert(recebimentos).values({
+            id: recId,
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            codigo: recCodigo,
+            pedidoCompraId: pcRow.id,
+            fornecedorId: fornecedorRow?.id || null,
+            chaveNfe: xmlParsed.chave_nfe || '',
+            numeroNf: xmlParsed.numero_nf || '',
+            serieNf: xmlParsed.serie || '',
+            dataEmissaoNf: xmlParsed.data_emissao || null,
+            valorProdutosNf: toDec(xmlParsed.totais.valor_produtos, 2),
+            valorFreteNf: toDec(xmlParsed.totais.valor_frete, 2),
+            valorOutrasDespNf: toDec(xmlParsed.totais.valor_outras, 2),
+            valorDescontoNf: toDec(xmlParsed.totais.valor_desconto, 2),
+            valorTotalNf: toDec(xmlParsed.totais.valor_nf, 2),
+            xmlItensJson: xmlItensResolvidos,
+            xmlDuplicatasJson: xmlParsed.duplicatas as unknown as Array<Record<string, unknown>>,
+            xmlConteudo: xmlRaw,
+            statusValidacao: 'VALIDADO',
+            validadoPorId: ctx.operador.id,
+            validadoAt: new Date(),
+          })
+        }
+
+        // Gerar títulos oficiais no Contas a Pagar pelas duplicatas do XML (substituindo previsão PC aberta)
+        const qtdGerados = await gerarTitulosCompraOuXml(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          recebimentoId: recId,
+          pedidoCompraId: pcRow.id,
+          operadorId: ctx.operador.id,
+          operadorNome: ctx.operador.nome,
+          substituirPrevisaoPc: true,
+        })
+
+        const titulosGerados = await tx
+          .select({
+            id: financeiroTitulos.id,
+            codigo: financeiroTitulos.codigo,
+            numero_documento: financeiroTitulos.numeroDocumento,
+            parcela_num: financeiroTitulos.parcelaNum,
+            parcela_total: financeiroTitulos.parcelaTotal,
+            data_vencimento: financeiroTitulos.dataVencimento,
+            valor_original: financeiroTitulos.valorOriginal,
+            status: financeiroTitulos.status,
+          })
+          .from(financeiroTitulos)
+          .where(
+            and(
+              eq(financeiroTitulos.tenantId, ctx.tenantId),
+              eq(financeiroTitulos.tipo, 'PAGAR'),
+              eq(financeiroTitulos.recebimentoId, recId),
+              ne(financeiroTitulos.status, 'CANCELADO'),
+            ),
+          )
+          .orderBy(asc(financeiroTitulos.parcelaNum))
+
+        return {
+          recebimento_id: recId,
+          recebimento_codigo: recCodigo,
+          pedido_compra_codigo: pcRow.codigo,
+          numero_nf: xmlParsed.numero_nf,
+          serie_nf: xmlParsed.serie,
+          chave_nfe: xmlParsed.chave_nfe,
+          valor_total_nf: xmlParsed.totais.valor_nf,
+          qtd_titulos_criados: qtdGerados,
+          titulos_gerados: titulosGerados.map((t) => ({
+            ...t,
+            valor_original: toNum(t.valor_original, 0),
+          })),
+        }
+      })
+
+      return reply.code(201).send({ success: true, ...resultado })
+    },
+  )
+
+  // ── MÓDULO FISCAL: GERAR XML DE NF-e DE COMPRA SIMULADO PARA TESTAR UM PC EXISTENTE ──
+  app.post(
+    '/api/fiscal/entradas-compra/gerar-xml-teste/:pcId',
+    { preHandler: requirePermission(['fiscal', 'compras']) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const pcId = parseUuidOrBadRequest((req.params as { pcId: string }).pcId, 'pedido_compra_id')
+
+      const [pcRow] = await conn.db
+        .select()
+        .from(pedidosCompra)
+        .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
+        .limit(1)
+      if (!pcRow) throw new HttpError(404, 'Pedido de Compra não encontrado.')
+
+      const [fornRow, empRow, fpRow, itensPc] = await Promise.all([
+        pcRow.fornecedorId
+          ? conn.db.select().from(fornecedores).where(eq(fornecedores.id, pcRow.fornecedorId)).limit(1).then((r) => r[0] || null)
+          : Promise.resolve(null),
+        conn.db.select().from(empresas).where(eq(empresas.tenantId, ctx.tenantId)).limit(1).then((r) => r[0] || null),
+        pcRow.formaPagamentoId
+          ? conn.db.select().from(formasPagamento).where(eq(formasPagamento.id, pcRow.formaPagamentoId)).limit(1).then((r) => r[0] || null)
+          : Promise.resolve(null),
+        conn.db
+          .select({
+            codigo: produtos.codigo,
+            descricao: produtos.descricao,
+            ncm: produtos.ncm,
+            qtdKg: pedidosCompraItens.qtdKgSolicitada,
+            precoUnit: pedidosCompraItens.precoUnitarioKg,
+          })
+          .from(pedidosCompraItens)
+          .innerJoin(produtos, eq(produtos.id, pedidosCompraItens.produtoId))
+          .where(eq(pedidosCompraItens.pedidoCompraId, pcRow.id)),
+      ])
+
+      if (itensPc.length === 0) {
+        throw new HttpError(400, 'Este Pedido de Compra não possui itens cadastrados.')
+      }
+
+      const numeroNf = Math.floor(10000 + Math.random() * 89000)
+      const diasParc =
+        fpRow && Array.isArray(fpRow.diasParcelasJson) && fpRow.diasParcelasJson.length > 0
+          ? fpRow.diasParcelasJson.map((d) => Number(d || 0))
+          : [14, 28]
+
+      const gerado = gerarXmlCompraSimulado({
+        numeroNf,
+        serie: 1,
+        dataEmissaoIso: hojeIsoLocal(),
+        emitente: {
+          cnpj: fornRow?.cnpjCpf || '18456789000144',
+          razaoSocial: fornRow?.razaoSocial || 'FRIGORIFICO MODELO TESTE LTDA',
+          nomeFantasia: fornRow?.nomeFantasia || fornRow?.razaoSocial || 'FRIGORIFICO MODELO',
+          ie: fornRow?.inscricaoEstadual || '110220330440',
+          cidade: fornRow?.cidade || 'BARRETOS',
+          uf: fornRow?.uf || 'SP',
+        },
+        destinatario: {
+          cnpj: empRow?.cnpj || '54142043000130',
+          razaoSocial: empRow?.razaoSocial || 'TRICARNES ALIMENTOS LTDA',
+          uf: 'SP',
+        },
+        itens: itensPc.map((it) => ({
+          codigo: it.codigo || '001',
+          descricao: it.descricao,
+          ncm: it.ncm || '02013000',
+          qtdKg: Math.max(1, toNum(it.qtdKg, 1)),
+          precoUnit: Math.max(1, toNum(it.precoUnit, 30)),
+        })),
+        freteValor: toNum(pcRow.freteValor, 0),
+        diasParcelas: diasParc,
+        pcCodigo: pcRow.codigo,
+      })
+
+      return { success: true, pedido_compra_codigo: pcRow.codigo, ...gerado }
+    },
+  )
+
+  // ── MÓDULO FISCAL: CRIAR CENÁRIO COMPLETO DE TESTE (1 PC APROVADO + XML NF-e PRONTO) ──
+  app.post(
+    '/api/fiscal/entradas-compra/criar-cenario-teste',
+    { preHandler: requirePermission(['fiscal', 'compras']) },
+    async (req, reply) => {
+      const ctx = req.authCtx!
+
+      const out = await conn.db.transaction(async (tx) => {
+        let [forn] = await tx
+          .select()
+          .from(fornecedores)
+          .where(and(eq(fornecedores.tenantId, ctx.tenantId), eq(fornecedores.ativo, 1)))
+          .orderBy(asc(fornecedores.createdAt))
+          .limit(1)
+
+        if (!forn) {
+          const fid = uuidv7()
+          const fCod = await gerarProximoCodigoCadastro(tx, ctx.tenantId, 'fornecedor')
+          await tx.insert(fornecedores).values({
+            id: fid,
+            tenantId: ctx.tenantId,
+            codigo: fCod,
+            razaoSocial: 'FRIGORIFICO BOI VERDE TESTE LTDA',
+            nomeFantasia: 'FRIGORIFICO BOI VERDE (TESTE)',
+            cnpjCpf: '18456789000144',
+            inscricaoEstadual: '110220330440',
+            cidade: 'BARRETOS',
+            uf: 'SP',
+            ativo: 1,
+          })
+          const [criado] = await tx.select().from(fornecedores).where(eq(fornecedores.id, fid)).limit(1)
+          forn = criado
+        }
+
+        const prods = await tx
+          .select()
+          .from(produtos)
+          .where(and(eq(produtos.tenantId, ctx.tenantId), eq(produtos.ativo, 1)))
+          .orderBy(asc(produtos.descricao))
+          .limit(2)
+
+        if (prods.length === 0) {
+          throw new HttpError(400, 'Cadastre pelo menos 1 produto antes de gerar o cenário de teste.')
+        }
+
+        const [fp] = await tx
+          .select()
+          .from(formasPagamento)
+          .where(and(eq(formasPagamento.tenantId, ctx.tenantId), eq(formasPagamento.ativo, 1)))
+          .limit(1)
+        const [empRow] = await tx
+          .select()
+          .from(empresas)
+          .where(eq(empresas.tenantId, ctx.tenantId))
+          .limit(1)
+
+        const pcId = uuidv7()
+        const pcCodigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'PEDIDO_COMPRA', 'PC', 4)
+        const itensData = prods.map((p, idx) => {
+          const qtd = idx === 0 ? 120 : 80
+          const preco = toNum(p.custoMedioKg, 0) > 0 ? toNum(p.custoMedioKg, 0) : idx === 0 ? 32.5 : 48.9
+          return {
+            produtoId: p.id,
+            codigo: p.codigo || `P0${idx + 1}`,
+            descricao: p.descricao,
+            ncm: p.ncm || '02013000',
+            qtdKg: qtd,
+            precoUnit: Number(preco.toFixed(2)),
+          }
+        })
+        const valorTotal = Number(itensData.reduce((s, it) => s + it.qtdKg * it.precoUnit, 0).toFixed(2))
+        const hoje = hojeIsoLocal()
+
+        await tx.insert(pedidosCompra).values({
+          id: pcId,
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          codigo: pcCodigo,
+          fornecedorId: forn.id,
+          formaPagamentoId: fp?.id || null,
+          compradorId: ctx.operador.id,
+          previsaoEntrega: hoje,
+          valorTotal: toDec(valorTotal, 2),
+          freteValor: '150.00',
+          despesasValor: '0.00',
+          observacoes: 'Pedido de Compra gerado para teste completo de Entrada Fiscal (XML -> Contas a Pagar)',
+          status: 'APROVADO',
+        })
+
+        await tx.insert(pedidosCompraItens).values(
+          itensData.map((it) => ({
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            pedidoCompraId: pcId,
+            produtoId: it.produtoId,
+            qtdKgSolicitada: toDec(it.qtdKg, 3),
+            qtdKgRecebida: '0.000',
+            precoUnitarioKg: toDec(it.precoUnit, 4),
+            subtotal: toDec(it.qtdKg * it.precoUnit, 2),
+          })),
+        )
+
+        const diasParc =
+          fp && Array.isArray(fp.diasParcelasJson) && fp.diasParcelasJson.length > 0
+            ? fp.diasParcelasJson.map((d) => Number(d || 0))
+            : [14, 28]
+
+        const xmlGerado = gerarXmlCompraSimulado({
+          numeroNf: Math.floor(20000 + Math.random() * 79000),
+          serie: 1,
+          dataEmissaoIso: hoje,
+          emitente: {
+            cnpj: forn.cnpjCpf || '18456789000144',
+            razaoSocial: forn.razaoSocial,
+            nomeFantasia: forn.nomeFantasia || forn.razaoSocial,
+            ie: forn.inscricaoEstadual || '110220330440',
+            cidade: forn.cidade || 'BARRETOS',
+            uf: forn.uf || 'SP',
+          },
+          destinatario: {
+            cnpj: empRow?.cnpj || '54142043000130',
+            razaoSocial: empRow?.razaoSocial || 'TRICARNES ALIMENTOS LTDA',
+            uf: 'SP',
+          },
+          itens: itensData,
+          freteValor: 150,
+          diasParcelas: diasParc,
+          pcCodigo,
+        })
+
+        return {
+          pedido_compra_id: pcId,
+          pedido_compra_codigo: pcCodigo,
+          fornecedor_nome: forn.nomeFantasia || forn.razaoSocial,
+          valor_total: valorTotal,
+          ...xmlGerado,
+        }
+      })
+
+      return reply.code(201).send({ success: true, ...out })
     },
   )
 }

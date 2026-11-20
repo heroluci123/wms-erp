@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import {
   Archive,
   Ban,
@@ -11,6 +12,7 @@ import {
   FileCheck2,
   FileCode2,
   FileText,
+  FileUp,
   KeyRound,
   Layers,
   Plus,
@@ -38,6 +40,7 @@ import {
   imprimirSomenteDanfe,
 } from '../components/fiscal/DanfePrintModal'
 import { AbaConfigCertificado } from '../components/fiscal/AbaConfigCertificado'
+import { AbaEntradaNfeCompra } from '../components/fiscal/AbaEntradaNfeCompra'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -158,11 +161,27 @@ function downloadTextFile(filename, content, mime = 'application/xml;charset=utf
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+const ABAS_FISCAL_VALIDAS = ['FILA', 'NOTAS', 'ENTRADA_COMPRA', 'COFRE', 'EVENTOS', 'CONFIG']
+
 export function Fiscal() {
-  const { toastSuccess, toastError, confirmar } = useAppStore()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const { toastSuccess, toastError, toastWarning, confirmar } = useAppStore()
   const apiAtiva = isApiEnabled()
 
-  const [aba, setAba] = useState('FILA') // 'FILA' | 'NOTAS' | 'COFRE' | 'EVENTOS' | 'CONFIG'
+  const abaInicialUrl = String(searchParams.get('aba') || location.state?.aba || '').toUpperCase()
+  const pcInicialUrl = String(searchParams.get('pc') || location.state?.pcId || '')
+
+  const [aba, setAba] = useState(
+    ABAS_FISCAL_VALIDAS.includes(abaInicialUrl) ? abaInicialUrl : 'FILA',
+  ) // 'FILA' | 'NOTAS' | 'ENTRADA_COMPRA' | 'COFRE' | 'EVENTOS' | 'CONFIG'
+
+  useEffect(() => {
+    const alvo = String(searchParams.get('aba') || location.state?.aba || '').toUpperCase()
+    if (ABAS_FISCAL_VALIDAS.includes(alvo)) {
+      setAba(alvo)
+    }
+  }, [searchParams, location.state])
   const [loading, setLoading] = useState(false)
   const [config, setConfig] = useState(null)
   const [fila, setFila] = useState({ pedidos: [], devolucoes: [] })
@@ -493,7 +512,7 @@ export function Fiscal() {
       })
       toastSuccess(
         `Lote Faturado com Sucesso ✅`,
-        `${res.total_emitidas} NF-e(s) autorizadas! Pacotão de impressão (NF + Boleto + Romaneio) pronto.`,
+        `${res.total_emitidas} NF-e(s) autorizadas! Lote de impressão (NF + Boleto + Romaneio) pronto.`,
       )
       setModalLote(null)
       setSelecionadosFila([])
@@ -615,7 +634,7 @@ export function Fiscal() {
     }
   }
 
-  const abrirPacotaoNotasSelecionadas = async () => {
+  const abrirImpressaoLoteSelecionadas = async () => {
     if (selecionadasNotas.length === 0) return
     if (selecionadasNotas.length === 1) {
       await abrirModalNotaCompleta(selecionadasNotas[0])
@@ -819,6 +838,7 @@ export function Fiscal() {
         {[
           { id: 'FILA', label: `Fila de Emissão (${fila.pedidos.length + fila.devolucoes.length})`, icon: Send },
           { id: 'NOTAS', label: `Notas Emitidas (${notas.length})`, icon: FileText },
+          { id: 'ENTRADA_COMPRA', label: 'Entrada NF-e (Compras)', icon: FileUp },
           { id: 'COFRE', label: 'Cofre XML (Contador)', icon: Archive },
           { id: 'EVENTOS', label: `Eventos & Inutilização (${eventos.length})`, icon: FileCode2 },
           { id: 'CONFIG', label: 'Certificado A1 & Config.', icon: KeyRound },
@@ -1268,9 +1288,9 @@ export function Fiscal() {
                 <button
                   type="button"
                   className="btn btn--success btn--sm"
-                  onClick={abrirPacotaoNotasSelecionadas}
+                  onClick={abrirImpressaoLoteSelecionadas}
                 >
-                  <Printer size={14} /> Imprimir Pacotão Selecionado ({selecionadasNotas.length} Nota(s): NF + Boleto + Romaneio)
+                  <Printer size={14} /> Imprimir Lote Selecionado ({selecionadasNotas.length} Nota(s): NF + Boleto + Romaneio)
                 </button>
               )}
             </div>
@@ -1444,7 +1464,18 @@ export function Fiscal() {
         </div>
       )}
 
-      {/* ABA 3: COFRE XML DO CONTADOR */}
+      {/* ABA 3: ENTRADA FISCAL DE NF-E DE COMPRA (XML → CONTAS A PAGAR) */}
+      {aba === 'ENTRADA_COMPRA' && (
+        <AbaEntradaNfeCompra
+          toastSuccess={toastSuccess}
+          toastError={toastError}
+          toastWarning={toastWarning}
+          onEscriturado={carregarTudo}
+          pcInicialId={pcInicialUrl}
+        />
+      )}
+
+      {/* ABA 4: COFRE XML DO CONTADOR */}
       {aba === 'COFRE' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card" style={{ padding: 16, display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -2061,7 +2092,7 @@ export function Fiscal() {
                     <Layers size={19} className="text-cyan" /> Faturamento em Lote — {modalLote.pedidos.length} Pedidos Selecionados
                   </h3>
                   <div className="text-xs text-muted" style={{ marginTop: 4 }}>
-                    Escolha a Modalidade de Frete, Transportadora e Veículo uma única vez: o sistema replica para todas as notas e já abre o Pacotão (NF + Boleto + Romaneio)!
+                    Escolha a Modalidade de Frete, Transportadora e Veículo uma única vez: o sistema replica para todas as notas e abre a Impressão em Lote (NF + Boleto + Romaneio).
                   </div>
                 </div>
                 <button type="button" className="btn-icon" onClick={() => setModalLote(null)}>
@@ -2260,7 +2291,7 @@ export function Fiscal() {
                   <Send size={15} />{' '}
                   {emitindo
                     ? 'Faturando Lote...'
-                    : `Autorizar ${modalLote.pedidos.length} NF-es e Abrir Pacotão (NF + Boleto + Romaneio)`}
+                    : `Autorizar ${modalLote.pedidos.length} NF-es e Abrir Impressão em Lote (NF + Boleto + Romaneio)`}
                 </button>
               </div>
             </div>
@@ -2521,7 +2552,7 @@ export function Fiscal() {
         onBaixarXml={baixarXmlNota}
       />
 
-      {/* MODAL DIFERENTE DE IMPRESSÃO EM LOTE (2+ NOTAS: PACOTÃO CLIENTE POR CLIENTE) */}
+      {/* MODAL DE IMPRESSÃO EM LOTE (2+ NOTAS: AGRUPADO CLIENTE POR CLIENTE) */}
       <PacoteLotePrintModal
         notas={pacoteLoteNotas}
         onClose={() => setPacoteLoteNotas(null)}

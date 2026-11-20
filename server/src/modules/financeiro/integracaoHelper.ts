@@ -315,9 +315,37 @@ export async function gerarTitulosCompraOuXml(
     recebimentoId?: string | null
     operadorId?: string | null
     operadorNome?: string
+    substituirPrevisaoPc?: boolean
   },
 ): Promise<number> {
   if (!params.pedidoCompraId && !params.recebimentoId) return 0
+
+  // Se for escrituração oficial de NF-e XML vinculada a um PC, substitui eventual previsão COMPRA_PC ainda em ABERTO
+  if (params.substituirPrevisaoPc && params.pedidoCompraId) {
+    const existPc = await tx
+      .select({
+        id: financeiroTitulos.id,
+        origem: financeiroTitulos.origem,
+        status: financeiroTitulos.status,
+      })
+      .from(financeiroTitulos)
+      .where(
+        and(
+          eq(financeiroTitulos.tenantId, params.tenantId),
+          eq(financeiroTitulos.tipo, 'PAGAR'),
+          eq(financeiroTitulos.pedidoCompraId, params.pedidoCompraId),
+          ne(financeiroTitulos.status, 'CANCELADO'),
+        ),
+      )
+    if (
+      existPc.length > 0 &&
+      existPc.every((t) => t.origem === 'COMPRA_PC' && t.status === 'ABERTO')
+    ) {
+      await tx
+        .delete(financeiroTitulos)
+        .where(inArray(financeiroTitulos.id, existPc.map((t) => t.id)))
+    }
+  }
 
   // Checa idempotência: se já há títulos PAGAR ativos para o recebimento ou PC, não duplica
   const condExist = []

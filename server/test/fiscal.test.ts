@@ -693,6 +693,111 @@ test('Etapa 2 Módulo Fiscal: Motor Tributário Carnes, NF-e 55, NFC-e 65, XML 4
     })
     assert.equal(resPacote.statusCode, 200, resPacote.body)
     assert.equal(resPacote.json().notas.length, 2)
+
+    // 13. Entrada Fiscal de NF-e de Compra (XML -> Vínculo Obrigatório com PC -> Contas a Pagar + Cofre XML)
+    const resCenario = await app.inject({
+      method: 'POST',
+      url: '/api/fiscal/entradas-compra/criar-cenario-teste',
+      headers,
+      payload: {},
+    })
+    assert.equal(resCenario.statusCode, 201, resCenario.body)
+    const cenario = resCenario.json()
+    assert.ok(cenario.pedido_compra_id, 'Cenário de teste deve criar Pedido de Compra aprovado')
+    assert.equal(cenario.chave_nfe.length, 44, 'Chave NF-e simulada deve ter 44 dígitos')
+    assert.ok(String(cenario.xml_conteudo).includes('<nfeProc'), 'XML simulado deve seguir estrutura nfeProc 4.00')
+
+    // 13a. Bloqueia escrituração sem Pedido de Compra vinculado (400)
+    const resSemPc = await app.inject({
+      method: 'POST',
+      url: '/api/fiscal/entradas-compra/escriturar',
+      headers,
+      payload: { xml_conteudo: cenario.xml_conteudo },
+    })
+    assert.equal(resSemPc.statusCode, 400, `Entrada NF-e sem Pedido de Compra deveria retornar 400: ${resSemPc.body}`)
+
+    // 13b. Bloqueia chave bipada divergente do XML (400)
+    const resChaveErrada = await app.inject({
+      method: 'POST',
+      url: '/api/fiscal/entradas-compra/escriturar',
+      headers,
+      payload: {
+        pedido_compra_id: cenario.pedido_compra_id,
+        xml_conteudo: cenario.xml_conteudo,
+        chave_bipada: '35261199999999999999550010000000011000000019',
+      },
+    })
+    assert.equal(resChaveErrada.statusCode, 400, `Chave bipada divergente deveria retornar 400: ${resChaveErrada.body}`)
+
+    // 13c. Preview XML 3-Way com duplicatas
+    const resXmlPreview = await app.inject({
+      method: 'POST',
+      url: '/api/compras/xml/parse-preview',
+      headers,
+      payload: {
+        xml_conteudo: cenario.xml_conteudo,
+        pedido_compra_id: cenario.pedido_compra_id,
+      },
+    })
+    assert.equal(resXmlPreview.statusCode, 200, resXmlPreview.body)
+    assert.ok((resXmlPreview.json().nfe?.duplicatas || []).length >= 1, 'Preview XML deve ler duplicatas <cobr><dup>')
+
+    // 13d. Escrituração oficial da NF-e de Compra vinculada ao PC -> gera Contas a Pagar
+    const resEscrit = await app.inject({
+      method: 'POST',
+      url: '/api/fiscal/entradas-compra/escriturar',
+      headers,
+      payload: {
+        pedido_compra_id: cenario.pedido_compra_id,
+        xml_conteudo: cenario.xml_conteudo,
+        chave_bipada: cenario.chave_nfe,
+      },
+    })
+    assert.equal(resEscrit.statusCode, 201, resEscrit.body)
+    const escritBody = resEscrit.json()
+    assert.equal(escritBody.chave_nfe, cenario.chave_nfe)
+    const qtdDupsEsperadas = (resXmlPreview.json().nfe?.duplicatas || []).length
+    assert.ok(
+      Array.isArray(escritBody.titulos_gerados) && escritBody.titulos_gerados.length === qtdDupsEsperadas,
+      `Deveria gerar ${qtdDupsEsperadas} título(s) de Contas a Pagar das duplicatas do XML: ${resEscrit.body}`,
+    )
+
+    // 13e. Bloqueia duplicidade da mesma chave NF-e (409)
+    const resDup = await app.inject({
+      method: 'POST',
+      url: '/api/fiscal/entradas-compra/escriturar',
+      headers,
+      payload: {
+        pedido_compra_id: cenario.pedido_compra_id,
+        xml_conteudo: cenario.xml_conteudo,
+      },
+    })
+    assert.equal(resDup.statusCode, 409, `Mesma chave NF-e deveria ser bloqueada com 409: ${resDup.body}`)
+
+    // 13f. Listar entradas de compra mostra a NF escriturada com seus títulos a pagar + Cofre XML inclui ENTRADA COMPRA
+    const resEntLista = await app.inject({
+      method: 'GET',
+      url: '/api/fiscal/entradas-compra',
+      headers,
+    })
+    assert.equal(resEntLista.statusCode, 200, resEntLista.body)
+    const entLista = resEntLista.json()
+    const notaEncontrada = (entLista.notas_entrada || []).find((n: any) => n.chave_nfe === cenario.chave_nfe)
+    assert.ok(notaEncontrada, 'NF-e escriturada deve constar em notas_entrada')
+    assert.equal(notaEncontrada.titulos_pagar.length, qtdDupsEsperadas)
+
+    const resCofreComEntrada = await app.inject({
+      method: 'GET',
+      url: `/api/fiscal/cofre-xml?mes=${mesAtual}`,
+      headers,
+    })
+    assert.equal(resCofreComEntrada.statusCode, 200)
+    assert.ok(
+      (resCofreComEntrada.json().arquivos || []).some(
+        (a: any) => a.tipo === 'ENTRADA COMPRA' && a.chave === cenario.chave_nfe,
+      ),
+      'Cofre XML do Contador deve incluir a NF-e de entrada de compra escriturada',
+    )
   } finally {
     await app.close()
     await conn.close()

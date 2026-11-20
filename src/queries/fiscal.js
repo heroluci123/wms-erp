@@ -125,4 +125,41 @@ export const fiscalQueries = {
     const qs = buildQueryString({ mes })
     return apiRequest(`/api/fiscal/cofre-xml${qs}`)
   },
+
+  async listarEntradasCompra() {
+    if (!isApiEnabled()) return { pedidos_pendentes: [], notas_entrada: [] }
+    return apiRequest('/api/fiscal/entradas-compra')
+  },
+
+  async previewXmlCompra(dados) {
+    exigirApi()
+    return apiRequest('/api/compras/xml/parse-preview', {
+      method: 'POST',
+      body: dados,
+    })
+  },
+
+  async escriturarEntradaCompra(dados) {
+    exigirApi()
+    return apiRequest('/api/fiscal/entradas-compra/escriturar', {
+      method: 'POST',
+      body: dados,
+    })
+  },
+
+  async gerarXmlTesteCompra(pcId) {
+    exigirApi()
+    return apiRequest(`/api/fiscal/entradas-compra/gerar-xml-teste/${pcId}`, {
+      method: 'POST',
+      body: {},
+    })
+  },
+
+  async criarCenarioTesteEntradaCompra() {
+    exigirApi()
+    return apiRequest('/api/fiscal/entradas-compra/criar-cenario-teste', {
+      method: 'POST',
+      body: {},
+    })
+  },
 }

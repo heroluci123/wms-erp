@@ -18,6 +18,7 @@ import {
   fiscalEventos,
   fiscalNotas,
   formasPagamento,
+  fornecedores,
   locaisCobranca,
   matrizTributaria,
   pedidos,
@@ -25,6 +26,7 @@ import {
   pedidosParcelas,
   pendenciasSetor,
   produtos,
+  recebimentos,
   romaneios,
   romaneiosItens,
   rotas,
@@ -2185,7 +2187,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
     const q = (req.query || {}) as { mes?: string }
     const mes = /^\d{4}-\d{2}$/.test(String(q.mes || '')) ? String(q.mes) : hojeIsoLocal().slice(0, 7)
 
-    const [notasRows, eventosRows] = await Promise.all([
+    const [notasRows, eventosRows, entradasRows] = await Promise.all([
       conn.db
         .select()
         .from(fiscalNotas)
@@ -2196,10 +2198,33 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         .from(fiscalEventos)
         .where(and(eq(fiscalEventos.tenantId, ctx.tenantId), eq(fiscalEventos.filialId, ctx.filialId)))
         .orderBy(desc(fiscalEventos.createdAt)),
+      conn.db
+        .select({
+          id: recebimentos.id,
+          codigo: recebimentos.codigo,
+          numeroNf: recebimentos.numeroNf,
+          serieNf: recebimentos.serieNf,
+          chaveNfe: recebimentos.chaveNfe,
+          valorTotalNf: recebimentos.valorTotalNf,
+          xmlConteudo: recebimentos.xmlConteudo,
+          createdAt: recebimentos.createdAt,
+          fornecedorNome: fornecedores.razaoSocial,
+        })
+        .from(recebimentos)
+        .leftJoin(fornecedores, eq(fornecedores.id, recebimentos.fornecedorId))
+        .where(
+          and(
+            eq(recebimentos.tenantId, ctx.tenantId),
+            eq(recebimentos.filialId, ctx.filialId),
+            sql`${recebimentos.xmlConteudo} != ''`,
+          ),
+        )
+        .orderBy(desc(recebimentos.createdAt)),
     ])
 
     const notasMes = notasRows.filter((n) => new Date(n.createdAt).toISOString().slice(0, 7) === mes)
     const eventosMes = eventosRows.filter((e) => new Date(e.createdAt).toISOString().slice(0, 7) === mes)
+    const entradasMes = entradasRows.filter((r) => new Date(r.createdAt).toISOString().slice(0, 7) === mes)
 
     const arquivos = [
       ...notasMes.map((n) => ({
@@ -2213,6 +2238,18 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         valor: toNum(n.valorTotalNf, 0),
         data: n.createdAt,
         xml: n.xmlConteudo,
+      })),
+      ...entradasMes.map((r) => ({
+        nome: `NFe_ENTRADA_S${r.serieNf || '1'}_N${r.numeroNf || r.codigo}_${r.chaveNfe || r.codigo}.xml`,
+        tipo: 'ENTRADA COMPRA',
+        numero: Number(r.numeroNf || 0) || r.codigo,
+        serie: Number(r.serieNf || 1),
+        chave: r.chaveNfe || r.codigo,
+        status: 'ESCRITURADA',
+        destinatario: r.fornecedorNome || 'FORNECEDOR',
+        valor: toNum(r.valorTotalNf, 0),
+        data: r.createdAt,
+        xml: r.xmlConteudo,
       })),
       ...eventosMes.map((e) => ({
         nome: `EVENTO_${e.tipoEvento}_S${e.serie}_N${e.numeroInicial}_${e.sequencia}.xml`,
@@ -2235,6 +2272,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
         qtd_notas: notasMes.length,
         qtd_nfe_55: notasMes.filter((n) => n.modelo === '55').length,
         qtd_nfce_65: notasMes.filter((n) => n.modelo === '65').length,
+        qtd_entradas_compra: entradasMes.length,
         qtd_canceladas: notasMes.filter((n) => n.status === 'CANCELADA').length,
         qtd_eventos: eventosMes.length,
         valor_total_autorizado: Number(

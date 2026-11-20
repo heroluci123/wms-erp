@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   ShoppingBag,
   Plus,
@@ -16,6 +16,7 @@ import {
   Upload,
   FileText,
   FileCode2,
+  FileUp,
   ArrowRightLeft,
   Settings2,
   Boxes,
@@ -68,6 +69,7 @@ function readFileAsTextSmart(file) {
 
 export function Compras() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { operador, toastSuccess, toastError, toastWarning, confirmar } = useAppStore()
   const podeEscrever = temPermissao(operador, 'compras')
   const apiAtiva = isApiEnabled()
@@ -709,10 +711,10 @@ export function Compras() {
       <div className="page-header mb-16">
         <div>
           <h1 className="page-header__title flex items-center gap-10">
-            <ShoppingBag size={24} className="text-primary" /> Compras, Pré-Recebimento & Importação XML/TXT
+            <ShoppingBag size={24} className="text-primary" /> Compras & Pré-Recebimento Operacional
           </h1>
           <p className="page-header__subtitle">
-            Pedidos de Compra, Importação em Lote de Etiquetas (.txt) sem obrigatoriedade de XML, NF-e de Entrada e De-Para permanente
+            Pedidos de Compra (Industrial/Operação), etiquetas (.txt) para bipagem na doca e De-Para permanente. A entrada fiscal da NF-e (XML → Contas a Pagar) é feita no Módulo Fiscal.
           </p>
         </div>
         <div className="flex gap-8 flex-wrap">
@@ -727,6 +729,15 @@ export function Compras() {
               {travaAtiva ? 'Trava na Doca: ATIVA 🔒' : 'Trava na Doca: Desativada'}
             </button>
           )}
+          <button
+            type="button"
+            className="btn btn--ghost"
+            style={{ borderColor: 'rgba(16, 185, 129, 0.45)', color: '#34d399' }}
+            onClick={() => navigate('/fiscal?aba=ENTRADA_COMPRA')}
+            title="Abrir Entrada Fiscal de NF-e de Compra (XML → Contas a Pagar) vinculada a um Pedido de Compra"
+          >
+            <FileUp size={15} /> Entrada NF-e (Fiscal)
+          </button>
           <button type="button" className="btn btn--ghost" onClick={carregar} disabled={loading}>
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Atualizar
           </button>
@@ -737,7 +748,7 @@ export function Compras() {
                 className="btn btn--info"
                 onClick={() => setAbaAtiva('importar')}
               >
-                <Upload size={16} /> Importar TXTs / XML
+                <Upload size={16} /> Importar Etiquetas (.TXT)
               </button>
               <button type="button" className="btn btn--primary" onClick={() => setModalNovo(true)}>
                 <Plus size={16} /> Novo Pedido de Compra
@@ -887,6 +898,17 @@ export function Compras() {
                             {podeEscrever && c.status === 'ABERTO' && (
                               <button type="button" className="btn btn--info btn--sm" onClick={() => handleAprovar(c.id)}>
                                 <CheckCircle2 size={14} /> Aprovar
+                              </button>
+                            )}
+                            {['APROVADO', 'PARCIAL', 'RECEBIDO'].includes(c.status) && (
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--sm"
+                                style={{ color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.35)' }}
+                                title="Dar Entrada Fiscal na NF-e de Compra (XML → Contas a Pagar) vinculada a este Pedido"
+                                onClick={() => navigate(`/fiscal?aba=ENTRADA_COMPRA&pc=${c.id}`)}
+                              >
+                                <FileUp size={14} /> NF-e Fiscal
                               </button>
                             )}
                           </div>
