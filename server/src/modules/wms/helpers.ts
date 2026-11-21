@@ -279,7 +279,11 @@ export async function gerarCodigoDocumento(
     | 'EMBARQUE'
     | 'DEVOLUCAO'
     | 'FIN_PAGAR'
-    | 'FIN_RECEBER',
+    | 'FIN_RECEBER'
+    | 'INTERUNIDADES'
+    | 'VAREJO_INV'
+    | 'PDV_CAIXA'
+    | 'PDV_VENDA',
   prefix: string,
   pad = 4,
 ): Promise<string> {

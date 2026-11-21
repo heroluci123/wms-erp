@@ -10,6 +10,8 @@ export const SETORES_EMPRESA = [
   'Supply Chain / Compras',
   'Comercial / Vendas',
   'Financeiro',
+  'Loja / Açougue',
+  'Almoxarifado / Insumos',
   'Inventário',
   'Qualidade',
   'Administrativo',
@@ -79,6 +81,17 @@ export const SETORES_PERMISSOES = [
       { key: 'financeiro', label: 'Financeiro (Pagar, Receber, Caixa & Comissões)', desc: 'Gerenciar contas a pagar, contas a receber, baixas, bancos, fluxo de caixa e apuração de comissões.' },
       { key: 'financeiro_pedidos', label: 'Lançar pedidos pelo Financeiro', desc: 'Permite ao Financeiro criar solicitações de pedido que caem na fila do Supply Chain.' },
       { key: 'whatsapp_inbox', label: 'Caixa de Entrada WhatsApp (Parser)', desc: 'Visualizar mensagens recebidas do WhatsApp e converter em pedidos.' },
+    ],
+  },
+  {
+    id: 'varejo',
+    nome: 'Loja 1/1 (PDV & Açougue), Inter-Unidades & Insumos',
+    descricao: 'Frente de caixa PDV/NFC-e, estoque/inventário da loja, etiquetas Zebra 80×45 QR, transferências 1/2↔2/1↔1/1 e coleta de insumos.',
+    permissoes: [
+      { key: 'pdv_caixa', label: 'PDV Frente de Caixa & NFC-e (Loja 1/1)', desc: 'Abrir/fechar caixa, registrar vendas (QR, balança EAN-2, EAN-13), sangria/suprimento e emitir NFC-e.' },
+      { key: 'varejo_acougue', label: 'Açougue, Empório, Etiquetas 80×45 QR & Inventário Loja', desc: 'Gerenciar saldo da loja (KG/UN), preços de varejo, etiquetas Zebra 80×45 com QR Code e inventário rápido.' },
+      { key: 'interunidades', label: 'Movimentação Inter-Unidades (1/2 ↔ 2/1 ↔ 1/1)', desc: 'Transferência Matriz→Loja, Remessa p/ Industrialização (FG 2/1) e Retorno Produção→Matriz.' },
+      { key: 'insumos_coleta', label: 'Almoxarifado & Coleta de Insumos', desc: 'Cadastrar endereços de insumos, imprimir etiquetas 80×45 e realizar baixa manual bipando o endereço.' },
     ],
   },
   {
@@ -155,6 +168,10 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set([
   'financeiro',
   'financeiro_pedidos',
   'whatsapp_inbox',
+  'pdv_caixa',
+  'varejo_acougue',
+  'interunidades',
+  'insumos_coleta',
   'saida',
   'expedicao',
   'devolucao',
@@ -240,6 +257,29 @@ export const PERMISSOES_MASTER_COMPLETAS = (() => {
   return base
 })()
 
+export const PERMISSOES_PADRAO_CAIXA_PDV = {
+  pdv_caixa: true,
+  alterar_propria_senha: true,
+}
+
+export const PERMISSOES_PADRAO_ACOUGUE_BALCAO = {
+  varejo_acougue: true,
+  interunidades: true,
+  insumos_coleta: true,
+  alterar_propria_senha: true,
+}
+
+export const PERMISSOES_PADRAO_GERENTE_LOJA = {
+  pdv_caixa: true,
+  varejo_acougue: true,
+  interunidades: true,
+  insumos_coleta: true,
+  compras: true,
+  pedidos_consultar: true,
+  relatorios_estoque: true,
+  alterar_propria_senha: true,
+}
+
 export const PERFIS_SISTEMA_BASE = [
   {
     codigo: 'OPERADOR',
@@ -248,6 +288,33 @@ export const PERFIS_SISTEMA_BASE = [
     setor_padrao: 'Produção',
     descricao: 'Operação diária: recebimento, inventário coletor, entrada/saída de produção, movimentações, separação de pedidos e consultas.',
     permissoes: PERMISSOES_PADRAO_OPERADOR,
+    sistema_fixo: 1,
+  },
+  {
+    codigo: 'CAIXA_PDV',
+    nome: 'CAIXA PDV (LOJA 1/1)',
+    nivel: 'OPERACIONAL',
+    setor_padrao: 'Loja / Açougue',
+    descricao: 'Perfil enxuto para Frente de Caixa: abertura/fechamento, vendas PDV (QR/EAN-2/EAN-13), sangria, suprimento e NFC-e.',
+    permissoes: PERMISSOES_PADRAO_CAIXA_PDV,
+    sistema_fixo: 1,
+  },
+  {
+    codigo: 'ACOUGUE_BALCAO',
+    nome: 'AÇOUGUE & BALCÃO (LOJA 1/1)',
+    nivel: 'OPERACIONAL',
+    setor_padrao: 'Loja / Açougue',
+    descricao: 'Perfil enxuto para Açougue e Empório: estoque varejo, etiquetas Zebra 80×45 QR, inventário da loja, transferências e coleta de insumos.',
+    permissoes: PERMISSOES_PADRAO_ACOUGUE_BALCAO,
+    sistema_fixo: 1,
+  },
+  {
+    codigo: 'GERENTE_LOJA',
+    nome: 'GERENTE DE LOJA (1/1)',
+    nivel: 'OPERACIONAL',
+    setor_padrao: 'Loja / Açougue',
+    descricao: 'Gestão completa da Filial Loja 1/1: PDV, Açougue/Empório, Inventário do Varejo, Compras Empório, Transferências e Coleta de Insumos.',
+    permissoes: PERMISSOES_PADRAO_GERENTE_LOJA,
     sistema_fixo: 1,
   },
   {
@@ -381,7 +448,7 @@ export function sanitizarPermissoes(rawPermissoes = {}, nivel = 'OPERACIONAL', p
     mapa.roteirizacao_carregamento = true
   }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'fiscal', 'financeiro', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao', 'devolucao_fiscal', 'roteirizacao', 'roteirizacao_carregamento']) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'fiscal', 'financeiro', 'financeiro_pedidos', 'whatsapp_inbox', 'pdv_caixa', 'varejo_acougue', 'interunidades', 'insumos_coleta', 'compras', 'mapa_producao', 'devolucao_fiscal', 'roteirizacao', 'roteirizacao_carregamento']) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }

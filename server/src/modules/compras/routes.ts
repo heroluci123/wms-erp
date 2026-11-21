@@ -105,6 +105,8 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             String(raw.impressao_romaneio_padrao || 'OPCAO_B') === 'OPCAO_A' ? 'OPCAO_A' : 'OPCAO_B',
           exigir_temperatura_recebimento: Boolean(raw.exigir_temperatura_recebimento),
           exigir_nf_para_expedir: Boolean(raw.exigir_nf_para_expedir),
+          controlar_estoque_insumos: Boolean(raw.controlar_estoque_insumos),
+          padrao_balanca_loja: String(raw.padrao_balanca_loja || 'AUTO').toUpperCase(),
           tolerancia_recebimento_pct:
             raw.tolerancia_recebimento_pct != null && Number.isFinite(Number(raw.tolerancia_recebimento_pct))
               ? Number(raw.tolerancia_recebimento_pct)
@@ -123,6 +125,8 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         'configurar_sistema',
         'parametros_comerciais',
         'fiscal',
+        'varejo_acougue',
+        'insumos_coleta',
       ]),
     },
     async (req) => {
@@ -133,6 +137,8 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         impressao_romaneio_padrao?: string
         exigir_temperatura_recebimento?: boolean
         exigir_nf_para_expedir?: boolean
+        controlar_estoque_insumos?: boolean
+        padrao_balanca_loja?: string
         tolerancia_recebimento_pct?: number
       }
       const atual = await lerTenantFeatures(conn.db, ctx.tenantId)
@@ -151,6 +157,14 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       }
       if (body.exigir_nf_para_expedir !== undefined) {
         next.exigir_nf_para_expedir = Boolean(body.exigir_nf_para_expedir)
+      }
+      if (body.controlar_estoque_insumos !== undefined) {
+        next.controlar_estoque_insumos = Boolean(body.controlar_estoque_insumos)
+      }
+      if (body.padrao_balanca_loja !== undefined) {
+        const permitidos = ['AUTO', 'TOLEDO_PRECO_4', 'TOLEDO_PRECO_5', 'TOLEDO_PESO_4', 'TOLEDO_PESO_5']
+        const cand = String(body.padrao_balanca_loja || 'AUTO').toUpperCase()
+        next.padrao_balanca_loja = permitidos.includes(cand) ? cand : 'AUTO'
       }
       if (body.tolerancia_recebimento_pct !== undefined) {
         const tol = Math.min(25, Math.max(0, Number(body.tolerancia_recebimento_pct)))
@@ -310,10 +324,13 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
     { preHandler: requirePermission(PERM_COMPRA_READ, { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
-      const q = req.query as { status?: string; busca?: string }
+      const q = req.query as { status?: string; tipo_compra?: string; busca?: string }
       const conds = [eq(pedidosCompra.tenantId, ctx.tenantId), eq(pedidosCompra.filialId, ctx.filialId)]
       if (q.status && q.status !== 'TODOS') {
         conds.push(eq(pedidosCompra.status, String(q.status).toUpperCase()))
+      }
+      if (q.tipo_compra && q.tipo_compra !== 'TODOS') {
+        conds.push(eq(pedidosCompra.tipoCompra, String(q.tipo_compra).toUpperCase()))
       }
       if (q.busca && q.busca.trim()) {
         const pat = `%${q.busca.trim().toUpperCase()}%`
@@ -329,6 +346,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             id: pedidosCompra.id,
             codigo: pedidosCompra.codigo,
             status: pedidosCompra.status,
+            tipo_compra: pedidosCompra.tipoCompra,
             fornecedor_id: pedidosCompra.fornecedorId,
             fornecedor_nome: fornecedores.nomeFantasia,
             fornecedor_razao: fornecedores.razaoSocial,
@@ -366,6 +384,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       return {
         success: true,
         trava_recebimento_sem_pc: Boolean(features.trava_recebimento_sem_pc),
+        controlar_estoque_insumos: Boolean(features.controlar_estoque_insumos),
         data: rows.map((r) => ({
           ...r,
           frete_valor: toNum(r.frete_valor, 0),
@@ -390,6 +409,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           id: pedidosCompra.id,
           codigo: pedidosCompra.codigo,
           status: pedidosCompra.status,
+          tipo_compra: pedidosCompra.tipoCompra,
           fornecedor_id: pedidosCompra.fornecedorId,
           fornecedor_nome: fornecedores.nomeFantasia,
           fornecedor_uf: fornecedores.uf,
@@ -513,6 +533,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       fornecedor_id: string
       natureza_id?: string | null
       finalidade?: string
+      tipo_compra?: string
       centro_custo_id?: string | null
       forma_pagamento_id?: string | null
       marchante?: string
@@ -574,12 +595,21 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         marchanteFinal = defMarc?.nome || 'FRIGODIL'
       }
 
+      const tiposValidos = ['MATERIA_PRIMA', 'REVENDA', 'EMPORIO', 'INSUMO', 'HIGIENE_CONSUMO']
+      const tipoCompraRaw = String(body.tipo_compra || body.finalidade || 'MATERIA_PRIMA').toUpperCase()
+      const tipoCompraFinal = tiposValidos.includes(tipoCompraRaw)
+        ? tipoCompraRaw
+        : tipoCompraRaw === 'CONSUMO'
+          ? 'HIGIENE_CONSUMO'
+          : 'MATERIA_PRIMA'
+
       await tx.insert(pedidosCompra).values({
         id,
         tenantId: ctx.tenantId,
         filialId: ctx.filialId,
         codigo,
         fornecedorId,
+        tipoCompra: tipoCompraFinal,
         naturezaId: prep.naturezaIdResolvida,
         centroCustoId: centroCustoIdFinal,
         formaPagamentoId: body.forma_pagamento_id ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id') : null,

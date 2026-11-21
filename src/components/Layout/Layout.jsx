@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2 } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -369,8 +369,9 @@ function Sidebar({ collapsed = false, onCollapse }) {
   }
 
   const temVisaoGeral = temAlgumaPermissao(operador, ['dashboard_executivo', 'estoque_enderecos', 'consulta_estoque', 'relatorios_estoque'])
-  const temCompras = temAlgumaPermissao(operador, ['compras', 'recebimento'])
-  const temFaturamento = temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos', 'financeiro_pedidos', 'roteirizacao', 'fiscal', 'devolucao_fiscal'])
+  const temVarejoLoja = temAlgumaPermissao(operador, ['pdv_caixa', 'varejo_acougue'])
+  const temCompras = temAlgumaPermissao(operador, ['compras', 'recebimento', 'insumos_coleta'])
+  const temFaturamento = temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos', 'financeiro_pedidos', 'roteirizacao', 'fiscal', 'devolucao_fiscal', 'interunidades'])
   const temFinanceiro = temAlgumaPermissao(operador, ['financeiro', 'financeiro_pedidos'])
   const temGestaoOperacional = temAlgumaPermissao(operador, ['mapa_producao', 'producao_criar_op'])
   const temOperacao = temAlgumaPermissao(operador, [
@@ -460,18 +461,46 @@ function Sidebar({ collapsed = false, onCollapse }) {
         </NavLink>
       )}
       
+      {temVarejoLoja && (
+        <>
+          <div className="sidebar__section-label">Loja 1/1 (Varejo &amp; Açougue)</div>
+          {temAlgumaPermissao(operador, ['pdv_caixa', 'varejo_acougue']) && (
+            <NavLink to="/pdv" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <ShoppingCart size={18} /> PDV Frente de Caixa
+            </NavLink>
+          )}
+          {temAlgumaPermissao(operador, ['varejo_acougue']) && (
+            <NavLink to="/loja" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Store size={18} /> Açougue, Empório &amp; QR
+            </NavLink>
+          )}
+        </>
+      )}
+
       {temCompras && (
         <>
-          <div className="sidebar__section-label">Compras</div>
-          <NavLink to="/compras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-            <ShoppingBag size={18} /> Pedidos de Compra
-          </NavLink>
+          <div className="sidebar__section-label">Compras &amp; Insumos</div>
+          {temAlgumaPermissao(operador, ['compras', 'recebimento']) && (
+            <NavLink to="/compras" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <ShoppingBag size={18} /> Pedidos de Compra
+            </NavLink>
+          )}
+          {temAlgumaPermissao(operador, ['insumos_coleta', 'compras', 'varejo_acougue', 'producao_entrada']) && (
+            <NavLink to="/insumos-coleta" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Boxes size={18} /> Coleta de Insumos
+            </NavLink>
+          )}
         </>
       )}
 
       {temFaturamento && (
         <>
           <div className="sidebar__section-label">Faturamento</div>
+          {temAlgumaPermissao(operador, ['interunidades', 'movimentacao', 'fiscal', 'varejo_acougue']) && (
+            <NavLink to="/interunidades" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <ArrowRightLeft size={18} /> Inter-Unidades (1/2↔2/1↔1/1)
+            </NavLink>
+          )}
           {temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos']) && (
             <NavLink to="/whatsapp-inbox" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
               <MessageSquare size={18} /> Entrada WhatsApp

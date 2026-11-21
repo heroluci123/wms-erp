@@ -797,12 +797,18 @@ export function Producao() {
       : ''
 
     feedbackSom.sucesso()
+    const remAutoTxt = res?.remessa_automatica
+      ? ` • Remessa automática ${res.remessa_automatica.codigo} [${res.remessa_automatica.especie}] enviada p/ Faturamento Diário!`
+      : ''
     setFeedbackEntrada({
       tipo: 'sucesso',
-      titulo: 'Entrada Confirmada!',
-      msg: `${novoInsumo.produto_descricao} • Líq ${fmtKg2(pesoAdicionado)}${novoInsumo.qtd_pecas ? ` • ${novoInsumo.qtd_pecas} pç` : ''}${resumoMeta}`,
+      titulo: res?.remessa_automatica ? 'Entrada + Remessa Automática 1/2 → 2/1!' : 'Entrada Confirmada!',
+      msg: `${novoInsumo.produto_descricao} • Líq ${fmtKg2(pesoAdicionado)}${novoInsumo.qtd_pecas ? ` • ${novoInsumo.qtd_pecas} pç` : ''}${resumoMeta}${remAutoTxt}`,
     })
-    toastSuccess('Entrada Registrada', `${novoInsumo.produto_descricao} (${fmtKg2(pesoAdicionado)}) alocada na ${opSelecionada.codigo}.`)
+    toastSuccess(
+      res?.remessa_automatica ? 'Entrada + Remessa Automática!' : 'Entrada Registrada',
+      `${novoInsumo.produto_descricao} (${fmtKg2(pesoAdicionado)}) alocada na ${opSelecionada.codigo}.${remAutoTxt}`,
+    )
     setScanEntrada('')
     setTimeout(() => entradaRef.current?.focus(), 60)
   }

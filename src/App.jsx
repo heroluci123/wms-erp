@@ -52,6 +52,10 @@ import { PedidoRastreio } from './pages/PedidoRastreio'
 import { Financeiro } from './pages/Financeiro'
 import { DreGerencial } from './pages/DreGerencial'
 import { Fiscal } from './pages/Fiscal'
+import { PdvCaixa } from './pages/PdvCaixa'
+import { VarejoLoja } from './pages/VarejoLoja'
+import { Interunidades } from './pages/Interunidades'
+import { InsumosColeta } from './pages/InsumosColeta'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -87,6 +91,13 @@ function HomeWrapper() {
   if (isCliente(operador)) {
     return <Navigate to="/portal-cliente" replace />
   }
+  const perfilUp = String(operador?.perfil || '').toUpperCase()
+  if (perfilUp === 'CAIXA_PDV') {
+    return <Navigate to="/pdv" replace />
+  }
+  if (perfilUp === 'ACOUGUE_BALCAO') {
+    return <Navigate to="/loja" replace />
+  }
   const isMobile = window.innerWidth <= 768
   if (isMobile || !temPermissao(operador, 'dashboard_executivo')) {
     return <ColetorHome />
@@ -119,6 +130,10 @@ function App() {
           <Route path="whatsapp-inbox" element={<RequirePermissao permissoes={['whatsapp_inbox', 'pedidos']} element={<WhatsappInbox />} />} />
           <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos', 'financeiro_pedidos']} element={<Pedidos />} />} />
           <Route path="fiscal" element={<RequirePermissao permissoes={['fiscal', 'devolucao_fiscal', 'parametros_comerciais']} element={<Fiscal />} />} />
+          <Route path="pdv" element={<RequirePermissao permissoes={['pdv_caixa', 'varejo_acougue']} element={<PdvCaixa />} />} />
+          <Route path="loja" element={<RequirePermissao permissoes={['varejo_acougue', 'pdv_caixa']} element={<VarejoLoja />} />} />
+          <Route path="interunidades" element={<RequirePermissao permissoes={['interunidades', 'movimentacao', 'fiscal', 'varejo_acougue']} element={<Interunidades />} />} />
+          <Route path="insumos-coleta" element={<RequirePermissao permissoes={['insumos_coleta', 'compras', 'varejo_acougue', 'producao_entrada']} element={<InsumosColeta />} />} />
           <Route path="financeiro" element={<RequirePermissao permissoes={['financeiro', 'financeiro_pedidos']} element={<Financeiro />} />} />
           <Route path="dre" element={<RequirePermissao permissoes={['financeiro', 'financeiro_pedidos', 'dashboard_executivo']} element={<DreGerencial />} />} />
           <Route path="roteirizacao" element={<RequirePermissao permissoes={['roteirizacao', 'roteirizacao_carregamento', 'pedidos', 'saida', 'expedicao', 'transportadoras']} element={<Roteirizacao />} />} />

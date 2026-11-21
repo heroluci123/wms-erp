@@ -33,6 +33,7 @@ export const pedidosCompra = pgTable(
       .references(() => filiais.id, { onDelete: 'cascade' }),
     codigo: text('codigo').notNull(),
     fornecedorId: uuid('fornecedor_id').references(() => fornecedores.id, { onDelete: 'set null' }),
+    tipoCompra: text('tipo_compra').notNull().default('MATERIA_PRIMA'), // MATERIA_PRIMA | REVENDA | EMPORIO | INSUMO | HIGIENE_CONSUMO
     naturezaId: uuid('natureza_id').references(() => naturezasOperacao.id),
     centroCustoId: uuid('centro_custo_id').references(() => centrosCusto.id),
     formaPagamentoId: uuid('forma_pagamento_id').references(() => formasPagamento.id),
@@ -90,6 +91,9 @@ export const recebimentos = pgTable(
     codigo: text('codigo').notNull(),
     pedidoCompraId: uuid('pedido_compra_id').references(() => pedidosCompra.id),
     fornecedorId: uuid('fornecedor_id').references(() => fornecedores.id),
+    tipoEntrada: text('tipo_entrada').notNull().default('COMPRA_ESTOQUE'), // COMPRA_ESTOQUE | HIGIENE_CONSUMO_DIRETO | INSUMO_DIRETO
+    centroCustoId: uuid('centro_custo_id').references(() => centrosCusto.id, { onDelete: 'set null' }),
+    categoriaDre: text('categoria_dre').notNull().default(''),
     chaveNfe: text('chave_nfe').notNull().default(''),
     numeroNf: text('numero_nf').notNull().default(''),
     serieNf: text('serie_nf').notNull().default(''),

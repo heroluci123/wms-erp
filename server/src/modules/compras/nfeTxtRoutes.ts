@@ -3,12 +3,15 @@ import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { DbConnection } from '../../db/client.js'
 import {
+  centrosCusto,
   empresas,
   estoqueCaixas,
   financeiroTitulos,
   formasPagamento,
   fornecedorProdutoDepara,
   fornecedores,
+  insumosColetas,
+  insumosEstoque,
   layoutsImportacaoTxt,
   paletes,
   pedidosCompra,
@@ -1635,12 +1638,19 @@ ${dupsXml}
     async (req) => {
       const ctx = req.authCtx!
 
-      const [pcs, itensAll, recsAll, titsPagar] = await Promise.all([
+      const [features, ccsAtivos, pcs, itensAll, recsAll, titsPagar] = await Promise.all([
+        lerTenantFeatures(conn.db, ctx.tenantId),
+        conn.db
+          .select({ id: centrosCusto.id, codigo: centrosCusto.codigo, descricao: centrosCusto.descricao })
+          .from(centrosCusto)
+          .where(and(eq(centrosCusto.tenantId, ctx.tenantId), eq(centrosCusto.ativo, 1)))
+          .orderBy(asc(centrosCusto.descricao)),
         conn.db
           .select({
             id: pedidosCompra.id,
             codigo: pedidosCompra.codigo,
             status: pedidosCompra.status,
+            tipo_compra: pedidosCompra.tipoCompra,
             fornecedor_id: pedidosCompra.fornecedorId,
             fornecedor_nome: fornecedores.nomeFantasia,
             fornecedor_razao: fornecedores.razaoSocial,
@@ -1685,6 +1695,9 @@ ${dupsXml}
             codigo: recebimentos.codigo,
             pedido_compra_id: recebimentos.pedidoCompraId,
             pedido_compra_codigo: pedidosCompra.codigo,
+            tipo_entrada: recebimentos.tipoEntrada,
+            categoria_dre: recebimentos.categoriaDre,
+            centro_custo_id: recebimentos.centroCustoId,
             fornecedor_id: recebimentos.fornecedorId,
             fornecedor_nome: fornecedores.nomeFantasia,
             fornecedor_razao: fornecedores.razaoSocial,
@@ -1791,6 +1804,8 @@ ${dupsXml}
 
       return {
         success: true,
+        controlar_estoque_insumos: Boolean(features.controlar_estoque_insumos),
+        centros_custo: ccsAtivos,
         pedidos_pendentes: pedidosPendentes,
         notas_entrada: notasEntrada,
       }
@@ -1804,7 +1819,10 @@ ${dupsXml}
     async (req, reply) => {
       const ctx = req.authCtx!
       const body = (req.body || {}) as {
-        pedido_compra_id?: string
+        tipo_entrada?: string // COMPRA_ESTOQUE | HIGIENE_CONSUMO_DIRETO | INSUMO_DIRETO
+        pedido_compra_id?: string | null
+        centro_custo_id?: string | null
+        categoria_dre?: string
         xml_conteudo?: string
         chave_bipada?: string
         depara_vinculos?: Array<{
@@ -1816,13 +1834,32 @@ ${dupsXml}
         }>
       }
 
-      if (!body.pedido_compra_id) {
+      const tipoEntradaRaw = String(body.tipo_entrada || 'COMPRA_ESTOQUE').toUpperCase()
+      const tipoEntrada =
+        tipoEntradaRaw === 'HIGIENE_CONSUMO_DIRETO' || tipoEntradaRaw === 'INSUMO_DIRETO'
+          ? tipoEntradaRaw
+          : 'COMPRA_ESTOQUE'
+
+      const features = await lerTenantFeatures(conn.db, ctx.tenantId)
+      const controlarInsumosAtivo = Boolean(features.controlar_estoque_insumos)
+
+      if (tipoEntrada === 'INSUMO_DIRETO' && controlarInsumosAtivo && !body.pedido_compra_id) {
         throw new HttpError(
           400,
-          'Para dar entrada fiscal em uma NF-e de compra é obrigatório vincular a um Pedido de Compra.',
+          'O controle de estoque de Insumos está ATIVO para esta empresa. Crie e vincule um Pedido de Compra de Insumo antes de dar entrada na NF-e.',
         )
       }
-      const pcId = parseUuidOrBadRequest(body.pedido_compra_id, 'pedido_compra_id')
+
+      if (tipoEntrada === 'COMPRA_ESTOQUE' && !body.pedido_compra_id) {
+        throw new HttpError(
+          400,
+          'Para dar entrada fiscal em uma NF-e de compra (estoque/revenda/empório) é obrigatório vincular a um Pedido de Compra.',
+        )
+      }
+
+      const pcId = body.pedido_compra_id ? parseUuidOrBadRequest(body.pedido_compra_id, 'pedido_compra_id') : null
+      const ccIdEntrada = body.centro_custo_id ? parseUuidOrBadRequest(body.centro_custo_id, 'centro_custo_id') : null
+      const categoriaDreEntrada = String(body.categoria_dre || '').trim().toUpperCase()
       const xmlRaw = String(body.xml_conteudo || '').trim()
       if (!xmlRaw) {
         throw new HttpError(400, 'Selecione ou cole o arquivo XML da NF-e de compra.')
@@ -1849,14 +1886,18 @@ ${dupsXml}
       }
 
       const resultado = await conn.db.transaction(async (tx) => {
-        const [pcRow] = await tx
-          .select()
-          .from(pedidosCompra)
-          .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
-          .limit(1)
-        if (!pcRow) throw new HttpError(404, 'Pedido de Compra não encontrado.')
-        if (pcRow.status === 'CANCELADO') {
-          throw new HttpError(409, `Pedido de Compra ${pcRow.codigo} está CANCELADO e não pode receber NF-e.`)
+        let pcRow: typeof pedidosCompra.$inferSelect | null = null
+        if (pcId) {
+          const [foundPc] = await tx
+            .select()
+            .from(pedidosCompra)
+            .where(and(eq(pedidosCompra.id, pcId), eq(pedidosCompra.tenantId, ctx.tenantId)))
+            .limit(1)
+          if (!foundPc) throw new HttpError(404, 'Pedido de Compra não encontrado.')
+          if (foundPc.status === 'CANCELADO') {
+            throw new HttpError(409, `Pedido de Compra ${foundPc.codigo} está CANCELADO e não pode receber NF-e.`)
+          }
+          pcRow = foundPc
         }
 
         if (xmlParsed.chave_nfe) {
@@ -1878,9 +1919,9 @@ ${dupsXml}
           }
         }
 
-        // Resolver fornecedor (PC > CNPJ do XML)
+        // Resolver fornecedor (PC > CNPJ do XML > auto-cadastro para Entrada Direta)
         let fornecedorRow: typeof fornecedores.$inferSelect | null = null
-        if (pcRow.fornecedorId) {
+        if (pcRow?.fornecedorId) {
           const [f] = await tx
             .select()
             .from(fornecedores)
@@ -1895,100 +1936,188 @@ ${dupsXml}
             .where(and(eq(fornecedores.tenantId, ctx.tenantId), eq(fornecedores.ativo, 1)))
           fornecedorRow =
             allForn.find((f) => f.cnpjCpf.replace(/\D/g, '') === xmlParsed.emitente.cnpj) || null
+          if (!fornecedorRow && tipoEntrada !== 'COMPRA_ESTOQUE') {
+            const novoFId = uuidv7()
+            const fCod = await gerarProximoCodigoCadastro(tx, ctx.tenantId, 'fornecedor')
+            await tx.insert(fornecedores).values({
+              id: novoFId,
+              tenantId: ctx.tenantId,
+              codigo: fCod,
+              razaoSocial: xmlParsed.emitente.razao_social || 'FORNECEDOR XML',
+              nomeFantasia: xmlParsed.emitente.nome_fantasia || xmlParsed.emitente.razao_social || 'FORNECEDOR XML',
+              cnpjCpf: xmlParsed.emitente.cnpj,
+              inscricaoEstadual: xmlParsed.emitente.ie || '',
+              cidade: xmlParsed.emitente.cidade || '',
+              uf: xmlParsed.emitente.uf || 'SP',
+              ativo: 1,
+            })
+            const [criadoF] = await tx.select().from(fornecedores).where(eq(fornecedores.id, novoFId)).limit(1)
+            fornecedorRow = criadoF || null
+          }
         }
 
-        // Salvar vínculos De-Para enviados pelo usuário
-        if (fornecedorRow && Array.isArray(body.depara_vinculos)) {
-          for (const v of body.depara_vinculos) {
-            const codForn = String(v.codigo_fornecedor || '').trim()
-            if (!codForn || !v.produto_id) continue
-            const prodId = parseUuidOrBadRequest(v.produto_id, 'produto_id')
-            await tx
-              .insert(fornecedorProdutoDepara)
-              .values({
-                id: uuidv7(),
-                tenantId: ctx.tenantId,
-                fornecedorId: fornecedorRow.id,
-                codigoFornecedor: codForn,
-                descricaoFornecedor: String(v.descricao_fornecedor || '').trim(),
-                ncm: String(v.ncm || '').trim(),
-                produtoId: prodId,
-                fatorConversao: toDec(toNum(v.fator_conversao, 1) || 1, 4),
-                updatedAt: new Date(),
-              })
-              .onConflictDoUpdate({
-                target: [
-                  fornecedorProdutoDepara.tenantId,
-                  fornecedorProdutoDepara.fornecedorId,
-                  fornecedorProdutoDepara.codigoFornecedor,
-                ],
-                set: {
-                  produtoId: prodId,
+        const ehEntradaDiretaSemEstoque = tipoEntrada === 'HIGIENE_CONSUMO_DIRETO' || tipoEntrada === 'INSUMO_DIRETO'
+        let xmlItensResolvidos: Array<Record<string, unknown>> = []
+
+        if (!ehEntradaDiretaSemEstoque) {
+          // Salvar vínculos De-Para enviados pelo usuário
+          if (fornecedorRow && Array.isArray(body.depara_vinculos)) {
+            for (const v of body.depara_vinculos) {
+              const codForn = String(v.codigo_fornecedor || '').trim()
+              if (!codForn || !v.produto_id) continue
+              const prodId = parseUuidOrBadRequest(v.produto_id, 'produto_id')
+              await tx
+                .insert(fornecedorProdutoDepara)
+                .values({
+                  id: uuidv7(),
+                  tenantId: ctx.tenantId,
+                  fornecedorId: fornecedorRow.id,
+                  codigoFornecedor: codForn,
                   descricaoFornecedor: String(v.descricao_fornecedor || '').trim(),
                   ncm: String(v.ncm || '').trim(),
+                  produtoId: prodId,
+                  fatorConversao: toDec(toNum(v.fator_conversao, 1) || 1, 4),
                   updatedAt: new Date(),
-                },
-              })
+                })
+                .onConflictDoUpdate({
+                  target: [
+                    fornecedorProdutoDepara.tenantId,
+                    fornecedorProdutoDepara.fornecedorId,
+                    fornecedorProdutoDepara.codigoFornecedor,
+                  ],
+                  set: {
+                    produtoId: prodId,
+                    descricaoFornecedor: String(v.descricao_fornecedor || '').trim(),
+                    ncm: String(v.ncm || '').trim(),
+                    updatedAt: new Date(),
+                  },
+                })
+            }
           }
-        }
 
-        const { resolverProduto } = await carregarMapaProdutosEDepara(tx, ctx.tenantId, fornecedorRow?.id)
-        const extrasXml = Math.max(
-          0,
-          xmlParsed.totais.valor_frete +
-            xmlParsed.totais.valor_outras +
-            xmlParsed.totais.valor_ipi +
-            xmlParsed.totais.valor_st -
-            xmlParsed.totais.valor_desconto,
-        )
-        const baseXml =
-          xmlParsed.totais.valor_produtos > 0
-            ? xmlParsed.totais.valor_produtos
-            : xmlParsed.itens.reduce((s, i) => s + i.valor_total, 0)
+          const { resolverProduto } = await carregarMapaProdutosEDepara(tx, ctx.tenantId, fornecedorRow?.id)
+          const extrasXml = Math.max(
+            0,
+            xmlParsed.totais.valor_frete +
+              xmlParsed.totais.valor_outras +
+              xmlParsed.totais.valor_ipi +
+              xmlParsed.totais.valor_st -
+              xmlParsed.totais.valor_desconto,
+          )
+          const baseXml =
+            xmlParsed.totais.valor_produtos > 0
+              ? xmlParsed.totais.valor_produtos
+              : xmlParsed.itens.reduce((s, i) => s + i.valor_total, 0)
 
-        const xmlItensResolvidos = xmlParsed.itens.map((it) => {
-          const res = resolverProduto(it.codigo_fornecedor, it.ean)
-          const rateio = baseXml > 0 ? (it.valor_total / baseXml) * extrasXml : 0
-          const custoRealKg =
-            it.quantidade > 0
-              ? Number(((it.valor_total + rateio) / it.quantidade).toFixed(4))
-              : it.valor_unitario
-          return {
+          const itensCalc = xmlParsed.itens.map((it) => {
+            const res = resolverProduto(it.codigo_fornecedor, it.ean)
+            const rateio = baseXml > 0 ? (it.valor_total / baseXml) * extrasXml : 0
+            const custoRealKg =
+              it.quantidade > 0
+                ? Number(((it.valor_total + rateio) / it.quantidade).toFixed(4))
+                : it.valor_unitario
+            return {
+              ...it,
+              produto_id: res.produto?.id || null,
+              produto_codigo: res.produto?.codigo || null,
+              produto_descricao: res.produto?.descricao || null,
+              custo_unitario_com_frete: custoRealKg,
+            }
+          })
+          xmlItensResolvidos = itensCalc
+
+          // Atualizar custo médio nos produtos mapeados (+ somar saldo no almoxarifado de insumos se PC de INSUMO e controle ativo)
+          for (const it of itensCalc) {
+            if (it.produto_id && it.custo_unitario_com_frete > 0) {
+              await tx
+                .update(produtos)
+                .set({
+                  custoMedioKg: toDec(it.custo_unitario_com_frete, 4),
+                  updatedAt: new Date(),
+                })
+                .where(and(eq(produtos.id, it.produto_id), eq(produtos.tenantId, ctx.tenantId)))
+            }
+            if (pcRow?.tipoCompra === 'INSUMO' && controlarInsumosAtivo && it.produto_id && it.quantidade > 0) {
+              const [insEst] = await tx
+                .select()
+                .from(insumosEstoque)
+                .where(
+                  and(
+                    eq(insumosEstoque.tenantId, ctx.tenantId),
+                    eq(insumosEstoque.filialId, ctx.filialId),
+                    eq(insumosEstoque.produtoId, it.produto_id),
+                  ),
+                )
+                .limit(1)
+              if (insEst) {
+                const ant = toNum(insEst.saldoAtual, 0)
+                const novo = Number((ant + it.quantidade).toFixed(3))
+                await tx
+                  .update(insumosEstoque)
+                  .set({
+                    saldoAtual: toDec(novo, 3),
+                    custoUnitario: toDec(it.custo_unitario_com_frete || toNum(insEst.custoUnitario, 0), 4),
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(insumosEstoque.id, insEst.id))
+                await tx.insert(insumosColetas).values({
+                  id: uuidv7(),
+                  tenantId: ctx.tenantId,
+                  filialId: ctx.filialId,
+                  insumoEstoqueId: insEst.id,
+                  produtoId: it.produto_id,
+                  enderecoCodigo: insEst.enderecoCodigo,
+                  tipo: 'ENTRADA_COMPRA',
+                  quantidade: toDec(it.quantidade, 3),
+                  saldoAnterior: toDec(ant, 3),
+                  saldoNovo: toDec(novo, 3),
+                  setorDestino: 'ALMOXARIFADO',
+                  custoTotal: toDec(it.valor_total, 2),
+                  observacao: `Entrada Fiscal NF ${xmlParsed.numero_nf} (${pcRow.codigo})`,
+                  operadorId: ctx.operador.id,
+                  operadorNome: ctx.operador.nome,
+                })
+              }
+            }
+          }
+        } else {
+          // Entrada Direta (Higiene / Uso & Consumo / Insumo Direto): não mexe em estoque nem exige De-Para
+          xmlItensResolvidos = xmlParsed.itens.map((it) => ({
             ...it,
-            produto_id: res.produto?.id || null,
-            produto_codigo: res.produto?.codigo || null,
-            produto_descricao: res.produto?.descricao || null,
-            custo_unitario_com_frete: custoRealKg,
-          }
-        })
-
-        // Atualizar custo médio nos produtos mapeados
-        for (const it of xmlItensResolvidos) {
-          if (it.produto_id && it.custo_unitario_com_frete > 0) {
-            await tx
-              .update(produtos)
-              .set({
-                custoMedioKg: toDec(it.custo_unitario_com_frete, 4),
-                updatedAt: new Date(),
-              })
-              .where(and(eq(produtos.id, it.produto_id), eq(produtos.tenantId, ctx.tenantId)))
-          }
+            produto_id: null,
+            produto_codigo: null,
+            produto_descricao: null,
+            custo_unitario_com_frete: it.valor_unitario,
+          }))
         }
 
-        // Localizar ou criar registro de recebimento vinculado ao PC
-        const [recExist] = await tx
-          .select()
-          .from(recebimentos)
-          .where(and(eq(recebimentos.pedidoCompraId, pcRow.id), eq(recebimentos.tenantId, ctx.tenantId)))
-          .limit(1)
+        // Localizar ou criar registro de recebimento
+        const [recExist] = pcRow
+          ? await tx
+              .select()
+              .from(recebimentos)
+              .where(and(eq(recebimentos.pedidoCompraId, pcRow.id), eq(recebimentos.tenantId, ctx.tenantId)))
+              .limit(1)
+          : []
 
         let recId = recExist?.id || ''
         let recCodigo = recExist?.codigo || ''
+        const catDreFinal =
+          categoriaDreEntrada ||
+          (tipoEntrada === 'HIGIENE_CONSUMO_DIRETO'
+            ? 'HIGIENE / USO E CONSUMO'
+            : tipoEntrada === 'INSUMO_DIRETO'
+              ? 'INSUMOS / EMBALAGENS'
+              : '')
+
         if (recExist) {
           await tx
             .update(recebimentos)
             .set({
               fornecedorId: fornecedorRow?.id || recExist.fornecedorId,
+              tipoEntrada,
+              centroCustoId: ccIdEntrada || pcRow?.centroCustoId || recExist.centroCustoId,
+              categoriaDre: catDreFinal || recExist.categoriaDre,
               chaveNfe: xmlParsed.chave_nfe || recExist.chaveNfe,
               numeroNf: xmlParsed.numero_nf || recExist.numeroNf,
               serieNf: xmlParsed.serie || recExist.serieNf,
@@ -2014,8 +2143,11 @@ ${dupsXml}
             tenantId: ctx.tenantId,
             filialId: ctx.filialId,
             codigo: recCodigo,
-            pedidoCompraId: pcRow.id,
+            pedidoCompraId: pcRow?.id || null,
             fornecedorId: fornecedorRow?.id || null,
+            tipoEntrada,
+            centroCustoId: ccIdEntrada || pcRow?.centroCustoId || null,
+            categoriaDre: catDreFinal,
             chaveNfe: xmlParsed.chave_nfe || '',
             numeroNf: xmlParsed.numero_nf || '',
             serieNf: xmlParsed.serie || '',
@@ -2039,10 +2171,10 @@ ${dupsXml}
           tenantId: ctx.tenantId,
           filialId: ctx.filialId,
           recebimentoId: recId,
-          pedidoCompraId: pcRow.id,
+          pedidoCompraId: pcRow?.id || null,
           operadorId: ctx.operador.id,
           operadorNome: ctx.operador.nome,
-          substituirPrevisaoPc: true,
+          substituirPrevisaoPc: Boolean(pcRow),
         })
 
         const titulosGerados = await tx
@@ -2070,7 +2202,9 @@ ${dupsXml}
         return {
           recebimento_id: recId,
           recebimento_codigo: recCodigo,
-          pedido_compra_codigo: pcRow.codigo,
+          tipo_entrada: tipoEntrada,
+          categoria_dre: catDreFinal,
+          pedido_compra_codigo: pcRow?.codigo || 'ENTRADA DIRETA (SEM PC)',
           numero_nf: xmlParsed.numero_nf,
           serie_nf: xmlParsed.serie,
           chave_nfe: xmlParsed.chave_nfe,
@@ -2172,6 +2306,48 @@ ${dupsXml}
     { preHandler: requirePermission(['fiscal', 'compras']) },
     async (req, reply) => {
       const ctx = req.authCtx!
+      const reqBody = (req.body || {}) as { tipo_cenario?: string }
+
+      if (String(reqBody.tipo_cenario || '').toUpperCase() === 'HIGIENE_CONSUMO') {
+        const [empRow] = await conn.db
+          .select()
+          .from(empresas)
+          .where(eq(empresas.tenantId, ctx.tenantId))
+          .limit(1)
+        const hoje = hojeIsoLocal()
+        const xmlGerado = gerarXmlCompraSimulado({
+          numeroNf: Math.floor(30000 + Math.random() * 69000),
+          serie: 1,
+          dataEmissaoIso: hoje,
+          emitente: {
+            cnpj: '29876543000188',
+            razaoSocial: 'DISTRIBUIDORA LIMPA MAIS HIGIENE E LIMPEZA LTDA',
+            nomeFantasia: 'LIMPA MAIS HIGIENE',
+            ie: '112233445566',
+            cidade: 'CAMPINAS',
+            uf: 'SP',
+          },
+          destinatario: {
+            cnpj: empRow?.cnpj || '54142043000130',
+            razaoSocial: empRow?.razaoSocial || 'TRICARNES ALIMENTOS LTDA',
+            uf: 'SP',
+          },
+          itens: [
+            { codigo: 'HIG-001', descricao: 'PAPEL HIGIENICO FOLHA DUPLA FARDO 64 ROLOS', ncm: '48181000', qtdKg: 5, precoUnit: 42.0 },
+            { codigo: 'HIG-002', descricao: 'DETERGENTE ALCALINO CLORADO GALAO 5L', ncm: '34022000', qtdKg: 4, precoUnit: 38.5 },
+          ],
+          freteValor: 0,
+          diasParcelas: [15],
+          pcCodigo: 'ENTRADA-DIRETA-HIGIENE',
+        })
+        return reply.code(201).send({
+          success: true,
+          tipo_cenario: 'HIGIENE_CONSUMO',
+          fornecedor_nome: 'LIMPA MAIS HIGIENE',
+          valor_total: 364.0,
+          ...xmlGerado,
+        })
+      }
 
       const out = await conn.db.transaction(async (tx) => {
         let [forn] = await tx

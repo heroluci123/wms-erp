@@ -1524,6 +1524,194 @@ ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS duplicatas_json JSONB NOT NULL
 ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS vendedor_nome TEXT NOT NULL DEFAULT '';
 ALTER TABLE fiscal_notas ADD COLUMN IF NOT EXISTS condicao_pagamento_label TEXT NOT NULL DEFAULT '';
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS observacao_nf TEXT NOT NULL DEFAULT '';
+ALTER TABLE pedidos_compra ADD COLUMN IF NOT EXISTS tipo_compra TEXT NOT NULL DEFAULT 'MATERIA_PRIMA';
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS tipo_entrada TEXT NOT NULL DEFAULT 'COMPRA_ESTOQUE';
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS centro_custo_id UUID REFERENCES centros_custo(id) ON DELETE SET NULL;
+ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS categoria_dre TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS varejo_estoque (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  unidade_venda TEXT NOT NULL DEFAULT 'KG',
+  saldo_qtd NUMERIC(14,3) NOT NULL DEFAULT 0,
+  preco_venda_varejo NUMERIC(14,4) NOT NULL DEFAULT 0,
+  estoque_minimo NUMERIC(14,3) NOT NULL DEFAULT 0,
+  codigo_balanca TEXT NOT NULL DEFAULT '',
+  setor_loja TEXT NOT NULL DEFAULT 'ACOUGUE',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_varejo_est_filial_prod ON varejo_estoque(tenant_id, filial_id, produto_id);
+CREATE INDEX IF NOT EXISTS idx_varejo_est_balanca ON varejo_estoque(tenant_id, filial_id, codigo_balanca);
+
+CREATE TABLE IF NOT EXISTS varejo_movimentacoes (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  tipo TEXT NOT NULL,
+  qtd NUMERIC(14,3) NOT NULL,
+  saldo_anterior NUMERIC(14,3) NOT NULL DEFAULT 0,
+  saldo_novo NUMERIC(14,3) NOT NULL DEFAULT 0,
+  referencia_tipo TEXT NOT NULL DEFAULT '',
+  referencia_id UUID,
+  observacao TEXT NOT NULL DEFAULT '',
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT 'Sistema',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_varejo_mov_filial_data ON varejo_movimentacoes(tenant_id, filial_id, created_at);
+
+CREATE TABLE IF NOT EXISTS pdv_caixas (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  conta_bancaria_id UUID REFERENCES financeiro_contas_bancarias(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'ABERTO',
+  saldo_abertura NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_vendas NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_dinheiro NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_pix NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_debito NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_credito NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_suprimentos NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_sangrias NUMERIC(14,2) NOT NULL DEFAULT 0,
+  saldo_esperado_dinheiro NUMERIC(14,2) NOT NULL DEFAULT 0,
+  saldo_informado_fechamento NUMERIC(14,2),
+  diferenca_quebra NUMERIC(14,2),
+  observacoes TEXT NOT NULL DEFAULT '',
+  aberto_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  fechado_em TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pdv_caixas_codigo ON pdv_caixas(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_pdv_caixas_filial_status ON pdv_caixas(tenant_id, filial_id, status);
+
+CREATE TABLE IF NOT EXISTS pdv_caixa_movimentos (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  caixa_id UUID NOT NULL REFERENCES pdv_caixas(id) ON DELETE CASCADE,
+  tipo TEXT NOT NULL,
+  valor NUMERIC(14,2) NOT NULL,
+  motivo TEXT NOT NULL DEFAULT '',
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pdv_cx_mov_caixa ON pdv_caixa_movimentos(caixa_id);
+
+CREATE TABLE IF NOT EXISTS pdv_vendas (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  caixa_id UUID NOT NULL REFERENCES pdv_caixas(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+  cliente_nome TEXT NOT NULL DEFAULT 'CONSUMIDOR FINAL',
+  cliente_doc TEXT NOT NULL DEFAULT '',
+  subtotal NUMERIC(14,2) NOT NULL DEFAULT 0,
+  desconto_valor NUMERIC(14,2) NOT NULL DEFAULT 0,
+  valor_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+  troco_valor NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pagamentos_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  itens_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'CONCLUIDA',
+  nota_fiscal_id UUID REFERENCES fiscal_notas(id) ON DELETE SET NULL,
+  numero_nfce INTEGER,
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  motivo_cancelamento TEXT NOT NULL DEFAULT '',
+  cancelada_em TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pdv_vendas_codigo ON pdv_vendas(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_pdv_vendas_caixa ON pdv_vendas(caixa_id);
+
+CREATE TABLE IF NOT EXISTS varejo_inventarios (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  titulo TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ABERTO',
+  total_itens INTEGER NOT NULL DEFAULT 0,
+  total_divergencias INTEGER NOT NULL DEFAULT 0,
+  itens_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  concluido_em TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_varejo_inv_codigo ON varejo_inventarios(tenant_id, codigo);
+
+CREATE TABLE IF NOT EXISTS interunidades_movimentacoes (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  tipo_operacao TEXT NOT NULL,
+  filial_origem_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  filial_destino_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  caixa_id UUID REFERENCES estoque_caixas(id) ON DELETE SET NULL,
+  ean_caixa TEXT NOT NULL DEFAULT '',
+  produto_id UUID NOT NULL REFERENCES produtos(id),
+  produto_codigo TEXT NOT NULL DEFAULT '',
+  produto_descricao TEXT NOT NULL DEFAULT '',
+  especie TEXT NOT NULL DEFAULT 'OUTROS',
+  peso_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  valor_unitario_kg NUMERIC(14,4) NOT NULL DEFAULT 0,
+  valor_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+  op_id UUID REFERENCES ordens_producao(id) ON DELETE SET NULL,
+  requer_faturamento INTEGER NOT NULL DEFAULT 1,
+  status_fiscal TEXT NOT NULL DEFAULT 'PENDENTE',
+  nota_fiscal_id UUID REFERENCES fiscal_notas(id) ON DELETE SET NULL,
+  numero_nf INTEGER,
+  data_movimento DATE NOT NULL,
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  observacao TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_interunid_codigo ON interunidades_movimentacoes(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_interunid_tipo_status ON interunidades_movimentacoes(tenant_id, tipo_operacao, status_fiscal, data_movimento);
+
+CREATE TABLE IF NOT EXISTS insumos_estoque (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  endereco_codigo TEXT NOT NULL,
+  unidade TEXT NOT NULL DEFAULT 'UN',
+  saldo_atual NUMERIC(14,3) NOT NULL DEFAULT 0,
+  estoque_minimo NUMERIC(14,3) NOT NULL DEFAULT 0,
+  custo_unitario NUMERIC(14,4) NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_insumos_est_endereco ON insumos_estoque(tenant_id, filial_id, endereco_codigo);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_insumos_est_produto ON insumos_estoque(tenant_id, filial_id, produto_id);
+
+CREATE TABLE IF NOT EXISTS insumos_coletas (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  insumo_estoque_id UUID NOT NULL REFERENCES insumos_estoque(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES produtos(id),
+  endereco_codigo TEXT NOT NULL DEFAULT '',
+  tipo TEXT NOT NULL DEFAULT 'COLETA_MANUAL',
+  quantidade NUMERIC(14,3) NOT NULL,
+  saldo_anterior NUMERIC(14,3) NOT NULL DEFAULT 0,
+  saldo_novo NUMERIC(14,3) NOT NULL DEFAULT 0,
+  centro_custo_id UUID REFERENCES centros_custo(id) ON DELETE SET NULL,
+  setor_destino TEXT NOT NULL DEFAULT 'PRODUCAO',
+  custo_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+  observacao TEXT NOT NULL DEFAULT '',
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_insumos_coletas_filial_data ON insumos_coletas(tenant_id, filial_id, created_at);
 `
 
 export interface SeedDefaultsResult {

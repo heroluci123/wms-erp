@@ -27,6 +27,10 @@ export const TODAS_CHAVES_PERMISSAO = [
   'financeiro',
   'financeiro_pedidos',
   'whatsapp_inbox',
+  'pdv_caixa',
+  'varejo_acougue',
+  'interunidades',
+  'insumos_coleta',
   'estoque_enderecos',
   'consulta_estoque',
   'rastreabilidade',
@@ -80,6 +84,10 @@ export const CHAVES_PROIBIDAS_CLIENTE = new Set<string>([
   'financeiro',
   'financeiro_pedidos',
   'whatsapp_inbox',
+  'pdv_caixa',
+  'varejo_acougue',
+  'interunidades',
+  'insumos_coleta',
   'saida',
   'expedicao',
   'devolucao',
@@ -154,6 +162,29 @@ export const PERMISSOES_MASTER_COMPLETAS: MapaPermissoes = (() => {
   return base
 })()
 
+export const PERMISSOES_PADRAO_CAIXA_PDV: MapaPermissoes = {
+  pdv_caixa: true,
+  alterar_propria_senha: true,
+}
+
+export const PERMISSOES_PADRAO_ACOUGUE_BALCAO: MapaPermissoes = {
+  varejo_acougue: true,
+  interunidades: true,
+  insumos_coleta: true,
+  alterar_propria_senha: true,
+}
+
+export const PERMISSOES_PADRAO_GERENTE_LOJA: MapaPermissoes = {
+  pdv_caixa: true,
+  varejo_acougue: true,
+  interunidades: true,
+  insumos_coleta: true,
+  compras: true,
+  pedidos_consultar: true,
+  relatorios_estoque: true,
+  alterar_propria_senha: true,
+}
+
 export const PERFIS_SISTEMA_BASE = [
   {
     codigo: 'OPERADOR',
@@ -163,6 +194,33 @@ export const PERFIS_SISTEMA_BASE = [
     descricao:
       'Operação diária: recebimento, inventário coletor, entrada/saída de produção, movimentações, separação de pedidos e consultas.',
     permissoes: PERMISSOES_PADRAO_OPERADOR,
+    sistema_fixo: 1,
+  },
+  {
+    codigo: 'CAIXA_PDV',
+    nome: 'CAIXA PDV (LOJA 1/1)',
+    nivel: 'OPERACIONAL',
+    setor_padrao: 'Loja / Açougue',
+    descricao: 'Perfil enxuto para Frente de Caixa: abertura/fechamento, vendas PDV (QR/EAN-2/EAN-13), sangria, suprimento e NFC-e.',
+    permissoes: PERMISSOES_PADRAO_CAIXA_PDV,
+    sistema_fixo: 1,
+  },
+  {
+    codigo: 'ACOUGUE_BALCAO',
+    nome: 'AÇOUGUE & BALCÃO (LOJA 1/1)',
+    nivel: 'OPERACIONAL',
+    setor_padrao: 'Loja / Açougue',
+    descricao: 'Perfil enxuto para Açougue e Empório: estoque varejo, etiquetas Zebra 80x45 QR, inventário da loja, transferências e coleta de insumos.',
+    permissoes: PERMISSOES_PADRAO_ACOUGUE_BALCAO,
+    sistema_fixo: 1,
+  },
+  {
+    codigo: 'GERENTE_LOJA',
+    nome: 'GERENTE DE LOJA (1/1)',
+    nivel: 'OPERACIONAL',
+    setor_padrao: 'Loja / Açougue',
+    descricao: 'Gestão completa da Filial Loja 1/1: PDV, Açougue/Empório, Inventário do Varejo, Compras Empório, Transferências e Coleta de Insumos.',
+    permissoes: PERMISSOES_PADRAO_GERENTE_LOJA,
     sistema_fixo: 1,
   },
   {
@@ -320,7 +378,7 @@ export function sanitizarPermissoes(
     mapa.roteirizacao_carregamento = true
   }
   if (nivelUp === 'ADMINISTRADOR' || perfilUp === 'ADMINISTRADOR') {
-    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'fiscal', 'financeiro', 'financeiro_pedidos', 'whatsapp_inbox', 'compras', 'mapa_producao', 'devolucao_fiscal', 'roteirizacao', 'roteirizacao_carregamento'] as const) {
+    for (const k of ['clientes', 'fornecedores', 'vendedores', 'transportadoras', 'empresas_filiais', 'parametros_comerciais', 'fiscal', 'financeiro', 'financeiro_pedidos', 'whatsapp_inbox', 'pdv_caixa', 'varejo_acougue', 'interunidades', 'insumos_coleta', 'compras', 'mapa_producao', 'devolucao_fiscal', 'roteirizacao', 'roteirizacao_carregamento'] as const) {
       if (obj?.[k] === undefined) mapa[k] = true
     }
   }

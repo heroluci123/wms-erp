@@ -487,6 +487,7 @@ export async function gerarTitulosCompraOuXml(
     const cod = await gerarCodigoDocumento(tx, params.tenantId, 'FIN_PAGAR', 'CPA', 4)
     const refDoc = pcRow?.codigo || (recRow?.numeroNf ? `NF ${recRow.numeroNf}` : recRow?.codigo || 'COMPRA')
     const sufixo = p.total > 1 ? ` (${p.num}/${p.total})` : ''
+    const catPrefix = recRow?.categoriaDre ? `[${recRow.categoriaDre}] ` : ''
     await tx.insert(financeiroTitulos).values({
       id: uuidv7(),
       tenantId: params.tenantId,
@@ -494,14 +495,14 @@ export async function gerarTitulosCompraOuXml(
       codigo: cod,
       tipo: 'PAGAR',
       origem: p.origem,
-      descricao: `${refDoc} • ${fornNome}${sufixo}`,
+      descricao: `${catPrefix}${refDoc} • ${fornNome}${sufixo}`,
       numeroDocumento: p.doc,
       parcelaNum: p.num,
       parcelaTotal: p.total,
       fornecedorId: fornId,
       pedidoCompraId: pcRow?.id || null,
       recebimentoId: recRow?.id || null,
-      centroCustoId: pcRow?.centroCustoId || null,
+      centroCustoId: pcRow?.centroCustoId || recRow?.centroCustoId || null,
       formaPagamentoId: pcRow?.formaPagamentoId || null,
       contaBancariaId: contaPadrao?.id || null,
       dataEmissao,

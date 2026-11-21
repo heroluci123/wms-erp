@@ -43,6 +43,14 @@ const fmtData = (d) => {
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s
 }
 
+const TIPO_COMPRA_BADGE = {
+  MATERIA_PRIMA: { label: 'Matéria-Prima', cls: 'badge--info' },
+  REVENDA: { label: 'Revenda', cls: 'badge--primary' },
+  EMPORIO: { label: 'Empório / Loja', cls: 'badge--success' },
+  INSUMO: { label: 'Insumos / Emb.', cls: 'badge--warning' },
+  HIGIENE_CONSUMO: { label: 'Higiene / Consumo', cls: 'badge--neutral' },
+}
+
 const STATUS_PC_BADGE = {
   ABERTO: { label: 'Em Aberto', cls: 'badge--neutral' },
   APROVADO: { label: 'Aprovado p/ Doca', cls: 'badge--info' },
@@ -301,7 +309,8 @@ export function Compras() {
     try {
       const res = await comprasQueries.criarCompra({
         fornecedor_id: fornecedorId,
-        finalidade,
+        finalidade: finalidade === 'HIGIENE_CONSUMO' || finalidade === 'INSUMO' ? 'CONSUMO' : finalidade === 'EMPORIO' ? 'REVENDA' : finalidade,
+        tipo_compra: finalidade,
         centro_custo_id: centroCustoId || null,
         forma_pagamento_id: formaPagamentoId || null,
         natureza_id: cfopPreview?.natureza_id || null,
@@ -854,9 +863,15 @@ export function Compras() {
                   {compras.map((c) => {
                     const st = STATUS_PC_BADGE[c.status] || { label: c.status, cls: 'badge--neutral' }
                     const sv = c.status_validacao ? STATUS_VAL_BADGE[c.status_validacao] : null
+                    const tp = TIPO_COMPRA_BADGE[c.tipo_compra] || TIPO_COMPRA_BADGE.MATERIA_PRIMA
                     return (
                       <tr key={c.id}>
-                        <td className="font-mono font-bold text-primary">{c.codigo}</td>
+                        <td>
+                          <div className="font-mono font-bold text-primary">{c.codigo}</div>
+                          <span className={`badge ${tp.cls}`} style={{ fontSize: 10, marginTop: 3 }}>
+                            {tp.label}
+                          </span>
+                        </td>
                         <td>
                           <div className="font-bold">{c.fornecedor_nome}</div>
                           <div className="text-xs text-muted">
@@ -1493,11 +1508,13 @@ export function Compras() {
                     </select>
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Finalidade (CFOP Auto)</label>
+                    <label className="form-label">Tipo de Compra / Finalidade (CFOP Auto)</label>
                     <select className="form-input" value={finalidade} onChange={(e) => setFinalidade(e.target.value)}>
-                      <option value="MATERIA_PRIMA">Matéria-Prima p/ Desossa</option>
-                      <option value="REVENDA">Compra p/ Revenda</option>
-                      <option value="CONSUMO">Uso e Consumo / Embalagem</option>
+                      <option value="MATERIA_PRIMA">Matéria-Prima / Carnes (Indústria)</option>
+                      <option value="REVENDA">Mercadoria p/ Revenda (Atacado)</option>
+                      <option value="EMPORIO">Empório / Loja (Varejo 1/1)</option>
+                      <option value="INSUMO">Insumos / Embalagens (Almoxarifado)</option>
+                      <option value="HIGIENE_CONSUMO">Higiene / Uso &amp; Consumo (Opcional PC)</option>
                     </select>
                   </div>
                 </div>

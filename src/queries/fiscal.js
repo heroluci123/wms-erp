@@ -155,11 +155,11 @@ export const fiscalQueries = {
     })
   },
 
-  async criarCenarioTesteEntradaCompra() {
+  async criarCenarioTesteEntradaCompra(payload = {}) {
     exigirApi()
     return apiRequest('/api/fiscal/entradas-compra/criar-cenario-teste', {
       method: 'POST',
-      body: {},
+      body: payload,
     })
   },
 }

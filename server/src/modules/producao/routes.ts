@@ -15,6 +15,7 @@ import {
   taras,
 } from '../../db/schema/index.js'
 import { calcularEPersistirCustosOp, resolverPrecoVendaRefKg } from './costEngine.js'
+import { registrarRemessaAutomaticaNaOp } from '../interunidades/helpers.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
 import {
@@ -603,14 +604,16 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           FROM estoque_caixas ec
           JOIN produtos p ON p.id = ec.produto_id
           LEFT JOIN paletes pal ON pal.id = ec.palete_id
-          WHERE ec.tenant_id = ${ctx.tenantId} AND ec.filial_id = ${ctx.filialId}
+          WHERE ec.tenant_id = ${ctx.tenantId}
             AND LTRIM(ec.ean_caixa, '0') = LTRIM(${cleanEan}, '0')
+          ORDER BY (CASE WHEN ec.filial_id = ${op.filialId} THEN 0 ELSE 1 END), (CASE WHEN ec.status = 'DISPONIVEL' THEN 0 ELSE 1 END)
           LIMIT 1
           FOR UPDATE OF ec
         `)
         const cRaw = caixaRes.rows[0] as
           | {
               id: string
+              filial_id: string
               ean_caixa: string
               produto_id: string
               produto_codigo: string
@@ -741,9 +744,27 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
             ? toNum(cRaw.custo_unitario_kg, 0)
             : toNum(cRaw.produto_custo_medio_kg, 0)
 
+        let remessaAuto: { movId: string; codigo: string; especie: string } | null = null
+        if (cRaw.filial_id && cRaw.filial_id !== op.filialId) {
+          remessaAuto = await registrarRemessaAutomaticaNaOp(tx, {
+            tenantId: ctx.tenantId,
+            filialOrigemId: cRaw.filial_id,
+            filialDestinoId: op.filialId,
+            caixaId: cRaw.id,
+            eanCaixa: cRaw.ean_caixa,
+            produtoId: cRaw.produto_id,
+            pesoKg: pesoCaixa,
+            opId,
+            opCodigo: op.codigo,
+            operadorId: ctx.operador.id,
+            operadorNome: ctx.operador.nome,
+          })
+        }
+
         await tx
           .update(estoqueCaixas)
           .set({
+            filialId: op.filialId,
             status: 'RESERVADA',
             endereco: op.codigo,
             paleteId: null,
@@ -805,11 +826,15 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
             .where(and(eq(ordensProducao.id, opId), eq(ordensProducao.status, 'LIBERADA')))
         }
 
-        await recalcularPosicaoEnderecos(tx, ctx.tenantId, ctx.filialId, [endOrig, op.codigo])
+        if (cRaw.filial_id && cRaw.filial_id !== op.filialId) {
+          await recalcularPosicaoEnderecos(tx, ctx.tenantId, cRaw.filial_id, [endOrig])
+        }
+        await recalcularPosicaoEnderecos(tx, ctx.tenantId, op.filialId, [endOrig, op.codigo])
 
         return {
           success: true,
           insumo_id: insumoId,
+          remessa_automatica: remessaAuto,
           caixa: normalizeCaixaRow({ ...cRaw, endereco: op.codigo, lote: loteCaixa }),
         }
       })

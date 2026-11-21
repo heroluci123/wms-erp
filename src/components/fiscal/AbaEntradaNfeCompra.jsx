@@ -66,12 +66,22 @@ export function AbaEntradaNfeCompra({
   const [pedidosPendentes, setPedidosPendentes] = useState([])
   const [notasEntrada, setNotasEntrada] = useState([])
   const [produtosCatalogo, setProdutosCatalogo] = useState([])
+  const [centrosCusto, setCentrosCusto] = useState([])
+  const [controlarInsumosAtivo, setControlarInsumosAtivo] = useState(false)
+
+  // Tipo de entrada fiscal: COMPRA_ESTOQUE (exige PC) | HIGIENE_CONSUMO_DIRETO (sem PC, sem limite) | INSUMO_DIRETO
+  const [tipoEntrada, setTipoEntrada] = useState('COMPRA_ESTOQUE')
+  const [centroCustoDiretoId, setCentroCustoDiretoId] = useState('')
+  const [categoriaDreDireta, setCategoriaDreDireta] = useState('HIGIENE / LIMPEZA')
 
   // Seleção do PC + XML + Chave bipada
   const [pcSelecionadoId, setPcSelecionadoId] = useState(pcInicialId || '')
 
   useEffect(() => {
-    if (pcInicialId) setPcSelecionadoId(String(pcInicialId))
+    if (pcInicialId) {
+      setTipoEntrada('COMPRA_ESTOQUE')
+      setPcSelecionadoId(String(pcInicialId))
+    }
   }, [pcInicialId])
   const [xmlFileName, setXmlFileName] = useState('')
   const [xmlConteudo, setXmlConteudo] = useState('')
@@ -94,6 +104,8 @@ export function AbaEntradaNfeCompra({
       ])
       setPedidosPendentes(resEnt?.pedidos_pendentes || [])
       setNotasEntrada(resEnt?.notas_entrada || [])
+      setCentrosCusto(resEnt?.centros_custo || [])
+      setControlarInsumosAtivo(Boolean(resEnt?.controlar_estoque_insumos))
       setProdutosCatalogo(Array.isArray(prods) ? prods : [])
     } catch (err) {
       toastError('Erro ao carregar entradas fiscais de compra', err.message)
@@ -212,8 +224,33 @@ export function AbaEntradaNfeCompra({
     }
   }
 
+  const handleCriarCenarioHigieneDireta = async () => {
+    setLoading(true)
+    try {
+      const res = await fiscalQueries.criarCenarioTesteEntradaCompra({ tipo_cenario: 'HIGIENE_CONSUMO' })
+      downloadXmlFile(res.nome_arquivo, res.xml_conteudo)
+      setTipoEntrada('HIGIENE_CONSUMO_DIRETO')
+      setPcSelecionadoId('')
+      setCategoriaDreDireta('HIGIENE / LIMPEZA')
+      setXmlFileName(res.nome_arquivo)
+      setXmlConteudo(res.xml_conteudo)
+      setChaveBipada(res.chave_nfe || '')
+      const prev = await fiscalQueries.previewXmlCompra({ xml_conteudo: res.xml_conteudo })
+      setPreviewXml(prev)
+      toastSuccess(
+        `XML Teste Higiene / Consumo gerado (NF ${res.numero_nf})`,
+        'Modo Entrada Direta (sem PC e sem estoque) carregado! Confira o Centro de Custo/Categoria e confirme.',
+      )
+    } catch (err) {
+      toastError('Erro ao criar teste de Higiene', err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleConfirmarEscrituracao = async () => {
-    if (!pcSelecionadoId) {
+    const exigePc = tipoEntrada === 'COMPRA_ESTOQUE' || (tipoEntrada === 'INSUMO_DIRETO' && controlarInsumosAtivo)
+    if (exigePc && !pcSelecionadoId) {
       return toastWarning('Selecione o Pedido de Compra vinculado antes de dar entrada na NF-e.')
     }
     if (!xmlConteudo.trim() || !previewXml?.nfe) {
@@ -230,20 +267,26 @@ export function AbaEntradaNfeCompra({
       )
     }
 
-    const deparaVinculos = (previewXml.nfe.itens || [])
-      .filter((it) => deparaMap[it.codigo_fornecedor])
-      .map((it) => ({
-        codigo_fornecedor: it.codigo_fornecedor,
-        descricao_fornecedor: it.descricao,
-        ncm: it.ncm,
-        produto_id: deparaMap[it.codigo_fornecedor],
-        fator_conversao: 1,
-      }))
+    const deparaVinculos =
+      tipoEntrada === 'COMPRA_ESTOQUE'
+        ? (previewXml.nfe.itens || [])
+            .filter((it) => deparaMap[it.codigo_fornecedor])
+            .map((it) => ({
+              codigo_fornecedor: it.codigo_fornecedor,
+              descricao_fornecedor: it.descricao,
+              ncm: it.ncm,
+              produto_id: deparaMap[it.codigo_fornecedor],
+              fator_conversao: 1,
+            }))
+        : []
 
     setSalvando(true)
     try {
       const res = await fiscalQueries.escriturarEntradaCompra({
-        pedido_compra_id: pcSelecionadoId,
+        tipo_entrada: tipoEntrada,
+        pedido_compra_id: tipoEntrada === 'COMPRA_ESTOQUE' ? pcSelecionadoId : pcSelecionadoId || null,
+        centro_custo_id: centroCustoDiretoId || null,
+        categoria_dre: tipoEntrada !== 'COMPRA_ESTOQUE' ? categoriaDreDireta : '',
         xml_conteudo: xmlConteudo,
         chave_bipada: chaveLimpa || undefined,
         depara_vinculos: deparaVinculos,
@@ -328,7 +371,17 @@ export function AbaEntradaNfeCompra({
             disabled={loading}
             title="Cria 1 Pedido de Compra aprovado e baixa o XML NF-e correspondente para testar todo o fluxo na hora"
           >
-            <FlaskConical size={14} /> Gerar Cenário de Teste (PC + XML)
+            <FlaskConical size={14} /> Teste PC + XML
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            style={{ borderColor: 'rgba(16, 185, 129, 0.45)', color: '#34d399' }}
+            onClick={handleCriarCenarioHigieneDireta}
+            disabled={loading}
+            title="Gera XML de Higiene/Consumo para testar Entrada Direta sem Pedido de Compra e sem estoque"
+          >
+            <FlaskConical size={14} /> Teste Higiene (Sem PC)
           </button>
           <button type="button" className="btn btn--ghost btn--sm" onClick={carregar} disabled={loading}>
             <RefreshCw size={14} />
@@ -381,7 +434,88 @@ export function AbaEntradaNfeCompra({
 
       {/* FORMULÁRIO DE ENTRADA FISCAL EM PASSOS */}
       <div className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* PASSO 1: SELECIONAR PEDIDO DE COMPRA */}
+        {/* SELETOR DO MODO DE ENTRADA FISCAL */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="text-xs font-bold text-muted">MODALIDADE DE ENTRADA FISCAL:</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn btn--sm ${tipoEntrada === 'COMPRA_ESTOQUE' ? 'btn--primary' : 'btn--ghost'}`}
+              onClick={() => setTipoEntrada('COMPRA_ESTOQUE')}
+            >
+              Com Pedido de Compra (Estoque / Revenda / Empório / Insumos)
+            </button>
+            <button
+              type="button"
+              className={`btn btn--sm ${tipoEntrada === 'HIGIENE_CONSUMO_DIRETO' ? 'btn--primary' : 'btn--ghost'}`}
+              onClick={() => {
+                setTipoEntrada('HIGIENE_CONSUMO_DIRETO')
+                setPcSelecionadoId('')
+              }}
+            >
+              Entrada Direta — Higiene / Uso &amp; Consumo (Sem PC, Sem Estoque)
+            </button>
+            <button
+              type="button"
+              className={`btn btn--sm ${tipoEntrada === 'INSUMO_DIRETO' ? 'btn--primary' : 'btn--ghost'}`}
+              onClick={() => {
+                setTipoEntrada('INSUMO_DIRETO')
+                if (!controlarInsumosAtivo) setPcSelecionadoId('')
+              }}
+            >
+              Insumos / Embalagens ({controlarInsumosAtivo ? 'Exige PC — Controle Ativo' : 'Entrada Direta Liberada'})
+            </button>
+          </div>
+        </div>
+
+        {/* PASSO 1: SELECIONAR PEDIDO DE COMPRA OU CLASSIFICAÇÃO DIRETA */}
+        {tipoEntrada === 'HIGIENE_CONSUMO_DIRETO' || (tipoEntrada === 'INSUMO_DIRETO' && !controlarInsumosAtivo) ? (
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <div className="text-sm font-bold" style={{ color: '#34d399' }}>
+              1. Entrada Direta sem Pedido de Compra (Sem limite de valor • Não movimenta estoque nem exige De-Para)
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+              <div>
+                <label className="form-label">Centro de Custo (DRE)</label>
+                <select
+                  className="form-input"
+                  value={centroCustoDiretoId}
+                  onChange={(e) => setCentroCustoDiretoId(e.target.value)}
+                >
+                  <option value="">-- Selecione o Centro de Custo --</option>
+                  {centrosCusto.map((cc) => (
+                    <option key={cc.id} value={cc.id}>
+                      {cc.codigo} — {cc.descricao}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Categoria de Despesa (DRE)</label>
+                <select
+                  className="form-input"
+                  value={categoriaDreDireta}
+                  onChange={(e) => setCategoriaDreDireta(e.target.value)}
+                >
+                  <option value="HIGIENE / LIMPEZA">Higiene &amp; Limpeza (Papel, Detergente, Sanitizante)</option>
+                  <option value="USO E CONSUMO">Uso &amp; Consumo / Escritório / EPI</option>
+                  <option value="MANUTENCAO">Manutenção / Peças / Serviços</option>
+                  <option value="INSUMOS / EMBALAGENS">Insumos &amp; Embalagens (Baixa Direta)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <h3 className="text-sm font-bold m-0" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -439,6 +573,7 @@ export function AbaEntradaNfeCompra({
             </div>
           )}
         </div>
+        )}
 
         {/* PASSO 2: XML DA NF-e + BIPAR CHAVE DE ACESSO */}
         <div
@@ -716,7 +851,12 @@ export function AbaEntradaNfeCompra({
               <button
                 type="button"
                 className="btn btn--success"
-                disabled={salvando || !pcSelecionadoId || (chaveStatus && !chaveStatus.ok)}
+                disabled={
+                  salvando ||
+                  ((tipoEntrada === 'COMPRA_ESTOQUE' || (tipoEntrada === 'INSUMO_DIRETO' && controlarInsumosAtivo)) &&
+                    !pcSelecionadoId) ||
+                  (chaveStatus && !chaveStatus.ok)
+                }
                 onClick={handleConfirmarEscrituracao}
               >
                 <CheckCircle2 size={16} />
