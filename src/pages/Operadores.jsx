@@ -28,6 +28,7 @@ import {
   X,
 } from 'lucide-react'
 import { operadoresQueries } from '../queries/operadores'
+import { cadastrosQueries } from '../queries/cadastros'
 import { useAppStore } from '../store/appStore'
 import { gerarSenhaInicial } from '../utils/authCrypto'
 import {
@@ -338,6 +339,7 @@ export function Operadores() {
   const [usuarios, setUsuarios] = useState([])
   const [perfis, setPerfis] = useState(PERFIS_SISTEMA_BASE)
   const [auditoria, setAuditoria] = useState([])
+  const [filiaisSistema, setFiliaisSistema] = useState([])
 
   // Filtros Usuários
   const [buscaUsuario, setBuscaUsuario] = useState('')
@@ -361,6 +363,8 @@ export function Operadores() {
     nivel: 'OPERACIONAL',
     deve_trocar_senha: true,
     ativo: 1,
+    filiais_permitidas: [],
+    filial_padrao_id: '',
     permissoes: sanitizarPermissoes({}, 'OPERACIONAL', 'OPERADOR'),
   })
 
@@ -398,14 +402,16 @@ export function Operadores() {
     if (!podeAcessarModulo) return
     setLoading(true)
     try {
-      const [listaUsers, listaPerfis, listaAud] = await Promise.all([
+      const [listaUsers, listaPerfis, listaAud, listaFils] = await Promise.all([
         podeGerenciarUsuarios ? operadoresQueries.listar() : Promise.resolve([]),
         operadoresQueries.listarPerfis().catch(() => PERFIS_SISTEMA_BASE),
         podeGerenciarUsuarios ? operadoresQueries.listarAuditoria(150).catch(() => []) : Promise.resolve([]),
+        cadastrosQueries.listarContextoFiliais().then((r) => r?.data || []).catch(() => []),
       ])
       setUsuarios(listaUsers || [])
       setPerfis(listaPerfis?.length ? listaPerfis : PERFIS_SISTEMA_BASE)
       setAuditoria(listaAud || [])
+      setFiliaisSistema(listaFils || [])
     } catch (err) {
       toastError(err?.message || 'Erro ao carregar dados de usuários.')
     } finally {
@@ -477,6 +483,8 @@ export function Operadores() {
       nivel: perfilOp.nivel || 'OPERACIONAL',
       deve_trocar_senha: true,
       ativo: 1,
+      filiais_permitidas: filiaisSistema.map((f) => f.id),
+      filial_padrao_id: filiaisSistema[0]?.id || '',
       permissoes: sanitizarPermissoes(perfilOp.permissoes, perfilOp.nivel, perfilOp.codigo),
     })
     setModalUsuarioAberto(true)
@@ -499,6 +507,8 @@ export function Operadores() {
       nivel,
       deve_trocar_senha: Number(user.deve_trocar_senha) === 1,
       ativo: Number(user.ativo ?? 1),
+      filiais_permitidas: Array.isArray(user.filiais_permitidas) ? user.filiais_permitidas : [],
+      filial_padrao_id: user.filial_padrao_id || '',
       permissoes: sanitizarPermissoes(user.permissoes, nivel, perfil),
     })
     setModalUsuarioAberto(true)
@@ -563,6 +573,8 @@ export function Operadores() {
           perfil: formUsuario.perfil,
           nivel: formUsuario.nivel,
           ativo: formUsuario.ativo,
+          filiais_permitidas: formUsuario.filiais_permitidas,
+          filial_padrao_id: formUsuario.filial_padrao_id || null,
           permissoes: permissoesFinais,
         })
         if (resUpd?.success === false) {
@@ -578,6 +590,8 @@ export function Operadores() {
           perfil: formUsuario.perfil,
           nivel: formUsuario.nivel,
           deve_trocar_senha: formUsuario.deve_trocar_senha ? 1 : 0,
+          filiais_permitidas: formUsuario.filiais_permitidas,
+          filial_padrao_id: formUsuario.filial_padrao_id || null,
           permissoes: permissoesFinais,
         })
         if (resCri?.success === false) {
@@ -1414,6 +1428,110 @@ export function Operadores() {
                     </select>
                   </div>
                 </div>
+
+                {/* Filiais Liberadas para o Usuário */}
+                {filiaisSistema.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: 4,
+                      padding: 12,
+                      borderRadius: 10,
+                      background: '#0b1220',
+                      border: '1px solid #253654',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: '#e2e8f0' }}>
+                          Filiais Liberadas para este Usuário
+                        </div>
+                        <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                          {formUsuario.nivel === 'MASTER'
+                            ? 'MASTER possui acesso irrestrito a todas as filiais automaticamente.'
+                            : 'Se apenas 1 filial for liberada, o usuário entra direto nela sem seletor no topo.'}
+                        </div>
+                      </div>
+                      {formUsuario.nivel !== 'MASTER' && (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn--ghost"
+                            style={{ padding: '4px 10px', fontSize: 11 }}
+                            onClick={() =>
+                              setFormUsuario((prev) => ({
+                                ...prev,
+                                filiais_permitidas: filiaisSistema.map((f) => f.id),
+                              }))
+                            }
+                          >
+                            Liberar Todas
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--ghost"
+                            style={{ padding: '4px 10px', fontSize: 11 }}
+                            onClick={() =>
+                              setFormUsuario((prev) => ({
+                                ...prev,
+                                filiais_permitidas: [],
+                              }))
+                            }
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {filiaisSistema.map((f) => {
+                        const ehMasterForm = formUsuario.nivel === 'MASTER'
+                        const lista = Array.isArray(formUsuario.filiais_permitidas) ? formUsuario.filiais_permitidas : []
+                        const marcado = ehMasterForm || lista.includes(f.id)
+                        return (
+                          <label
+                            key={f.id}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              padding: '7px 11px',
+                              borderRadius: 8,
+                              background: marcado ? 'rgba(37, 99, 235, 0.16)' : '#131d32',
+                              border: `1px solid ${marcado ? '#3b82f6' : '#263654'}`,
+                              cursor: ehMasterForm ? 'not-allowed' : 'pointer',
+                              fontSize: 12,
+                              color: marcado ? '#f8fafc' : '#94a3b8',
+                            }}
+                          >
+                            <CustomCheckbox
+                              checked={marcado}
+                              disabled={ehMasterForm}
+                              onChange={() => {
+                                if (ehMasterForm) return
+                                setFormUsuario((prev) => {
+                                  const atual = Array.isArray(prev.filiais_permitidas) ? prev.filiais_permitidas : []
+                                  const next = atual.includes(f.id)
+                                    ? atual.filter((x) => x !== f.id)
+                                    : [...atual, f.id]
+                                  return {
+                                    ...prev,
+                                    filiais_permitidas: next,
+                                    filial_padrao_id:
+                                      next.length > 0 && !next.includes(prev.filial_padrao_id)
+                                        ? next[0]
+                                        : prev.filial_padrao_id,
+                                  }
+                                })
+                              }}
+                            />
+                            <span className="font-mono font-bold">{f.codigo}</span>
+                            <span>{f.nome}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Senha Automática na Criação */}

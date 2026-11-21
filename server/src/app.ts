@@ -24,6 +24,7 @@ import { registerDreRoutes } from './modules/financeiro/dreRoutes.js'
 import { registerFiscalRoutes } from './modules/fiscal/routes.js'
 import { registerInterunidadesRoutes } from './modules/interunidades/routes.js'
 import { registerVarejoRoutes } from './modules/varejo/routes.js'
+import { registerAcougueRoutes } from './modules/varejo/acougueRoutes.js'
 import { registerInsumosRoutes } from './modules/insumos/routes.js'
 
 export async function buildApp(
@@ -103,6 +104,7 @@ export async function buildApp(
   registerFiscalRoutes(app, conn)
   registerInterunidadesRoutes(app, conn)
   registerVarejoRoutes(app, conn)
+  registerAcougueRoutes(app, conn)
   registerInsumosRoutes(app, conn)
 
   return app

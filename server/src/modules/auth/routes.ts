@@ -110,10 +110,25 @@ export function registerAuthRoutes(app: FastifyInstance, conn: DbConnection) {
       .set({ ultimoAcesso: sql`NOW()` })
       .where(eq(operadores.id, row.id))
 
-    const contexto = await carregarContextoTenant(row.tenantId, row.empresaId)
+    const contextoRaw = await carregarContextoTenant(row.tenantId, row.empresaId)
+    const permitidasOp = Array.isArray(row.filiaisPermitidasJson)
+      ? row.filiaisPermitidasJson.map((x) => String(x)).filter(Boolean)
+      : []
+    const ehMaster = isMaster({ nivel: row.nivel, perfil: row.perfil })
+    const filiaisFiltradas =
+      ehMaster || permitidasOp.length === 0
+        ? contextoRaw.filiais
+        : contextoRaw.filiais.filter((f) => permitidasOp.includes(f.id))
+    const contexto = { ...contextoRaw, filiais: filiaisFiltradas.length > 0 ? filiaisFiltradas : contextoRaw.filiais }
     const filialFallback =
-      contexto.filiais.find((f) => f.isPadrao === 1)?.id || contexto.filiais[0]?.id || ''
+      contexto.filiais.find((f) => f.id === row.filialPadraoId)?.id ||
+      contexto.filiais.find((f) => f.isPadrao === 1)?.id ||
+      contexto.filiais[0]?.id ||
+      ''
     const opFmt = formatarOperadorResposta(row, filialFallback)
+    if (!ehMaster && permitidasOp.length > 0 && !permitidasOp.includes(opFmt.filialId)) {
+      opFmt.filialId = filialFallback
+    }
 
     const jwtToken = app.jwt.sign(
       {
@@ -158,11 +173,19 @@ export function registerAuthRoutes(app: FastifyInstance, conn: DbConnection) {
 
   app.get('/api/auth/me', async (req) => {
     const ctx = await verifySession(req)
-    const contexto = await carregarContextoTenant(ctx.tenantId, ctx.empresaId)
+    const contextoRaw = await carregarContextoTenant(ctx.tenantId, ctx.empresaId)
+    const permitidas = Array.isArray((ctx.operador as any).filiais_permitidas)
+      ? ((ctx.operador as any).filiais_permitidas as string[])
+      : []
+    const ehMaster = isMaster(ctx.operador)
+    const filiaisFiltradas =
+      ehMaster || permitidas.length === 0
+        ? contextoRaw.filiais
+        : contextoRaw.filiais.filter((f) => permitidas.includes(f.id))
     return {
       success: true,
       operador: ctx.operador,
-      contexto,
+      contexto: { ...contextoRaw, filiais: filiaisFiltradas.length > 0 ? filiaisFiltradas : contextoRaw.filiais },
     }
   })
 

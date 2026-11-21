@@ -40,6 +40,10 @@ const ProdutoSchema = z.object({
   status_curva: z.enum(['A', 'B', 'C']).default('C'),
   unidade: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : 'CX')),
   grupo: z.string().nullish().transform((v) => (v ?? '').trim()),
+  especie: z.string().nullish().transform((v) => (v ?? '').trim().toUpperCase()),
+  conservacao: z.string().nullish().transform((v) => (v && v.trim() ? v.trim().toUpperCase() : 'RESFRIADO')),
+  validade_dias: z.coerce.number().int().min(0).max(3650).default(5),
+  tara_embalagem_kg: z.coerce.number().min(0).max(50).default(0),
   classificacao: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
   peso_padrao_cx: z.coerce.number().min(0).nullish(),
   tara_primaria_peca_kg: z.coerce.number().min(0).default(0),
@@ -83,6 +87,9 @@ const PERM_PROD_READ = [
   'ean_etiquetas',
   'reimpressao',
   'rastreabilidade',
+  'varejo_acougue',
+  'pdv_caixa',
+  'insumos_coleta',
 ]
 
 export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection) {
@@ -116,10 +123,17 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
         .leftJoin(empresas, eq(empresas.id, filiais.empresaId))
         .where(and(eq(filiais.tenantId, ctx.tenantId), eq(filiais.ativo, 1)))
         .orderBy(asc(filiais.codigo))
+      const permitidas = Array.isArray((ctx.operador as any).filiais_permitidas)
+        ? ((ctx.operador as any).filiais_permitidas as string[])
+        : []
+      const ehMaster = String(ctx.operador.nivel || '').toUpperCase() === 'MASTER' || String(ctx.operador.perfil || '').toUpperCase() === 'MASTER'
+      const rowsFiltradas =
+        ehMaster || permitidas.length === 0 ? rows : rows.filter((f) => permitidas.includes(f.id))
+      const listaFinal = rowsFiltradas.length > 0 ? rowsFiltradas : rows
       return {
         success: true,
         filial_ativa_id: ctx.filialId,
-        data: rows.map((f) => ({
+        data: listaFinal.map((f) => ({
           id: f.id,
           empresa_id: f.empresaId,
           empresa_razao_social: f.empresaRazaoSocial || '',
@@ -160,6 +174,10 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             p.status_curva,
             p.unidade,
             p.grupo,
+            p.especie,
+            p.conservacao,
+            p.validade_dias,
+            p.tara_embalagem_kg,
             p.classificacao,
             p.peso_padrao_cx,
             p.tara_primaria_peca_kg,
@@ -219,6 +237,10 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
         custo_medio_kg: Number(r.custo_medio_kg || 0),
         peso_padrao_cx: r.peso_padrao_cx != null ? Number(r.peso_padrao_cx) : null,
         tara_primaria_peca_kg: Number(r.tara_primaria_peca_kg || 0),
+        tara_embalagem_kg: Number(r.tara_embalagem_kg || 0),
+        validade_dias: Number(r.validade_dias ?? 5),
+        conservacao: String(r.conservacao || 'RESFRIADO'),
+        especie: String(r.especie || ''),
         saldo_kg: Number(r.saldo_kg || 0),
         qtd_caixas: Number(r.qtd_caixas || 0),
         arvore_vinculos: arvMap.get(String(r.id)) || [],
@@ -378,6 +400,10 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           statusCurva: d.status_curva,
           unidade: d.unidade,
           grupo: d.grupo,
+          especie: d.especie,
+          conservacao: d.conservacao,
+          validadeDias: d.validade_dias,
+          taraEmbalagemKg: String(d.tara_embalagem_kg),
           classificacao: d.classificacao,
           pesoPadraoCx: d.peso_padrao_cx != null ? String(d.peso_padrao_cx) : null,
           taraPrimariaPecaKg: String(d.tara_primaria_peca_kg),
@@ -439,6 +465,10 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             statusCurva: d.status_curva,
             unidade: d.unidade,
             grupo: d.grupo,
+            especie: d.especie,
+            conservacao: d.conservacao,
+            validadeDias: d.validade_dias,
+            taraEmbalagemKg: String(d.tara_embalagem_kg),
             classificacao: d.classificacao,
             pesoPadraoCx: d.peso_padrao_cx != null ? String(d.peso_padrao_cx) : null,
             taraPrimariaPecaKg: String(d.tara_primaria_peca_kg),

@@ -45,12 +45,16 @@ export class HttpError extends Error {
 export function formatarOperadorResposta(row: typeof operadores.$inferSelect, fallbackFilialId = '') {
   const nivel = String(row.nivel || (Number(row.isAdm) === 1 ? 'ADMINISTRADOR' : 'OPERACIONAL')).toUpperCase()
   const perfil = String(row.perfil || nivel).toUpperCase()
+  const filiaisPermitidas = Array.isArray(row.filiaisPermitidasJson)
+    ? row.filiaisPermitidasJson.map((x) => String(x)).filter(Boolean)
+    : []
   return {
     id: row.id,
     legacy_id: row.legacyId ?? null,
     tenantId: row.tenantId,
     empresaId: row.empresaId,
-    filialId: row.filialPadraoId || fallbackFilialId,
+    filialId: row.filialPadraoId || filiaisPermitidas[0] || fallbackFilialId,
+    filiais_permitidas: filiaisPermitidas,
     nome: row.nome,
     login: row.login,
     perfil,
@@ -138,11 +142,22 @@ export function createAuthMiddleware(app: FastifyInstance, conn: DbConnection) {
       )
     }
 
-    let filialId = match.op.filialPadraoId || ''
+    const filiaisPermitidasOp = Array.isArray(match.op.filiaisPermitidasJson)
+      ? match.op.filiaisPermitidasJson.map((x) => String(x)).filter(Boolean)
+      : []
+    const ehMasterOp = isMaster({ nivel: match.op.nivel, perfil: match.op.perfil })
+
+    let filialId = match.op.filialPadraoId || filiaisPermitidasOp[0] || ''
+    if (!ehMasterOp && filiaisPermitidasOp.length > 0 && !filiaisPermitidasOp.includes(filialId)) {
+      filialId = filiaisPermitidasOp[0]
+    }
     const requestedFilial = String(req.headers['x-filial-id'] || '').trim()
     if (requestedFilial) {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedFilial)) {
         throw new HttpError(400, 'Cabecalho x-filial-id invalido.')
+      }
+      if (!ehMasterOp && filiaisPermitidasOp.length > 0 && !filiaisPermitidasOp.includes(requestedFilial)) {
+        throw new HttpError(403, 'Seu usuario nao possui permissao para acessar esta filial.')
       }
       const fValid = await conn.db
         .select({ id: filiais.id })

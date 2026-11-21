@@ -53,6 +53,10 @@ export function Produtos() {
     custo_medio_kg: 0,
     tipo_produto: 'Materia Prima',
     grupo: '',
+    especie: '',
+    conservacao: 'RESFRIADO',
+    validade_dias: 5,
+    tara_embalagem_kg: 0,
     classificacao: '',
     peso_padrao_cx: '',
     tara_primaria_peca_kg: 0,
@@ -155,6 +159,10 @@ export function Produtos() {
       custo_medio_kg: p.custo_medio_kg || 0,
       tipo_produto: p.tipo_produto || 'Materia Prima',
       grupo: p.grupo || '',
+      especie: p.especie || '',
+      conservacao: p.conservacao || 'RESFRIADO',
+      validade_dias: p.validade_dias != null ? p.validade_dias : 5,
+      tara_embalagem_kg: p.tara_embalagem_kg != null ? p.tara_embalagem_kg : 0,
       classificacao: p.classificacao || '',
       peso_padrao_cx: p.peso_padrao_cx != null ? p.peso_padrao_cx : '',
       tara_primaria_peca_kg: p.tara_primaria_peca_kg || 0,
@@ -211,6 +219,10 @@ export function Produtos() {
       custo_medio_kg: 0,
       tipo_produto: 'Materia Prima',
       grupo: '',
+      especie: '',
+      conservacao: 'RESFRIADO',
+      validade_dias: 5,
+      tara_embalagem_kg: 0,
       classificacao: '',
       peso_padrao_cx: '',
       tara_primaria_peca_kg: 0,
@@ -790,6 +802,60 @@ export function Produtos() {
                         value={formData.valor_unitario}
                         onChange={(e) => setFormData({ ...formData, valor_unitario: e.target.value })}
                         required
+                      />
+                    </div>
+                  </div>
+                  <div className="form-grid form-grid--4 mt-12">
+                    <div className="form-group">
+                      <label className="form-label">Espécie / Categoria (Açougue)</label>
+                      <select
+                        className="form-input"
+                        value={formData.especie}
+                        onChange={(e) => setFormData({ ...formData, especie: e.target.value })}
+                      >
+                        <option value="">Auto (pelo Grupo / NCM)</option>
+                        <option value="BOVINO">Bovino</option>
+                        <option value="SUINO">Suíno</option>
+                        <option value="AVES">Aves</option>
+                        <option value="EMPORIO">Empório</option>
+                        <option value="INSUMO">Insumo / Embalagem</option>
+                        <option value="OUTROS">Outros</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Armazenagem / Conservação</label>
+                      <select
+                        className="form-input"
+                        value={formData.conservacao}
+                        onChange={(e) => setFormData({ ...formData, conservacao: e.target.value })}
+                      >
+                        <option value="RESFRIADO">Resfriado (0°C a 4°C)</option>
+                        <option value="CONGELADO">Congelado (-18°C)</option>
+                        <option value="SECO">Seco / Temperatura Ambiente</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Validade Padrão (dias)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="3650"
+                        className="form-input text-right font-mono"
+                        value={formData.validade_dias}
+                        onChange={(e) => setFormData({ ...formData, validade_dias: e.target.value })}
+                        placeholder="Ex: 5"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Tara Bandeja / Embalagem (kg)</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        min="0"
+                        className="form-input text-right font-mono"
+                        value={formData.tara_embalagem_kg}
+                        onChange={(e) => setFormData({ ...formData, tara_embalagem_kg: e.target.value })}
+                        placeholder="Ex: 0.0200 (20g)"
                       />
                     </div>
                   </div>

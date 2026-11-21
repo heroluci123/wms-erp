@@ -36,13 +36,15 @@ function fmtDataBR(d) {
 
 /**
  * Monta o payload compacto do QR Code personalizado para o PDV Frente de Caixa.
- * Ex: TRIC|COD=3244|KG=1.250|VL=74.88|LT=L2111
+ * Ex: TRIC|ID=ETQ00001|COD=3244|KG=1.250|VL=74.88|LT=L2111
  */
-export function montarPayloadQrPdv({ codigo, pesoKg, valorTotal, lote = '', validade = '' }) {
+export function montarPayloadQrPdv({ codigoEtiqueta = '', codigo, pesoKg, valorTotal, lote = '', validade = '' }) {
   const cod = String(codigo || '').trim()
   const kg = Number(pesoKg || 0)
   const vl = Number(valorTotal || 0)
-  const parts = [`TRIC`, `COD=${cod}`]
+  const parts = ['TRIC']
+  if (codigoEtiqueta) parts.push(`ID=${String(codigoEtiqueta).trim().toUpperCase()}`)
+  if (cod) parts.push(`COD=${cod}`)
   if (kg > 0) parts.push(`KG=${kg.toFixed(3)}`)
   if (vl > 0) parts.push(`VL=${vl.toFixed(2)}`)
   if (lote) parts.push(`LT=${String(lote).trim().slice(0, 16)}`)
@@ -56,13 +58,13 @@ export function montarPayloadQrInsumo(enderecoCodigo) {
 
 /**
  * Gera código ZPL II nativo para impressora Zebra 203 DPI — Etiqueta 80mm x 45mm (640 x 360 dots).
- * - Modo 'PDV': Item, Peso, Preço/kg, Valor Total em destaque e QR Code para bipar no caixa!
+ * - Modo 'PDV': Item, Peso, Preço/kg, Valor Total em destaque, Conservação e QR Code único p/ PDV!
  * - Modo 'INSUMO': Endereço em destaque, Produto, Unidade e QR Code para bipar na Coleta de Insumos!
  */
 export function gerarZplEtiqueta80x45(dados, modo = 'PDV') {
   const st = useAppStore.getState?.()
   const fil = (st?.filiaisDisponiveis || []).find((f) => String(f.id) === String(st?.filialAtivaId))
-  const empresa = limparZpl(dados?.empresa_nome || fil?.nome || 'TRICARNES LOJA 1/1').toUpperCase().slice(0, 32)
+  const empresa = limparZpl(dados?.empresa_nome || fil?.nome || 'VAREJO & ACOUGUE').toUpperCase().slice(0, 28)
 
   if (modo === 'INSUMO') {
     const end = limparZpl(dados?.endereco_codigo || 'ALM-01').toUpperCase()
@@ -94,23 +96,28 @@ export function gerarZplEtiqueta80x45(dados, modo = 'PDV') {
       .join('\n')
   }
 
-  // Modo PDV / Açougue / Empório com QR Code mostrando Item, Peso e Valor
+  // Modo PDV / Açougue / Empório com QR Code mostrando Item, Peso, Valor e Serial Único
   const desc = limparZpl(dados?.descricao || 'PRODUTO').toUpperCase()
   const desc1 = desc.slice(0, 26)
   const desc2 = desc.slice(26, 52)
   const cod = limparZpl(dados?.codigo || '-')
+  const serial = limparZpl(dados?.codigo_etiqueta || '')
+  const conserv = limparZpl(dados?.conservacao || '').toUpperCase()
   const un = limparZpl(dados?.unidade || 'KG').toUpperCase()
   const peso = Number(dados?.peso_kg ?? dados?.qtd ?? 0)
   const precoKg = Number(dados?.preco_unitario ?? 0)
   const total = Number(dados?.valor_total ?? Number((peso * precoKg).toFixed(2)))
   const valStr = fmtDataBR(dados?.validade)
-  const payload = montarPayloadQrPdv({
-    codigo: cod,
-    pesoKg: peso,
-    valorTotal: total,
-    lote: dados?.lote || '',
-    validade: dados?.validade || '',
-  })
+  const payload =
+    dados?.payload_qr ||
+    montarPayloadQrPdv({
+      codigoEtiqueta: serial,
+      codigo: cod,
+      pesoKg: peso,
+      valorTotal: total,
+      lote: dados?.lote || '',
+      validade: dados?.validade || '',
+    })
 
   const pesoTxt = un === 'KG' ? `${peso.toFixed(3).replace('.', ',')} kg` : `${peso} ${un}`
   const unitTxt = `R$ ${precoKg.toFixed(2).replace('.', ',')}/${un}`
@@ -124,16 +131,16 @@ export function gerarZplEtiqueta80x45(dados, modo = 'PDV') {
     '^LH0,0',
     '^FO10,10^GB620,340,3^FS',
     '^FO10,10^GB620,38,38,B^FS',
-    `^FO22,18^FR^A0N,22,22^FD${empresa}   COD: ${cod}^FS`,
+    `^FO22,18^FR^A0N,22,22^FD${empresa}   ${serial || `COD:${cod}`}^FS`,
     `^FO22,58^A0N,26,24^FD${desc1}^FS`,
     desc2 ? `^FO22,88^A0N,24,22^FD${desc2}^FS` : '',
     `^FO22,126^A0N,22,22^FDPESO/QTD: ${pesoTxt}^FS`,
-    `^FO22,158^A0N,20,20^FDPRECO: ${unitTxt}^FS`,
+    `^FO22,158^A0N,20,20^FDPRECO: ${unitTxt}${conserv ? ` • ${conserv}` : ''}^FS`,
     '^FO20,192^GB390,94,3^FS',
     '^FO32,202^A0N,18,18^FDVALOR A PAGAR^FS',
     `^FO32,226^A0N,50,46^FD${totalTxt}^FS`,
     `^FO22,300^A0N,18,18^FDVAL: ${valStr}  ${dados?.lote ? `LT: ${limparZpl(dados.lote)}` : ''}^FS`,
-    '^FO22,324^A0N,16,16^FDBIPE O QR NO CAIXA PDV^FS',
+    `^FO22,324^A0N,16,16^FD${serial ? `${serial} • ` : ''}BIPE O QR NO CAIXA PDV^FS`,
     `^FO430,74^BQN,2,5^FDQA,${payload}^FS`,
     '^XZ',
   ]
@@ -144,11 +151,13 @@ export function gerarZplEtiqueta80x45(dados, modo = 'PDV') {
 export async function imprimirEtiqueta80x45Html(dados, modo = 'PDV', copias = 1) {
   const st = useAppStore.getState?.()
   const fil = (st?.filiaisDisponiveis || []).find((f) => String(f.id) === String(st?.filialAtivaId))
-  const empresa = String(dados?.empresa_nome || fil?.nome || 'TRICARNES LOJA 1/1').toUpperCase()
+  const empresa = String(dados?.empresa_nome || fil?.nome || 'VAREJO & AÇOUGUE').toUpperCase()
   const payload =
     modo === 'INSUMO'
       ? montarPayloadQrInsumo(dados?.endereco_codigo)
-      : montarPayloadQrPdv({
+      : dados?.payload_qr ||
+        montarPayloadQrPdv({
+          codigoEtiqueta: dados?.codigo_etiqueta || '',
           codigo: dados?.codigo,
           pesoKg: dados?.peso_kg ?? dados?.qtd,
           valorTotal: dados?.valor_total,
@@ -166,6 +175,8 @@ export async function imprimirEtiqueta80x45Html(dados, modo = 'PDV', copias = 1)
   const peso = Number(dados?.peso_kg ?? dados?.qtd ?? 0)
   const preco = Number(dados?.preco_unitario ?? 0)
   const total = Number(dados?.valor_total ?? Number((peso * preco).toFixed(2)))
+  const serial = String(dados?.codigo_etiqueta || '').trim()
+  const conserv = String(dados?.conservacao || '').trim().toUpperCase()
 
   const etiquetaBody =
     modo === 'INSUMO'
@@ -186,7 +197,7 @@ export async function imprimirEtiqueta80x45Html(dados, modo = 'PDV', copias = 1)
         </div>`
       : `
         <div class="label">
-          <div class="hdr"><span>${escHtml(empresa.slice(0, 28))}</span><span>CÓD ${escHtml(dados?.codigo || '-')}</span></div>
+          <div class="hdr"><span>${escHtml(empresa.slice(0, 24))}</span><span>${escHtml(serial || `CÓD ${dados?.codigo || '-'}`)}</span></div>
           <div class="grid">
             <div class="left">
               <div class="desc">${escHtml(String(dados?.descricao || '').toUpperCase())}</div>
@@ -198,11 +209,11 @@ export async function imprimirEtiqueta80x45Html(dados, modo = 'PDV', copias = 1)
                 <div class="price-lbl">VALOR TOTAL</div>
                 <div class="price-val">${escHtml(fmtMoeda(total))}</div>
               </div>
-              <div class="foot">VAL: ${escHtml(fmtDataBR(dados?.validade))} ${dados?.lote ? `• LOTE: ${escHtml(dados.lote)}` : ''}</div>
+              <div class="foot">VAL: ${escHtml(fmtDataBR(dados?.validade))}${conserv ? ` • ${escHtml(conserv)}` : ''}${dados?.lote ? ` • LT: ${escHtml(dados.lote)}` : ''}</div>
             </div>
             <div class="right">
               <img src="${qrDataUrl}" class="qr" alt="QR PDV" />
-              <div class="qr-cap">BIPE NO CAIXA</div>
+              <div class="qr-cap">${serial ? escHtml(serial) : 'BIPE NO CAIXA'}</div>
             </div>
           </div>
         </div>`
@@ -294,7 +305,9 @@ export function ModalEtiquetaZebra80x45({ aberto, onClose, dados, modo = 'PDV', 
   const payload =
     modo === 'INSUMO'
       ? montarPayloadQrInsumo(dados?.endereco_codigo)
-      : montarPayloadQrPdv({
+      : dados?.payload_qr ||
+        montarPayloadQrPdv({
+          codigoEtiqueta: dados?.codigo_etiqueta || '',
           codigo: dados?.codigo,
           pesoKg: dados?.peso_kg ?? dados?.qtd,
           valorTotal: dados?.valor_total,
@@ -366,8 +379,8 @@ export function ModalEtiquetaZebra80x45({ aberto, onClose, dados, modo = 'PDV', 
                 justifyContent: 'space-between',
               }}
             >
-              <span>{modo === 'INSUMO' ? 'ALMOXARIFADO INSUMOS' : 'LOJA 1/1 • AÇOUGUE & EMPÓRIO'}</span>
-              <span>{modo === 'INSUMO' ? `UN: ${un}` : `CÓD ${dados.codigo || '-'}`}</span>
+              <span>{modo === 'INSUMO' ? 'ALMOXARIFADO INSUMOS' : 'VAREJO & AÇOUGUE'}</span>
+              <span>{modo === 'INSUMO' ? `UN: ${un}` : dados.codigo_etiqueta || `CÓD ${dados.codigo || '-'}`}</span>
             </div>
 
             <div style={{ display: 'flex', gap: 10, paddingTop: 8, alignItems: 'center' }}>

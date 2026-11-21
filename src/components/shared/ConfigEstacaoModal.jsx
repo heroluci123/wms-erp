@@ -80,27 +80,40 @@ export function ConfigEstacaoModal({ isOpen, onClose, onSaved }) {
         <form onSubmit={handleSalvar} className="flex flex-col gap-16">
           <div className="p-12 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
             <div className="text-xs font-bold uppercase text-primary mb-10 flex items-center gap-6">
-              <Printer size={14} /> Impressão de Etiquetas Térmicas (Zebra 100×70mm)
+              <Printer size={14} /> Impressora de Etiquetas (Zebra 80×45mm / 100×70mm)
             </div>
 
-            <div className="form-group mb-10">
-              <label className="form-label">Modo de Impressão neste Computador</label>
-              <select
-                className="form-input"
-                value={cfg.modoImpressao}
-                onChange={(e) => setCfg((p) => ({ ...p, modoImpressao: e.target.value }))}
-              >
-                <option value="JANELA">Janela Padrão do Navegador (Mostra prévia)</option>
-                <option value="SILENCIOSA">
-                  Impressão Silenciosa Direta ({hasElectronPrinter ? 'App Desktop .exe (Zero Popup)' : 'Direto / Chrome --kiosk-printing'})
-                </option>
-                <option value="ZEBRA_USB_ZPL">Zebra USB Direta via ZPL (WebUSB no Chrome/Edge)</option>
-              </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10 }} className="mb-10">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Modo de Impressão neste Computador</label>
+                <select
+                  className="form-input"
+                  value={cfg.modoImpressao}
+                  onChange={(e) => setCfg((p) => ({ ...p, modoImpressao: e.target.value }))}
+                >
+                  <option value="JANELA">Janela Padrão do Navegador (Mostra prévia)</option>
+                  <option value="SILENCIOSA">
+                    Impressão Silenciosa Direta ({hasElectronPrinter ? 'App Desktop .exe (Zero Popup)' : 'Direto / Chrome --kiosk-printing'})
+                  </option>
+                  <option value="ZEBRA_USB_ZPL">Zebra USB Direta via ZPL (WebUSB no Chrome/Edge)</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Tamanho Zebra Padrão</label>
+                <select
+                  className="form-input"
+                  value={cfg.zebraTamanhoPadrao || '80x45'}
+                  onChange={(e) => setCfg((p) => ({ ...p, zebraTamanhoPadrao: e.target.value }))}
+                >
+                  <option value="80x45">80×45mm (Açougue / QR / Insumos)</option>
+                  <option value="100x70">100×70mm (Caixas Indústria)</option>
+                </select>
+              </div>
             </div>
 
             {hasElectronPrinter && cfg.modoImpressao === 'SILENCIOSA' && (
               <div className="form-group mb-10">
-                <label className="form-label">Impressora Térmica Instalada no Windows</label>
+                <label className="form-label">Impressora Zebra Instalada no Windows</label>
                 <select
                   className="form-input"
                   value={cfg.impressoraNome}
@@ -136,9 +149,8 @@ export function ConfigEstacaoModal({ isOpen, onClose, onSaved }) {
               <div className="p-10 rounded mb-10 text-xs flex gap-8 items-start" style={{ background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)' }}>
                 <Info size={16} className="text-cyan shrink-0 mt-2" />
                 <div>
-                  No site pelo Chrome/Edge sem popup, ative o atalho do Chrome no computador da balança com a flag{' '}
-                  <code>--kiosk-printing</code> apontando para a Zebra como impressora padrão do Windows — ou use o{' '}
-                  <strong>App Desktop (.exe)</strong>, que imprime silencioso nativamente sem janela.
+                  No Chrome/Edge sem popup, crie um atalho com <code>--kiosk-printing</code> apontando para a impressora térmica como padrão do Windows — ou use o{' '}
+                  <strong>App Desktop (.exe)</strong> para roteamento silencioso simultâneo entre Zebra, Bobina 80mm e A4.
                 </div>
               </div>
             )}
@@ -149,8 +161,69 @@ export function ConfigEstacaoModal({ isOpen, onClose, onSaved }) {
                 checked={Boolean(cfg.imprimirAutoAoSalvar)}
                 onChange={(e) => setCfg((p) => ({ ...p, imprimirAutoAoSalvar: e.target.checked }))}
               />
-              Imprimir etiqueta automaticamente assim que salvar uma caixa pesada
+              Imprimir etiqueta automaticamente assim que pesar um corte ou caixa
             </label>
+          </div>
+
+          <div className="p-12 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+            <div className="text-xs font-bold uppercase text-success mb-10 flex items-center gap-6">
+              <Printer size={14} /> Impressora de Bobina Térmica (Cupom NFC-e, Crediário p/ Assinatura & Pedidos)
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }} className="mb-10">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Largura da Bobina Térmica</label>
+                <select
+                  className="form-input"
+                  value={Number(cfg.bobinaLarguraMm || 80)}
+                  onChange={(e) => setCfg((p) => ({ ...p, bobinaLarguraMm: Number(e.target.value) }))}
+                >
+                  <option value={80}>80mm (Elgin i9 / Bematech MP-4200 / Epson TM-T20)</option>
+                  <option value={58}>58mm (Mini Térmica Compacta)</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Nome da Impressora Bobina (Windows)</label>
+                {hasElectronPrinter ? (
+                  <select
+                    className="form-input"
+                    value={cfg.bobinaImpressoraNome || ''}
+                    onChange={(e) => setCfg((p) => ({ ...p, bobinaImpressoraNome: e.target.value }))}
+                  >
+                    <option value="">Impressora Padrão do Windows</option>
+                    {printers.map((pr) => (
+                      <option key={pr.name} value={pr.name}>
+                        {pr.displayName || pr.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="form-input"
+                    placeholder="Ex: ELGIN i9 / Epson TM-T20"
+                    value={cfg.bobinaImpressoraNome || ''}
+                    onChange={(e) => setCfg((p) => ({ ...p, bobinaImpressoraNome: e.target.value }))}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col gap-6">
+              <label className="flex items-center gap-8 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(cfg.imprimirCrediarioAuto ?? true)}
+                  onChange={(e) => setCfg((p) => ({ ...p, imprimirCrediarioAuto: e.target.checked }))}
+                />
+                Abrir comprovante de Crediário (com campo de assinatura) automaticamente ao fechar venda no crediário
+              </label>
+              <label className="flex items-center gap-8 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(cfg.imprimirCupomAuto)}
+                  onChange={(e) => setCfg((p) => ({ ...p, imprimirCupomAuto: e.target.checked }))}
+                />
+                Abrir cupom térmico automaticamente ao finalizar toda venda no PDV
+              </label>
+            </div>
           </div>
 
           <div className="p-12 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>

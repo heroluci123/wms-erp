@@ -53,7 +53,10 @@ import { Financeiro } from './pages/Financeiro'
 import { DreGerencial } from './pages/DreGerencial'
 import { Fiscal } from './pages/Fiscal'
 import { PdvCaixa } from './pages/PdvCaixa'
-import { VarejoLoja } from './pages/VarejoLoja'
+import { AcougueOperacao } from './pages/AcougueOperacao'
+import { GerenciadorAcougue } from './pages/GerenciadorAcougue'
+import { InventarioLoja } from './pages/InventarioLoja'
+import { ClientesVarejo } from './pages/ClientesVarejo'
 import { Interunidades } from './pages/Interunidades'
 import { InsumosColeta } from './pages/InsumosColeta'
 
@@ -96,7 +99,7 @@ function HomeWrapper() {
     return <Navigate to="/pdv" replace />
   }
   if (perfilUp === 'ACOUGUE_BALCAO') {
-    return <Navigate to="/loja" replace />
+    return <Navigate to="/acougue" replace />
   }
   const isMobile = window.innerWidth <= 768
   if (isMobile || !temPermissao(operador, 'dashboard_executivo')) {
@@ -131,7 +134,11 @@ function App() {
           <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos', 'financeiro_pedidos']} element={<Pedidos />} />} />
           <Route path="fiscal" element={<RequirePermissao permissoes={['fiscal', 'devolucao_fiscal', 'parametros_comerciais']} element={<Fiscal />} />} />
           <Route path="pdv" element={<RequirePermissao permissoes={['pdv_caixa', 'varejo_acougue']} element={<PdvCaixa />} />} />
-          <Route path="loja" element={<RequirePermissao permissoes={['varejo_acougue', 'pdv_caixa']} element={<VarejoLoja />} />} />
+          <Route path="acougue" element={<RequirePermissao permissoes={['varejo_acougue']} element={<AcougueOperacao />} />} />
+          <Route path="gerenciador-acougue" element={<RequirePermissao permissoes={['varejo_acougue', 'pdv_caixa']} element={<GerenciadorAcougue />} />} />
+          <Route path="inventario-loja" element={<RequirePermissao permissoes={['varejo_acougue', 'inventario_gestao', 'inventario_coletor']} element={<InventarioLoja />} />} />
+          <Route path="clientes-varejo" element={<RequirePermissao permissoes={['pdv_caixa', 'varejo_acougue', 'clientes']} element={<ClientesVarejo />} />} />
+          <Route path="loja" element={<Navigate to="/gerenciador-acougue" replace />} />
           <Route path="interunidades" element={<RequirePermissao permissoes={['interunidades', 'movimentacao', 'fiscal', 'varejo_acougue']} element={<Interunidades />} />} />
           <Route path="insumos-coleta" element={<RequirePermissao permissoes={['insumos_coleta', 'compras', 'varejo_acougue', 'producao_entrada']} element={<InsumosColeta />} />} />
           <Route path="financeiro" element={<RequirePermissao permissoes={['financeiro', 'financeiro_pedidos']} element={<Financeiro />} />} />

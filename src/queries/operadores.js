@@ -223,6 +223,8 @@ export async function criar({
   permissoes = {},
   deve_trocar_senha = false,
   ativo = 1,
+  filiais_permitidas,
+  filial_padrao_id,
 }) {
   if (isApiEnabled()) {
     return apiRequest('/api/operadores', {
@@ -237,6 +239,8 @@ export async function criar({
         permissoes,
         deve_trocar_senha: Boolean(deve_trocar_senha),
         ativo,
+        ...(Array.isArray(filiais_permitidas) ? { filiais_permitidas } : {}),
+        ...(filial_padrao_id !== undefined ? { filial_padrao_id } : {}),
       },
     })
   }
@@ -321,12 +325,26 @@ export async function atualizar({
   ativo,
   novaSenha = '',
   deve_trocar_senha,
+  filiais_permitidas,
+  filial_padrao_id,
 }) {
   if (isApiEnabled()) {
     try {
       const res = await apiRequest(`/api/operadores/${id}`, {
         method: 'PUT',
-        body: { nome, login, setor, perfil, nivel, permissoes, ativo, novaSenha, deve_trocar_senha },
+        body: {
+          nome,
+          login,
+          setor,
+          perfil,
+          nivel,
+          permissoes,
+          ativo,
+          novaSenha,
+          deve_trocar_senha,
+          ...(Array.isArray(filiais_permitidas) ? { filiais_permitidas } : {}),
+          ...(filial_padrao_id !== undefined ? { filial_padrao_id } : {}),
+        },
       })
       limparCacheSessao()
       return res

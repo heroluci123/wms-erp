@@ -1,7 +1,7 @@
 import { apiRequest, buildQueryString } from '../lib/apiClient'
 
 export const varejoQueries = {
-  // ── ESTOQUE DA LOJA (1/1 — AÇOUGUE & EMPÓRIO) ───────────────────────────────
+  // ── ESTOQUE DO VAREJO (AÇOUGUE & EMPÓRIO) ───────────────────────────────────
   listarEstoque: (params = {}) =>
     apiRequest(`/api/varejo/estoque${buildQueryString(params)}`),
 
@@ -11,15 +11,24 @@ export const varejoQueries = {
   listarMovimentacoes: () =>
     apiRequest('/api/varejo/movimentacoes'),
 
-  // ── INVENTÁRIO RÁPIDO DO VAREJO ─────────────────────────────────────────────
-  listarInventarios: () =>
-    apiRequest('/api/varejo/inventarios'),
+  // ── INVENTÁRIO VAREJO & AÇOUGUE (EMPÓRIO CEGO + AÇOUGUE BIPADO) ─────────────
+  listarInventarios: (params = {}) =>
+    apiRequest(`/api/varejo/inventarios${buildQueryString(params)}`),
 
   criarInventario: (payload) =>
     apiRequest('/api/varejo/inventarios', { method: 'POST', body: payload }),
 
+  liberarInventario: (id, liberado_operador) =>
+    apiRequest(`/api/varejo/inventarios/${id}/liberar`, { method: 'PUT', body: { liberado_operador } }),
+
   salvarContagemInventario: (id, itens) =>
     apiRequest(`/api/varejo/inventarios/${id}/contagem`, { method: 'PUT', body: { itens } }),
+
+  biparEtiquetaInventario: (id, codigo) =>
+    apiRequest(`/api/varejo/inventarios/${id}/bipar-etiqueta`, { method: 'POST', body: { codigo } }),
+
+  pesarMpInventario: (id, payload) =>
+    apiRequest(`/api/varejo/inventarios/${id}/pesar-mp`, { method: 'POST', body: payload }),
 
   finalizarInventario: (id) =>
     apiRequest(`/api/varejo/inventarios/${id}/finalizar`, { method: 'POST', body: {} }),
@@ -43,11 +52,40 @@ export const varejoQueries = {
   buscarCodigoPdv: (q) =>
     apiRequest(`/api/pdv/buscar-codigo${buildQueryString({ q })}`),
 
+  gerarPixPdv: (payload) =>
+    apiRequest('/api/pdv/gerar-pix', { method: 'POST', body: payload }),
+
+  obterCrediarioCliente: (clienteId) =>
+    apiRequest(`/api/pdv/crediario/cliente/${clienteId}`),
+
+  receberCrediario: (payload) =>
+    apiRequest('/api/pdv/crediario/receber', { method: 'POST', body: payload }),
+
   finalizarVendaPdv: (payload) =>
     apiRequest('/api/pdv/vendas', { method: 'POST', body: payload }),
 
   cancelarVendaPdv: (vendaId, motivo = '') =>
     apiRequest(`/api/pdv/vendas/${vendaId}/cancelar`, { method: 'POST', body: { motivo } }),
+}
+
+export const acougueQueries = {
+  obterGerenciador: (params = {}) =>
+    apiRequest(`/api/acougue/gerenciador${buildQueryString(params)}`),
+
+  darEntradaMp: (codigo) =>
+    apiRequest('/api/acougue/entrada-mp', { method: 'POST', body: { ean_caixa: codigo, codigo } }),
+
+  encerrarMp: (caixaId, motivo = '') =>
+    apiRequest(`/api/acougue/mp/${caixaId}/encerrar`, { method: 'POST', body: { motivo } }),
+
+  listarProdutosPesagem: (params = {}) =>
+    apiRequest(`/api/acougue/produtos-pesagem${buildQueryString(params)}`),
+
+  pesarEtiqueta: (payload) =>
+    apiRequest('/api/acougue/pesar-etiqueta', { method: 'POST', body: payload }),
+
+  cancelarEtiqueta: (id) =>
+    apiRequest(`/api/acougue/etiquetas/${id}/cancelar`, { method: 'POST', body: {} }),
 }
 
 export const interunidadesQueries = {

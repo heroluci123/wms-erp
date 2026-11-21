@@ -47,6 +47,7 @@ export const operadores = pgTable(
       .notNull()
       .references(() => empresas.id, { onDelete: 'cascade' }),
     filialPadraoId: uuid('filial_padrao_id').references(() => filiais.id, { onDelete: 'set null' }),
+    filiaisPermitidasJson: jsonb('filiais_permitidas_json').$type<string[]>().notNull().default([]),
     colaboradorId: uuid('colaborador_id').references(() => colaboradores.id, { onDelete: 'set null' }),
     legacyId: integer('legacy_id'),
     nome: text('nome').notNull(),

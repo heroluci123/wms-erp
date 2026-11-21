@@ -90,10 +90,17 @@ function TopBar({ sidebarRecolhida = false, onToggleSidebar }) {
       .then((res) => {
         if (Array.isArray(res?.data) && res.data.length > 0) {
           setFiliaisDisponiveis(res.data)
+          const atualOk = res.data.some((f) => String(f.id) === String(filialAtivaId))
+          if (!atualOk || res.data.length === 1) {
+            setFilialAtiva(res.data[0].id)
+          }
         }
       })
       .catch(() => {})
-  }, [operador?.id, clienteUser, setFiliaisDisponiveis])
+  }, [operador?.id, clienteUser, filialAtivaId, setFiliaisDisponiveis, setFilialAtiva])
+
+  const filialAtivaObj =
+    filiaisDisponiveis.find((f) => String(f.id) === String(filialAtivaId)) || filiaisDisponiveis[0] || null
 
   return (
     <>
@@ -127,24 +134,38 @@ function TopBar({ sidebarRecolhida = false, onToggleSidebar }) {
         {isApiEnabled() && operador && !clienteUser && filiaisDisponiveis.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16, WebkitAppRegion: 'no-drag' }}>
             <span className="text-xs text-muted">Filial:</span>
-            <select
-              className="form-input"
-              style={{ padding: '3px 8px', fontSize: 11, height: 26, width: 'auto', minWidth: 185, background: 'var(--bg-2)' }}
-              value={filialAtivaId}
-              onChange={(e) => {
-                const novoId = e.target.value
-                const f = filiaisDisponiveis.find((x) => String(x.id) === String(novoId))
-                setFilialAtiva(novoId)
-                if (f) toastSuccess('Filial alterada', `Operando em ${f.codigo} - ${f.nome}`)
-              }}
-              title="Troca rápida de Empresa / Filial (ex: 1/1 Açougue, 1/2 Estoque, 2/1 FG)"
-            >
-              {filiaisDisponiveis.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.codigo} — {f.nome}
-                </option>
-              ))}
-            </select>
+            {filiaisDisponiveis.length === 1 && filialAtivaObj ? (
+              <span
+                className="text-xs font-bold px-8 py-2 rounded"
+                style={{
+                  background: 'rgba(59,130,246,0.14)',
+                  color: '#93c5fd',
+                  border: '1px solid rgba(59,130,246,0.35)',
+                }}
+                title="Usuário vinculado exclusivamente a esta filial"
+              >
+                {filialAtivaObj.codigo} — {filialAtivaObj.nome}
+              </span>
+            ) : (
+              <select
+                className="form-input"
+                style={{ padding: '3px 8px', fontSize: 11, height: 26, width: 'auto', minWidth: 185, background: 'var(--bg-2)' }}
+                value={filialAtivaId}
+                onChange={(e) => {
+                  const novoId = e.target.value
+                  const f = filiaisDisponiveis.find((x) => String(x.id) === String(novoId))
+                  setFilialAtiva(novoId)
+                  if (f) toastSuccess('Filial alterada', `Operando em ${f.codigo} - ${f.nome}`)
+                }}
+                title="Alternar entre as filiais liberadas para o seu usuário"
+              >
+                {filiaisDisponiveis.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.codigo} — {f.nome}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         )}
         
@@ -323,8 +344,13 @@ function TopBar({ sidebarRecolhida = false, onToggleSidebar }) {
 }
 
 function Sidebar({ collapsed = false, onCollapse }) {
-  const { operador } = useAppStore()
+  const { operador, filialAtivaId, filiaisDisponiveis } = useAppStore()
   const cliente = isCliente(operador)
+  const filialAtivaObj =
+    (filiaisDisponiveis || []).find((f) => String(f.id) === String(filialAtivaId)) ||
+    (filiaisDisponiveis || [])[0] ||
+    null
+  const isFilialVarejo = String(filialAtivaObj?.tipo_unidade || '').toUpperCase() === 'VAREJO'
 
   if (cliente) {
     return (
@@ -461,17 +487,30 @@ function Sidebar({ collapsed = false, onCollapse }) {
         </NavLink>
       )}
       
-      {temVarejoLoja && (
+      {isFilialVarejo && temVarejoLoja && (
         <>
-          <div className="sidebar__section-label">Loja 1/1 (Varejo &amp; Açougue)</div>
+          <div className="sidebar__section-label">Varejo &amp; Açougue</div>
           {temAlgumaPermissao(operador, ['pdv_caixa', 'varejo_acougue']) && (
             <NavLink to="/pdv" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
               <ShoppingCart size={18} /> PDV Frente de Caixa
             </NavLink>
           )}
           {temAlgumaPermissao(operador, ['varejo_acougue']) && (
-            <NavLink to="/loja" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-              <Store size={18} /> Açougue, Empório &amp; QR
+            <>
+              <NavLink to="/acougue" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+                <Scale size={18} /> Açougue
+              </NavLink>
+              <NavLink to="/gerenciador-acougue" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+                <Store size={18} /> Gerenciador do Açougue
+              </NavLink>
+              <NavLink to="/inventario-loja" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+                <CheckSquare size={18} /> Inventário Varejo &amp; Açougue
+              </NavLink>
+            </>
+          )}
+          {temAlgumaPermissao(operador, ['pdv_caixa', 'varejo_acougue', 'clientes']) && (
+            <NavLink to="/clientes-varejo" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Users size={18} /> Clientes (Varejo)
             </NavLink>
           )}
         </>

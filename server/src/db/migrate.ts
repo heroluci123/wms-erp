@@ -1712,6 +1712,65 @@ CREATE TABLE IF NOT EXISTS insumos_coletas (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_insumos_coletas_filial_data ON insumos_coletas(tenant_id, filial_id, created_at);
+
+ALTER TABLE operadores ADD COLUMN IF NOT EXISTS filiais_permitidas_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS especie TEXT NOT NULL DEFAULT '';
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS conservacao TEXT NOT NULL DEFAULT 'RESFRIADO';
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS validade_dias INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS tara_embalagem_kg NUMERIC(10,4) NOT NULL DEFAULT 0;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS rg TEXT NOT NULL DEFAULT '';
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS data_nascimento DATE;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tipo_cliente TEXT NOT NULL DEFAULT 'AMBOS';
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS crediario_ativo INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS prazo_crediario_dias INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS desconto_ativo INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS desconto_max_pct NUMERIC(6,2) NOT NULL DEFAULT 0;
+ALTER TABLE estoque_caixas ADD COLUMN IF NOT EXISTS peso_restante_kg NUMERIC(14,3);
+ALTER TABLE estoque_caixas ADD COLUMN IF NOT EXISTS entrada_acougue_em TIMESTAMPTZ;
+ALTER TABLE estoque_caixas ADD COLUMN IF NOT EXISTS entrada_acougue_por TEXT NOT NULL DEFAULT '';
+ALTER TABLE estoque_caixas ADD COLUMN IF NOT EXISTS quebra_acougue_kg NUMERIC(14,3);
+ALTER TABLE pdv_caixas ADD COLUMN IF NOT EXISTS total_crediario NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE pdv_vendas ADD COLUMN IF NOT EXISTS desconto_tipo TEXT NOT NULL DEFAULT 'VALOR';
+ALTER TABLE pdv_vendas ADD COLUMN IF NOT EXISTS desconto_pct NUMERIC(6,2) NOT NULL DEFAULT 0;
+ALTER TABLE pdv_vendas ADD COLUMN IF NOT EXISTS crediario_valor NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE pdv_vendas ADD COLUMN IF NOT EXISTS titulo_receber_id UUID;
+ALTER TABLE pdv_vendas ADD COLUMN IF NOT EXISTS vencimento_crediario DATE;
+ALTER TABLE varejo_inventarios ADD COLUMN IF NOT EXISTS tipo_inventario TEXT NOT NULL DEFAULT 'EMPORIO_CEGO';
+ALTER TABLE varejo_inventarios ADD COLUMN IF NOT EXISTS liberado_operador INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE varejo_inventarios ADD COLUMN IF NOT EXISTS etiquetas_bipadas_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE varejo_inventarios ADD COLUMN IF NOT EXISTS mps_pesadas_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS etiquetas_acougue (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  codigo_etiqueta TEXT NOT NULL,
+  produto_id UUID NOT NULL REFERENCES produtos(id),
+  produto_codigo TEXT NOT NULL DEFAULT '',
+  produto_descricao TEXT NOT NULL DEFAULT '',
+  especie TEXT NOT NULL DEFAULT 'OUTROS',
+  conservacao TEXT NOT NULL DEFAULT 'RESFRIADO',
+  caixa_mp_id UUID REFERENCES estoque_caixas(id) ON DELETE SET NULL,
+  ean_mp_origem TEXT NOT NULL DEFAULT '',
+  peso_bruto_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  tara_kg NUMERIC(10,4) NOT NULL DEFAULT 0,
+  peso_liquido_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  preco_kg NUMERIC(14,4) NOT NULL DEFAULT 0,
+  valor_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+  lote TEXT NOT NULL DEFAULT '',
+  data_pesagem DATE NOT NULL,
+  validade DATE,
+  payload_qr TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'EM_ESTOQUE',
+  venda_pdv_id UUID REFERENCES pdv_vendas(id) ON DELETE SET NULL,
+  vendida_em TIMESTAMPTZ,
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_etq_acougue_codigo ON etiquetas_acougue(tenant_id, codigo_etiqueta);
+CREATE INDEX IF NOT EXISTS idx_etq_acougue_filial_status ON etiquetas_acougue(tenant_id, filial_id, status);
+CREATE INDEX IF NOT EXISTS idx_etq_acougue_mp ON etiquetas_acougue(caixa_mp_id);
 `
 
 export interface SeedDefaultsResult {

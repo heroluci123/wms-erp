@@ -74,6 +74,12 @@ const ClienteSchema = z.object({
   razao_social: z.string().trim().min(1, 'Informe a Razão Social.'),
   nome_fantasia: optStr(''),
   cnpj_cpf: optStr(''),
+  rg: optStr(''),
+  data_nascimento: z.string().nullish().transform((v) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()) ? v.trim() : null)),
+  tipo_cliente: z.string().nullish().transform((v) => {
+    const s = String(v || 'AMBOS').trim().toUpperCase()
+    return ['ATACADO', 'VAREJO', 'AMBOS'].includes(s) ? s : 'AMBOS'
+  }),
   inscricao_estadual: optStr(''),
   endereco: optStr(''),
   numero: optStr(''),
@@ -91,6 +97,10 @@ const ClienteSchema = z.object({
   marchante_padrao: optStr(''),
   rota_padrao_nome: optStr(''),
   limite_credito: z.coerce.number().min(0).default(0),
+  crediario_ativo: z.union([z.boolean(), z.number()]).optional().default(0),
+  prazo_crediario_dias: z.coerce.number().int().min(1).max(365).optional().default(30),
+  desconto_ativo: z.union([z.boolean(), z.number()]).optional().default(0),
+  desconto_max_pct: z.coerce.number().min(0).max(100).optional().default(0),
   bloqueado_financeiro: z.union([z.boolean(), z.number()]).optional().default(0),
   permite_pagamento_entrega: z.union([z.boolean(), z.number()]).optional().default(1),
   is_padrao: z.union([z.boolean(), z.number()]).optional().default(0),
@@ -444,7 +454,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
   // ── CLIENTES + ESPECIFICACOES POR PRODUTO ───────────────────────────────────
   app.get(
     '/api/cadastros/clientes',
-    { preHandler: requirePermission(['clientes', 'pedidos', 'pedidos_consultar', 'financeiro_pedidos', 'saida', 'expedicao'], { write: false }) },
+    { preHandler: requirePermission(['clientes', 'pedidos', 'pedidos_consultar', 'financeiro_pedidos', 'saida', 'expedicao', 'pdv_caixa', 'varejo_acougue'], { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
       const incluirInativos = ['1', 'true'].includes(
@@ -457,6 +467,9 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           c.razao_social,
           c.nome_fantasia,
           c.cnpj_cpf,
+          c.rg,
+          c.data_nascimento,
+          c.tipo_cliente,
           c.inscricao_estadual,
           c.endereco,
           c.numero,
@@ -478,6 +491,10 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           c.marchante_padrao,
           c.rota_padrao_nome,
           c.limite_credito,
+          c.crediario_ativo,
+          c.prazo_crediario_dias,
+          c.desconto_ativo,
+          c.desconto_max_pct,
           c.bloqueado_financeiro,
           c.permite_pagamento_entrega,
           c.is_padrao,
@@ -485,6 +502,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           c.inativado_em,
           c.created_at,
           c.updated_at,
+          COALESCE((SELECT SUM(ft.saldo_aberto) FROM financeiro_titulos ft WHERE ft.tenant_id = c.tenant_id AND ft.cliente_id = c.id AND ft.tipo = 'RECEBER' AND ft.status IN ('ABERTO', 'PARCIAL')), 0) AS credito_utilizado,
           COALESCE((SELECT COUNT(*)::int FROM cliente_produto_espec e WHERE e.cliente_id = c.id), 0) AS qtd_especificacoes,
           COALESCE((SELECT COUNT(*)::int FROM cliente_produto_espec e WHERE e.cliente_id = c.id AND e.alerta_reclamacao = 1), 0) AS qtd_alertas
         FROM clientes c
@@ -509,9 +527,21 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         success: true,
         data: rows.map((r) => {
           const eleg = elegMap?.get(String(r.id))
+          const limite = Number(r.limite_credito || 0)
+          const utilizado = Number(r.credito_utilizado || 0)
+          const disponivel = Number(Math.max(0, limite - utilizado).toFixed(2))
           return {
             ...r,
-            limite_credito: Number(r.limite_credito || 0),
+            rg: String(r.rg || ''),
+            data_nascimento: r.data_nascimento ? String(r.data_nascimento).slice(0, 10) : '',
+            tipo_cliente: String(r.tipo_cliente || 'AMBOS'),
+            limite_credito: limite,
+            credito_utilizado: utilizado,
+            credito_disponivel: disponivel,
+            crediario_ativo: Number(r.crediario_ativo || 0),
+            prazo_crediario_dias: Number(r.prazo_crediario_dias || 30),
+            desconto_ativo: Number(r.desconto_ativo || 0),
+            desconto_max_pct: Number(r.desconto_max_pct || 0),
             bloqueado_financeiro: Number(r.bloqueado_financeiro || 0),
             permite_pagamento_entrega: Number(r.permite_pagamento_entrega ?? 1),
             is_padrao: Number(r.is_padrao || 0),
@@ -534,7 +564,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
 
   app.post(
     '/api/cadastros/clientes',
-    { preHandler: requirePermission(['clientes', 'pedidos', 'financeiro_pedidos']) },
+    { preHandler: requirePermission(['clientes', 'pedidos', 'financeiro_pedidos', 'varejo_acougue', 'pdv_caixa']) },
     async (req, reply) => {
       const ctx = req.authCtx!
       const parsed = ClienteSchema.safeParse(req.body)
@@ -555,6 +585,9 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           razaoSocial: d.razao_social,
           nomeFantasia: d.nome_fantasia || d.razao_social,
           cnpjCpf: d.cnpj_cpf,
+          rg: d.rg || '',
+          dataNascimento: d.data_nascimento || null,
+          tipoCliente: d.tipo_cliente || 'AMBOS',
           inscricaoEstadual: d.inscricao_estadual,
           endereco: d.endereco,
           numero: d.numero,
@@ -572,6 +605,10 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           marchantePadrao: d.marchante_padrao,
           rotaPadraoNome: d.rota_padrao_nome,
           limiteCredito: String(d.limite_credito),
+          crediarioAtivo: flag01(d.crediario_ativo, d.limite_credito > 0 ? 1 : 0),
+          prazoCrediarioDias: Number(d.prazo_crediario_dias || 30),
+          descontoAtivo: flag01(d.desconto_ativo, d.desconto_max_pct > 0 ? 1 : 0),
+          descontoMaxPct: String(d.desconto_max_pct || 0),
           bloqueadoFinanceiro: flag01(d.bloqueado_financeiro, 0),
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
           isPadrao,
@@ -583,7 +620,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
     }
   )
 
-  app.put('/api/cadastros/clientes/:id', { preHandler: requirePermission(['clientes', 'pedidos']) }, async (req) => {
+  app.put('/api/cadastros/clientes/:id', { preHandler: requirePermission(['clientes', 'pedidos', 'varejo_acougue', 'pdv_caixa']) }, async (req) => {
     const ctx = req.authCtx!
     const id = String((req.params as { id: string }).id || '').trim()
     const parsed = ClienteSchema.safeParse(req.body)
@@ -603,6 +640,9 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           razaoSocial: d.razao_social,
           nomeFantasia: d.nome_fantasia || d.razao_social,
           cnpjCpf: d.cnpj_cpf,
+          rg: d.rg || '',
+          dataNascimento: d.data_nascimento || null,
+          tipoCliente: d.tipo_cliente || 'AMBOS',
           inscricaoEstadual: d.inscricao_estadual,
           endereco: d.endereco,
           numero: d.numero,
@@ -620,6 +660,10 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           marchantePadrao: d.marchante_padrao,
           rotaPadraoNome: d.rota_padrao_nome,
           limiteCredito: String(d.limite_credito),
+          crediarioAtivo: flag01(d.crediario_ativo, 0),
+          prazoCrediarioDias: Number(d.prazo_crediario_dias || 30),
+          descontoAtivo: flag01(d.desconto_ativo, 0),
+          descontoMaxPct: String(d.desconto_max_pct || 0),
           bloqueadoFinanceiro: flag01(d.bloqueado_financeiro, 0),
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
           isPadrao,

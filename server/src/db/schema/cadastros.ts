@@ -4,6 +4,7 @@ import {
   text,
   integer,
   numeric,
+  date,
   timestamp,
   jsonb,
   index,
@@ -30,6 +31,10 @@ export const produtos = pgTable(
     statusCurva: text('status_curva').notNull().default('C'),
     unidade: text('unidade').notNull().default('CX'),
     grupo: text('grupo').notNull().default(''),
+    especie: text('especie').notNull().default(''), // BOVINO | SUINO | AVES | EMPORIO | INSUMO | OUTROS
+    conservacao: text('conservacao').notNull().default('RESFRIADO'), // RESFRIADO | CONGELADO | SECO
+    validadeDias: integer('validade_dias').notNull().default(5),
+    taraEmbalagemKg: numeric('tara_embalagem_kg', { precision: 10, scale: 4 }).notNull().default('0'),
     classificacao: text('classificacao'), // MATERIA_PRIMA | SUBPRODUTO | APARA | ACABADO
     produtoPaiId: uuid('produto_pai_id'),
     pesoPadraoCx: numeric('peso_padrao_cx', { precision: 14, scale: 3 }),
@@ -261,6 +266,9 @@ export const clientes = pgTable(
     razaoSocial: text('razao_social').notNull(),
     nomeFantasia: text('nome_fantasia').notNull(),
     cnpjCpf: text('cnpj_cpf').notNull().default(''),
+    rg: text('rg').notNull().default(''),
+    dataNascimento: date('data_nascimento'),
+    tipoCliente: text('tipo_cliente').notNull().default('AMBOS'), // ATACADO | VAREJO | AMBOS
     inscricaoEstadual: text('inscricao_estadual').notNull().default(''),
     endereco: text('endereco').notNull().default(''),
     numero: text('numero').notNull().default(''),
@@ -282,6 +290,10 @@ export const clientes = pgTable(
     marchantePadrao: text('marchante_padrao').notNull().default(''),
     rotaPadraoNome: text('rota_padrao_nome').notNull().default(''),
     limiteCredito: numeric('limite_credito', { precision: 14, scale: 2 }).notNull().default('0'),
+    crediarioAtivo: integer('crediario_ativo').notNull().default(0),
+    prazoCrediarioDias: integer('prazo_crediario_dias').notNull().default(30),
+    descontoAtivo: integer('desconto_ativo').notNull().default(0),
+    descontoMaxPct: numeric('desconto_max_pct', { precision: 6, scale: 2 }).notNull().default('0'),
     bloqueadoFinanceiro: integer('bloqueado_financeiro').notNull().default(0),
     permitePagamentoEntrega: integer('permite_pagamento_entrega').notNull().default(1),
     isPadrao: integer('is_padrao').notNull().default(0),

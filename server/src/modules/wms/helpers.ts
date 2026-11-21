@@ -283,7 +283,8 @@ export async function gerarCodigoDocumento(
     | 'INTERUNIDADES'
     | 'VAREJO_INV'
     | 'PDV_CAIXA'
-    | 'PDV_VENDA',
+    | 'PDV_VENDA'
+    | 'ETQ_ACOUGUE',
   prefix: string,
   pad = 4,
 ): Promise<string> {

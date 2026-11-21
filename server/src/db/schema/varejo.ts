@@ -97,6 +97,7 @@ export const pdvCaixas = pgTable(
     totalPix: numeric('total_pix', { precision: 14, scale: 2 }).notNull().default('0'),
     totalDebito: numeric('total_debito', { precision: 14, scale: 2 }).notNull().default('0'),
     totalCredito: numeric('total_credito', { precision: 14, scale: 2 }).notNull().default('0'),
+    totalCrediario: numeric('total_crediario', { precision: 14, scale: 2 }).notNull().default('0'),
     totalSuprimentos: numeric('total_suprimentos', { precision: 14, scale: 2 }).notNull().default('0'),
     totalSangrias: numeric('total_sangrias', { precision: 14, scale: 2 }).notNull().default('0'),
     saldoEsperadoDinheiro: numeric('saldo_esperado_dinheiro', { precision: 14, scale: 2 }).notNull().default('0'),
@@ -150,9 +151,14 @@ export const pdvVendas = pgTable(
     clienteNome: text('cliente_nome').notNull().default('CONSUMIDOR FINAL'),
     clienteDoc: text('cliente_doc').notNull().default(''),
     subtotal: numeric('subtotal', { precision: 14, scale: 2 }).notNull().default('0'),
+    descontoTipo: text('desconto_tipo').notNull().default('VALOR'), // VALOR | PCT
+    descontoPct: numeric('desconto_pct', { precision: 6, scale: 2 }).notNull().default('0'),
     descontoValor: numeric('desconto_valor', { precision: 14, scale: 2 }).notNull().default('0'),
     valorTotal: numeric('valor_total', { precision: 14, scale: 2 }).notNull().default('0'),
     trocoValor: numeric('troco_valor', { precision: 14, scale: 2 }).notNull().default('0'),
+    crediarioValor: numeric('crediario_valor', { precision: 14, scale: 2 }).notNull().default('0'),
+    tituloReceberId: uuid('titulo_receber_id'),
+    vencimentoCrediario: date('vencimento_crediario'),
     pagamentosJson: jsonb('pagamentos_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
     itensJson: jsonb('itens_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
     status: text('status').notNull().default('CONCLUIDA'), // CONCLUIDA | CANCELADA
@@ -182,16 +188,64 @@ export const varejoInventarios = pgTable(
       .references(() => filiais.id, { onDelete: 'cascade' }),
     codigo: text('codigo').notNull(),
     titulo: text('titulo').notNull().default(''),
+    tipoInventario: text('tipo_inventario').notNull().default('EMPORIO_CEGO'), // EMPORIO_CEGO | ACOUGUE_BIPADO
+    liberadoOperador: integer('liberado_operador').notNull().default(1),
     status: text('status').notNull().default('ABERTO'), // ABERTO | CONCLUIDO
     totalItens: integer('total_itens').notNull().default(0),
     totalDivergencias: integer('total_divergencias').notNull().default(0),
     itensJson: jsonb('itens_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    etiquetasBipadasJson: jsonb('etiquetas_bipadas_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    mpsPesadasJson: jsonb('mps_pesadas_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
     operadorId: uuid('operador_id').references(() => operadores.id, { onDelete: 'set null' }),
     operadorNome: text('operador_nome').notNull().default(''),
     concluidoEm: timestamp('concluido_em', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('uq_varejo_inv_codigo').on(t.tenantId, t.codigo)]
+)
+
+// ── ETIQUETAS PESADAS DO AÇOUGUE (QR 80x45 COM SERIAL ÚNICO + RASTREIO MP) ──
+export const etiquetasAcougue = pgTable(
+  'etiquetas_acougue',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    codigoEtiqueta: text('codigo_etiqueta').notNull(), // ex: ETQ00001
+    produtoId: uuid('produto_id')
+      .notNull()
+      .references(() => produtos.id),
+    produtoCodigo: text('produto_codigo').notNull().default(''),
+    produtoDescricao: text('produto_descricao').notNull().default(''),
+    especie: text('especie').notNull().default('OUTROS'),
+    conservacao: text('conservacao').notNull().default('RESFRIADO'),
+    caixaMpId: uuid('caixa_mp_id').references(() => estoqueCaixas.id, { onDelete: 'set null' }),
+    eanMpOrigem: text('ean_mp_origem').notNull().default(''),
+    pesoBrutoKg: numeric('peso_bruto_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    taraKg: numeric('tara_kg', { precision: 14, scale: 4 }).notNull().default('0'),
+    pesoLiquidoKg: numeric('peso_liquido_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    precoKg: numeric('preco_kg', { precision: 14, scale: 4 }).notNull().default('0'),
+    valorTotal: numeric('valor_total', { precision: 14, scale: 2 }).notNull().default('0'),
+    lote: text('lote').notNull().default(''),
+    dataPesagem: date('data_pesagem').notNull(),
+    validade: date('validade'),
+    payloadQr: text('payload_qr').notNull().default(''),
+    status: text('status').notNull().default('EM_ESTOQUE'), // EM_ESTOQUE | VENDIDA | CANCELADA | PERDA_INVENTARIO
+    vendaPdvId: uuid('venda_pdv_id').references(() => pdvVendas.id, { onDelete: 'set null' }),
+    vendidaEm: timestamp('vendida_em', { withTimezone: true }),
+    operadorId: uuid('operador_id').references(() => operadores.id, { onDelete: 'set null' }),
+    operadorNome: text('operador_nome').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_etq_acougue_codigo').on(t.tenantId, t.codigoEtiqueta),
+    index('idx_etq_acougue_filial_status').on(t.tenantId, t.filialId, t.status),
+    index('idx_etq_acougue_mp').on(t.caixaMpId),
+  ]
 )
 
 // ── MOVIMENTAÇÃO INTER-UNIDADES (1/2 -> 1/1 | 1/2 -> 2/1 | 2/1 -> 1/2) ──────

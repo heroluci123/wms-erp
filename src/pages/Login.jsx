@@ -17,7 +17,7 @@ import { isCliente } from '../utils/permissoes'
 
 export function Login() {
   const navigate = useNavigate()
-  const { operador, sessionToken, setSessao, logout, toastSuccess, toastError } = useAppStore()
+  const { operador, sessionToken, setSessao, setFiliaisDisponiveis, setFilialAtiva, logout, toastSuccess, toastError } = useAppStore()
 
   const [loginInput, setLoginInput] = useState('')
   const [senha, setSenha] = useState('')
@@ -71,6 +71,10 @@ export function Login() {
       }
 
       setSessao(op, token)
+      if (Array.isArray(res?.contexto?.filiais) && res.contexto.filiais.length > 0) {
+        setFiliaisDisponiveis(res.contexto.filiais)
+        setFilialAtiva(res.contexto.filial_id || res.contexto.filiais[0].id)
+      }
 
       if (Number(op.deve_trocar_senha) === 1) {
         setSenhaAtualTroca(senha)

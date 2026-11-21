@@ -212,54 +212,22 @@ export function registerInterunidadesRoutes(app: FastifyInstance, conn: DbConnec
         const especie = detectarEspecieProduto({ grupo: prod.grupo, ncm: prod.ncm, descricao: prod.descricao })
         const endAnterior = cx.endereco || ''
 
-        // 1. Baixa caixa da câmara fria (1/2)
+        const filialOrigId = cx.filialId
+
+        // 1. A etiqueta continua VIVA — apenas troca de filial (1/2 -> 1/1) aguardando o 2º bip do açougueiro!
         await tx
           .update(estoqueCaixas)
           .set({
-            status: 'TRANSFERIDA_LOJA',
-            endereco: `LOJA-${filialLoja.codigo}`,
+            filialId: filialLoja.id,
+            status: 'EM_TRANSITO_LOJA',
+            endereco: 'TRANSITO-LOJA',
+            pesoRestanteKg: toDec(pesoKg, 3),
             paleteId: null,
             updatedAt: new Date(),
           })
           .where(eq(estoqueCaixas.id, cx.id))
 
-        await recalcularPosicaoEnderecos(tx, ctx.tenantId, cx.filialId, [endAnterior])
-
-        // 2. Soma saldo na hora no Estoque da Loja (1/1)
-        const [estLoja] = await tx
-          .select()
-          .from(varejoEstoque)
-          .where(
-            and(
-              eq(varejoEstoque.tenantId, ctx.tenantId),
-              eq(varejoEstoque.filialId, filialLoja.id),
-              eq(varejoEstoque.produtoId, prod.id),
-            ),
-          )
-          .limit(1)
-
-        const saldoAnt = estLoja ? toNum(estLoja.saldoQtd, 0) : 0
-        const saldoNovo = Number((saldoAnt + pesoKg).toFixed(3))
-
-        if (estLoja) {
-          await tx
-            .update(varejoEstoque)
-            .set({ saldoQtd: toDec(saldoNovo, 3), updatedAt: new Date() })
-            .where(eq(varejoEstoque.id, estLoja.id))
-        } else {
-          await tx.insert(varejoEstoque).values({
-            id: uuidv7(),
-            tenantId: ctx.tenantId,
-            filialId: filialLoja.id,
-            produtoId: prod.id,
-            unidadeVenda: 'KG',
-            saldoQtd: toDec(saldoNovo, 3),
-            precoVendaVarejo: toDec(toNum(prod.valorUnitario, 0) || valorUnit, 4),
-            estoqueMinimo: '0.000',
-            codigoBalanca: (prod.codigo || '').replace(/\D/g, '').slice(-5),
-            setorLoja: especie === 'OUTROS' ? 'EMPORIO' : 'ACOUGUE',
-          })
-        }
+        await recalcularPosicaoEnderecos(tx, ctx.tenantId, filialOrigId, [endAnterior])
 
         const movId = uuidv7()
         const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'INTERUNIDADES', 'TRL', 5)
@@ -269,7 +237,7 @@ export function registerInterunidadesRoutes(app: FastifyInstance, conn: DbConnec
           tenantId: ctx.tenantId,
           codigo,
           tipoOperacao: 'TRANSFERENCIA_LOJA',
-          filialOrigemId: cx.filialId,
+          filialOrigemId: filialOrigId,
           filialDestinoId: filialLoja.id,
           caixaId: cx.id,
           eanCaixa: cx.eanCaixa,
@@ -285,23 +253,7 @@ export function registerInterunidadesRoutes(app: FastifyInstance, conn: DbConnec
           dataMovimento: hojeIsoLocal(),
           operadorId: ctx.operador.id,
           operadorNome: ctx.operador.nome,
-          observacao: String(body.observacao || '').trim() || `Transferência bipada para ${filialLoja.codigo} - ${filialLoja.nome}`,
-        })
-
-        await tx.insert(varejoMovimentacoes).values({
-          id: uuidv7(),
-          tenantId: ctx.tenantId,
-          filialId: filialLoja.id,
-          produtoId: prod.id,
-          tipo: 'ENTRADA_TRANSFERENCIA',
-          qtd: toDec(pesoKg, 3),
-          saldoAnterior: toDec(saldoAnt, 3),
-          saldoNovo: toDec(saldoNovo, 3),
-          referenciaTipo: 'INTERUNIDADES',
-          referenciaId: movId,
-          observacao: `Caixa ${cx.eanCaixa} recebida da Matriz (${codigo})`,
-          operadorId: ctx.operador.id,
-          operadorNome: ctx.operador.nome,
+          observacao: String(body.observacao || '').trim() || `Transferência bipada p/ ${filialLoja.nome} (aguardando 2º bip no Açougue)`,
         })
 
         await registrarHistoricoCaixa(tx, {
@@ -309,16 +261,16 @@ export function registerInterunidadesRoutes(app: FastifyInstance, conn: DbConnec
           caixaId: cx.id,
           eanCaixa: cx.eanCaixa,
           operacao: 'TRANSFERENCIA_LOJA',
-          detalhes: `Transferida para ${filialLoja.codigo} - ${filialLoja.nome} (${codigo}) • ${pesoKg.toFixed(3)} kg`,
+          detalhes: `Transferida para ${filialLoja.codigo} - ${filialLoja.nome} (${codigo}) • ${pesoKg.toFixed(3)} kg • Aguardando 2º bip no Açougue`,
           operadorNome: ctx.operador.nome,
         })
 
         await registrarMovimentacaoLog(tx, {
           tenantId: ctx.tenantId,
-          filialId: cx.filialId,
+          filialId: filialOrigId,
           produtoId: prod.id,
           enderecoOrigem: endAnterior,
-          enderecoDestino: `LOJA-${filialLoja.codigo}`,
+          enderecoDestino: 'TRANSITO-LOJA',
           lote: cx.lote || '',
           qtdCaixas: 1,
           qtdKg: pesoKg,
@@ -336,7 +288,7 @@ export function registerInterunidadesRoutes(app: FastifyInstance, conn: DbConnec
           especie,
           peso_kg: pesoKg,
           valor_total: valorTotal,
-          saldo_loja_novo: saldoNovo,
+          status_caixa: 'EM_TRANSITO_LOJA',
           filial_destino: `${filialLoja.codigo} - ${filialLoja.nome}`,
         }
       })

@@ -24,6 +24,8 @@ const CreateOperadorSchema = z.object({
   ativo: z.union([z.boolean(), z.number()]).optional().default(1),
   permissoes: z.record(z.boolean()).optional(),
   filial_id: z.string().uuid().optional(),
+  filial_padrao_id: z.string().uuid().optional(),
+  filiais_permitidas: z.array(z.string().uuid()).optional(),
 })
 
 const UpdateOperadorSchema = z.object({
@@ -37,6 +39,8 @@ const UpdateOperadorSchema = z.object({
   ativo: z.union([z.boolean(), z.number()]).optional(),
   permissoes: z.record(z.boolean()).optional(),
   filial_id: z.string().uuid().nullable().optional(),
+  filial_padrao_id: z.string().uuid().nullable().optional(),
+  filiais_permitidas: z.array(z.string().uuid()).optional(),
 })
 
 const SavePerfilSchema = z.object({
@@ -110,11 +114,21 @@ export function registerOperadoresRoutes(app: FastifyInstance, conn: DbConnectio
       const senhaHash = await hashSenha(senhaInicial)
 
       const newId = uuidv7()
+      const filiaisPerm = Array.isArray(d.filiais_permitidas)
+        ? Array.from(new Set(d.filiais_permitidas.filter(Boolean)))
+        : []
+      const filialPadrao =
+        d.filial_padrao_id || d.filial_id || filiaisPerm[0] || ctx.filialId || null
+      if (filialPadrao && filiaisPerm.length > 0 && !filiaisPerm.includes(filialPadrao)) {
+        filiaisPerm.unshift(filialPadrao)
+      }
+
       await conn.db.insert(operadores).values({
         id: newId,
         tenantId: ctx.tenantId,
         empresaId: ctx.empresaId,
-        filialPadraoId: d.filial_id || ctx.filialId || null,
+        filialPadraoId: filialPadrao,
+        filiaisPermitidasJson: filiaisPerm,
         nome: d.nome,
         login: d.login,
         pin: '****',
@@ -221,8 +235,18 @@ export function registerOperadoresRoutes(app: FastifyInstance, conn: DbConnectio
         atualizadoPorNome: executor.nome,
         updatedAt: new Date(),
       }
-      if (d.filial_id !== undefined) {
-        updateValues.filialPadraoId = d.filial_id
+      if (d.filial_id !== undefined || d.filial_padrao_id !== undefined) {
+        updateValues.filialPadraoId = d.filial_padrao_id !== undefined ? d.filial_padrao_id : d.filial_id
+      }
+      if (d.filiais_permitidas !== undefined) {
+        const permList = Array.from(new Set(d.filiais_permitidas.filter(Boolean)))
+        updateValues.filiaisPermitidasJson = permList
+        if (permList.length > 0) {
+          const padraoAtual = (updateValues.filialPadraoId as string | null | undefined) ?? atual.filialPadraoId
+          if (!padraoAtual || !permList.includes(padraoAtual)) {
+            updateValues.filialPadraoId = permList[0]
+          }
+        }
       }
       if (d.senha && d.senha.trim().length > 0) {
         if (d.senha.trim().length < 4) {
