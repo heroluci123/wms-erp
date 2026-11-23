@@ -1592,3 +1592,46 @@ input[type="number"] {
   .desktop-only.flex { display: flex; }
   .mobile-only { display: none; }
 }
+
+/* ─── Reset Global de Impressão / PDF Multi-Página (Chrome / Edge / Electron) ─ */
+@media print {
+  html,
+  body,
+  #root,
+  .app-shell,
+  .app-shell-col,
+  .app-shell-body,
+  .main-content,
+  .main-content-mobile {
+    display: block !important;
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .titlebar,
+  .sidebar,
+  .sidebar-edge-toggle,
+  .no-print,
+  .toast-container {
+    display: none !important;
+  }
+
+  .card {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+}

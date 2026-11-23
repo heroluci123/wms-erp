@@ -204,10 +204,10 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
 
           .print-dossie-executive {
             display: block !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+            position: static !important;
             width: 100% !important;
+            height: auto !important;
+            overflow: visible !important;
             color: #0f172a !important;
             background: #ffffff !important;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FileSpreadsheet, Printer, Calendar, Search, Package, Truck,
   ArrowDownCircle, Layers, Box, CheckCircle2, RefreshCw, Filter
@@ -42,8 +42,391 @@ const PRESETS = [
   { label: 'Este ano', getRange: () => [startOfYear(new Date()).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10)] },
 ];
 
+const PRINT_WMS_EXEC_RULES = `
+  @page {
+    size: A4 portrait;
+    margin: 8mm 9mm 10mm 9mm;
+  }
+
+  * {
+    box-sizing: border-box !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  .print-wms-executive {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    color: #0f172a !important;
+    background: #ffffff !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+    font-size: 9.2px !important;
+    line-height: 1.28 !important;
+  }
+
+  .pw-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 10px !important;
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%) !important;
+    color: #ffffff !important;
+    border-bottom: 3.5px solid #0ea5e9 !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .pw-header div,
+  .pw-header span,
+  .pw-header strong {
+    color: #f8fafc !important;
+  }
+
+  .pw-brand-title {
+    font-size: 14.5px !important;
+    font-weight: 900 !important;
+    color: #ffffff !important;
+    letter-spacing: -0.3px !important;
+  }
+
+  .pw-brand-sub {
+    font-size: 8.2px !important;
+    color: #bae6fd !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.4px !important;
+    margin-top: 2px !important;
+  }
+
+  .pw-doc-title {
+    font-size: 11.5px !important;
+    font-weight: 800 !important;
+    color: #ffffff !important;
+    text-align: right !important;
+  }
+
+  .pw-doc-meta {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+    font-size: 8.2px !important;
+    color: #e0f2fe !important;
+    justify-content: flex-end !important;
+    margin-top: 2px !important;
+  }
+
+  .pw-kpi-strip {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .pw-kpi-strip > * {
+    border-radius: 6px !important;
+    padding: 7px 10px !important;
+    border: 1px solid #cbd5e1 !important;
+    border-top: 3.5px solid #1e3a8a !important;
+    background: #f8fafc !important;
+  }
+
+  .pw-kpi-strip > *:nth-child(1) {
+    background: #ecfdf5 !important;
+    border-color: #a7f3d0 !important;
+    border-top-color: #059669 !important;
+  }
+  .pw-kpi-strip > *:nth-child(1) * { color: #065f46 !important; }
+
+  .pw-kpi-strip > *:nth-child(2) {
+    background: #eff6ff !important;
+    border-color: #bfdbfe !important;
+    border-top-color: #2563eb !important;
+  }
+  .pw-kpi-strip > *:nth-child(2) * { color: #1e3a8a !important; }
+
+  .pw-kpi-strip > *:nth-child(3) {
+    background: #f5f3ff !important;
+    border-color: #ddd6fe !important;
+    border-top-color: #7c3aed !important;
+  }
+  .pw-kpi-strip > *:nth-child(3) * { color: #4c1d95 !important; }
+
+  .pw-kpi-strip > *:nth-child(4) {
+    background: #ecfeff !important;
+    border-color: #a5f3fc !important;
+    border-top-color: #0891b2 !important;
+  }
+  .pw-kpi-strip > *:nth-child(4) * { color: #155e75 !important; }
+
+  .pw-kpi-label {
+    font-size: 7.3px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+  }
+
+  .pw-kpi-val {
+    font-size: 12px !important;
+    font-weight: 900 !important;
+    margin-top: 2px !important;
+  }
+
+  .pw-kpi-sub {
+    font-size: 7.8px !important;
+    margin-top: 1px !important;
+  }
+
+  .pw-major-section {
+    margin-top: 12px !important;
+    margin-bottom: 14px !important;
+    padding: 8px 9px 10px !important;
+    border: 1.5px solid #a7f3d0 !important;
+    border-radius: 7px !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+
+  .pw-major-header {
+    background: linear-gradient(90deg, #065f46 0%, #059669 100%) !important;
+    color: #ffffff !important;
+    padding: 6px 10px !important;
+    font-size: 9.2px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.25px !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 6px 12px !important;
+    white-space: normal !important;
+    border-radius: 4px !important;
+    border-left: 4px solid #34d399 !important;
+    margin-bottom: 8px !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  .pw-major-header * {
+    color: #ffffff !important;
+  }
+
+  /* Seção 2 — Entradas (Azul Royal) */
+  .pw-section-entradas {
+    border-color: #bfdbfe !important;
+  }
+  .pw-section-entradas .pw-major-header {
+    background: linear-gradient(90deg, #1e3a8a 0%, #2563eb 100%) !important;
+    border-left-color: #60a5fa !important;
+  }
+  .pw-section-entradas table thead th {
+    background: #eff6ff !important;
+    color: #1e3a8a !important;
+    border-bottom: 1.5px solid #93c5fd !important;
+  }
+
+  /* Seção 3 — Estoque Consolidado por Produto (Roxo / Índigo) */
+  .pw-section-estoque-prod {
+    border-color: #ddd6fe !important;
+  }
+  .pw-section-estoque-prod .pw-major-header {
+    background: linear-gradient(90deg, #4c1d95 0%, #7c3aed 100%) !important;
+    border-left-color: #a78bfa !important;
+  }
+  .pw-section-estoque-prod table thead th {
+    background: #f5f3ff !important;
+    color: #4c1d95 !important;
+    border-bottom: 1.5px solid #c4b5fd !important;
+  }
+  .pw-section-estoque-prod .pw-tfoot-general td {
+    background: #ede9fe !important;
+    color: #4c1d95 !important;
+    border-top-color: #7c3aed !important;
+  }
+
+  /* Seção 4 — Estoque Analítico Caixa a Caixa (Ciano / Petróleo) */
+  .pw-section-estoque-cx {
+    border-color: #a5f3fc !important;
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+  .pw-section-estoque-cx .pw-major-header {
+    background: linear-gradient(90deg, #155e75 0%, #0891b2 100%) !important;
+    border-left-color: #22d3ee !important;
+  }
+  .pw-section-estoque-cx table thead th {
+    background: #ecfeff !important;
+    color: #155e75 !important;
+    border-bottom: 1.5px solid #67e8f9 !important;
+  }
+  .pw-section-estoque-cx .pw-tfoot-general td {
+    background: #cffafe !important;
+    color: #155e75 !important;
+    border-top-color: #0891b2 !important;
+  }
+
+  /* CARD INDIVIDUAL DE CADA ROMANEIO NO PDF */
+  .pw-rom-card {
+    border: 1px solid #99f6e4 !important;
+    border-left: 3.5px solid #059669 !important;
+    border-radius: 5px !important;
+    margin-bottom: 10px !important;
+    overflow: visible !important;
+  }
+
+  .pw-rom-banner {
+    background: #ecfdf5 !important;
+    border-bottom: 1.5px solid #6ee7b7 !important;
+    padding: 5px 8px !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 8px !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  .pw-rom-title {
+    font-size: 9.8px !important;
+    font-weight: 800 !important;
+    color: #065f46 !important;
+    flex: 1 !important;
+  }
+
+  .pw-rom-badge-total {
+    background: #059669 !important;
+    color: #ffffff !important;
+    padding: 3px 8px !important;
+    border-radius: 4px !important;
+    font-size: 8.8px !important;
+    font-weight: 900 !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  .pw-rom-meta {
+    background: #f1f5f9 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding: 4px 9px !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: space-between !important;
+    gap: 4px 10px !important;
+    font-size: 8.2px !important;
+    color: #334155 !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  .pw-rom-prod-pills {
+    background: #f8fafc !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    padding: 3.5px 9px !important;
+    font-size: 7.9px !important;
+    color: #1e293b !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  .pw-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 8.1px !important;
+  }
+
+  .pw-table thead {
+    display: table-header-group !important;
+  }
+
+  .pw-table tfoot {
+    display: table-row-group !important;
+  }
+
+  .pw-table tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .pw-table th {
+    background: #ecfdf5 !important;
+    color: #065f46 !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    border-bottom: 1.5px solid #6ee7b7 !important;
+    padding: 3.5px 5px !important;
+    text-align: left !important;
+    font-size: 7.5px !important;
+  }
+
+  .pw-table td {
+    border-bottom: 1px solid #e2e8f0 !important;
+    padding: 3px 5px !important;
+    color: #0f172a !important;
+  }
+
+  .pw-tr-zebra td {
+    background: #f8fafc !important;
+  }
+
+  .pw-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+    font-size: 7.8px !important;
+  }
+
+  .pw-tfoot-rom td {
+    background: #d1fae5 !important;
+    color: #065f46 !important;
+    border-top: 1.5px solid #059669 !important;
+    padding: 5px 6px !important;
+    font-size: 8.8px !important;
+    font-weight: 900 !important;
+  }
+
+  .pw-tfoot-general td {
+    background: #dbeafe !important;
+    color: #1e3a8a !important;
+    border-top: 1.5px solid #2563eb !important;
+    padding: 5.5px 6px !important;
+    font-size: 8.8px !important;
+    font-weight: 900 !important;
+  }
+
+  .pw-sub-title {
+    background: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+    border-bottom: none !important;
+    padding: 4.5px 8px !important;
+    font-size: 8.4px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    color: #1e293b !important;
+    margin-top: 8px !important;
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  .pw-footer {
+    display: flex !important;
+    justify-content: space-between !important;
+    border-top: 1px solid #cbd5e1 !important;
+    padding-top: 5px !important;
+    font-size: 7.5px !important;
+    color: #64748b !important;
+    margin-top: 14px !important;
+  }
+`;
+
 export function RelatorioGeralWms({ somenteCliente = false }) {
-  const { operador } = useAppStore();
+  const { operador, toastError } = useAppStore();
+  const printExecutiveRef = useRef(null);
   const modoCliente = somenteCliente || isCliente(operador);
   const [presetAtivo, setPresetAtivo] = useState(3); // Padrão: Este mês
   const [dataInicio, setDataInicio] = useState(() => startOfMonth(new Date()).toISOString().slice(0, 10));
@@ -251,16 +634,80 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
       });
     } catch (err) {
       console.error('Erro ao gerar Excel:', err);
-      alert('Erro ao gerar arquivo Excel: ' + err.message);
+      toastError('Erro ao gerar arquivo Excel', err.message || 'Tente novamente.');
     } finally {
       setExportingExcel(false);
     }
   };
 
+  // Impressão / Exportação PDF multi-página em iframe isolado (imune ao overflow/100vh da casca SPA)
+  const handlePrintPdfExecutivo = () => {
+    const el = printExecutiveRef.current;
+    if (!el) {
+      window.print();
+      return;
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Relatório Executivo WMS — ${fmtDateBR(periodoAtivo.inicio)} a ${fmtDateBR(periodoAtivo.fim)}</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: auto;
+      overflow: visible;
+      background: #ffffff;
+      color: #0f172a;
+    }
+    ${PRINT_WMS_EXEC_RULES}
+  </style>
+</head>
+<body>
+  ${el.outerHTML}
+</body>
+</html>`);
+    doc.close();
+
+    const cleanup = () => {
+      setTimeout(() => {
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      }, 600);
+    };
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.onafterprint = cleanup;
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        setTimeout(cleanup, 30000);
+      } catch (err) {
+        console.error('Erro ao abrir impressão do PDF Executivo:', err);
+        cleanup();
+        window.print();
+      }
+    }, 140);
+  };
+
   return (
     <div className="relatorio-geral-wms-wrapper">
       {/* ═══════════════════════════════════════════════════════════════════════
-          ESTILOS EXCLUSIVOS DE IMPRESSÃO / PDF EXECUTIVO A4
+          ESTILOS EXCLUSIVOS DE IMPRESSÃO / PDF EXECUTIVO A4 (também p/ Ctrl+P)
          ═══════════════════════════════════════════════════════════════════════ */}
       <style>{`
         .print-wms-executive {
@@ -268,20 +715,6 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
         }
 
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 8mm 9mm 10mm 9mm;
-          }
-
-          body * {
-            visibility: hidden !important;
-          }
-
-          .print-wms-executive,
-          .print-wms-executive * {
-            visibility: visible !important;
-          }
-
           .screen-wms-view,
           .no-print,
           nav,
@@ -291,390 +724,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
             display: none !important;
           }
 
-          .print-wms-executive {
-            display: block !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            color: #0f172a !important;
-            background: #ffffff !important;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
-            font-size: 9.5px !important;
-            line-height: 1.25 !important;
-          }
-
-          .print-wms-executive,
-          .print-wms-executive * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            color-adjust: exact !important;
-          }
-
-          .pw-header {
-            display: flex !important;
-            justify-content: space-between !important;
-            align-items: center !important;
-            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%) !important;
-            color: #ffffff !important;
-            border-bottom: 3.5px solid #0ea5e9 !important;
-            border-radius: 6px !important;
-            padding: 10px 14px !important;
-            margin-bottom: 10px !important;
-          }
-
-          .pw-header div {
-            color: #f8fafc !important;
-          }
-
-          .pw-header > div > div:nth-child(2) {
-            color: #bae6fd !important;
-          }
-
-          .pw-brand-title {
-            font-size: 15px !important;
-            font-weight: 900 !important;
-            color: #0f172a !important;
-            letter-spacing: -0.3px !important;
-          }
-
-          .pw-brand-sub {
-            font-size: 8.5px !important;
-            color: #475569 !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.4px !important;
-          }
-
-          .pw-doc-title {
-            font-size: 12px !important;
-            font-weight: 800 !important;
-            color: #0f172a !important;
-            text-align: right !important;
-          }
-
-          .pw-doc-meta {
-            display: flex !important;
-            gap: 12px !important;
-            font-size: 8.5px !important;
-            color: #475569 !important;
-            justify-content: flex-end !important;
-            margin-top: 2px !important;
-          }
-
-          .pw-kpi-strip {
-            display: grid !important;
-            grid-template-columns: repeat(4, 1fr) !important;
-            gap: 8px !important;
-            margin-bottom: 14px !important;
-            background: transparent !important;
-            border: none !important;
-            padding: 0 !important;
-          }
-
-          .pw-kpi-strip > * {
-            border-radius: 6px !important;
-            padding: 7px 10px !important;
-            border: 1px solid #cbd5e1 !important;
-            border-top: 3.5px solid #1e3a8a !important;
-            background: #f8fafc !important;
-          }
-
-          .pw-kpi-strip > *:nth-child(1) {
-            background: #ecfdf5 !important;
-            border-color: #a7f3d0 !important;
-            border-top-color: #059669 !important;
-          }
-          .pw-kpi-strip > *:nth-child(1) * { color: #065f46 !important; }
-
-          .pw-kpi-strip > *:nth-child(2) {
-            background: #eff6ff !important;
-            border-color: #bfdbfe !important;
-            border-top-color: #2563eb !important;
-          }
-          .pw-kpi-strip > *:nth-child(2) * { color: #1e3a8a !important; }
-
-          .pw-kpi-strip > *:nth-child(3) {
-            background: #f5f3ff !important;
-            border-color: #ddd6fe !important;
-            border-top-color: #7c3aed !important;
-          }
-          .pw-kpi-strip > *:nth-child(3) * { color: #4c1d95 !important; }
-
-          .pw-kpi-strip > *:nth-child(4) {
-            background: #ecfeff !important;
-            border-color: #a5f3fc !important;
-            border-top-color: #0891b2 !important;
-          }
-          .pw-kpi-strip > *:nth-child(4) * { color: #155e75 !important; }
-
-          .pw-kpi-box {
-            border-right: 1px solid #e2e8f0 !important;
-            padding: 2px 6px !important;
-          }
-          .pw-kpi-box:last-child {
-            border-right: none !important;
-          }
-
-          .pw-kpi-label {
-            font-size: 7.5px !important;
-            font-weight: 800 !important;
-            color: #64748b !important;
-            text-transform: uppercase !important;
-          }
-
-          .pw-kpi-val {
-            font-size: 12px !important;
-            font-weight: 900 !important;
-            color: #0f172a !important;
-            margin-top: 1px !important;
-          }
-
-          .pw-kpi-sub {
-            font-size: 8px !important;
-            color: #475569 !important;
-          }
-
-          .pw-major-section {
-            margin-top: 14px !important;
-            margin-bottom: 18px !important;
-            padding: 8px 9px 10px !important;
-            border: 1.5px solid #a7f3d0 !important;
-            border-radius: 7px !important;
-            background: #ffffff !important;
-          }
-
-          .pw-major-header {
-            background: linear-gradient(90deg, #065f46 0%, #059669 100%) !important;
-            color: #ffffff !important;
-            padding: 6px 11px !important;
-            font-size: 10px !important;
-            font-weight: 800 !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.35px !important;
-            display: flex !important;
-            justify-content: space-between !important;
-            align-items: center !important;
-            gap: 12px !important;
-            white-space: nowrap !important;
-            border-radius: 4px !important;
-            border-left: 4px solid #34d399 !important;
-            margin-bottom: 9px !important;
-          }
-
-          .pw-major-header * {
-            color: #ffffff !important;
-          }
-
-          /* Módulo 2 — Entradas (Azul Royal) */
-          .pw-major-section ~ .pw-major-section {
-            border-color: #bfdbfe !important;
-          }
-          .pw-major-section ~ .pw-major-section .pw-major-header {
-            background: linear-gradient(90deg, #1e3a8a 0%, #2563eb 100%) !important;
-            border-left-color: #60a5fa !important;
-          }
-          .pw-major-section ~ .pw-major-section table thead th {
-            background: #eff6ff !important;
-            color: #1e3a8a !important;
-            border-bottom: 1.5px solid #93c5fd !important;
-          }
-          .pw-major-section ~ .pw-major-section table tbody tr:nth-child(even) td {
-            background: #f8fafc !important;
-          }
-
-          /* Módulo 3 — Estoque Consolidado por Produto (Roxo / Índigo) */
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section {
-            border-color: #ddd6fe !important;
-          }
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-major-header {
-            background: linear-gradient(90deg, #4c1d95 0%, #7c3aed 100%) !important;
-            border-left-color: #a78bfa !important;
-          }
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section table thead th {
-            background: #f5f3ff !important;
-            color: #4c1d95 !important;
-            border-bottom: 1.5px solid #c4b5fd !important;
-          }
-
-          /* Módulo 4 — Estoque Analítico Caixa a Caixa (Ciano / Petróleo) */
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section {
-            border-color: #a5f3fc !important;
-          }
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-major-header {
-            background: linear-gradient(90deg, #155e75 0%, #0891b2 100%) !important;
-            border-left-color: #22d3ee !important;
-          }
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section table thead th {
-            background: #ecfeff !important;
-            color: #155e75 !important;
-            border-bottom: 1.5px solid #67e8f9 !important;
-          }
-
-          .pw-table tfoot {
-            display: table-row-group !important;
-          }
-
-          /* CARD INDIVIDUAL DE CADA ROMANEIO NO PDF */
-          .pw-rom-card {
-            border: 1.5px solid #64748b !important;
-            border-radius: 4px !important;
-            margin-bottom: 11px !important;
-            page-break-inside: avoid !important;
-            overflow: hidden !important;
-          }
-
-          .pw-rom-banner {
-            background: #1e293b !important;
-            color: #ffffff !important;
-            padding: 5px 10px !important;
-            display: flex !important;
-            justify-content: space-between !important;
-            align-items: center !important;
-          }
-
-          .pw-rom-title {
-            font-size: 10.5px !important;
-            font-weight: 800 !important;
-          }
-
-          .pw-rom-badge-total {
-            background: #059669 !important;
-            color: #ffffff !important;
-            padding: 2px 8px !important;
-            border-radius: 3px !important;
-            font-size: 9.5px !important;
-            font-weight: 900 !important;
-          }
-
-          .pw-rom-meta {
-            background: #f1f5f9 !important;
-            border-bottom: 1px solid #cbd5e1 !important;
-            padding: 4px 10px !important;
-            display: flex !important;
-            justify-content: space-between !important;
-            font-size: 8.5px !important;
-            color: #334155 !important;
-          }
-
-          .pw-rom-prod-pills {
-            background: #f8fafc !important;
-            border-bottom: 1px solid #e2e8f0 !important;
-            padding: 3.5px 10px !important;
-            font-size: 8px !important;
-            color: #1e293b !important;
-          }
-
-          .pw-table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-            font-size: 8.2px !important;
-          }
-
-          .pw-table th {
-            background: #e2e8f0 !important;
-            color: #1e293b !important;
-            font-weight: 800 !important;
-            text-transform: uppercase !important;
-            border-bottom: 1px solid #94a3b8 !important;
-            padding: 3.5px 6px !important;
-            text-align: left !important;
-            font-size: 7.8px !important;
-          }
-
-          .pw-table td {
-            border-bottom: 1px solid #e2e8f0 !important;
-            padding: 3px 6px !important;
-            color: #0f172a !important;
-          }
-
-          .pw-tr-zebra {
-            background: #f8fafc !important;
-          }
-
-          .pw-mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
-            font-size: 8px !important;
-          }
-
-          .pw-tfoot-rom td {
-            background: #d1fae5 !important;
-            color: #065f46 !important;
-            border-top: 1.5px solid #059669 !important;
-            padding: 5px 6px !important;
-            font-size: 9px !important;
-            font-weight: 900 !important;
-          }
-
-          .pw-tfoot-general td {
-            background: #dbeafe !important;
-            color: #1e3a8a !important;
-            border-top: 1.5px solid #2563eb !important;
-            padding: 5.5px 6px !important;
-            font-size: 9px !important;
-            font-weight: 900 !important;
-          }
-
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-tfoot-general td {
-            background: #ede9fe !important;
-            color: #4c1d95 !important;
-            border-top-color: #7c3aed !important;
-          }
-
-          .pw-major-section ~ .pw-major-section ~ .pw-major-section ~ .pw-major-section .pw-tfoot-general td {
-            background: #cffafe !important;
-            color: #155e75 !important;
-            border-top-color: #0891b2 !important;
-          }
-
-          .pw-rom-card {
-            border: 1px solid #99f6e4 !important;
-            border-left: 3.5px solid #059669 !important;
-            border-radius: 5px !important;
-            margin-bottom: 10px !important;
-            overflow: hidden !important;
-          }
-
-          .pw-rom-card table thead th {
-            background: #ecfdf5 !important;
-            color: #065f46 !important;
-            border-bottom: 1.5px solid #6ee7b7 !important;
-          }
-
-          .pw-rom-card table tbody tr:nth-child(even) td {
-            background: #f8fafc !important;
-          }
-
-          .pw-rom-card > div:first-child {
-            background: #ecfdf5 !important;
-            border-bottom: 1.5px solid #6ee7b7 !important;
-            padding: 5px 8px !important;
-          }
-
-          .pw-rom-card > div:first-child * {
-            color: #065f46 !important;
-          }
-
-          .pw-sub-title {
-            background: #f1f5f9 !important;
-            border: 1px solid #cbd5e1 !important;
-            border-bottom: none !important;
-            padding: 4px 8px !important;
-            font-size: 8.5px !important;
-            font-weight: 800 !important;
-            text-transform: uppercase !important;
-            color: #1e293b !important;
-            margin-top: 6px !important;
-          }
-
-          .pw-footer {
-            display: flex !important;
-            justify-content: space-between !important;
-            border-top: 1px solid #cbd5e1 !important;
-            padding-top: 4px !important;
-            font-size: 7.5px !important;
-            color: #64748b !important;
-            margin-top: 12px !important;
-          }
+          ${PRINT_WMS_EXEC_RULES}
         }
       `}</style>
 
@@ -741,7 +791,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
 
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={handlePrintPdfExecutivo}
                 disabled={loading}
                 style={{
                   display: 'inline-flex',
@@ -1224,7 +1274,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
       {/* ═══════════════════════════════════════════════════════════════════════
           LAYOUT EXECUTIVO DE IMPRESSÃO / PDF (APENAS NO @media print)
          ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="print-wms-executive">
+      <div className="print-wms-executive" ref={printExecutiveRef}>
         {/* CABEÇALHO CORPORATIVO */}
         <div className="pw-header">
           <div>
@@ -1291,7 +1341,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
                   <span><strong>Data/Hora Expedição:</strong> {fmtDateTimeBR(rom.expedido_at || rom.created_at)}</span>
                   <span><strong>Status:</strong> {rom.status}</span>
                   {!modoCliente && (
-                    <span><strong>Operador Resp.:</strong> {rom.operador_expedicao_nome || rom.operador_nome || 'Administrador'}</span>
+                    <span><strong>Responsável:</strong> {rom.operador_expedicao_nome || rom.operador_nome || 'Administrador'}</span>
                   )}
                   <span><strong>Produtos Distintos:</strong> {rom.resumo_produtos ? rom.resumo_produtos.length : 0}</span>
                 </div>
@@ -1352,7 +1402,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
 
             {/* Resumo Consolidado Geral das Saídas por Produto */}
             {resumoSaidasPorProduto.length > 0 && (
-              <div style={{ pageBreakInside: 'avoid' }}>
+              <div>
                 <div className="pw-sub-title">
                   RESUMO CONSOLIDADO DE SAÍDAS POR PRODUTO NO PERÍODO ({totais.totalRomaneios} ROMANEIOS)
                 </div>
@@ -1394,7 +1444,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
             SEÇÃO 2 DO PDF: ENTRADAS DO PERÍODO
            ═══════════════════════════════════════════════════════════════════ */}
         {secoesAtivas.entradas && (
-          <div className="pw-major-section" style={{ pageBreakInside: 'avoid' }}>
+          <div className="pw-major-section pw-section-entradas">
             <div className="pw-major-header">
               <span>SEÇÃO 2 — ENTRADAS REGISTRADAS NO PERÍODO (RECEBIMENTO / PRODUÇÃO)</span>
               <span>{totais.entradasCaixasCount} Caixas | Peso Total: {fmtKg(totais.entradasKg)}</span>
@@ -1436,7 +1486,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
             SEÇÃO 3 DO PDF: ESTOQUE ATUAL TOTAL POR PRODUTO (CONSOLIDADO)
            ═══════════════════════════════════════════════════════════════════ */}
         {secoesAtivas.estoqueProduto && (
-          <div className="pw-major-section" style={{ pageBreakInside: 'avoid' }}>
+          <div className="pw-major-section pw-section-estoque-prod">
             <div className="pw-major-header">
               <span>SEÇÃO 3 — ESTOQUE ATUAL TOTAL POR PRODUTO (CONSOLIDADO)</span>
               <span>{totais.estoqueProdutos} Produtos | {totais.estoqueCaixas} Caixas | Total: {fmtKg(totais.estoqueKg)}</span>
@@ -1480,7 +1530,7 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
             SEÇÃO 4 DO PDF: ESTOQUE ATUAL DETALHADO POR CAIXA FÍSICA
            ═══════════════════════════════════════════════════════════════════ */}
         {secoesAtivas.estoqueCaixa && (
-          <div className="pw-major-section" style={{ pageBreakBefore: 'always' }}>
+          <div className="pw-major-section pw-section-estoque-cx">
             <div className="pw-major-header">
               <span>SEÇÃO 4 — ESTOQUE ATUAL DETALHADO POR CAIXA FÍSICA (SERIALIZADO)</span>
               <span>{totais.estoqueCaixas} Caixas | Peso Total: {fmtKg(totais.estoqueKg)}</span>

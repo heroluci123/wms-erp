@@ -820,14 +820,14 @@ export function Layout() {
 
   return (
     <div className="app-shell">
-      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+      <div className="app-shell-col" style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
         {!isMobile && (
           <TopBar
             sidebarRecolhida={sidebarRecolhida}
             onToggleSidebar={() => setSidebarRecolhida((v) => !v)}
           />
         )}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div className="app-shell-body" style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
           {!isMobile && (
             <Sidebar
               collapsed={sidebarRecolhida}
