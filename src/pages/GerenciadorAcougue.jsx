@@ -260,7 +260,12 @@ export function GerenciadorAcougue() {
                 onChange={(e) => setBusca(e.target.value)}
               />
             </div>
-            <select className="form-input" style={{ height: 34, width: 130, fontSize: 12 }} value={especie} onChange={(e) => setEspecie(e.target.value)}>
+            <select
+              className="form-input"
+              style={{ height: 34, width: 158, padding: '0 10px', fontSize: 12, lineHeight: 'normal' }}
+              value={especie}
+              onChange={(e) => setEspecie(e.target.value)}
+            >
               <option value="TODOS">Todas Espécies</option>
               <option value="BOVINO">Bovinos</option>
               <option value="SUINO">Suínos</option>
@@ -268,14 +273,24 @@ export function GerenciadorAcougue() {
               <option value="EMPORIO">Empório</option>
               <option value="OUTROS">Outros</option>
             </select>
-            <select className="form-input" style={{ height: 34, width: 135, fontSize: 12 }} value={conservacao} onChange={(e) => setConservacao(e.target.value)}>
+            <select
+              className="form-input"
+              style={{ height: 34, width: 150, padding: '0 10px', fontSize: 12, lineHeight: 'normal' }}
+              value={conservacao}
+              onChange={(e) => setConservacao(e.target.value)}
+            >
               <option value="TODOS">Conservação</option>
               <option value="RESFRIADO">Resfriado</option>
               <option value="CONGELADO">Congelado</option>
               <option value="SECO">Seco</option>
             </select>
             {aba === 'ETIQUETAS' && (
-              <select className="form-input" style={{ height: 34, width: 145, fontSize: 12 }} value={statusEtq} onChange={(e) => setStatusEtq(e.target.value)}>
+              <select
+                className="form-input"
+                style={{ height: 34, width: 158, padding: '0 10px', fontSize: 12, lineHeight: 'normal' }}
+                value={statusEtq}
+                onChange={(e) => setStatusEtq(e.target.value)}
+              >
                 <option value="EM_ESTOQUE">Em Estoque</option>
                 <option value="VENDIDA">Vendidas</option>
                 <option value="CANCELADA">Canceladas</option>
