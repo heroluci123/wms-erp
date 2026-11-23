@@ -6,6 +6,7 @@ import {
   centrosCusto,
   empresas,
   estoqueCaixas,
+  filiais,
   financeiroTitulos,
   formasPagamento,
   fornecedorProdutoDepara,
@@ -19,6 +20,8 @@ import {
   produtos,
   recebimentoPreCaixas,
   recebimentos,
+  varejoEstoque,
+  varejoMovimentacoes,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
@@ -2026,16 +2029,73 @@ ${dupsXml}
           })
           xmlItensResolvidos = itensCalc
 
-          // Atualizar custo médio nos produtos mapeados (+ somar saldo no almoxarifado de insumos se PC de INSUMO e controle ativo)
+          // Verifica se filial ativa é VAREJO (para creditar automaticamente endereço EMPORIO)
+          const [filEnt] = await tx
+            .select({ tipoUnidade: filiais.tipoUnidade })
+            .from(filiais)
+            .where(eq(filiais.id, ctx.filialId))
+            .limit(1)
+          const ehFilialVarejoEnt = String(filEnt?.tipoUnidade || '').toUpperCase() === 'VAREJO'
+
+          // Atualizar último preço de compra + custo médio (+ somar saldo no almoxarifado de insumos ou Empório)
           for (const it of itensCalc) {
             if (it.produto_id && it.custo_unitario_com_frete > 0) {
               await tx
                 .update(produtos)
                 .set({
+                  ultimoPrecoCompra: toDec(it.custo_unitario_com_frete, 4),
                   custoMedioKg: toDec(it.custo_unitario_com_frete, 4),
                   updatedAt: new Date(),
                 })
                 .where(and(eq(produtos.id, it.produto_id), eq(produtos.tenantId, ctx.tenantId)))
+            }
+            if ((pcRow?.tipoCompra === 'EMPORIO' || ehFilialVarejoEnt) && pcRow?.tipoCompra !== 'INSUMO' && it.produto_id && it.quantidade > 0) {
+              const [estEmp] = await tx
+                .select()
+                .from(varejoEstoque)
+                .where(
+                  and(
+                    eq(varejoEstoque.tenantId, ctx.tenantId),
+                    eq(varejoEstoque.filialId, ctx.filialId),
+                    eq(varejoEstoque.produtoId, it.produto_id),
+                  ),
+                )
+                .limit(1)
+              const antEmp = estEmp ? toNum(estEmp.saldoQtd, 0) : 0
+              const novoEmp = Number((antEmp + it.quantidade).toFixed(3))
+              if (estEmp) {
+                await tx
+                  .update(varejoEstoque)
+                  .set({ saldoQtd: toDec(novoEmp, 3), updatedAt: new Date() })
+                  .where(eq(varejoEstoque.id, estEmp.id))
+              } else {
+                await tx.insert(varejoEstoque).values({
+                  id: uuidv7(),
+                  tenantId: ctx.tenantId,
+                  filialId: ctx.filialId,
+                  produtoId: it.produto_id,
+                  unidadeVenda: String(it.unidade || 'UN').toUpperCase() === 'KG' ? 'KG' : 'UN',
+                  saldoQtd: toDec(novoEmp, 3),
+                  precoVendaVarejo: '0.0000',
+                  estoqueMinimo: '0.000',
+                  codigoBalanca: (it.produto_codigo || '').replace(/\D/g, '').slice(-5),
+                  setorLoja: 'EMPORIO',
+                })
+              }
+              await tx.insert(varejoMovimentacoes).values({
+                id: uuidv7(),
+                tenantId: ctx.tenantId,
+                filialId: ctx.filialId,
+                produtoId: it.produto_id,
+                tipo: 'ENTRADA_COMPRA',
+                qtd: toDec(it.quantidade, 3),
+                saldoAnterior: toDec(antEmp, 3),
+                saldoNovo: toDec(novoEmp, 3),
+                referenciaTipo: 'NFE_COMPRA',
+                observacao: `Entrada XML NF ${xmlParsed.numero_nf}${pcRow ? ` (${pcRow.codigo})` : ''}`,
+                operadorId: ctx.operador.id,
+                operadorNome: ctx.operador.nome,
+              })
             }
             if (pcRow?.tipoCompra === 'INSUMO' && controlarInsumosAtivo && it.produto_id && it.quantidade > 0) {
               const [insEst] = await tx

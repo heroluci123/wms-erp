@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { cadastrosQueries } from '../queries/cadastros'
-import { varejoQueries } from '../queries/varejo'
+import { precosQueries, varejoQueries } from '../queries/varejo'
 import { useAppStore } from '../store/appStore'
 
 const fmtMoeda = (v) =>
@@ -51,12 +51,14 @@ const FORM_VAZIO = {
   limite_credito: '0',
   prazo_crediario_dias: '30',
   bloqueado_financeiro: false,
+  tabela_preco_id: '',
 }
 
 export function ClientesVarejo() {
   const { toastSuccess, toastError } = useAppStore()
   const [loading, setLoading] = useState(true)
   const [clientes, setClientes] = useState([])
+  const [tabelasPreco, setTabelasPreco] = useState([])
   const [busca, setBusca] = useState('')
   const [filtroTipo, setFiltroTipo] = useState('TODOS') // TODOS | DESCONTO | CREDIARIO | DEVEDORES
 
@@ -74,8 +76,12 @@ export function ClientesVarejo() {
   const carregar = useCallback(async () => {
     setLoading(true)
     try {
-      const lista = await cadastrosQueries.listarClientes()
+      const [lista, resTabs] = await Promise.all([
+        cadastrosQueries.listarClientes(),
+        precosQueries.listarTabelas({ apenas_ativas: '1' }).catch(() => ({ data: [] })),
+      ])
       setClientes(Array.isArray(lista) ? lista : [])
+      setTabelasPreco(resTabs?.data || [])
     } catch (err) {
       toastError('Erro ao carregar clientes', err.message)
     } finally {
@@ -130,6 +136,7 @@ export function ClientesVarejo() {
       limite_credito: String(Number(c.limite_credito || 0)),
       prazo_crediario_dias: String(Number(c.prazo_crediario_dias || 30)),
       bloqueado_financeiro: Number(c.bloqueado_financeiro) === 1,
+      tabela_preco_id: c.tabela_preco_id || '',
     })
     setModalForm(true)
   }
@@ -152,6 +159,7 @@ export function ClientesVarejo() {
         limite_credito: form.crediario_ativo ? Number(form.limite_credito || 0) : 0,
         prazo_crediario_dias: Number(form.prazo_crediario_dias || 30),
         bloqueado_financeiro: form.bloqueado_financeiro ? 1 : 0,
+        tabela_preco_id: form.tabela_preco_id || null,
       })
       toastSuccess(form.id ? 'Cliente atualizado!' : 'Cliente cadastrado!', form.razao_social.trim())
       setModalForm(false)
@@ -326,6 +334,11 @@ export function ClientesVarejo() {
                           </span>
                         ) : (
                           <span className="badge badge--neutral">Inativo</span>
+                        )}
+                        {c.tabela_preco_nome && (
+                          <div className="text-xs text-info mt-4" style={{ fontSize: 10.5 }}>
+                            Tabela: {c.tabela_preco_nome}
+                          </div>
                         )}
                       </td>
                       <td>
@@ -545,6 +558,25 @@ export function ClientesVarejo() {
                   ) : (
                     <div className="text-xs text-muted">Ative para permitir compras no Crediário com comprovante assinado.</div>
                   )}
+                </div>
+              </div>
+
+              {/* TABELA DE PREÇOS PERSONALIZADA */}
+              <div className="card" style={{ padding: 14, background: 'var(--bg-2)' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Tabela de Preços Personalizada (Opcional — aplicada automaticamente no PDV)</label>
+                  <select
+                    className="form-input"
+                    value={form.tabela_preco_id}
+                    onChange={(e) => setForm((p) => ({ ...p, tabela_preco_id: e.target.value }))}
+                  >
+                    <option value="">Usar Tabela Padrão do Varejo</option>
+                    {tabelasPreco.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.codigo} — {t.nome} ({t.finalidade})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </form>

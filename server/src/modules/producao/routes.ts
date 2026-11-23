@@ -11,6 +11,7 @@ import {
   ordensProducao,
   paletes,
   produtoArvore,
+  produtoEspecificacoes,
   produtos,
   taras,
 } from '../../db/schema/index.js'
@@ -881,6 +882,7 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
             descricao: produtos.descricao,
             valorUnitario: produtos.valorUnitario,
             registroDipoa: produtos.registroDipoa,
+            especificacaoId: produtos.especificacaoId,
           })
           .from(produtos)
           .where(and(eq(produtos.id, produtoId), eq(produtos.tenantId, ctx.tenantId)))
@@ -985,6 +987,20 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
 
         await recalcularPosicaoEnderecos(tx, ctx.tenantId, ctx.filialId, [enderecoRetorno])
 
+        let especNome = ''
+        let tempRotulo = ''
+        if (prod.especificacaoId) {
+          const [esp] = await tx
+            .select({ nome: produtoEspecificacoes.nome, temp: produtoEspecificacoes.temperaturaRotulo })
+            .from(produtoEspecificacoes)
+            .where(eq(produtoEspecificacoes.id, prod.especificacaoId))
+            .limit(1)
+          if (esp) {
+            especNome = esp.nome
+            tempRotulo = esp.temp || ''
+          }
+        }
+
         return {
           retorno_id: retornoId,
           caixa_id: caixaId,
@@ -992,7 +1008,10 @@ export function registerProducaoRoutes(app: FastifyInstance, conn: DbConnection)
           produto_id: prod.id,
           produto_codigo: prod.codigo,
           produto_descricao: prod.descricao,
+          produto_especificacao: especNome,
+          temperatura_rotulo: tempRotulo,
           registro_dipoa: prod.registroDipoa || '',
+          op_codigo: op.codigo,
           endereco: enderecoRetorno,
           lote: pesagem.lote,
           data_producao: pesagem.dataProducao,

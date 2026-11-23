@@ -20,6 +20,7 @@ import {
   resolverCodigoCadastroOnUpdate,
 } from './codigoHelper.js'
 import { registerCadastrosMestresRoutes } from './mestresRoutes.js'
+import { calcularMetricasProdutosEmLote } from './especificacoesRoutes.js'
 
 const ArvoreVinculoSchema = z.object({
   pai_id: z.string().uuid(),
@@ -35,12 +36,14 @@ const ProdutoSchema = z.object({
   ean: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
   descricao: z.string().trim().min(1, 'Descricao obrigatoria.'),
   valor_unitario: z.coerce.number().min(0).default(0),
+  ultimo_preco_compra: z.coerce.number().min(0).optional(),
   custo_medio_kg: z.coerce.number().min(0).default(0),
   tipo_produto: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : 'Materia Prima')),
   status_curva: z.enum(['A', 'B', 'C']).default('C'),
   unidade: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : 'CX')),
   grupo: z.string().nullish().transform((v) => (v ?? '').trim()),
   especie: z.string().nullish().transform((v) => (v ?? '').trim().toUpperCase()),
+  especificacao_id: z.preprocess((v) => (v === '' || v === undefined ? null : v), z.string().uuid().nullable()).optional(),
   conservacao: z.string().nullish().transform((v) => (v && v.trim() ? v.trim().toUpperCase() : 'RESFRIADO')),
   validade_dias: z.coerce.number().int().min(0).max(3650).default(5),
   tara_embalagem_kg: z.coerce.number().min(0).max(50).default(0),
@@ -160,7 +163,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
     { preHandler: requirePermission(PERM_PROD_READ, { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
-      const [res, arvRes] = await Promise.all([
+      const [res, arvRes, metricasBatch] = await Promise.all([
         conn.db.execute(sql`
           SELECT
             p.id,
@@ -169,12 +172,16 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             p.ean,
             p.descricao,
             p.valor_unitario,
+            p.ultimo_preco_compra,
             p.custo_medio_kg,
             p.tipo_produto,
             p.status_curva,
             p.unidade,
             p.grupo,
             p.especie,
+            p.especificacao_id,
+            pe.nome AS especificacao_nome,
+            pe.temperatura_rotulo AS especificacao_temperatura,
             p.conservacao,
             p.validade_dias,
             p.tara_embalagem_kg,
@@ -191,6 +198,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             COALESCE(pos.saldo_kg, 0) AS saldo_kg,
             COALESCE(pos.qtd_caixas, 0) AS qtd_caixas
           FROM produtos p
+          LEFT JOIN produto_especificacoes pe ON pe.id = p.especificacao_id
           LEFT JOIN produto_arvore pa ON pa.filho_id = p.id AND pa.tenant_id = ${ctx.tenantId}
           LEFT JOIN produtos pai ON pai.id = pa.pai_id
           LEFT JOIN (
@@ -202,7 +210,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             GROUP BY ep.produto_id
           ) pos ON pos.produto_id = p.id
           WHERE p.tenant_id = ${ctx.tenantId} AND p.ativo = 1
-          GROUP BY p.id, pos.saldo_kg, pos.qtd_caixas
+          GROUP BY p.id, pe.nome, pe.temperatura_rotulo, pos.saldo_kg, pos.qtd_caixas
           ORDER BY p.descricao ASC
         `),
         conn.db
@@ -216,6 +224,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           })
           .from(produtoArvore)
           .where(eq(produtoArvore.tenantId, ctx.tenantId)),
+        calcularMetricasProdutosEmLote(conn.db, ctx.tenantId, 7),
       ])
 
       const arvMap = new Map<string, Array<Record<string, unknown>>>()
@@ -231,20 +240,32 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
         arvMap.set(v.filho_id, list)
       }
 
-      const rows = (res.rows as Array<Record<string, unknown>>).map((r) => ({
-        ...r,
-        valor_unitario: Number(r.valor_unitario || 0),
-        custo_medio_kg: Number(r.custo_medio_kg || 0),
-        peso_padrao_cx: r.peso_padrao_cx != null ? Number(r.peso_padrao_cx) : null,
-        tara_primaria_peca_kg: Number(r.tara_primaria_peca_kg || 0),
-        tara_embalagem_kg: Number(r.tara_embalagem_kg || 0),
-        validade_dias: Number(r.validade_dias ?? 5),
-        conservacao: String(r.conservacao || 'RESFRIADO'),
-        especie: String(r.especie || ''),
-        saldo_kg: Number(r.saldo_kg || 0),
-        qtd_caixas: Number(r.qtd_caixas || 0),
-        arvore_vinculos: arvMap.get(String(r.id)) || [],
-      }))
+      const rows = (res.rows as Array<Record<string, unknown>>).map((r) => {
+        const met = metricasBatch.getMetricas(String(r.id))
+        const custoMed = Number(r.custo_medio_kg || 0)
+        const ultCompra = Number(r.ultimo_preco_compra || 0)
+        return {
+          ...r,
+          valor_unitario: Number(r.valor_unitario || 0),
+          ultimo_preco_compra: ultCompra,
+          custo_medio_kg: custoMed,
+          preco_medio_venda: met.preco_medio_venda,
+          estoque_minimo_dinamico_kg: met.estoque_minimo_dinamico_kg,
+          consumo_medio_dia_total_kg: met.consumo_medio_dia_total_kg,
+          especificacao_id: r.especificacao_id ? String(r.especificacao_id) : null,
+          especificacao_nome: r.especificacao_nome ? String(r.especificacao_nome) : '',
+          especificacao_temperatura: r.especificacao_temperatura ? String(r.especificacao_temperatura) : '',
+          peso_padrao_cx: r.peso_padrao_cx != null ? Number(r.peso_padrao_cx) : null,
+          tara_primaria_peca_kg: Number(r.tara_primaria_peca_kg || 0),
+          tara_embalagem_kg: Number(r.tara_embalagem_kg || 0),
+          validade_dias: Number(r.validade_dias ?? 5),
+          conservacao: String(r.conservacao || 'RESFRIADO'),
+          especie: String(r.especie || ''),
+          saldo_kg: Number(r.saldo_kg || 0),
+          qtd_caixas: Number(r.qtd_caixas || 0),
+          arvore_vinculos: arvMap.get(String(r.id)) || [],
+        }
+      })
       return { success: true, data: rows }
     }
   )
@@ -395,12 +416,14 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           ean: d.ean,
           descricao: d.descricao,
           valorUnitario: String(d.valor_unitario),
+          ultimoPrecoCompra: String(d.ultimo_preco_compra ?? d.custo_medio_kg ?? 0),
           custoMedioKg: String(d.custo_medio_kg),
           tipoProduto: d.tipo_produto,
           statusCurva: d.status_curva,
           unidade: d.unidade,
           grupo: d.grupo,
           especie: d.especie,
+          especificacaoId: d.especificacao_id ?? null,
           conservacao: d.conservacao,
           validadeDias: d.validade_dias,
           taraEmbalagemKg: String(d.tara_embalagem_kg),
@@ -460,12 +483,14 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             ean: d.ean,
             descricao: d.descricao,
             valorUnitario: String(d.valor_unitario),
+            ...(d.ultimo_preco_compra !== undefined ? { ultimoPrecoCompra: String(d.ultimo_preco_compra) } : {}),
             custoMedioKg: String(d.custo_medio_kg),
             tipoProduto: d.tipo_produto,
             statusCurva: d.status_curva,
             unidade: d.unidade,
             grupo: d.grupo,
             especie: d.especie,
+            ...(d.especificacao_id !== undefined ? { especificacaoId: d.especificacao_id } : {}),
             conservacao: d.conservacao,
             validadeDias: d.validade_dias,
             taraEmbalagemKg: String(d.tara_embalagem_kg),

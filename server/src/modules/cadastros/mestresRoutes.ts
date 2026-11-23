@@ -101,6 +101,7 @@ const ClienteSchema = z.object({
   prazo_crediario_dias: z.coerce.number().int().min(1).max(365).optional().default(30),
   desconto_ativo: z.union([z.boolean(), z.number()]).optional().default(0),
   desconto_max_pct: z.coerce.number().min(0).max(100).optional().default(0),
+  tabela_preco_id: optNullableUuid.optional(),
   bloqueado_financeiro: z.union([z.boolean(), z.number()]).optional().default(0),
   permite_pagamento_entrega: z.union([z.boolean(), z.number()]).optional().default(1),
   is_padrao: z.union([z.boolean(), z.number()]).optional().default(0),
@@ -495,6 +496,8 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           c.prazo_crediario_dias,
           c.desconto_ativo,
           c.desconto_max_pct,
+          c.tabela_preco_id,
+          tp.nome AS tabela_preco_nome,
           c.bloqueado_financeiro,
           c.permite_pagamento_entrega,
           c.is_padrao,
@@ -509,6 +512,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         LEFT JOIN vendedores v ON v.id = c.vendedor_padrao_id
         LEFT JOIN formas_pagamento fp ON fp.id = c.forma_pagamento_padrao_id
         LEFT JOIN locais_cobranca lc ON lc.id = c.local_cobranca_padrao_id
+        LEFT JOIN tabelas_preco tp ON tp.id = c.tabela_preco_id
         WHERE c.tenant_id = ${ctx.tenantId}
           ${incluirInativos ? sql`` : sql`AND c.ativo = 1`}
         ORDER BY c.ativo DESC, c.is_padrao DESC, c.razao_social ASC
@@ -609,6 +613,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           prazoCrediarioDias: Number(d.prazo_crediario_dias || 30),
           descontoAtivo: flag01(d.desconto_ativo, d.desconto_max_pct > 0 ? 1 : 0),
           descontoMaxPct: String(d.desconto_max_pct || 0),
+          tabelaPrecoId: d.tabela_preco_id || null,
           bloqueadoFinanceiro: flag01(d.bloqueado_financeiro, 0),
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
           isPadrao,
@@ -664,6 +669,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           prazoCrediarioDias: Number(d.prazo_crediario_dias || 30),
           descontoAtivo: flag01(d.desconto_ativo, 0),
           descontoMaxPct: String(d.desconto_max_pct || 0),
+          ...(d.tabela_preco_id !== undefined ? { tabelaPrecoId: d.tabela_preco_id || null } : {}),
           bloqueadoFinanceiro: flag01(d.bloqueado_financeiro, 0),
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
           isPadrao,

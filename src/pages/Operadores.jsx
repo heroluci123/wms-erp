@@ -365,6 +365,7 @@ export function Operadores() {
     ativo: 1,
     filiais_permitidas: [],
     filial_padrao_id: '',
+    pin_gerencial: '',
     permissoes: sanitizarPermissoes({}, 'OPERACIONAL', 'OPERADOR'),
   })
 
@@ -485,6 +486,7 @@ export function Operadores() {
       ativo: 1,
       filiais_permitidas: filiaisSistema.map((f) => f.id),
       filial_padrao_id: filiaisSistema[0]?.id || '',
+      pin_gerencial: '',
       permissoes: sanitizarPermissoes(perfilOp.permissoes, perfilOp.nivel, perfilOp.codigo),
     })
     setModalUsuarioAberto(true)
@@ -509,6 +511,7 @@ export function Operadores() {
       ativo: Number(user.ativo ?? 1),
       filiais_permitidas: Array.isArray(user.filiais_permitidas) ? user.filiais_permitidas : [],
       filial_padrao_id: user.filial_padrao_id || '',
+      pin_gerencial: '',
       permissoes: sanitizarPermissoes(user.permissoes, nivel, perfil),
     })
     setModalUsuarioAberto(true)
@@ -575,6 +578,7 @@ export function Operadores() {
           ativo: formUsuario.ativo,
           filiais_permitidas: formUsuario.filiais_permitidas,
           filial_padrao_id: formUsuario.filial_padrao_id || null,
+          ...(formUsuario.pin_gerencial?.trim() ? { pin_gerencial: formUsuario.pin_gerencial.trim() } : {}),
           permissoes: permissoesFinais,
         })
         if (resUpd?.success === false) {
@@ -592,6 +596,7 @@ export function Operadores() {
           deve_trocar_senha: formUsuario.deve_trocar_senha ? 1 : 0,
           filiais_permitidas: formUsuario.filiais_permitidas,
           filial_padrao_id: formUsuario.filial_padrao_id || null,
+          ...(formUsuario.pin_gerencial?.trim() ? { pin_gerencial: formUsuario.pin_gerencial.trim() } : {}),
           permissoes: permissoesFinais,
         })
         if (resCri?.success === false) {
@@ -1530,6 +1535,51 @@ export function Operadores() {
                         )
                       })}
                     </div>
+                  </div>
+                )}
+
+                {/* PIN Gerencial (para troca de tabela no Açougue e liberações gerenciais) */}
+                {(formUsuario.nivel === 'MASTER' || formUsuario.nivel === 'ADMINISTRADOR') && (
+                  <div
+                    style={{
+                      marginTop: 4,
+                      padding: 12,
+                      borderRadius: 10,
+                      background: '#0b1220',
+                      border: '1px solid #253654',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 14,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <KeyRound size={14} /> PIN Gerencial (4 a 6 dígitos)
+                        {editandoUsuario?.tem_pin_gerencial && (
+                          <span className="badge badge--success" style={{ fontSize: 10 }}>PIN configurado ✓</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                        Usado para autorizar troca de Tabela de Preço na balança do Açougue e liberações rápidas. Deixe em branco para manter o PIN atual.
+                      </div>
+                    </div>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={6}
+                      className="form-input font-mono text-center"
+                      style={{ width: 150, height: 38, fontSize: 16, letterSpacing: 6, background: '#131d32' }}
+                      placeholder={editandoUsuario?.tem_pin_gerencial ? '••••' : 'Ex: 1234'}
+                      value={formUsuario.pin_gerencial}
+                      onChange={(e) =>
+                        setFormUsuario((prev) => ({
+                          ...prev,
+                          pin_gerencial: e.target.value.replace(/\D/g, '').slice(0, 6),
+                        }))
+                      }
+                    />
                   </div>
                 )}
               </div>

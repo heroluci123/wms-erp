@@ -225,6 +225,7 @@ export async function criar({
   ativo = 1,
   filiais_permitidas,
   filial_padrao_id,
+  pin_gerencial,
 }) {
   if (isApiEnabled()) {
     return apiRequest('/api/operadores', {
@@ -241,6 +242,7 @@ export async function criar({
         ativo,
         ...(Array.isArray(filiais_permitidas) ? { filiais_permitidas } : {}),
         ...(filial_padrao_id !== undefined ? { filial_padrao_id } : {}),
+        ...(pin_gerencial !== undefined && String(pin_gerencial).trim() !== '' ? { pin_gerencial: String(pin_gerencial).trim() } : {}),
       },
     })
   }
@@ -327,6 +329,7 @@ export async function atualizar({
   deve_trocar_senha,
   filiais_permitidas,
   filial_padrao_id,
+  pin_gerencial,
 }) {
   if (isApiEnabled()) {
     try {
@@ -344,6 +347,7 @@ export async function atualizar({
           deve_trocar_senha,
           ...(Array.isArray(filiais_permitidas) ? { filiais_permitidas } : {}),
           ...(filial_padrao_id !== undefined ? { filial_padrao_id } : {}),
+          ...(pin_gerencial !== undefined && String(pin_gerencial).trim() !== '' ? { pin_gerencial: String(pin_gerencial).trim() } : {}),
         },
       })
       limparCacheSessao()

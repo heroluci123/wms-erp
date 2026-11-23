@@ -53,6 +53,7 @@ export const operadores = pgTable(
     nome: text('nome').notNull(),
     login: text('login').notNull(),
     pin: text('pin').notNull().default('****'),
+    pinGerencialHash: text('pin_gerencial_hash').notNull().default(''),
     senhaHash: text('senha_hash').notNull(),
     perfil: text('perfil').notNull().default('OPERADOR'),
     nivel: text('nivel').notNull().default('OPERACIONAL'),

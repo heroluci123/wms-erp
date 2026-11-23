@@ -8,6 +8,9 @@ export const varejoQueries = {
   ajustarEstoque: (payload) =>
     apiRequest('/api/varejo/estoque/ajustar', { method: 'POST', body: payload }),
 
+  entradaEmporio: (payload) =>
+    apiRequest('/api/varejo/emporio/entrada', { method: 'POST', body: payload }),
+
   listarMovimentacoes: () =>
     apiRequest('/api/varejo/movimentacoes'),
 
@@ -49,8 +52,8 @@ export const varejoQueries = {
   fecharCaixa: (caixaId, payload) =>
     apiRequest(`/api/pdv/caixa/${caixaId}/fechar`, { method: 'POST', body: payload }),
 
-  buscarCodigoPdv: (q) =>
-    apiRequest(`/api/pdv/buscar-codigo${buildQueryString({ q })}`),
+  buscarCodigoPdv: (q, clienteId = null) =>
+    apiRequest(`/api/pdv/buscar-codigo${buildQueryString({ q, ...(clienteId ? { cliente_id: clienteId } : {}) })}`),
 
   gerarPixPdv: (payload) =>
     apiRequest('/api/pdv/gerar-pix', { method: 'POST', body: payload }),
@@ -81,11 +84,46 @@ export const acougueQueries = {
   listarProdutosPesagem: (params = {}) =>
     apiRequest(`/api/acougue/produtos-pesagem${buildQueryString(params)}`),
 
+  listarEtiquetasDia: (params = {}) =>
+    apiRequest(`/api/acougue/etiquetas-dia${buildQueryString(params)}`),
+
+  obterTabelaAtiva: () =>
+    apiRequest('/api/acougue/tabela-ativa'),
+
+  trocarTabelaAtiva: (payload) =>
+    apiRequest('/api/acougue/trocar-tabela', { method: 'POST', body: payload }),
+
   pesarEtiqueta: (payload) =>
     apiRequest('/api/acougue/pesar-etiqueta', { method: 'POST', body: payload }),
 
   cancelarEtiqueta: (id) =>
     apiRequest(`/api/acougue/etiquetas/${id}/cancelar`, { method: 'POST', body: {} }),
+}
+
+export const precosQueries = {
+  listarTabelas: (params = {}) =>
+    apiRequest(`/api/tabelas-preco${buildQueryString(params)}`),
+
+  obterTabela: (id, params = {}) =>
+    apiRequest(`/api/tabelas-preco/${id}${buildQueryString(params)}`),
+
+  criarTabela: (payload) =>
+    apiRequest('/api/tabelas-preco', { method: 'POST', body: payload }),
+
+  atualizarTabela: (id, payload) =>
+    apiRequest(`/api/tabelas-preco/${id}`, { method: 'PUT', body: payload }),
+
+  excluirTabela: (id) =>
+    apiRequest(`/api/tabelas-preco/${id}`, { method: 'DELETE' }),
+
+  salvarItens: (id, itens) =>
+    apiRequest(`/api/tabelas-preco/${id}/itens`, { method: 'POST', body: { itens } }),
+
+  removerItem: (id, produtoId) =>
+    apiRequest(`/api/tabelas-preco/${id}/itens/${produtoId}`, { method: 'DELETE' }),
+
+  aplicarReajuste: (id, payload) =>
+    apiRequest(`/api/tabelas-preco/${id}/aplicar-reajuste`, { method: 'POST', body: payload }),
 }
 
 export const interunidadesQueries = {

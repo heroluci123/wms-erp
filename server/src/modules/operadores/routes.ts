@@ -26,6 +26,7 @@ const CreateOperadorSchema = z.object({
   filial_id: z.string().uuid().optional(),
   filial_padrao_id: z.string().uuid().optional(),
   filiais_permitidas: z.array(z.string().uuid()).optional(),
+  pin_gerencial: z.string().trim().optional(),
 })
 
 const UpdateOperadorSchema = z.object({
@@ -41,6 +42,7 @@ const UpdateOperadorSchema = z.object({
   filial_id: z.string().uuid().nullable().optional(),
   filial_padrao_id: z.string().uuid().nullable().optional(),
   filiais_permitidas: z.array(z.string().uuid()).optional(),
+  pin_gerencial: z.string().trim().optional(),
 })
 
 const SavePerfilSchema = z.object({
@@ -112,6 +114,13 @@ export function registerOperadoresRoutes(app: FastifyInstance, conn: DbConnectio
       const ativo = d.ativo === false || Number(d.ativo) === 0 ? 0 : 1
       const deveTrocar = d.deve_trocar_senha === false || Number(d.deve_trocar_senha) === 0 ? 0 : 1
       const senhaHash = await hashSenha(senhaInicial)
+      let pinGerencialHash = ''
+      if (d.pin_gerencial && d.pin_gerencial.trim().length > 0) {
+        if (!/^\d{4,6}$/.test(d.pin_gerencial.trim())) {
+          throw new HttpError(400, 'O PIN gerencial deve conter de 4 a 6 dígitos numéricos.')
+        }
+        pinGerencialHash = await hashSenha(d.pin_gerencial.trim())
+      }
 
       const newId = uuidv7()
       const filiaisPerm = Array.isArray(d.filiais_permitidas)
@@ -132,6 +141,7 @@ export function registerOperadoresRoutes(app: FastifyInstance, conn: DbConnectio
         nome: d.nome,
         login: d.login,
         pin: '****',
+        pinGerencialHash,
         senhaHash,
         perfil,
         nivel,
@@ -253,6 +263,12 @@ export function registerOperadoresRoutes(app: FastifyInstance, conn: DbConnectio
           throw new HttpError(400, 'A nova senha deve ter pelo menos 4 caracteres.')
         }
         updateValues.senhaHash = await hashSenha(d.senha.trim())
+      }
+      if (d.pin_gerencial !== undefined && d.pin_gerencial.trim().length > 0) {
+        if (!/^\d{4,6}$/.test(d.pin_gerencial.trim())) {
+          throw new HttpError(400, 'O PIN gerencial deve conter de 4 a 6 dígitos numéricos.')
+        }
+        updateValues.pinGerencialHash = await hashSenha(d.pin_gerencial.trim())
       }
 
       await conn.db

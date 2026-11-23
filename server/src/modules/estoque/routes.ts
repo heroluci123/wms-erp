@@ -6,6 +6,8 @@ import {
   desmembramentosVinculos,
   estoqueCaixas,
   estoquePosicao,
+  etiquetasAcougue,
+  filiais,
   fornecedores,
   inventarios,
   locais,
@@ -15,10 +17,12 @@ import {
   pedidosCompra,
   pedidosCompraItens,
   produtoArvore,
+  produtoEspecificacoes,
   produtos,
   produtosEans,
   recebimentos,
   taras,
+  varejoEstoque,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
@@ -73,11 +77,21 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
     async (req) => {
       const ctx = req.authCtx!
       const q = req.query as { incluirInsumos?: string; endereco?: string; produto_id?: string }
+      const [filPos] = await conn.db
+        .select({ tipoUnidade: filiais.tipoUnidade })
+        .from(filiais)
+        .where(eq(filiais.id, ctx.filialId))
+        .limit(1)
+      const ehVarejoPos = String(filPos?.tipoUnidade || '').toUpperCase() === 'VAREJO'
+
       const conds = [
         eq(estoquePosicao.tenantId, ctx.tenantId),
         eq(estoquePosicao.filialId, ctx.filialId),
         sql`(${estoquePosicao.qtdCaixas} > 0 OR ${estoquePosicao.qtdKg} > 0)`,
       ]
+      if (!ehVarejoPos) {
+        conds.push(sql`UPPER(${estoquePosicao.endereco}) NOT IN ('ACOUGUE', 'EMPORIO', 'ACOUGUE-MP', 'TRANSITO-LOJA')`)
+      }
       if (q.endereco) {
         conds.push(eq(estoquePosicao.endereco, q.endereco.trim().toUpperCase()))
       }
@@ -146,25 +160,47 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         limit?: string
       }
       const limit = Math.min(2000, Math.max(1, Number(query.limit) || 500))
+      const [filAtiva] = await conn.db
+        .select({ tipoUnidade: filiais.tipoUnidade })
+        .from(filiais)
+        .where(eq(filiais.id, ctx.filialId))
+        .limit(1)
+      const ehFilialVarejo = String(filAtiva?.tipoUnidade || '').toUpperCase() === 'VAREJO'
+
       const conds = [
         eq(estoqueCaixas.tenantId, ctx.tenantId),
         eq(estoqueCaixas.filialId, ctx.filialId),
       ]
+      if (!ehFilialVarejo) {
+        conds.push(sql`UPPER(${estoqueCaixas.endereco}) NOT IN ('ACOUGUE', 'EMPORIO', 'ACOUGUE-MP', 'TRANSITO-LOJA')`)
+      }
       if (query.status && query.status !== 'TODOS') {
         const statuses = query.status
           .split(',')
           .map((s) => s.trim().toUpperCase())
           .filter(Boolean)
+        if (ehFilialVarejo && statuses.includes('DISPONIVEL') && !statuses.includes('ABERTA_ACOUGUE')) {
+          statuses.push('ABERTA_ACOUGUE', 'EM_TRANSITO_LOJA')
+        }
         if (statuses.length === 1) {
           conds.push(eq(estoqueCaixas.status, statuses[0]))
         } else if (statuses.length > 1) {
           conds.push(inArray(estoqueCaixas.status, statuses))
         }
       } else if (!query.status) {
-        conds.push(eq(estoqueCaixas.status, 'DISPONIVEL'))
+        if (ehFilialVarejo) {
+          conds.push(inArray(estoqueCaixas.status, ['DISPONIVEL', 'ABERTA_ACOUGUE', 'EM_TRANSITO_LOJA']))
+        } else {
+          conds.push(eq(estoqueCaixas.status, 'DISPONIVEL'))
+        }
       }
       if (query.endereco) {
-        conds.push(eq(estoqueCaixas.endereco, query.endereco.trim().toUpperCase()))
+        const endFilt = query.endereco.trim().toUpperCase()
+        if (ehFilialVarejo && endFilt === 'ACOUGUE') {
+          conds.push(inArray(estoqueCaixas.endereco, ['ACOUGUE', 'ACOUGUE-MP', 'TRANSITO-LOJA']))
+        } else {
+          conds.push(eq(estoqueCaixas.endereco, endFilt))
+        }
       }
       if (query.produto_id) {
         conds.push(eq(estoqueCaixas.produtoId, parseUuidOrBadRequest(query.produto_id, 'produto_id')))
@@ -185,12 +221,15 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           descricao: produtos.descricao,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          produto_especificacao: produtoEspecificacoes.nome,
+          temperatura_rotulo: produtoEspecificacoes.temperaturaRotulo,
           registro_dipoa: produtos.registroDipoa,
           grupo: produtos.grupo,
           tipo_produto: produtos.tipoProduto,
           status_curva: produtos.statusCurva,
           valor_unitario: produtos.valorUnitario,
-          tipo_armazenamento: sql<string>`COALESCE(${locais.tipoArmazenamento}, 'SECO')`,
+          custo_medio_kg: produtos.custoMedioKg,
+          tipo_armazenamento: sql<string>`COALESCE(${locais.tipoArmazenamento}, ${produtos.conservacao}, 'SECO')`,
           palete_id: estoqueCaixas.paleteId,
           palete_codigo: paletes.codigo,
           endereco: estoqueCaixas.endereco,
@@ -203,6 +242,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           tara_nome: taras.nome,
           tara_primaria_total_kg: estoqueCaixas.taraPrimariaTotalKg,
           peso_kg: estoqueCaixas.pesoKg,
+          peso_restante_kg: estoqueCaixas.pesoRestanteKg,
           qtd_pecas: estoqueCaixas.qtdPecas,
           custo_unitario_kg: estoqueCaixas.custoUnitarioKg,
           origem_tipo: estoqueCaixas.origemTipo,
@@ -221,6 +261,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         })
         .from(estoqueCaixas)
         .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .leftJoin(produtoEspecificacoes, eq(produtoEspecificacoes.id, produtos.especificacaoId))
         .leftJoin(paletes, eq(paletes.id, estoqueCaixas.paleteId))
         .leftJoin(taras, eq(taras.id, estoqueCaixas.taraId))
         .leftJoin(
@@ -235,12 +276,176 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         .orderBy(desc(estoqueCaixas.createdAt))
         .limit(limit)
 
-      return {
-        data: rows.map((r) => ({
+      const listaBase: Array<Record<string, unknown>> = rows.map((r) => {
+        const ehMpAcougue = r.status === 'ABERTA_ACOUGUE' || r.status === 'EM_TRANSITO_LOJA'
+        const pesoEfetivo =
+          ehMpAcougue && r.peso_restante_kg != null ? toNum(r.peso_restante_kg, 0) : toNum(r.peso_kg, 0)
+        return {
           ...normalizeCaixaRow(r),
-          valor_unitario: toNum(r.valor_unitario, 0),
-        })),
+          endereco: ehFilialVarejo && ehMpAcougue ? 'ACOUGUE' : r.endereco,
+          peso_kg: pesoEfetivo,
+          status: ehMpAcougue ? 'DISPONIVEL' : r.status,
+          produto_especificacao: r.produto_especificacao || '',
+          temperatura_rotulo: r.temperatura_rotulo || '',
+          valor_unitario: toNum(r.custo_medio_kg, 0) || toNum(r.valor_unitario, 0),
+        }
+      })
+
+      // Na filial Varejo, consolida também as etiquetas QR geradas no endereço ACOUGUE e o saldo de prateleira no endereço EMPORIO!
+      if (ehFilialVarejo) {
+        const endFilt = query.endereco ? query.endereco.trim().toUpperCase() : ''
+        const qNorm = query.q ? query.q.trim().toUpperCase() : ''
+        const querDisponivel =
+          !query.status ||
+          query.status === 'TODOS' ||
+          query.status.toUpperCase().includes('DISPONIVEL')
+
+        if (querDisponivel && (!endFilt || endFilt === 'ACOUGUE')) {
+          const etqs = await conn.db
+            .select({
+              id: etiquetasAcougue.id,
+              codigo_etiqueta: etiquetasAcougue.codigoEtiqueta,
+              produto_id: etiquetasAcougue.produtoId,
+              codigo: produtos.codigo,
+              descricao: produtos.descricao,
+              grupo: produtos.grupo,
+              tipo_produto: produtos.tipoProduto,
+              status_curva: produtos.statusCurva,
+              custo_medio_kg: produtos.custoMedioKg,
+              conservacao: etiquetasAcougue.conservacao,
+              lote: etiquetasAcougue.lote,
+              data_producao: etiquetasAcougue.dataPesagem,
+              validade: etiquetasAcougue.validade,
+              peso_bruto_kg: etiquetasAcougue.pesoBrutoKg,
+              tara_kg: etiquetasAcougue.taraKg,
+              peso_kg: etiquetasAcougue.pesoLiquidoKg,
+              preco_kg: etiquetasAcougue.precoKg,
+              operador_nome: etiquetasAcougue.operadorNome,
+              created_at: etiquetasAcougue.createdAt,
+            })
+            .from(etiquetasAcougue)
+            .innerJoin(produtos, eq(produtos.id, etiquetasAcougue.produtoId))
+            .where(
+              and(
+                eq(etiquetasAcougue.tenantId, ctx.tenantId),
+                eq(etiquetasAcougue.filialId, ctx.filialId),
+                eq(etiquetasAcougue.status, 'EM_ESTOQUE'),
+              ),
+            )
+            .orderBy(desc(etiquetasAcougue.createdAt))
+            .limit(500)
+
+          for (const e of etqs) {
+            if (query.produto_id && e.produto_id !== query.produto_id) continue
+            if (
+              qNorm &&
+              !String(e.codigo_etiqueta || '').toUpperCase().includes(qNorm) &&
+              !String(e.codigo || '').toUpperCase().includes(qNorm) &&
+              !String(e.descricao || '').toUpperCase().includes(qNorm)
+            ) {
+              continue
+            }
+            listaBase.push({
+              id: e.id,
+              ean_caixa: e.codigo_etiqueta,
+              produto_id: e.produto_id,
+              codigo: e.codigo || '',
+              descricao: e.descricao,
+              produto_codigo: e.codigo || '',
+              produto_descricao: e.descricao,
+              grupo: e.grupo || 'ACOUGUE',
+              tipo_produto: e.tipo_produto || 'Produto Acabado',
+              status_curva: e.status_curva || 'A',
+              valor_unitario: toNum(e.custo_medio_kg, 0) || toNum(e.preco_kg, 0),
+              tipo_armazenamento: e.conservacao || 'RESFRIADO',
+              palete_codigo: 'ETIQUETA QR',
+              endereco: 'ACOUGUE',
+              lote: e.lote || '',
+              data_producao: e.data_producao,
+              validade: e.validade,
+              peso_bruto_kg: toNum(e.peso_bruto_kg, 0),
+              tara_kg: toNum(e.tara_kg, 0),
+              peso_kg: toNum(e.peso_kg, 0),
+              qtd_pecas: 1,
+              origem_tipo: 'ETIQUETA_ACOUGUE',
+              operador_cadastro_nome: e.operador_nome || '',
+              status: 'DISPONIVEL',
+              updated_at: e.created_at,
+              created_at: e.created_at,
+            })
+          }
+        }
+
+        if (querDisponivel && (!endFilt || endFilt === 'EMPORIO')) {
+          const emps = await conn.db
+            .select({
+              id: varejoEstoque.id,
+              produto_id: varejoEstoque.produtoId,
+              unidade_venda: varejoEstoque.unidadeVenda,
+              saldo_qtd: varejoEstoque.saldoQtd,
+              preco_venda: varejoEstoque.precoVendaVarejo,
+              updated_at: varejoEstoque.updatedAt,
+              codigo: produtos.codigo,
+              ean: produtos.ean,
+              descricao: produtos.descricao,
+              grupo: produtos.grupo,
+              tipo_produto: produtos.tipoProduto,
+              status_curva: produtos.statusCurva,
+              conservacao: produtos.conservacao,
+              custo_medio_kg: produtos.custoMedioKg,
+            })
+            .from(varejoEstoque)
+            .innerJoin(produtos, eq(produtos.id, varejoEstoque.produtoId))
+            .where(
+              and(
+                eq(varejoEstoque.tenantId, ctx.tenantId),
+                eq(varejoEstoque.filialId, ctx.filialId),
+                eq(varejoEstoque.setorLoja, 'EMPORIO'),
+                sql`${varejoEstoque.saldoQtd} > 0`,
+              ),
+            )
+            .orderBy(produtos.descricao)
+
+          for (const emp of emps) {
+            if (query.produto_id && emp.produto_id !== query.produto_id) continue
+            if (
+              qNorm &&
+              !String(emp.ean || '').toUpperCase().includes(qNorm) &&
+              !String(emp.codigo || '').toUpperCase().includes(qNorm) &&
+              !String(emp.descricao || '').toUpperCase().includes(qNorm)
+            ) {
+              continue
+            }
+            const qtd = toNum(emp.saldo_qtd, 0)
+            listaBase.push({
+              id: emp.id,
+              ean_caixa: emp.ean || `EMP-${emp.codigo || 'ITEM'}`,
+              produto_id: emp.produto_id,
+              codigo: emp.codigo || '',
+              descricao: emp.descricao,
+              produto_codigo: emp.codigo || '',
+              produto_descricao: emp.descricao,
+              grupo: emp.grupo || 'EMPORIO',
+              tipo_produto: emp.tipo_produto || 'Produto Acabado',
+              status_curva: emp.status_curva || 'B',
+              valor_unitario: toNum(emp.custo_medio_kg, 0) || toNum(emp.preco_venda, 0),
+              tipo_armazenamento: emp.conservacao || 'SECO',
+              palete_codigo: `${qtd} ${emp.unidade_venda || 'UN'}`,
+              endereco: 'EMPORIO',
+              lote: '',
+              validade: null,
+              peso_kg: qtd,
+              qtd_pecas: Math.round(qtd),
+              origem_tipo: 'EMPORIO',
+              status: 'DISPONIVEL',
+              updated_at: emp.updated_at,
+              created_at: emp.updated_at,
+            })
+          }
+        }
       }
+
+      return { data: listaBase }
     },
   )
 
@@ -265,6 +470,8 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          produto_especificacao: produtoEspecificacoes.nome,
+          temperatura_rotulo: produtoEspecificacoes.temperaturaRotulo,
           registro_dipoa: produtos.registroDipoa,
           endereco: estoqueCaixas.endereco,
           lote: estoqueCaixas.lote,
@@ -286,6 +493,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         })
         .from(estoqueCaixas)
         .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .leftJoin(produtoEspecificacoes, eq(produtoEspecificacoes.id, produtos.especificacaoId))
         .leftJoin(taras, eq(taras.id, estoqueCaixas.taraId))
         .leftJoin(ordensProducao, eq(ordensProducao.id, estoqueCaixas.opId))
         .where(
@@ -319,6 +527,8 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          produto_especificacao: produtoEspecificacoes.nome,
+          temperatura_rotulo: produtoEspecificacoes.temperaturaRotulo,
           registro_dipoa: produtos.registroDipoa,
           produto_ean_padrao: produtos.ean,
           palete_id: estoqueCaixas.paleteId,
@@ -349,6 +559,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         })
         .from(estoqueCaixas)
         .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .leftJoin(produtoEspecificacoes, eq(produtoEspecificacoes.id, produtos.especificacaoId))
         .leftJoin(paletes, eq(paletes.id, estoqueCaixas.paleteId))
         .leftJoin(taras, eq(taras.id, estoqueCaixas.taraId))
         .leftJoin(ordensProducao, eq(ordensProducao.id, estoqueCaixas.opId))
@@ -1010,6 +1221,8 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          produto_especificacao: produtoEspecificacoes.nome,
+          temperatura_rotulo: produtoEspecificacoes.temperaturaRotulo,
           registro_dipoa: produtos.registroDipoa,
           endereco: estoqueCaixas.endereco,
           lote: estoqueCaixas.lote,
@@ -1024,6 +1237,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         })
         .from(estoqueCaixas)
         .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .leftJoin(produtoEspecificacoes, eq(produtoEspecificacoes.id, produtos.especificacaoId))
         .where(
           and(
             eq(estoqueCaixas.tenantId, ctx.tenantId),
@@ -1933,6 +2147,8 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
           produto_id: estoqueCaixas.produtoId,
           produto_codigo: produtos.codigo,
           produto_descricao: produtos.descricao,
+          produto_especificacao: produtoEspecificacoes.nome,
+          temperatura_rotulo: produtoEspecificacoes.temperaturaRotulo,
           registro_dipoa: produtos.registroDipoa,
           endereco: estoqueCaixas.endereco,
           lote: estoqueCaixas.lote,
@@ -1956,6 +2172,7 @@ export function registerEstoqueRoutes(app: FastifyInstance, conn: DbConnection):
         })
         .from(estoqueCaixas)
         .innerJoin(produtos, eq(produtos.id, estoqueCaixas.produtoId))
+        .leftJoin(produtoEspecificacoes, eq(produtoEspecificacoes.id, produtos.especificacaoId))
         .leftJoin(ordensProducao, eq(ordensProducao.id, estoqueCaixas.opId))
         .where(
           and(

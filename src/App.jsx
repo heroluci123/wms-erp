@@ -57,6 +57,8 @@ import { AcougueOperacao } from './pages/AcougueOperacao'
 import { GerenciadorAcougue } from './pages/GerenciadorAcougue'
 import { InventarioLoja } from './pages/InventarioLoja'
 import { ClientesVarejo } from './pages/ClientesVarejo'
+import { TabelasPreco } from './pages/TabelasPreco'
+import { EmporioEstoque } from './pages/EmporioEstoque'
 import { Interunidades } from './pages/Interunidades'
 import { InsumosColeta } from './pages/InsumosColeta'
 
@@ -138,6 +140,8 @@ function App() {
           <Route path="gerenciador-acougue" element={<RequirePermissao permissoes={['varejo_acougue', 'pdv_caixa']} element={<GerenciadorAcougue />} />} />
           <Route path="inventario-loja" element={<RequirePermissao permissoes={['varejo_acougue', 'inventario_gestao', 'inventario_coletor']} element={<InventarioLoja />} />} />
           <Route path="clientes-varejo" element={<RequirePermissao permissoes={['pdv_caixa', 'varejo_acougue', 'clientes']} element={<ClientesVarejo />} />} />
+          <Route path="tabelas-preco" element={<RequirePermissao permissoes={['varejo_acougue', 'pdv_caixa', 'produtos', 'pedidos', 'parametros_comerciais']} element={<TabelasPreco />} />} />
+          <Route path="emporio" element={<RequirePermissao permissoes={['varejo_acougue', 'pdv_caixa', 'compras']} element={<EmporioEstoque />} />} />
           <Route path="loja" element={<Navigate to="/gerenciador-acougue" replace />} />
           <Route path="interunidades" element={<RequirePermissao permissoes={['interunidades', 'movimentacao', 'fiscal', 'varejo_acougue']} element={<Interunidades />} />} />
           <Route path="insumos-coleta" element={<RequirePermissao permissoes={['insumos_coleta', 'compras', 'varejo_acougue', 'producao_entrada']} element={<InsumosColeta />} />} />

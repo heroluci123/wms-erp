@@ -224,6 +224,8 @@ export async function criar({
   descricao,
   valor_unitario,
   custo_medio_kg,
+  ultimo_preco_compra,
+  especificacao_id,
   tipo_produto,
   status_curva,
   unidade,
@@ -253,6 +255,8 @@ export async function criar({
           descricao,
           valor_unitario,
           custo_medio_kg,
+          ultimo_preco_compra: ultimo_preco_compra === '' || ultimo_preco_compra == null ? 0 : Number(ultimo_preco_compra),
+          especificacao_id: especificacao_id || null,
           tipo_produto,
           status_curva,
           unidade,
@@ -328,6 +332,8 @@ export async function atualizar({
   descricao,
   valor_unitario,
   custo_medio_kg,
+  ultimo_preco_compra,
+  especificacao_id,
   tipo_produto,
   status_curva,
   unidade,
@@ -357,6 +363,8 @@ export async function atualizar({
           descricao,
           valor_unitario,
           custo_medio_kg,
+          ultimo_preco_compra: ultimo_preco_compra === '' || ultimo_preco_compra == null ? 0 : Number(ultimo_preco_compra),
+          especificacao_id: especificacao_id || null,
           tipo_produto,
           status_curva,
           unidade,
@@ -538,4 +546,32 @@ export async function buscarCaixaPorEan(ean) {
   } catch { /* tabela ainda não populada */ }
 
   return caixa
+}
+
+// ── ESPECIFICAÇÕES DE RÓTULO, EDIÇÃO EM LOTE E RESUMO GERENCIAL ──────────────
+
+export async function listarEspecificacoes() {
+  if (!isApiEnabled()) return []
+  return (await apiRequest('/api/cadastros/especificacoes')).data || []
+}
+
+export async function criarEspecificacao(payload) {
+  return apiRequest('/api/cadastros/especificacoes', { method: 'POST', body: payload })
+}
+
+export async function atualizarEspecificacao(id, payload) {
+  return apiRequest(`/api/cadastros/especificacoes/${id}`, { method: 'PUT', body: payload })
+}
+
+export async function excluirEspecificacao(id) {
+  return apiRequest(`/api/cadastros/especificacoes/${id}`, { method: 'DELETE' })
+}
+
+export async function editarEmLote(payload) {
+  return apiRequest('/api/cadastros/produtos/lote', { method: 'PATCH', body: payload })
+}
+
+export async function obterResumoGerencial(id) {
+  if (!isApiEnabled()) return null
+  return (await apiRequest(`/api/cadastros/produtos/${id}/resumo-gerencial`)).data || null
 }

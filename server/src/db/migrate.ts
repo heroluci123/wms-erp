@@ -15,6 +15,12 @@ import {
   layoutsImportacaoTxt,
   eanSequencias,
   financeiroContasBancarias,
+  produtoEspecificacoes,
+  produtos,
+  varejoEstoque,
+  tabelasPreco,
+  tabelasPrecoItens,
+  acougueConfigFilial,
 } from './schema/index.js'
 import { uuidv7 } from '../utils/uuid.js'
 import { hashSenha } from '../utils/crypto.js'
@@ -1771,6 +1777,75 @@ CREATE TABLE IF NOT EXISTS etiquetas_acougue (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_etq_acougue_codigo ON etiquetas_acougue(tenant_id, codigo_etiqueta);
 CREATE INDEX IF NOT EXISTS idx_etq_acougue_filial_status ON etiquetas_acougue(tenant_id, filial_id, status);
 CREATE INDEX IF NOT EXISTS idx_etq_acougue_mp ON etiquetas_acougue(caixa_mp_id);
+
+ALTER TABLE operadores ADD COLUMN IF NOT EXISTS pin_gerencial_hash TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS produto_especificacoes (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  nome TEXT NOT NULL,
+  especie TEXT NOT NULL DEFAULT 'BOVINO',
+  conservacao TEXT NOT NULL DEFAULT 'RESFRIADO',
+  temperatura_rotulo TEXT NOT NULL DEFAULT '',
+  validade_dias_padrao INTEGER,
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_prod_espec_tenant_cod ON produto_especificacoes(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_prod_espec_tenant ON produto_especificacoes(tenant_id, ativo);
+
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS especificacao_id UUID REFERENCES produto_especificacoes(id) ON DELETE SET NULL;
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS ultimo_preco_compra NUMERIC(14,4) NOT NULL DEFAULT 0;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tabela_preco_id UUID;
+
+CREATE TABLE IF NOT EXISTS tabelas_preco (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID REFERENCES filiais(id) ON DELETE SET NULL,
+  codigo TEXT NOT NULL,
+  nome TEXT NOT NULL,
+  finalidade TEXT NOT NULL DEFAULT 'VAREJO_PDV',
+  padrao INTEGER NOT NULL DEFAULT 0,
+  desconto_padrao_pct NUMERIC(6,2) NOT NULL DEFAULT 0,
+  data_inicio DATE,
+  data_fim DATE,
+  observacoes TEXT NOT NULL DEFAULT '',
+  ativo INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tabelas_preco_codigo ON tabelas_preco(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_tabelas_preco_finalidade ON tabelas_preco(tenant_id, finalidade, ativo);
+
+CREATE TABLE IF NOT EXISTS tabelas_preco_itens (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  tabela_preco_id UUID NOT NULL REFERENCES tabelas_preco(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  preco_venda NUMERIC(14,4) NOT NULL DEFAULT 0,
+  preco_promocional NUMERIC(14,4),
+  desconto_pct NUMERIC(6,2) NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tabela_preco_item_prod ON tabelas_preco_itens(tabela_preco_id, produto_id);
+CREATE INDEX IF NOT EXISTS idx_tabela_preco_itens_tab ON tabelas_preco_itens(tenant_id, tabela_preco_id);
+
+CREATE TABLE IF NOT EXISTS acougue_config_filial (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  tabela_ativa_id UUID REFERENCES tabelas_preco(id) ON DELETE SET NULL,
+  tabela_padrao_id UUID REFERENCES tabelas_preco(id) ON DELETE SET NULL,
+  alterada_por_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  alterada_por_nome TEXT NOT NULL DEFAULT '',
+  alterada_em TIMESTAMPTZ,
+  motivo TEXT NOT NULL DEFAULT '',
+  historico_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_acougue_cfg_filial ON acougue_config_filial(tenant_id, filial_id);
 `
 
 export interface SeedDefaultsResult {
@@ -2141,6 +2216,7 @@ export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefa
 
   if (masterRows.length === 0) {
     const hash7410 = await hashSenha('7410')
+    const hashPin1234 = await hashSenha('1234')
     const masterPerms = PERFIS_SISTEMA_BASE.find((p) => p.codigo === 'MASTER')!.permissoes
     await db.insert(operadores).values({
       id: uuidv7(),
@@ -2150,6 +2226,7 @@ export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefa
       nome: 'Luciano',
       login: 'Luciano',
       pin: '****',
+      pinGerencialHash: hashPin1234,
       senhaHash: hash7410,
       perfil: 'MASTER',
       nivel: 'MASTER',
@@ -2160,6 +2237,152 @@ export async function runMigrationsAndSeed(conn: DbConnection): Promise<SeedDefa
       permissoesJson: masterPerms,
       criadoPorNome: 'Sistema',
     })
+  } else {
+    // Garante PIN gerencial 1234 no MASTER se ainda não definido
+    const mastersSemPin = await db
+      .select({ id: operadores.id })
+      .from(operadores)
+      .where(sql`${operadores.tenantId} = ${tenantId} AND UPPER(${operadores.nivel}) = 'MASTER' AND COALESCE(${operadores.pinGerencialHash}, '') = ''`)
+    if (mastersSemPin.length > 0) {
+      const hashPin1234 = await hashSenha('1234')
+      for (const m of mastersSemPin) {
+        await db.update(operadores).set({ pinGerencialHash: hashPin1234 }).where(eq(operadores.id, m.id))
+      }
+    }
+  }
+
+  // Seed idempotente das 12 Especificações de Produto (Denominação de Venda para Rótulos 100x70)
+  const especsBase = [
+    { codigo: 'ESP-BOV-RES-SO', nome: 'CARNE RESFRIADA DE BOVINO SEM OSSO', especie: 'BOVINO', conservacao: 'RESFRIADO', temp: 'MANTER RESFRIADO DE 0°C A 4°C', dias: 45 },
+    { codigo: 'ESP-BOV-RES-CO', nome: 'CARNE RESFRIADA DE BOVINO COM OSSO', especie: 'BOVINO', conservacao: 'RESFRIADO', temp: 'MANTER RESFRIADO DE 0°C A 4°C', dias: 30 },
+    { codigo: 'ESP-BOV-CON-SO', nome: 'CARNE CONGELADA DE BOVINO SEM OSSO', especie: 'BOVINO', conservacao: 'CONGELADO', temp: 'MANTER CONGELADO A -18°C OU MAIS FRIO', dias: 365 },
+    { codigo: 'ESP-BOV-CON-CO', nome: 'CARNE CONGELADA DE BOVINO COM OSSO', especie: 'BOVINO', conservacao: 'CONGELADO', temp: 'MANTER CONGELADO A -18°C OU MAIS FRIO', dias: 365 },
+    { codigo: 'ESP-SUI-RES-SO', nome: 'CARNE RESFRIADA DE SUÍNO SEM OSSO', especie: 'SUINO', conservacao: 'RESFRIADO', temp: 'MANTER RESFRIADO DE 0°C A 4°C', dias: 20 },
+    { codigo: 'ESP-SUI-RES-CO', nome: 'CARNE RESFRIADA DE SUÍNO COM OSSO', especie: 'SUINO', conservacao: 'RESFRIADO', temp: 'MANTER RESFRIADO DE 0°C A 4°C', dias: 15 },
+    { codigo: 'ESP-SUI-CON-SO', nome: 'CARNE CONGELADA DE SUÍNO SEM OSSO', especie: 'SUINO', conservacao: 'CONGELADO', temp: 'MANTER CONGELADO A -18°C OU MAIS FRIO', dias: 365 },
+    { codigo: 'ESP-SUI-CON-CO', nome: 'CARNE CONGELADA DE SUÍNO COM OSSO', especie: 'SUINO', conservacao: 'CONGELADO', temp: 'MANTER CONGELADO A -18°C OU MAIS FRIO', dias: 365 },
+    { codigo: 'ESP-AVE-RES-SO', nome: 'CARNE RESFRIADA DE AVES SEM OSSO', especie: 'AVES', conservacao: 'RESFRIADO', temp: 'MANTER RESFRIADO DE 0°C A 4°C', dias: 10 },
+    { codigo: 'ESP-AVE-RES-CO', nome: 'CARNE RESFRIADA DE AVES COM OSSO', especie: 'AVES', conservacao: 'RESFRIADO', temp: 'MANTER RESFRIADO DE 0°C A 4°C', dias: 10 },
+    { codigo: 'ESP-AVE-CON-SO', nome: 'CARNE CONGELADA DE AVES SEM OSSO', especie: 'AVES', conservacao: 'CONGELADO', temp: 'MANTER CONGELADO A -18°C OU MAIS FRIO', dias: 365 },
+    { codigo: 'ESP-AVE-CON-CO', nome: 'CARNE CONGELADA DE AVES COM OSSO', especie: 'AVES', conservacao: 'CONGELADO', temp: 'MANTER CONGELADO A -18°C OU MAIS FRIO', dias: 365 },
+  ]
+  for (const esp of especsBase) {
+    await db
+      .insert(produtoEspecificacoes)
+      .values({
+        id: uuidv7(),
+        tenantId,
+        codigo: esp.codigo,
+        nome: esp.nome,
+        especie: esp.especie,
+        conservacao: esp.conservacao,
+        temperaturaRotulo: esp.temp,
+        validadeDiasPadrao: esp.dias,
+        ativo: 1,
+      })
+      .onConflictDoNothing()
+  }
+
+  // Seed idempotente das Tabelas de Preço padrão + importação dos preços já cadastrados no banco
+  const existingTabs = await db
+    .select({ id: tabelasPreco.id, codigo: tabelasPreco.codigo })
+    .from(tabelasPreco)
+    .where(eq(tabelasPreco.tenantId, tenantId))
+
+  let tabPadraoId = existingTabs.find((t) => t.codigo === 'TAB-001')?.id || existingTabs[0]?.id || ''
+  if (existingTabs.length === 0) {
+    tabPadraoId = uuidv7()
+    const tabPromoId = uuidv7()
+    await db.insert(tabelasPreco).values([
+      {
+        id: tabPadraoId,
+        tenantId,
+        filialId: filialAcougue,
+        codigo: 'TAB-001',
+        nome: 'Tabela Padrão Varejo & Açougue',
+        finalidade: 'ACOUGUE_BALANCA',
+        padrao: 1,
+        descontoPadraoPct: '0.00',
+        observacoes: 'Tabela padrão ativa na balança do Açougue e PDV',
+        ativo: 1,
+      },
+      {
+        id: tabPromoId,
+        tenantId,
+        filialId: filialAcougue,
+        codigo: 'TAB-002',
+        nome: 'Promoção Fim de Semana (-10%)',
+        finalidade: 'PROMOCIONAL',
+        padrao: 0,
+        descontoPadraoPct: '10.00',
+        observacoes: 'Tabela promocional pronta para troca rápida mediante PIN gerencial',
+        ativo: 1,
+      },
+    ])
+
+    // Popula TAB-001 e TAB-002 com todos os produtos que já têm preço cadastrado (> 0)
+    const [estPrecos, prodsPrecos] = await Promise.all([
+      db
+        .select({ produtoId: varejoEstoque.produtoId, preco: varejoEstoque.precoVendaVarejo })
+        .from(varejoEstoque)
+        .where(eq(varejoEstoque.tenantId, tenantId)),
+      db
+        .select({ id: produtos.id, valorUnitario: produtos.valorUnitario })
+        .from(produtos)
+        .where(sql`${produtos.tenantId} = ${tenantId} AND ${produtos.ativo} = 1`),
+    ])
+
+    const mapPreco = new Map<string, number>()
+    for (const p of prodsPrecos) {
+      const v = Number(p.valorUnitario || 0)
+      if (v > 0) mapPreco.set(p.id, v)
+    }
+    for (const e of estPrecos) {
+      const v = Number(e.preco || 0)
+      if (v > 0) mapPreco.set(e.produtoId, v)
+    }
+
+    const itensPadrao: Array<typeof tabelasPrecoItens.$inferInsert> = []
+    const itensPromo: Array<typeof tabelasPrecoItens.$inferInsert> = []
+    for (const [prodId, preco] of mapPreco.entries()) {
+      itensPadrao.push({
+        id: uuidv7(),
+        tenantId,
+        tabelaPrecoId: tabPadraoId,
+        produtoId: prodId,
+        precoVenda: preco.toFixed(4),
+        descontoPct: '0.00',
+      })
+      const precoPromo = Number((preco * 0.9).toFixed(2))
+      itensPromo.push({
+        id: uuidv7(),
+        tenantId,
+        tabelaPrecoId: tabPromoId,
+        produtoId: prodId,
+        precoVenda: precoPromo.toFixed(4),
+        descontoPct: '10.00',
+      })
+    }
+    for (let i = 0; i < itensPadrao.length; i += 100) {
+      await db.insert(tabelasPrecoItens).values(itensPadrao.slice(i, i + 100)).onConflictDoNothing()
+      await db.insert(tabelasPrecoItens).values(itensPromo.slice(i, i + 100)).onConflictDoNothing()
+    }
+  }
+
+  if (tabPadraoId && filialAcougue) {
+    await db
+      .insert(acougueConfigFilial)
+      .values({
+        id: uuidv7(),
+        tenantId,
+        filialId: filialAcougue,
+        tabelaAtivaId: tabPadraoId,
+        tabelaPadraoId: tabPadraoId,
+        alteradaPorNome: 'Sistema',
+        motivo: 'Configuração inicial padrão',
+        historicoJson: [],
+      })
+      .onConflictDoNothing()
   }
 
   return {

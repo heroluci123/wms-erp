@@ -344,28 +344,161 @@ test('Etapa 3 Completa: Filial Loja 1/1, PDV (QR 80x45 + Balanca EAN-2 + NFC-e),
       .where(eq(financeiroTitulos.tipo, 'RECEBER'))
     assert.equal(titsRec.length, 0, 'NF-es de Remessa/Transferência interna não podem gerar Contas a Receber!')
 
-    // 8. AÇOUGUE (PESAGEM C/ BAIXA AUTOMÁTICA FEFO DE MP) + PDV (QR ÚNICO + DESCONTO TRAVADO + PIX BR CODE + CREDIÁRIO)
-    // 8a. Pesar 2 bandejas de Picanha no Açougue (baixa automática na MP cxLojaEan 22.500 -> 21.250 -> 20.000)
+    // 8. ESPECIFICAÇÕES + TABELAS DE PREÇO + PIN GERENCIAL (1234) + AÇOUGUE TRAVADO + EMPÓRIO + ESTOQUE POR ENDEREÇO ISOLADO + PDV
+    // 8.0 Verificar 12 especificações padrão semeadas + Edição em lote (especificação, tara=0.02, validade=5)
+    const resEsps = await app.inject({ method: 'GET', url: '/api/cadastros/especificacoes', headers: hdrMatriz })
+    assert.equal(resEsps.statusCode, 200, resEsps.body)
+    const espsLista = resEsps.json().data || []
+    assert.ok(espsLista.length >= 12, `Esperava ao menos 12 especificações semeadas, veio ${espsLista.length}`)
+    const espBovResf = espsLista.find((e: any) => String(e.nome).includes('CARNE RESFRIADA DE BOVINO SEM OSSO'))
+    assert.ok(espBovResf, 'Especificação CARNE RESFRIADA DE BOVINO SEM OSSO deve estar semeada')
+
+    const resLote = await app.inject({
+      method: 'PATCH',
+      url: '/api/cadastros/produtos/lote',
+      headers: hdrMatriz,
+      payload: {
+        ids: [prodBovId],
+        especificacao_id: espBovResf.id,
+        especie: 'BOVINO',
+        conservacao: 'RESFRIADO',
+        validade_dias: 5,
+        tara_embalagem_kg: 0.02,
+      },
+    })
+    assert.equal(resLote.statusCode, 200, resLote.body)
+    assert.equal(resLote.json().atualizados, 1)
+
+    // 8.1 Tentar pesar produto SEM preço na tabela ativa -> 400 (bloqueio estrito!)
+    const resPesarSemPreco = await app.inject({
+      method: 'POST',
+      url: '/api/acougue/pesar-etiqueta',
+      headers: hdrLoja,
+      payload: { produto_id: prodBovId, peso_bruto_kg: 1.27 },
+    })
+    assert.equal(resPesarSemPreco.statusCode, 400, 'Produto sem preço na tabela ativa não pode ser pesado no Açougue')
+
+    // 8.2 Precificar Picanha (59.90) e Carvão (29.90) na tabela ativa padrão (TAB-001) + criar tabela Promo (-10%)
+    const resTabAtiva = await app.inject({ method: 'GET', url: '/api/acougue/tabela-ativa', headers: hdrLoja })
+    assert.equal(resTabAtiva.statusCode, 200, resTabAtiva.body)
+    const tabPadraoId = resTabAtiva.json().tabela_ativa?.id as string
+    assert.ok(tabPadraoId, `Tabela padrão do Açougue deve estar ativa: ${resTabAtiva.body}`)
+
+    const resPrecificar = await app.inject({
+      method: 'POST',
+      url: `/api/tabelas-preco/${tabPadraoId}/itens`,
+      headers: hdrLoja,
+      payload: {
+        itens: [
+          { produto_id: prodBovId, preco_venda: 59.9 },
+          { produto_id: prodEmpId, preco_venda: 29.9 },
+        ],
+      },
+    })
+    assert.equal(resPrecificar.statusCode, 200, resPrecificar.body)
+
+    const resTabPromo = await app.inject({
+      method: 'POST',
+      url: '/api/tabelas-preco',
+      headers: hdrLoja,
+      payload: {
+        nome: 'Promoção Teste -10%',
+        finalidade: 'PROMOCIONAL',
+        copiar_de_tabela_id: tabPadraoId,
+        desconto_padrao_pct: 10,
+      },
+    })
+    assert.equal(resTabPromo.statusCode, 201, resTabPromo.body)
+    const tabPromoId = resTabPromo.json().data.id as string
+
+    // 8.3 Paginação no Açougue lista SOMENTE itens precificados na tabela ativa
+    const resProdsPes = await app.inject({ method: 'GET', url: '/api/acougue/produtos-pesagem?page=1&limit=48', headers: hdrLoja })
+    assert.equal(resProdsPes.statusCode, 200, resProdsPes.body)
+    assert.equal(resProdsPes.json().data.length, 2, 'Apenas os 2 itens precificados devem aparecer na pesagem')
+    assert.equal(resProdsPes.json().total, 2)
+
+    // 8a. Pesar 2 bandejas de Picanha no Açougue (enviando tara/preço adulterados -> servidor IGNORA e aplica tara 0.02 e preço 59.90!)
     const resPesar1 = await app.inject({
       method: 'POST',
       url: '/api/acougue/pesar-etiqueta',
       headers: hdrLoja,
-      payload: { produto_id: prodBovId, peso_bruto_kg: 1.27, tara_kg: 0.02, preco_kg: 59.9 },
+      payload: { produto_id: prodBovId, peso_bruto_kg: 1.27, tara_kg: 0.99, preco_kg: 1.0 },
     })
     assert.equal(resPesar1.statusCode, 201, resPesar1.body)
     const etq1 = resPesar1.json().data
-    assert.equal(etq1.peso_kg, 1.25)
+    assert.equal(etq1.peso_kg, 1.25, 'Tara do cadastro (0.02) deve ser forçada no servidor')
+    assert.equal(etq1.preco_unitario, 59.9, 'Preço da tabela ativa (59.90) deve ser forçado no servidor')
     assert.equal(etq1.valor_total, 74.88)
     assert.equal(etq1.mp_baixada_ean, cxLojaEan, 'Pesagem deve baixar automaticamente da MP aberta via FEFO')
+
+    // 8a-pin. Testar troca de tabela no Açougue via PIN Gerencial (9999 -> 403; 1234 -> 200; voltar -> 200)
+    const resPinErrado = await app.inject({
+      method: 'POST',
+      url: '/api/acougue/trocar-tabela',
+      headers: hdrLoja,
+      payload: { tabela_preco_id: tabPromoId, pin: '9999' },
+    })
+    assert.equal(resPinErrado.statusCode, 403, 'PIN gerencial incorreto deve ser bloqueado')
+
+    const resPinOk = await app.inject({
+      method: 'POST',
+      url: '/api/acougue/trocar-tabela',
+      headers: hdrLoja,
+      payload: { tabela_preco_id: tabPromoId, pin: '1234', motivo: 'Teste Promo' },
+    })
+    assert.equal(resPinOk.statusCode, 200, resPinOk.body)
+
+    const resTabVolta = await app.inject({
+      method: 'POST',
+      url: '/api/acougue/trocar-tabela',
+      headers: hdrLoja,
+      payload: { tabela_preco_id: tabPadraoId, pin: '1234', motivo: 'Retorno Padrão' },
+    })
+    assert.equal(resTabVolta.statusCode, 200, resTabVolta.body)
 
     const resPesar2 = await app.inject({
       method: 'POST',
       url: '/api/acougue/pesar-etiqueta',
       headers: hdrLoja,
-      payload: { produto_id: prodBovId, peso_bruto_kg: 1.27, tara_kg: 0.02, preco_kg: 59.9 },
+      payload: { produto_id: prodBovId, peso_bruto_kg: 1.27 },
     })
     assert.equal(resPesar2.statusCode, 201, resPesar2.body)
     const etq2 = resPesar2.json().data
+
+    // Etiquetas geradas no dia
+    const resEtqDia = await app.inject({ method: 'GET', url: '/api/acougue/etiquetas-dia', headers: hdrLoja })
+    assert.equal(resEtqDia.statusCode, 200, resEtqDia.body)
+    assert.equal(resEtqDia.json().data.length, 2, 'Deve retornar as 2 etiquetas geradas no dia')
+
+    // Entrada rápida no Empório (2 fardos x 12 = 24 UN no endereço EMPORIO) + Isolamento Estoque por Endereço!
+    const resEmpEnt = await app.inject({
+      method: 'POST',
+      url: '/api/varejo/emporio/entrada',
+      headers: hdrLoja,
+      payload: {
+        ean_ou_codigo: '7891111222233',
+        qtd_volumes: 2,
+        fator_conversao: 12,
+        custo_unitario: 18,
+        preco_venda: 29.9,
+      },
+    })
+    assert.equal(resEmpEnt.statusCode, 201, resEmpEnt.body)
+    assert.equal(resEmpEnt.json().data.qtd_entrada, 24)
+
+    const resEstLoja = await app.inject({ method: 'GET', url: '/api/estoque/caixas', headers: hdrLoja })
+    assert.equal(resEstLoja.statusCode, 200, resEstLoja.body)
+    const rowsLoja = resEstLoja.json().data || []
+    assert.ok(rowsLoja.some((r: any) => r.endereco === 'ACOUGUE'), 'Estoque por Endereço na 1/1 deve exibir endereço ACOUGUE')
+    assert.ok(rowsLoja.some((r: any) => r.endereco === 'EMPORIO'), 'Estoque por Endereço na 1/1 deve exibir endereço EMPORIO')
+
+    const resEstMatriz = await app.inject({ method: 'GET', url: '/api/estoque/caixas', headers: hdrMatriz })
+    assert.equal(resEstMatriz.statusCode, 200, resEstMatriz.body)
+    const rowsMatriz = resEstMatriz.json().data || []
+    assert.ok(
+      !rowsMatriz.some((r: any) => r.endereco === 'ACOUGUE' || r.endereco === 'EMPORIO'),
+      'Endereços ACOUGUE e EMPORIO nunca podem aparecer em outras filiais!',
+    )
 
     const [mpPosPesagem] = await conn.db.select().from(estoqueCaixas).where(eq(estoqueCaixas.eanCaixa, cxLojaEan)).limit(1)
     assert.equal(Number(mpPosPesagem.pesoRestanteKg), 20.0, 'MP aberta deve ter sido reduzida automaticamente para 20.000 kg')
@@ -709,6 +842,17 @@ test('Etapa 3 Completa: Filial Loja 1/1, PDV (QR 80x45 + Balanca EAN-2 + NFC-e),
     assert.equal(resColIns.json().data.saldo_novo, 8)
     assert.equal(resColIns.json().data.custo_total, 87.5)
     assert.equal(resColIns.json().data.alerta_estoque_minimo, true, 'Saldo 8 <= mínimo 10 deve disparar alerta_estoque_minimo')
+
+    // 11. Resumo Gerencial ao Vivo do Produto (Preço Médio de Venda real-time + Estoque Mínimo Dinâmico + Tabelas)
+    const resResumo = await app.inject({
+      method: 'GET',
+      url: `/api/cadastros/produtos/${prodBovId}/resumo-gerencial`,
+      headers: hdrMatriz,
+    })
+    assert.equal(resResumo.statusCode, 200, resResumo.body)
+    const resumo = resResumo.json().data
+    assert.ok(resumo.preco_medio_venda > 0, `Preço médio de venda deve estar calculado após venda PDV: ${resResumo.body}`)
+    assert.ok((resumo.tabelas_preco || []).length >= 1, 'Resumo deve listar tabelas de preço vinculadas')
   } finally {
     await app.close()
     await conn.close()

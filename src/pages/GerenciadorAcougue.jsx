@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
+  AlertTriangle,
   CheckCircle2,
   Download,
   Package,
@@ -8,6 +9,7 @@ import {
   RefreshCw,
   Search,
   Store,
+  Tag,
   Trash2,
   XCircle,
 } from 'lucide-react'
@@ -31,6 +33,8 @@ export function GerenciadorAcougue() {
 
   const [dados, setDados] = useState({
     resumo: {},
+    tabela_ativa: null,
+    alertas_validade: [],
     mps_transito: [],
     mps_abertas: [],
     mps_encerradas: [],
@@ -49,6 +53,8 @@ export function GerenciadorAcougue() {
       })
       setDados({
         resumo: res.kpis || res.resumo || {},
+        tabela_ativa: res.tabela_ativa || null,
+        alertas_validade: res.alertas_validade || [],
         mps_transito: res.mps_transito || [],
         mps_abertas: res.mps_abertas || [],
         mps_encerradas: res.mps_encerradas || [],
@@ -158,7 +164,12 @@ export function GerenciadorAcougue() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {dados.tabela_ativa && (
+            <span className="badge badge--info" style={{ padding: '6px 10px', fontSize: 11.5 }}>
+              <Tag size={12} /> Tabela Ativa: {dados.tabela_ativa.codigo} — {dados.tabela_ativa.nome}
+            </span>
+          )}
           <button type="button" className="btn btn--secondary btn--sm" onClick={exportarCsv}>
             <Download size={14} /> Exportar Relatório CSV
           </button>
@@ -169,29 +180,48 @@ export function GerenciadorAcougue() {
       </div>
 
       {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10 }}>
         <div className="card" style={{ padding: '12px 14px' }}>
-          <div className="text-xs text-muted uppercase">MPs Aguardando 2º Bip</div>
-          <div className="font-mono font-bold text-warning" style={{ fontSize: 20, marginTop: 2 }}>
+          <div className="text-xs text-muted uppercase">MPs Aguardando Entrada</div>
+          <div className="font-mono font-bold text-warning" style={{ fontSize: 18, marginTop: 2 }}>
             {r.qtd_mp_transito || 0} cx • {fmtKg(r.kg_mp_transito || 0)}
           </div>
         </div>
         <div className="card" style={{ padding: '12px 14px' }}>
           <div className="text-xs text-muted uppercase">MPs Abertas (Saldo Vivo)</div>
-          <div className="font-mono font-bold text-info" style={{ fontSize: 20, marginTop: 2 }}>
+          <div className="font-mono font-bold text-info" style={{ fontSize: 18, marginTop: 2 }}>
             {r.qtd_mp_aberta || 0} cx • {fmtKg(r.kg_mp_aberta || 0)}
           </div>
         </div>
         <div className="card" style={{ padding: '12px 14px' }}>
           <div className="text-xs text-muted uppercase">Etiquetas QR em Estoque</div>
-          <div className="font-mono font-bold text-success" style={{ fontSize: 20, marginTop: 2 }}>
+          <div className="font-mono font-bold text-success" style={{ fontSize: 18, marginTop: 2 }}>
             {r.qtd_etiquetas_estoque || 0} un • {fmtKg(r.kg_etiquetas_estoque || 0)}
           </div>
         </div>
         <div className="card" style={{ padding: '12px 14px' }}>
-          <div className="text-xs text-muted uppercase">Valor Etiquetado em Estoque</div>
-          <div className="font-mono font-bold" style={{ fontSize: 20, color: '#22c55e', marginTop: 2 }}>
+          <div className="text-xs text-muted uppercase">Valor Etiquetado</div>
+          <div className="font-mono font-bold" style={{ fontSize: 18, color: '#22c55e', marginTop: 2 }}>
             {fmtMoeda(r.valor_etiquetas_estoque || 0)}
+          </div>
+        </div>
+        <div
+          className="card"
+          style={{
+            padding: '12px 14px',
+            cursor: 'pointer',
+            border: (dados.alertas_validade || []).length > 0 ? '1px solid rgba(239,68,68,0.45)' : undefined,
+          }}
+          onClick={() => setAba('VALIDADE')}
+        >
+          <div className="text-xs text-muted uppercase flex items-center gap-4">
+            <AlertTriangle size={12} color={(dados.alertas_validade || []).length > 0 ? '#ef4444' : '#94a3b8'} /> Alertas de Validade
+          </div>
+          <div
+            className="font-mono font-bold"
+            style={{ fontSize: 18, color: (dados.alertas_validade || []).length > 0 ? '#ef4444' : '#94a3b8', marginTop: 2 }}
+          >
+            {(dados.alertas_validade || []).length} item(ns)
           </div>
         </div>
       </div>
@@ -203,8 +233,9 @@ export function GerenciadorAcougue() {
             {[
               { id: 'ETIQUETAS', label: `Etiquetas Pesadas (${dados.etiquetas.length})` },
               { id: 'MP_ABERTAS', label: `MPs Abertas (${dados.mps_abertas.length})` },
-              { id: 'MP_TRANSITO', label: `MPs em Trânsito (${dados.mps_transito.length})` },
+              { id: 'MP_TRANSITO', label: `MPs Aguardando Entrada (${dados.mps_transito.length})` },
               { id: 'MP_ENCERRADAS', label: `MPs Encerradas (${dados.mps_encerradas.length})` },
+              { id: 'VALIDADE', label: `Alertas de Validade (${(dados.alertas_validade || []).length})` },
             ].map((t) => (
               <button
                 key={t.id}
@@ -258,6 +289,49 @@ export function GerenciadorAcougue() {
         {/* TABELA CONTEXTUAL */}
         {loading ? (
           <div className="text-center text-muted p-24">Carregando estoque em tempo real...</div>
+        ) : aba === 'VALIDADE' ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Origem</th>
+                  <th>Código / Serial</th>
+                  <th>Produto</th>
+                  <th style={{ textAlign: 'right' }}>Peso</th>
+                  <th>Validade</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(dados.alertas_validade || []).length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center text-muted p-24">
+                      Nenhum item vencido ou vencendo nos próximos 3 dias! Tudo em dia.
+                    </td>
+                  </tr>
+                ) : (
+                  (dados.alertas_validade || []).map((a) => (
+                    <tr key={`${a.tipo}-${a.id}`}>
+                      <td><span className="badge badge--neutral">{a.tipo === 'ETIQUETA' ? 'Etiqueta QR' : 'MP Aberta'}</span></td>
+                      <td className="font-mono font-bold text-info">{a.codigo}</td>
+                      <td className="font-bold text-sm">{a.produto_descricao}</td>
+                      <td className="font-mono" style={{ textAlign: 'right' }}>{fmtKg(a.peso_kg)}</td>
+                      <td className="font-mono text-xs">{a.validade}</td>
+                      <td>
+                        <span className={`badge ${a.nivel === 'VENCIDO' ? 'badge--danger' : 'badge--warning'}`}>
+                          {a.nivel === 'VENCIDO'
+                            ? `VENCIDO há ${Math.abs(a.dias_restantes)}d`
+                            : a.dias_restantes === 0
+                              ? 'VENCE HOJE'
+                              : `Vence em ${a.dias_restantes}d`}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         ) : aba === 'ETIQUETAS' ? (
           <div style={{ overflowX: 'auto' }}>
             <table className="table">

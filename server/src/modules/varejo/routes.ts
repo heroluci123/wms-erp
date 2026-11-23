@@ -18,6 +18,8 @@ import {
   pdvVendas,
   produtos,
   produtosEans,
+  tabelasPreco,
+  tabelasPrecoItens,
   tenants,
   varejoEstoque,
   varejoInventarios,
@@ -391,6 +393,204 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
       })
 
       return { success: true, data: out }
+    },
+  )
+
+  // ── ENTRADA RÁPIDA DE EMPÓRIO (EAN-13 + FATOR DE CONVERSÃO FARDO × UNIDADE) ─
+  app.post(
+    '/api/varejo/emporio/entrada',
+    { preHandler: requirePermission(['varejo_acougue', 'produtos', 'recebimento']) },
+    async (req, reply) => {
+      const ctx = req.authCtx!
+      const body = (req.body || {}) as {
+        produto_id?: string
+        ean_ou_codigo?: string
+        qtd_volumes?: number
+        fator_conversao?: number
+        unidade_venda?: string
+        custo_unitario?: number
+        preco_venda?: number
+        estoque_minimo?: number
+        observacao?: string
+      }
+
+      const qtdVolumes = Number(body.qtd_volumes || 0)
+      const fator = Math.max(1, Number(body.fator_conversao || 1))
+      if (!Number.isFinite(qtdVolumes) || qtdVolumes <= 0) {
+        throw new HttpError(400, 'Informe uma quantidade de entrada maior que zero.')
+      }
+      const qtdTotal = Number((qtdVolumes * fator).toFixed(3))
+
+      let prod: typeof produtos.$inferSelect | undefined
+      if (body.produto_id) {
+        const pid = parseUuidOrBadRequest(body.produto_id, 'produto_id')
+        ;[prod] = await conn.db
+          .select()
+          .from(produtos)
+          .where(and(eq(produtos.id, pid), eq(produtos.tenantId, ctx.tenantId)))
+          .limit(1)
+      } else if (body.ean_ou_codigo) {
+        const raw = String(body.ean_ou_codigo).trim()
+        const rawLow = raw.toLowerCase()
+        const allProds = await conn.db
+          .select()
+          .from(produtos)
+          .where(and(eq(produtos.tenantId, ctx.tenantId), eq(produtos.ativo, 1)))
+        prod = allProds.find(
+          (p) =>
+            String(p.ean || '').toLowerCase() === rawLow ||
+            String(p.codigo || '').toLowerCase() === rawLow ||
+            String(p.codigoAuxiliar || '').toLowerCase() === rawLow,
+        )
+        if (!prod) {
+          const [alt] = await conn.db
+            .select({ produtoId: produtosEans.produtoId })
+            .from(produtosEans)
+            .where(and(eq(produtosEans.tenantId, ctx.tenantId), sql`LOWER(${produtosEans.codigoBarras}) = ${rawLow}`))
+            .limit(1)
+          if (alt) prod = allProds.find((p) => p.id === alt.produtoId)
+        }
+      }
+      if (!prod) {
+        throw new HttpError(404, 'Produto não encontrado pelo EAN/código informado. Cadastre o produto primeiro.')
+      }
+
+      const out = await conn.db.transaction(async (tx) => {
+        const [atual] = await tx
+          .select()
+          .from(varejoEstoque)
+          .where(
+            and(
+              eq(varejoEstoque.tenantId, ctx.tenantId),
+              eq(varejoEstoque.filialId, ctx.filialId),
+              eq(varejoEstoque.produtoId, prod!.id),
+            ),
+          )
+          .limit(1)
+
+        const saldoAnt = atual ? toNum(atual.saldoQtd, 0) : 0
+        const saldoNovo = Number((saldoAnt + qtdTotal).toFixed(3))
+        const unidade = String(body.unidade_venda || atual?.unidadeVenda || (prod!.unidade === 'KG' ? 'KG' : 'UN')).toUpperCase() === 'KG' ? 'KG' : 'UN'
+        const precoVenda =
+          body.preco_venda !== undefined && Number(body.preco_venda) > 0
+            ? Number(body.preco_venda)
+            : atual
+              ? toNum(atual.precoVendaVarejo, 0)
+              : toNum(prod!.valorUnitario, 0)
+        const estMin =
+          body.estoque_minimo !== undefined && Number.isFinite(Number(body.estoque_minimo))
+            ? Math.max(0, Number(body.estoque_minimo))
+            : atual
+              ? toNum(atual.estoqueMinimo, 0)
+              : 0
+
+        if (atual) {
+          await tx
+            .update(varejoEstoque)
+            .set({
+              unidadeVenda: unidade,
+              saldoQtd: toDec(saldoNovo, 3),
+              precoVendaVarejo: toDec(precoVenda, 4),
+              estoqueMinimo: toDec(estMin, 3),
+              setorLoja: 'EMPORIO',
+              updatedAt: new Date(),
+            })
+            .where(eq(varejoEstoque.id, atual.id))
+        } else {
+          await tx.insert(varejoEstoque).values({
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            filialId: ctx.filialId,
+            produtoId: prod!.id,
+            unidadeVenda: unidade,
+            saldoQtd: toDec(saldoNovo, 3),
+            precoVendaVarejo: toDec(precoVenda, 4),
+            estoqueMinimo: toDec(estMin, 3),
+            codigoBalanca: (prod!.codigo || '').replace(/\D/g, '').slice(-5),
+            setorLoja: 'EMPORIO',
+          })
+        }
+
+        // Atualiza último preço de compra / custo se informado
+        if (body.custo_unitario !== undefined && Number(body.custo_unitario) > 0) {
+          const custoUn = Number(body.custo_unitario)
+          const prodPatch: Partial<typeof produtos.$inferInsert> = {
+            ultimoPrecoCompra: toDec(custoUn, 4),
+            updatedAt: new Date(),
+          }
+          if (toNum(prod!.custoMedioKg, 0) <= 0) {
+            prodPatch.custoMedioKg = toDec(custoUn, 4)
+          }
+          if (!prod!.especie) prodPatch.especie = 'EMPORIO'
+          await tx.update(produtos).set(prodPatch).where(eq(produtos.id, prod!.id))
+        }
+
+        // Se informou preço de venda > 0, vincula na tabela de preços padrão do varejo se ainda não existir
+        if (precoVenda > 0) {
+          const [tabPadrao] = await tx
+            .select({ id: tabelasPreco.id })
+            .from(tabelasPreco)
+            .where(and(eq(tabelasPreco.tenantId, ctx.tenantId), eq(tabelasPreco.ativo, 1)))
+            .orderBy(desc(tabelasPreco.padrao), asc(tabelasPreco.codigo))
+            .limit(1)
+          if (tabPadrao) {
+            const [itemExist] = await tx
+              .select({ id: tabelasPrecoItens.id })
+              .from(tabelasPrecoItens)
+              .where(and(eq(tabelasPrecoItens.tabelaPrecoId, tabPadrao.id), eq(tabelasPrecoItens.produtoId, prod!.id)))
+              .limit(1)
+            if (itemExist) {
+              if (body.preco_venda !== undefined && Number(body.preco_venda) > 0) {
+                await tx
+                  .update(tabelasPrecoItens)
+                  .set({ precoVenda: toDec(precoVenda, 4), updatedAt: new Date() })
+                  .where(eq(tabelasPrecoItens.id, itemExist.id))
+              }
+            } else {
+              await tx.insert(tabelasPrecoItens).values({
+                id: uuidv7(),
+                tenantId: ctx.tenantId,
+                tabelaPrecoId: tabPadrao.id,
+                produtoId: prod!.id,
+                precoVenda: toDec(precoVenda, 4),
+                descontoPct: '0.00',
+              })
+            }
+          }
+        }
+
+        await tx.insert(varejoMovimentacoes).values({
+          id: uuidv7(),
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          produtoId: prod!.id,
+          tipo: 'ENTRADA_EMPORIO',
+          qtd: toDec(qtdTotal, 3),
+          saldoAnterior: toDec(saldoAnt, 3),
+          saldoNovo: toDec(saldoNovo, 3),
+          referenciaTipo: 'EMPORIO',
+          observacao:
+            String(body.observacao || '').trim() ||
+            `Entrada Empório: ${qtdVolumes} vol × ${fator} = +${qtdTotal} ${unidade}`,
+          operadorId: ctx.operador.id,
+          operadorNome: ctx.operador.nome,
+        })
+
+        return {
+          produto_id: prod!.id,
+          produto_codigo: prod!.codigo || '',
+          produto_ean: prod!.ean || '',
+          produto_descricao: prod!.descricao,
+          unidade_venda: unidade,
+          qtd_entrada: qtdTotal,
+          saldo_anterior: saldoAnt,
+          saldo_novo: saldoNovo,
+          preco_venda: precoVenda,
+          endereco: 'EMPORIO',
+        }
+      })
+
+      return reply.code(201).send({ success: true, data: out })
     },
   )
 
@@ -1417,10 +1617,34 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
     { preHandler: requirePermission(PERM_PDV, { write: false, bloquearCliente: true }) },
     async (req) => {
       const ctx = req.authCtx!
-      const raw = String((req.query as { q?: string }).q || '').trim()
+      const qObj = (req.query || {}) as { q?: string; cliente_id?: string }
+      const raw = String(qObj.q || '').trim()
       if (!raw) return { success: true, origem: 'VAZIO', match_exato: null, sugestoes: [] }
 
-      const [estLojaRows, prodsAll, eansAlt] = await Promise.all([
+      // Resolve Tabela de Preços do Cliente (se vinculado) ou Tabela Padrão Varejo/PDV
+      let tabelaPrecoIdAlvo: string | null = null
+      if (qObj.cliente_id) {
+        const [cliRow] = await conn.db
+          .select({ tabelaPrecoId: clientes.tabelaPrecoId })
+          .from(clientes)
+          .where(and(eq(clientes.id, parseUuidOrBadRequest(qObj.cliente_id, 'cliente_id')), eq(clientes.tenantId, ctx.tenantId)))
+          .limit(1)
+        if (cliRow?.tabelaPrecoId) tabelaPrecoIdAlvo = cliRow.tabelaPrecoId
+      }
+      if (!tabelaPrecoIdAlvo) {
+        const tabs = await conn.db
+          .select({ id: tabelasPreco.id, finalidade: tabelasPreco.finalidade, padrao: tabelasPreco.padrao })
+          .from(tabelasPreco)
+          .where(and(eq(tabelasPreco.tenantId, ctx.tenantId), eq(tabelasPreco.ativo, 1)))
+          .orderBy(desc(tabelasPreco.padrao), asc(tabelasPreco.codigo))
+        const tabPdv =
+          tabs.find((t) => Number(t.padrao) === 1 && t.finalidade === 'VAREJO_PDV') ||
+          tabs.find((t) => Number(t.padrao) === 1) ||
+          tabs[0]
+        tabelaPrecoIdAlvo = tabPdv?.id || null
+      }
+
+      const [estLojaRows, prodsAll, eansAlt, tabItensRows] = await Promise.all([
         conn.db
           .select()
           .from(varejoEstoque)
@@ -1433,10 +1657,21 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
           .select()
           .from(produtosEans)
           .where(eq(produtosEans.tenantId, ctx.tenantId)),
+        tabelaPrecoIdAlvo
+          ? conn.db
+              .select({ produtoId: tabelasPrecoItens.produtoId, precoVenda: tabelasPrecoItens.precoVenda })
+              .from(tabelasPrecoItens)
+              .where(eq(tabelasPrecoItens.tabelaPrecoId, tabelaPrecoIdAlvo))
+          : Promise.resolve([]),
       ])
 
       const estMap = new Map(estLojaRows.map((e) => [e.produtoId, e]))
       const prodMap = new Map(prodsAll.map((p) => [p.id, p]))
+      const tabPrecoMap = new Map<string, number>()
+      for (const ti of tabItensRows) {
+        const pv = toNum(ti.precoVenda, 0)
+        if (pv > 0) tabPrecoMap.set(ti.produtoId, pv)
+      }
 
       const montarItem = (
         p: typeof produtos.$inferSelect,
@@ -1451,7 +1686,7 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
           codigo_etiqueta?: string
         },
       ) => {
-        const preco = toNum(est?.precoVendaVarejo, 0) || toNum(p.valorUnitario, 0)
+        const preco = tabPrecoMap.get(p.id) || toNum(est?.precoVendaVarejo, 0) || toNum(p.valorUnitario, 0)
         let qtd = qtdOverride && qtdOverride > 0 ? qtdOverride : 1
         let valorTotal = totalOverride && totalOverride > 0 ? totalOverride : Number((qtd * preco).toFixed(2))
         let precoUnit = preco

@@ -275,7 +275,7 @@ export function PdvCaixa() {
     if (!q) return
     setBuscando(true)
     try {
-      const res = await varejoQueries.buscarCodigoPdv(q)
+      const res = await varejoQueries.buscarCodigoPdv(q, clienteSel?.id || null)
       if (res.match_exato) {
         adicionarAoCarrinho(res.match_exato)
         if (res.origem === 'QR_ZEBRA_80X45') {

@@ -284,7 +284,8 @@ export async function gerarCodigoDocumento(
     | 'VAREJO_INV'
     | 'PDV_CAIXA'
     | 'PDV_VENDA'
-    | 'ETQ_ACOUGUE',
+    | 'ETQ_ACOUGUE'
+    | 'TABELA_PRECO',
   prefix: string,
   pad = 4,
 ): Promise<string> {

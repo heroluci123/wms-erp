@@ -13,6 +13,29 @@ import {
 import { tenants, filiais } from './saas.js'
 import { vendedores } from './auth.js'
 
+export const produtoEspecificacoes = pgTable(
+  'produto_especificacoes',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    codigo: text('codigo').notNull(),
+    nome: text('nome').notNull(),
+    especie: text('especie').notNull().default('BOVINO'), // BOVINO | SUINO | AVES | OUTROS
+    conservacao: text('conservacao').notNull().default('RESFRIADO'), // RESFRIADO | CONGELADO | SECO
+    temperaturaRotulo: text('temperatura_rotulo').notNull().default(''),
+    validadeDiasPadrao: integer('validade_dias_padrao'),
+    ativo: integer('ativo').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_prod_espec_tenant_cod').on(t.tenantId, t.codigo),
+    index('idx_prod_espec_tenant').on(t.tenantId, t.ativo),
+  ]
+)
+
 export const produtos = pgTable(
   'produtos',
   {
@@ -26,12 +49,14 @@ export const produtos = pgTable(
     ean: text('ean'),
     descricao: text('descricao').notNull(),
     valorUnitario: numeric('valor_unitario', { precision: 14, scale: 4 }).notNull().default('0'),
+    ultimoPrecoCompra: numeric('ultimo_preco_compra', { precision: 14, scale: 4 }).notNull().default('0'),
     custoMedioKg: numeric('custo_medio_kg', { precision: 14, scale: 4 }).notNull().default('0'),
     tipoProduto: text('tipo_produto').notNull().default('Materia Prima'),
     statusCurva: text('status_curva').notNull().default('C'),
     unidade: text('unidade').notNull().default('CX'),
     grupo: text('grupo').notNull().default(''),
     especie: text('especie').notNull().default(''), // BOVINO | SUINO | AVES | EMPORIO | INSUMO | OUTROS
+    especificacaoId: uuid('especificacao_id').references(() => produtoEspecificacoes.id, { onDelete: 'set null' }),
     conservacao: text('conservacao').notNull().default('RESFRIADO'), // RESFRIADO | CONGELADO | SECO
     validadeDias: integer('validade_dias').notNull().default(5),
     taraEmbalagemKg: numeric('tara_embalagem_kg', { precision: 10, scale: 4 }).notNull().default('0'),
@@ -294,6 +319,7 @@ export const clientes = pgTable(
     prazoCrediarioDias: integer('prazo_crediario_dias').notNull().default(30),
     descontoAtivo: integer('desconto_ativo').notNull().default(0),
     descontoMaxPct: numeric('desconto_max_pct', { precision: 6, scale: 2 }).notNull().default('0'),
+    tabelaPrecoId: uuid('tabela_preco_id'),
     bloqueadoFinanceiro: integer('bloqueado_financeiro').notNull().default(0),
     permitePagamentoEntrega: integer('permite_pagamento_entrega').notNull().default(1),
     isPadrao: integer('is_padrao').notNull().default(0),

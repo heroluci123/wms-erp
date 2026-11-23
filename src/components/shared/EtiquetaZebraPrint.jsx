@@ -1,9 +1,32 @@
 import React, { useEffect, useRef } from 'react'
 import JsBarcode from 'jsbarcode'
+import QRCode from 'qrcode'
 import { Printer, Download, X, Tag, CheckCircle2 } from 'lucide-react'
 import { fmtDataBR, fmtKg2, fmtKg3, gerarLotePorData } from '../../utils/rastreabilidade'
 import { lerConfigEstacao } from '../../utils/estacaoConfig'
 import { useAppStore } from '../../store/appStore'
+
+function gerarQrSvgHtml(texto, sizePx = 56) {
+  if (!texto) return ''
+  try {
+    const qr = QRCode.create(String(texto), { errorCorrectionLevel: 'M' })
+    const modCount = qr.modules.size
+    const data = qr.modules.data
+    const quiet = 1
+    const total = modCount + quiet * 2
+    let rects = ''
+    for (let r = 0; r < modCount; r++) {
+      for (let c = 0; c < modCount; c++) {
+        if (data[r * modCount + c]) {
+          rects += `<rect x="${c + quiet}" y="${r + quiet}" width="1" height="1" fill="#000"/>`
+        }
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${sizePx}" height="${sizePx}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="#fff"/>${rects}</svg>`
+  } catch {
+    return ''
+  }
+}
 
 function obterFilialAtivaStore() {
   try {
@@ -78,12 +101,30 @@ function normalizarEtiqueta(raw) {
     registroTipo: raw?.registro_sanitario_tipo || filialAtiva?.registro_sanitario_tipo || '',
     registroNum: raw?.registro_sanitario_num || filialAtiva?.registro_sanitario_num || '',
   })
+  const especificacao = String(
+    raw?.produto_especificacao || raw?.especificacao_nome || raw?.especificacao || '',
+  )
+    .trim()
+    .toUpperCase()
+  const temperaturaRotulo = String(
+    raw?.temperatura_rotulo || raw?.especificacao_temperatura || '',
+  )
+    .trim()
+    .toUpperCase()
+  const opCodigo = String(raw?.op_codigo || '').trim().toUpperCase()
+  const loteOp = opCodigo ? `${lote} / ${opCodigo}` : lote
+  const qrPayload = `WMS|${ean}|${String(raw?.produto_codigo || raw?.codigo || '').trim()}|${lote}|${Number(liquido || 0).toFixed(3)}|${raw?.validade || ''}`
 
   return {
     ean,
     codigo: String(raw?.produto_codigo || raw?.codigo || '-').trim(),
     descricao: String(raw?.produto_descricao || raw?.descricao || 'PRODUTO SEM DESCRIÇÃO').trim().toUpperCase(),
+    especificacao,
+    temperatura_rotulo: temperaturaRotulo,
     lote,
+    op_codigo: opCodigo,
+    lote_op: loteOp,
+    qr_payload: qrPayload,
     data_producao: raw?.data_producao || null,
     validade: raw?.validade || null,
     peso_bruto_kg: bruto,
@@ -100,16 +141,18 @@ function normalizarEtiqueta(raw) {
 
 /**
  * Gera código ZPL II nativo para impressoras Zebra (203 DPI — 100mm x 70mm = 800 x 560 dots).
+ * Identidade visual original WMSphere com Especificação de Rótulo, Selo Sanitário, Pesos, Code128 e QR.
  */
 export function gerarZplEtiqueta100x70(raw) {
   const e = normalizarEtiqueta(raw)
+  const especTxt = e.especificacao.slice(0, 48)
   const desc1 = e.descricao.slice(0, 34)
   const desc2 = e.descricao.slice(34, 68)
   const prodData = fmtDataBR(e.data_producao)
   const valData = fmtDataBR(e.validade)
-  const brutoTxt = `${Number(e.peso_bruto_kg || 0).toFixed(2).replace('.', ',')} kg`
+  const brutoTxt = `${Number(e.peso_bruto_kg || 0).toFixed(3).replace('.', ',')} kg`
   const taraTxt = `${Number(e.tara_kg || 0).toFixed(3).replace('.', ',')} kg`
-  const liqTxt = `${Number(e.peso_liquido_kg || 0).toFixed(2).replace('.', ',')} kg`
+  const liqTxt = `${Number(e.peso_liquido_kg || 0).toFixed(3).replace('.', ',')} kg`
   const pecasTxt = e.qtd_pecas != null ? `${e.qtd_pecas} PC` : '-'
 
   return [
@@ -118,21 +161,33 @@ export function gerarZplEtiqueta100x70(raw) {
     '^PW800',
     '^LL560',
     '^LH0,0',
-    '^FO24,18^GB752,524,3^FS',
-    '^FO24,62^GB752,2,2^FS',
-    `^FO38,28^A0N,26,26^FD${e.empresa_nome.slice(0, 28)}^FS`,
-    `^FO450,28^A0N,20,20^FD${e.origem_tipo.slice(0, 26)}^FS`,
-    `^FO38,74^A0N,30,30^FD${desc1}^FS`,
-    desc2 ? `^FO38,108^A0N,26,26^FD${desc2}^FS` : '',
-    `^FO38,144^A0N,24,24^FDCOD: ${e.codigo}   LOTE: ${e.lote}   PECAS: ${pecasTxt}^FS`,
-    `^FO38,178^A0N,24,24^FDPROD: ${prodData}   VAL: ${valData}^FS`,
-    '^FO24,214^GB752,2,2^FS',
-    `^FO38,228^A0N,24,24^FDBRUTO: ${brutoTxt}   TARA: ${taraTxt}^FS`,
-    `^FO38,262^A0N,34,34^FDPESO LIQ: ${liqTxt}   QTD: ${pecasTxt}^FS`,
-    '^FO24,308^GB752,2,2^FS',
-    `^FO90,330^BY2,3,105^BCN,105,Y,N,N^FD${e.ean}^FS`,
-    e.ean_origem ? `^FO38,512^A0N,17,17^FDORIGEM: ${e.ean_origem}^FS` : '',
-    e.selo_sanitario ? `^FO380,512^A0N,17,17^FB382,1,0,R^FD${e.selo_sanitario}^FS` : '',
+    // Moldura externa WMSphere
+    '^FO18,14^GB764,532,3^FS',
+    // Barra superior escura (identidade WMSphere + empresa)
+    '^FO18,14^GB764,46,46^FS',
+    `^FO32,24^A0N,24,24^FR^FD${e.empresa_nome.slice(0, 28)}^FS`,
+    `^FO445,26^A0N,20,20^FB322,1,0,R^FR^FD${(e.selo_sanitario || e.origem_tipo).slice(0, 32)}^FS`,
+    // Especificação do produto (faixa de destaque acima do corte)
+    especTxt ? `^FO32,68^A0N,22,22^FB736,1,0,C^FD${especTxt}^FS` : '',
+    especTxt ? '^FO28,94^GB744,2,2^FS' : '',
+    // Nome do corte em destaque
+    `^FO32,${especTxt ? 102 : 72}^A0N,32,32^FD${desc1}^FS`,
+    desc2 ? `^FO32,${especTxt ? 136 : 108}^A0N,24,24^FD${desc2}^FS` : '',
+    // Grade de rastreabilidade (Prod / Val / Cod / Peças / Lote-OP)
+    '^FO18,168^GB764,2,2^FS',
+    `^FO32,178^A0N,22,22^FDCOD: ${e.codigo}   PECAS: ${pecasTxt}   LOTE/OP: ${e.lote_op.slice(0, 20)}^FS`,
+    `^FO32,208^A0N,24,24^FDPROD: ${prodData}     VAL: ${valData}^FS`,
+    e.temperatura_rotulo ? `^FO32,238^A0N,18,18^FD${e.temperatura_rotulo.slice(0, 56)}^FS` : '',
+    // Faixa de pesos
+    '^FO18,264^GB764,2,2^FS',
+    `^FO32,276^A0N,22,22^FDBRUTO: ${brutoTxt}   TARA: ${taraTxt}^FS`,
+    `^FO32,306^A0N,34,34^FDPESO LIQUIDO: ${liqTxt}^FS`,
+    '^FO18,348^GB764,2,2^FS',
+    // Código de barras à esquerda + QR de rastreabilidade à direita
+    `^FO36,368^BY2,3,108^BCN,108,Y,N,N^FD${e.ean}^FS`,
+    `^FO632,360^BQN,2,4^FDQA,${e.qr_payload}^FS`,
+    // Rodapé rastreável WMSphere
+    `^FO32,518^A0N,16,16^FDWMSphere${e.ean_origem ? ` • ORIGEM: ${e.ean_origem}` : ''} • ${e.origem_tipo.slice(0, 26)}^FS`,
     '^XZ',
   ].filter(Boolean).join('\n')
 }
@@ -185,23 +240,27 @@ export function montarHtmlEtiqueta100x70(etiquetas) {
 
   const cardsHtml = lista.map((e) => `
     <div class="zlabel">
-      <div class="zheader">
-        <div>
+      <div class="ztop">
+        <div class="ztop-left">
           <div class="zbrand">${escHtml(e.empresa_nome)}</div>
-          <div class="zsub">WMS RASTREABILIDADE • COD. ${escHtml(e.codigo)}</div>
+          <div class="zsub">WMSphere Rastreabilidade • ${escHtml(e.origem_tipo)}</div>
         </div>
-        <div class="zbadge">${escHtml(e.origem_tipo)}</div>
+        ${e.selo_sanitario ? `<div class="zselo-pill">${escHtml(e.selo_sanitario)}</div>` : `<div class="zselo-pill">COD. ${escHtml(e.codigo)}</div>`}
       </div>
 
-      <div class="zprod">${escHtml(e.descricao)}</div>
+      ${e.especificacao ? `<div class="zespec">${escHtml(e.especificacao)}</div>` : ''}
+
+      <div class="zprod-row">
+        <div class="zprod">${escHtml(e.descricao)}</div>
+        <div class="zcod-box">
+          <span>CÓD</span>
+          <strong>${escHtml(e.codigo)}</strong>
+        </div>
+      </div>
 
       <div class="zmeta-grid">
         <div class="zcell">
-          <span class="zlbl">LOTE</span>
-          <strong class="zval zval-big">${escHtml(e.lote)}</strong>
-        </div>
-        <div class="zcell">
-          <span class="zlbl">DATA PROD.</span>
+          <span class="zlbl">DATA PRODUÇÃO</span>
           <strong class="zval">${escHtml(fmtDataBR(e.data_producao))}</strong>
         </div>
         <div class="zcell">
@@ -209,15 +268,21 @@ export function montarHtmlEtiqueta100x70(etiquetas) {
           <strong class="zval">${escHtml(fmtDataBR(e.validade))}</strong>
         </div>
         <div class="zcell">
+          <span class="zlbl">LOTE / OP</span>
+          <strong class="zval zval-mono">${escHtml(e.lote_op)}</strong>
+        </div>
+        <div class="zcell" style="text-align:right">
           <span class="zlbl">PEÇAS</span>
-          <strong class="zval zval-big">${escHtml(e.qtd_pecas != null ? `${e.qtd_pecas} pç` : '-')}</strong>
+          <strong class="zval zval-mono">${escHtml(e.qtd_pecas != null ? `${e.qtd_pecas} pç` : '-')}</strong>
         </div>
       </div>
+
+      ${e.temperatura_rotulo ? `<div class="ztemp">${escHtml(e.temperatura_rotulo)}</div>` : ''}
 
       <div class="zpeso-strip">
         <div class="zpeso-item">
           <span>PESO BRUTO</span>
-          <strong>${escHtml(fmtKg2(e.peso_bruto_kg))}</strong>
+          <strong>${escHtml(fmtKg3(e.peso_bruto_kg))}</strong>
         </div>
         <div class="zpeso-item">
           <span>TARA</span>
@@ -225,20 +290,18 @@ export function montarHtmlEtiqueta100x70(etiquetas) {
         </div>
         <div class="zpeso-item zpeso-liq">
           <span>PESO LÍQUIDO</span>
-          <strong>${escHtml(fmtKg2(e.peso_liquido_kg))}</strong>
+          <strong>${escHtml(fmtKg3(e.peso_liquido_kg))}</strong>
         </div>
       </div>
 
-      <div class="zbarcode-wrap">
-        ${gerarBarcodeSvgHtml(e.ean)}
-        ${
-          e.ean_origem || e.selo_sanitario
-            ? `<div class="zfooter-sanitario">
-                 <span>${e.ean_origem ? `Origem: ${escHtml(e.ean_origem)}` : ''}</span>
-                 <span class="zselo">${escHtml(e.selo_sanitario)}</span>
-               </div>`
-            : ''
-        }
+      <div class="zbottom">
+        <div class="zbarcode-col">
+          ${gerarBarcodeSvgHtml(e.ean)}
+          ${e.ean_origem ? `<div class="zorig">Origem: ${escHtml(e.ean_origem)}</div>` : ''}
+        </div>
+        <div class="zqr-col">
+          ${gerarQrSvgHtml(e.qr_payload, 52)}
+        </div>
       </div>
     </div>
   `).join('')
@@ -247,32 +310,40 @@ export function montarHtmlEtiqueta100x70(etiquetas) {
   <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <title>Etiqueta Zebra 100x70mm</title>
+    <title>Etiqueta WMSphere 100x70mm</title>
     <style>
       @page { size: 100mm 70mm; margin: 0; }
       * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       html, body { width: 100mm; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
-      .zlabel { width: 100mm; height: 70mm; padding: 2.6mm 3.2mm 2mm 3.2mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; overflow: hidden; background: #fff; }
+      .zlabel { width: 100mm; height: 70mm; padding: 2mm 2.8mm 1.8mm 2.8mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; overflow: hidden; background: #fff; border: 0.6pt solid #000; }
       .zlabel:last-child { page-break-after: auto; break-after: auto; }
-      .zheader { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5pt solid #000; padding-bottom: 1.2mm; }
-      .zbrand { font-size: 9pt; font-weight: 900; letter-spacing: 0.4px; line-height: 1; }
-      .zsub { font-size: 6.5pt; font-weight: 700; margin-top: 0.6mm; }
-      .zbadge { background: #000; color: #fff; font-size: 6.5pt; font-weight: 800; padding: 1mm 2mm; border-radius: 1mm; text-transform: uppercase; max-width: 44mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .zprod { font-size: 10.5pt; font-weight: 900; line-height: 1.15; text-transform: uppercase; max-height: 8.5mm; overflow: hidden; margin: 1mm 0; }
-      .zmeta-grid { display: grid; grid-template-columns: 1.05fr 0.95fr 0.95fr 0.72fr; gap: 1.2mm; border-top: 0.8pt solid #000; border-bottom: 0.8pt solid #000; padding: 1mm 0; }
+      .ztop { background: #000; color: #fff; padding: 1.2mm 2mm; border-radius: 0.8mm; display: flex; justify-content: space-between; align-items: center; gap: 2mm; }
+      .zbrand { font-size: 8.5pt; font-weight: 900; letter-spacing: 0.3px; line-height: 1.05; }
+      .zsub { font-size: 5.5pt; font-weight: 700; opacity: 0.9; margin-top: 0.3mm; }
+      .zselo-pill { background: #fff; color: #000; font-size: 6pt; font-weight: 900; padding: 0.7mm 1.6mm; border-radius: 0.6mm; white-space: nowrap; }
+      .zespec { text-align: center; font-size: 7.4pt; font-weight: 900; letter-spacing: 0.3px; border-bottom: 1pt solid #000; padding: 0.7mm 0; margin-top: 0.6mm; text-transform: uppercase; }
+      .zprod-row { display: flex; align-items: center; justify-content: space-between; gap: 2mm; margin: 0.8mm 0; }
+      .zprod { font-size: 10.5pt; font-weight: 900; line-height: 1.1; text-transform: uppercase; max-height: 8mm; overflow: hidden; flex: 1; }
+      .zcod-box { background: #000; color: #fff; padding: 0.6mm 1.8mm; border-radius: 0.6mm; text-align: center; flex-shrink: 0; }
+      .zcod-box span { display: block; font-size: 4.8pt; font-weight: 700; opacity: 0.85; }
+      .zcod-box strong { display: block; font-size: 8.8pt; font-weight: 900; font-family: 'Courier New', monospace; }
+      .zmeta-grid { display: grid; grid-template-columns: 0.95fr 0.95fr 1.2fr 0.58fr; gap: 1mm; border-top: 0.8pt solid #000; border-bottom: 0.8pt solid #000; padding: 0.8mm 0; }
       .zcell { display: flex; flex-direction: column; }
-      .zlbl { font-size: 6pt; font-weight: 700; color: #222; }
-      .zval { font-size: 8.5pt; font-weight: 800; }
-      .zval-big { font-family: 'Courier New', monospace; font-size: 9.5pt; font-weight: 900; }
-      .zpeso-strip { display: grid; grid-template-columns: 1fr 0.9fr 1.2fr; gap: 1.5mm; background: #f3f4f6; border: 1pt solid #000; padding: 1mm 1.5mm; margin-top: 1mm; }
+      .zlbl { font-size: 5.3pt; font-weight: 700; color: #222; }
+      .zval { font-size: 8pt; font-weight: 800; }
+      .zval-mono { font-family: 'Courier New', monospace; font-size: 8.2pt; font-weight: 900; }
+      .ztemp { font-size: 5.5pt; font-weight: 800; text-align: center; padding-top: 0.4mm; letter-spacing: 0.2px; }
+      .zpeso-strip { display: grid; grid-template-columns: 1fr 0.85fr 1.25fr; gap: 1.2mm; background: #f3f4f6; border: 1pt solid #000; padding: 0.8mm 1.4mm; margin-top: 0.6mm; }
       .zpeso-item { display: flex; flex-direction: column; }
-      .zpeso-item span { font-size: 5.8pt; font-weight: 700; }
-      .zpeso-item strong { font-size: 8.8pt; font-weight: 800; }
+      .zpeso-item span { font-size: 5.2pt; font-weight: 700; }
+      .zpeso-item strong { font-size: 8.4pt; font-weight: 800; font-family: 'Courier New', monospace; }
       .zpeso-liq strong { font-size: 10.5pt; font-weight: 900; }
-      .zbarcode-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 0.8mm; }
-      .zbarcode-wrap svg { max-width: 92mm; height: 14.5mm; }
-      .zfooter-sanitario { width: 100%; display: flex; justify-content: space-between; align-items: center; font-size: 5.8pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: 0.3mm; color: #111; }
-      .zselo { margin-left: auto; letter-spacing: 0.2px; }
+      .zbottom { display: flex; align-items: center; justify-content: space-between; gap: 1.5mm; margin-top: 0.6mm; }
+      .zbarcode-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+      .zbarcode-col svg { max-width: 75mm; height: 13mm; }
+      .zorig { font-size: 5.2pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: 0.2mm; }
+      .zqr-col { flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 0.6pt solid #000; padding: 0.5mm; border-radius: 0.5mm; }
+      .zqr-col svg { width: 13mm; height: 13mm; display: block; }
     </style>
   </head>
   <body>${cardsHtml}</body>
@@ -421,90 +492,115 @@ function BarcodeSvg({ value }) {
 
 export function EtiquetaZebraCard({ etiqueta }) {
   const e = normalizarEtiqueta(etiqueta)
+  const qrHtml = gerarQrSvgHtml(e.qr_payload, 56)
   return (
     <div style={{
       background: '#ffffff',
       color: '#090d16',
       border: '2px solid #090d16',
       borderRadius: 8,
-      padding: '12px 14px',
+      padding: '10px 12px',
       width: '100%',
-      maxWidth: 380,
+      maxWidth: 400,
       fontFamily: 'Arial, Helvetica, sans-serif',
       boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #090d16', paddingBottom: 6, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#090d16', color: '#ffffff', borderRadius: 5, padding: '6px 9px', marginBottom: 6, gap: 8 }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: '0.4px' }}>{e.empresa_nome}</div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#334155' }}>COD. {e.codigo}</div>
+          <div style={{ fontSize: 11.5, fontWeight: 900, letterSpacing: '0.4px' }}>{e.empresa_nome}</div>
+          <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>WMSphere • {e.origem_tipo}</div>
         </div>
         <span style={{
-          background: '#090d16', color: '#ffffff', fontSize: 10, fontWeight: 800,
-          padding: '3px 7px', borderRadius: 4, textTransform: 'uppercase',
+          background: '#ffffff', color: '#090d16', fontSize: 9, fontWeight: 900,
+          padding: '2px 6px', borderRadius: 3, whiteSpace: 'nowrap',
         }}>
-          {e.origem_tipo}
+          {e.selo_sanitario || `CÓD. ${e.codigo}`}
         </span>
       </div>
 
-      <div style={{ fontSize: 14, fontWeight: 900, lineHeight: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>
-        {e.descricao}
+      {e.especificacao && (
+        <div style={{
+          textAlign: 'center', fontSize: 10.5, fontWeight: 900, letterSpacing: '0.35px',
+          borderBottom: '1.5px solid #090d16', paddingBottom: 4, marginBottom: 6, color: '#0f172a',
+        }}>
+          {e.especificacao}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <div style={{ fontSize: 14, fontWeight: 900, lineHeight: 1.15, textTransform: 'uppercase', flex: 1 }}>
+          {e.descricao}
+        </div>
+        <div style={{ background: '#090d16', color: '#fff', borderRadius: 4, padding: '3px 7px', textAlign: 'center', flexShrink: 0 }}>
+          <div style={{ fontSize: 7.5, fontWeight: 700, opacity: 0.8 }}>CÓD</div>
+          <div style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace' }}>{e.codigo}</div>
+        </div>
       </div>
 
       <div style={{
-        display: 'grid', gridTemplateColumns: '1.05fr 0.95fr 0.95fr 0.72fr', gap: 6,
+        display: 'grid', gridTemplateColumns: '0.95fr 0.95fr 1.25fr 0.6fr', gap: 6,
         borderTop: '1px solid #cbd5e1', borderBottom: '1px solid #cbd5e1',
-        padding: '6px 0', marginBottom: 8,
+        padding: '5px 0', marginBottom: 6,
       }}>
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569' }}>LOTE</div>
-          <div style={{ fontSize: 13, fontWeight: 900, fontFamily: 'monospace' }}>{e.lote}</div>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: '#475569' }}>DATA PROD.</div>
+          <div style={{ fontSize: 11.5, fontWeight: 800 }}>{fmtDataBR(e.data_producao)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569' }}>DATA PROD.</div>
-          <div style={{ fontSize: 12, fontWeight: 800 }}>{fmtDataBR(e.data_producao)}</div>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: '#475569' }}>VALIDADE</div>
+          <div style={{ fontSize: 11.5, fontWeight: 800 }}>{fmtDataBR(e.validade)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569' }}>VALIDADE</div>
-          <div style={{ fontSize: 12, fontWeight: 800 }}>{fmtDataBR(e.validade)}</div>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: '#475569' }}>LOTE / OP</div>
+          <div style={{ fontSize: 11.5, fontWeight: 900, fontFamily: 'monospace' }}>{e.lote_op}</div>
         </div>
-        <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569' }}>PEÇAS</div>
-          <div style={{ fontSize: 13, fontWeight: 900, fontFamily: 'monospace' }}>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: '#475569' }}>PEÇAS</div>
+          <div style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace' }}>
             {e.qtd_pecas != null ? `${e.qtd_pecas} pç` : '-'}
           </div>
         </div>
       </div>
 
+      {e.temperatura_rotulo && (
+        <div style={{ textAlign: 'center', fontSize: 8.5, fontWeight: 800, color: '#334155', marginBottom: 5 }}>
+          {e.temperatura_rotulo}
+        </div>
+      )}
+
       <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.2fr', gap: 6,
-        background: '#f1f5f9', border: '1px solid #090d16', borderRadius: 4, padding: '6px 8px',
-        marginBottom: 8,
+        display: 'grid', gridTemplateColumns: '1fr 0.85fr 1.25fr', gap: 6,
+        background: '#f1f5f9', border: '1px solid #090d16', borderRadius: 4, padding: '5px 8px',
+        marginBottom: 6,
       }}>
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569' }}>PESO BRUTO</div>
-          <div style={{ fontSize: 12, fontWeight: 800 }}>{fmtKg2(e.peso_bruto_kg)}</div>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: '#475569' }}>PESO BRUTO</div>
+          <div style={{ fontSize: 11.5, fontWeight: 800, fontFamily: 'monospace' }}>{fmtKg3(e.peso_bruto_kg)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569' }}>TARA</div>
-          <div style={{ fontSize: 12, fontWeight: 800 }}>{fmtKg3(e.tara_kg)}</div>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: '#475569' }}>TARA</div>
+          <div style={{ fontSize: 11.5, fontWeight: 800, fontFamily: 'monospace' }}>{fmtKg3(e.tara_kg)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: '#475569' }}>PESO LÍQUIDO</div>
-          <div style={{ fontSize: 14, fontWeight: 900 }}>{fmtKg2(e.peso_liquido_kg)}</div>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: '#475569' }}>PESO LÍQUIDO</div>
+          <div style={{ fontSize: 14, fontWeight: 900, fontFamily: 'monospace' }}>{fmtKg3(e.peso_liquido_kg)}</div>
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <BarcodeSvg value={e.ean} />
-        {(e.ean_origem || e.selo_sanitario) && (
-          <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 9.5, fontFamily: 'monospace', color: '#334155', marginTop: 3 }}>
-            <span>{e.ean_origem ? `Origem: ${e.ean_origem}` : ''}</span>
-            {e.selo_sanitario && (
-              <span style={{ marginLeft: 'auto', fontWeight: 800, color: '#0f172a', letterSpacing: '0.2px' }}>
-                {e.selo_sanitario}
-              </span>
-            )}
-          </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}>
+          <BarcodeSvg value={e.ean} />
+          {e.ean_origem && (
+            <div style={{ fontSize: 8.5, fontFamily: 'monospace', color: '#334155', marginTop: 2 }}>
+              Origem: {e.ean_origem}
+            </div>
+          )}
+        </div>
+        {qrHtml && (
+          <div
+            style={{ border: '1px solid #090d16', borderRadius: 4, padding: 3, flexShrink: 0, background: '#fff' }}
+            dangerouslySetInnerHTML={{ __html: qrHtml }}
+          />
         )}
       </div>
     </div>

@@ -1,88 +1,244 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { Plus, Search, Edit2, Trash2, X, Download, Save, Box, Layers, ChevronLeft, ChevronRight } from 'lucide-react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import {
+  Plus,
+  Search,
+  Edit2,
+  Trash2,
+  X,
+  Download,
+  Save,
+  Box,
+  Layers,
+  ChevronLeft,
+  ChevronRight,
+  Tag,
+  SlidersHorizontal,
+  TrendingUp,
+  Activity,
+  DollarSign,
+  CheckSquare,
+  Snowflake,
+  Package,
+  AlertTriangle,
+} from 'lucide-react'
 import * as produtosQueries from '../queries/produtos'
 import { ModalDialog } from '../components/shared/ModalDialog'
+import { useAppStore } from '../store/appStore'
 import {
   encontrarCodigoDuplicadoLocal,
   obterProximoCodigoDisponivel,
   sugerirProximoCodigoLocal,
 } from '../utils/codigoCadastro'
 
-const CurvaBadge = ({ curva }) => {
-  const cores = {
-    'A': 'badge--success',
-    'B': 'badge--warning',
-    'C': 'badge--ghost'
-  }
-  return <span className={`badge ${cores[curva] || 'badge--ghost'}`}>Curva {curva}</span>
+const fmtMoeda = (v) =>
+  Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+const fmtKg = (v, dec = 1) => `${Number(v || 0).toFixed(dec).replace('.', ',')} kg`
+
+const FORM_PRODUTO_INICIAL = {
+  id: null,
+  codigo: '',
+  codigo_auxiliar: '',
+  ean: '',
+  descricao: '',
+  status_curva: 'C',
+  unidade: 'CX',
+  valor_unitario: 0,
+  custo_medio_kg: 0,
+  ultimo_preco_compra: 0,
+  especificacao_id: '',
+  tipo_produto: 'Materia Prima',
+  grupo: '',
+  especie: '',
+  conservacao: 'RESFRIADO',
+  validade_dias: 5,
+  tara_embalagem_kg: 0,
+  classificacao: '',
+  peso_padrao_cx: '',
+  tara_primaria_peca_kg: 0,
+  ncm: '',
+  cest: '',
+  origem_mercadoria: '0',
+  registro_dipoa: '',
+  pais_ids: [],
+  rendimentos_map: {},
+}
+
+const FORM_ESPEC_INICIAL = {
+  id: null,
+  codigo: '',
+  nome: '',
+  especie: 'BOVINO',
+  conservacao: 'RESFRIADO',
+  com_osso: false,
+  temperatura_rotulo: 'MANTER RESFRIADO DE 0°C A 4°C',
 }
 
 export function Produtos() {
+  const { toastSuccess, toastError, toastWarning } = useAppStore()
+  const [abaPagina, setAbaPagina] = useState('PRODUTOS') // 'PRODUTOS' | 'ESPECIFICACOES'
+
   const [produtos, setProdutos] = useState([])
-  const [busca, setBusca] = useState('')
+  const [especificacoes, setEspecificacoes] = useState([])
   const [loading, setLoading] = useState(true)
-  
-  // Modal State
-  const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', message: '', onConfirm: null })
 
-  const showAlert = (title, message, type = 'error') => {
-    setModal({ isOpen: true, type, title, message, onConfirm: null })
-  }
+  // Filtros de Produtos
+  const [busca, setBusca] = useState('')
+  const [filtroClassificacao, setFiltroClassificacao] = useState('TODOS')
+  const [filtroEspecie, setFiltroEspecie] = useState('TODOS')
+  const [apenasSemEspec, setApenasSemEspec] = useState(false)
+  const [paginaAtual, setPaginaAtual] = useState(1)
+  const [itensPorPagina, setItensPorPagina] = useState(50)
 
-  const showConfirm = (title, message, onConfirm) => {
-    setModal({ isOpen: true, type: 'confirm', title, message, onConfirm })
-  }
-
-  const closeModal = () => setModal(m => ({ ...m, isOpen: false }))
-  
-  // Form State
-  const [isEditing, setIsEditing] = useState(false)
-  const [savedRowId, setSavedRowId] = useState(null)
-  const tableRef = useRef(null)
-  const scrollYRef = useRef(0)
-  const codigoEditadoRef = useRef(false)
-  const [formData, setFormData] = useState({
-    id: null,
-    codigo: '',
-    codigo_auxiliar: '',
-    ean: '',
-    descricao: '',
-    status_curva: 'C',
-    unidade: 'CX',
-    valor_unitario: 0,
-    custo_medio_kg: 0,
-    tipo_produto: 'Materia Prima',
-    grupo: '',
-    especie: '',
+  // Seleção para Edição em Lote
+  const [selecionados, setSelecionados] = useState(() => new Set())
+  const [modalLote, setModalLote] = useState(false)
+  const [salvandoLote, setSalvandoLote] = useState(false)
+  const [formLote, setFormLote] = useState({
+    aplicarEspec: false,
+    especificacao_id: '',
+    aplicarEspecie: false,
+    especie: 'BOVINO',
+    aplicarConservacao: false,
     conservacao: 'RESFRIADO',
-    validade_dias: 5,
-    tara_embalagem_kg: 0,
-    classificacao: '',
-    peso_padrao_cx: '',
-    tara_primaria_peca_kg: 0,
-    ncm: '',
-    cest: '',
-    origem_mercadoria: '0',
-    registro_dipoa: '',
-    pais_ids: [],
-    rendimentos_map: {},
+    aplicarValidade: false,
+    validade_dias: '5',
+    aplicarTara: false,
+    tara_embalagem_kg: '0.0200',
   })
 
-  const carregar = async () => {
+  // Modal de Confirmação / Alerta
+  const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', message: '', onConfirm: null })
+  const showAlert = (title, message, type = 'error') =>
+    setModal({ isOpen: true, type, title, message, onConfirm: null })
+  const showConfirm = (title, message, onConfirm) =>
+    setModal({ isOpen: true, type: 'confirm', title, message, onConfirm })
+  const closeModal = () => setModal((m) => ({ ...m, isOpen: false }))
+
+  // Modal de Produto (com Abas + Resumo Gerencial ao Vivo)
+  const [isEditing, setIsEditing] = useState(false)
+  const [abaModal, setAbaModal] = useState('IDENTIFICACAO') // IDENTIFICACAO | ARMAZENAGEM | CUSTOS | BOM
+  const [savedRowId, setSavedRowId] = useState(null)
+  const [salvandoProd, setSalvandoProd] = useState(false)
+  const [resumoGerencial, setResumoGerencial] = useState(null)
+  const [loadingResumo, setLoadingResumo] = useState(false)
+  const scrollYRef = useRef(0)
+  const codigoEditadoRef = useRef(false)
+  const [formData, setFormData] = useState(FORM_PRODUTO_INICIAL)
+
+  // Modal de Especificações de Rótulo
+  const [modalEspec, setModalEspec] = useState(false)
+  const [formEspec, setFormEspec] = useState(FORM_ESPEC_INICIAL)
+  const [salvandoEspec, setSalvandoEspec] = useState(false)
+
+  const carregar = useCallback(async () => {
+    setLoading(true)
     try {
-      const p = await produtosQueries.listar()
-      setProdutos(p)
+      const [p, esps] = await Promise.all([
+        produtosQueries.listar(),
+        produtosQueries.listarEspecificacoes().catch(() => []),
+      ])
+      setProdutos(Array.isArray(p) ? p : [])
+      setEspecificacoes(Array.isArray(esps) ? esps : [])
     } catch (err) {
       console.error(err)
-      showAlert('Erro', 'Erro ao carregar produtos. Tente novamente.')
+      toastError('Erro ao carregar produtos', err.message || 'Tente novamente.')
     } finally {
       setLoading(false)
     }
-  }
+  }, [toastError])
 
   useEffect(() => {
     carregar()
-  }, [])
+  }, [carregar])
+
+  const resetForm = () => {
+    setIsEditing(false)
+    setAbaModal('IDENTIFICACAO')
+    setResumoGerencial(null)
+    setFormData(FORM_PRODUTO_INICIAL)
+  }
+
+  const handleEdit = (p) => {
+    scrollYRef.current = window.scrollY
+    const rendMap = {}
+    if (Array.isArray(p.arvore_vinculos)) {
+      p.arvore_vinculos.forEach((v) => {
+        if (v.pai_id && v.rendimento_esperado_pct != null) {
+          rendMap[v.pai_id] = v.rendimento_esperado_pct
+        }
+      })
+    }
+    setFormData({
+      id: p.id,
+      codigo: p.codigo || '',
+      codigo_auxiliar: p.codigo_auxiliar || '',
+      ean: p.ean || '',
+      descricao: p.descricao || '',
+      status_curva: p.status_curva || 'C',
+      unidade: p.unidade || 'CX',
+      valor_unitario: p.valor_unitario || 0,
+      custo_medio_kg: p.custo_medio_kg || 0,
+      ultimo_preco_compra: p.ultimo_preco_compra || 0,
+      especificacao_id: p.especificacao_id || '',
+      tipo_produto: p.tipo_produto || 'Materia Prima',
+      grupo: p.grupo || '',
+      especie: p.especie || '',
+      conservacao: p.conservacao || 'RESFRIADO',
+      validade_dias: p.validade_dias != null ? p.validade_dias : 5,
+      tara_embalagem_kg: p.tara_embalagem_kg != null ? p.tara_embalagem_kg : 0,
+      classificacao: p.classificacao || '',
+      peso_padrao_cx: p.peso_padrao_cx != null ? p.peso_padrao_cx : '',
+      tara_primaria_peca_kg: p.tara_primaria_peca_kg || 0,
+      ncm: p.ncm || '',
+      cest: p.cest || '',
+      origem_mercadoria: p.origem_mercadoria || '0',
+      registro_dipoa: p.registro_dipoa || '',
+      pais_ids: p.pais_ids
+        ? p.pais_ids
+            .toString()
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((v) => (/^\d+$/.test(v) ? Number(v) : v))
+        : [],
+      rendimentos_map: rendMap,
+    })
+    codigoEditadoRef.current = false
+    setAbaModal('IDENTIFICACAO')
+    setIsEditing(true)
+
+    // Carrega o painel ao vivo (Preço Médio de Venda, Estoque Mínimo Dinâmico, Tabelas)
+    setResumoGerencial(null)
+    setLoadingResumo(true)
+    produtosQueries
+      .obterResumoGerencial(p.id)
+      .then((res) => setResumoGerencial(res || null))
+      .catch(() => setResumoGerencial(null))
+      .finally(() => setLoadingResumo(false))
+  }
+
+  const abrirNovoProduto = async () => {
+    resetForm()
+    codigoEditadoRef.current = false
+    const codLocal = sugerirProximoCodigoLocal(produtos)
+    setFormData((prev) => ({ ...prev, codigo: codLocal }))
+    setIsEditing(true)
+    const codServidor = await obterProximoCodigoDisponivel('produto', produtos)
+    if (!codigoEditadoRef.current) {
+      setFormData((prev) => (prev.id ? prev : { ...prev, codigo: codServidor }))
+    }
+  }
+
+  const handleSelecionarEspecificacaoNoProduto = (especId) => {
+    const esp = especificacoes.find((x) => String(x.id) === String(especId))
+    setFormData((prev) => ({
+      ...prev,
+      especificacao_id: especId,
+      especie: esp && !prev.especie ? esp.especie : prev.especie,
+      conservacao: esp ? esp.conservacao : prev.conservacao,
+    }))
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -101,6 +257,7 @@ export function Produtos() {
     }
     const payload = {
       ...formData,
+      especificacao_id: formData.especificacao_id || null,
       arvore_vinculos:
         formData.classificacao === 'SUBPRODUTO'
           ? (formData.pais_ids || []).map((pid) => ({
@@ -112,17 +269,19 @@ export function Produtos() {
             }))
           : [],
     }
+    setSalvandoProd(true)
     try {
       if (formData.id) {
         const result = await produtosQueries.atualizar(payload)
         if (!result.success) throw new Error(result.error)
+        toastSuccess('Produto atualizado!', formData.descricao)
       } else {
         const result = await produtosQueries.criar(payload)
         if (!result.success) throw new Error(result.error)
+        toastSuccess('Produto cadastrado!', formData.descricao)
       }
       resetForm()
       await carregar()
-      // Restaurar scroll e destacar a linha editada
       if (editedId) {
         setSavedRowId(editedId)
         window.scrollTo({ top: scrollYRef.current, behavior: 'smooth' })
@@ -134,126 +293,158 @@ export function Produtos() {
       }
     } catch (err) {
       showAlert('Erro ao Salvar', err.message || 'Não foi possível salvar o produto.')
+    } finally {
+      setSalvandoProd(false)
     }
   }
 
-  const handleEdit = (p) => {
-    scrollYRef.current = window.scrollY
-    const rendMap = {}
-    if (Array.isArray(p.arvore_vinculos)) {
-      p.arvore_vinculos.forEach((v) => {
-        if (v.pai_id && v.rendimento_esperado_pct != null) {
-          rendMap[v.pai_id] = v.rendimento_esperado_pct
-        }
-      })
-    }
-    setFormData({
-      id: p.id,
-      codigo: p.codigo || '',
-      codigo_auxiliar: p.codigo_auxiliar || '',
-      ean: p.ean || '',
-      descricao: p.descricao,
-      status_curva: p.status_curva || 'C',
-      unidade: p.unidade || 'CX',
-      valor_unitario: p.valor_unitario || 0,
-      custo_medio_kg: p.custo_medio_kg || 0,
-      tipo_produto: p.tipo_produto || 'Materia Prima',
-      grupo: p.grupo || '',
-      especie: p.especie || '',
-      conservacao: p.conservacao || 'RESFRIADO',
-      validade_dias: p.validade_dias != null ? p.validade_dias : 5,
-      tara_embalagem_kg: p.tara_embalagem_kg != null ? p.tara_embalagem_kg : 0,
-      classificacao: p.classificacao || '',
-      peso_padrao_cx: p.peso_padrao_cx != null ? p.peso_padrao_cx : '',
-      tara_primaria_peca_kg: p.tara_primaria_peca_kg || 0,
-      ncm: p.ncm || '',
-      cest: p.cest || '',
-      origem_mercadoria: p.origem_mercadoria || '0',
-      registro_dipoa: p.registro_dipoa || '',
-      pais_ids: p.pais_ids ? p.pais_ids.toString().split(',').map(s => s.trim()).filter(Boolean).map(v => /^\d+$/.test(v) ? Number(v) : v) : [],
-      rendimentos_map: rendMap,
-    })
-    codigoEditadoRef.current = false
-    setIsEditing(true)
-  }
-
-  const abrirNovoProduto = async () => {
-    resetForm()
-    codigoEditadoRef.current = false
-    const codLocal = sugerirProximoCodigoLocal(produtos)
-    setFormData((prev) => ({ ...prev, codigo: codLocal }))
-    setIsEditing(true)
-    const codServidor = await obterProximoCodigoDisponivel('produto', produtos)
-    if (!codigoEditadoRef.current) {
-      setFormData((prev) => (prev.id ? prev : { ...prev, codigo: codServidor }))
-    }
-  }
-
-  const handleDelete = async (id, nome) => {
-    showConfirm(
-      'Excluir Produto',
-      `Deseja realmente excluir "${nome}"? Esta ação não pode ser desfeita.`,
-      async () => {
-        try {
-          const result = await produtosQueries.deletar(id)
-          if (!result.success) throw new Error(result.error)
-          carregar()
-        } catch (err) {
-          showAlert('Erro ao Excluir', err.message || 'Não foi possível excluir este produto.')
-        }
+  const handleDelete = (id, nome) => {
+    showConfirm('Excluir Produto', `Deseja realmente excluir "${nome}"? Esta ação não pode ser desfeita.`, async () => {
+      try {
+        const result = await produtosQueries.deletar(id)
+        if (!result.success) throw new Error(result.error)
+        toastSuccess('Produto excluído', nome)
+        await carregar()
+      } catch (err) {
+        showAlert('Erro ao Excluir', err.message || 'Não foi possível excluir este produto.')
       }
-    )
-  }
-
-  const resetForm = () => {
-    setIsEditing(false)
-    setFormData({
-      id: null,
-      codigo: '',
-      codigo_auxiliar: '',
-      ean: '',
-      descricao: '',
-      status_curva: 'C',
-      unidade: 'CX',
-      valor_unitario: 0,
-      custo_medio_kg: 0,
-      tipo_produto: 'Materia Prima',
-      grupo: '',
-      especie: '',
-      conservacao: 'RESFRIADO',
-      validade_dias: 5,
-      tara_embalagem_kg: 0,
-      classificacao: '',
-      peso_padrao_cx: '',
-      tara_primaria_peca_kg: 0,
-      ncm: '',
-      cest: '',
-      origem_mercadoria: '0',
-      registro_dipoa: '',
-      pais_ids: [],
-      rendimentos_map: {},
     })
   }
 
-  const exportarCSV = async () => {
+  // ── EDIÇÃO EM LOTE ──────────────────────────────────────────────────────────
+  const alternarSelecionado = (id) => {
+    setSelecionados((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleSalvarLote = async (e) => {
+    e.preventDefault()
+    const ids = Array.from(selecionados)
+    if (ids.length === 0) return
+    const body = { ids }
+    if (formLote.aplicarEspec) body.especificacao_id = formLote.especificacao_id || null
+    if (formLote.aplicarEspecie) body.especie = formLote.especie
+    if (formLote.aplicarConservacao) body.conservacao = formLote.conservacao
+    if (formLote.aplicarValidade) body.validade_dias = Number(formLote.validade_dias || 0)
+    if (formLote.aplicarTara) body.tara_embalagem_kg = Number(formLote.tara_embalagem_kg || 0)
+
+    if (Object.keys(body).length <= 1) {
+      toastWarning('Nenhum campo marcado', 'Marque ao menos um atributo para aplicar em lote.')
+      return
+    }
+    setSalvandoLote(true)
+    try {
+      const res = await produtosQueries.editarEmLote(body)
+      toastSuccess('Atualização em lote concluída!', `${res.atualizados || ids.length} produto(s) atualizado(s).`)
+      setModalLote(false)
+      setSelecionados(new Set())
+      await carregar()
+    } catch (err) {
+      toastError('Erro na edição em lote', err.message)
+    } finally {
+      setSalvandoLote(false)
+    }
+  }
+
+  // ── CRUD DE ESPECIFICAÇÕES DE RÓTULO ────────────────────────────────────────
+  const abrirNovaEspec = () => {
+    setFormEspec(FORM_ESPEC_INICIAL)
+    setModalEspec(true)
+  }
+
+  const abrirEditarEspec = (esp) => {
+    setFormEspec({
+      id: esp.id,
+      codigo: esp.codigo || '',
+      nome: esp.nome || '',
+      especie: esp.especie || 'BOVINO',
+      conservacao: esp.conservacao || 'RESFRIADO',
+      com_osso: Number(esp.com_osso) === 1,
+      temperatura_rotulo: esp.temperatura_rotulo || '',
+    })
+    setModalEspec(true)
+  }
+
+  const handleSalvarEspec = async (e) => {
+    e.preventDefault()
+    if (!formEspec.nome.trim()) {
+      toastWarning('Nome obrigatório', 'Informe o texto oficial da especificação (ex: CARNE RESFRIADA DE BOVINO SEM OSSO).')
+      return
+    }
+    setSalvandoEspec(true)
+    try {
+      const payload = {
+        codigo: formEspec.codigo.trim() || undefined,
+        nome: formEspec.nome.trim().toUpperCase(),
+        especie: formEspec.especie,
+        conservacao: formEspec.conservacao,
+        com_osso: formEspec.com_osso ? 1 : 0,
+        temperatura_rotulo: formEspec.temperatura_rotulo.trim().toUpperCase(),
+      }
+      if (formEspec.id) {
+        await produtosQueries.atualizarEspecificacao(formEspec.id, payload)
+        toastSuccess('Especificação atualizada!', payload.nome)
+      } else {
+        await produtosQueries.criarEspecificacao(payload)
+        toastSuccess('Especificação criada!', payload.nome)
+      }
+      setModalEspec(false)
+      await carregar()
+    } catch (err) {
+      toastError('Erro ao salvar especificação', err.message)
+    } finally {
+      setSalvandoEspec(false)
+    }
+  }
+
+  const handleExcluirEspec = (esp) => {
+    showConfirm('Excluir Especificação', `Deseja remover "${esp.nome}"?`, async () => {
+      try {
+        await produtosQueries.excluirEspecificacao(esp.id)
+        toastSuccess('Especificação removida', esp.nome)
+        await carregar()
+      } catch (err) {
+        toastError('Não foi possível excluir', err.message)
+      }
+    })
+  }
+
+  const exportarCSV = () => {
     if (produtos.length === 0) return
-    const header = "ID;CODIGO;DESCRICAO;GRUPO;TIPO;CURVA;UNIDADE;VALOR_UNIT;CLASSIFICACAO;PAIS\n"
-    const rows = produtos.map(p =>
-      `${p.id};${p.codigo || ''};${p.descricao};${p.grupo || ''};${p.tipo_produto};${p.status_curva};${p.unidade};${p.valor_unitario || 0};${p.classificacao || ''};${p.pai_descricao || ''}`
-    ).join("\n")
-    
+    const header =
+      'CODIGO;DESCRICAO;ESPECIFICACAO;ESPECIE;CONSERVACAO;VALIDADE_DIAS;TARA_KG;ULT_COMPRA;CUSTO_MEDIO;PRECO_MEDIO_VENDA;EST_MIN_DINAMICO_KG;SALDO_KG;CLASSIFICACAO\n'
+    const rows = produtos
+      .map((p) =>
+        [
+          p.codigo || '',
+          p.descricao || '',
+          p.especificacao_nome || '',
+          p.especie || '',
+          p.conservacao || '',
+          p.validade_dias ?? 5,
+          Number(p.tara_embalagem_kg || 0).toFixed(4),
+          Number(p.ultimo_preco_compra || 0).toFixed(2),
+          Number(p.custo_medio_kg || 0).toFixed(2),
+          Number(p.preco_medio_venda || 0).toFixed(2),
+          Number(p.estoque_minimo_dinamico_kg || 0).toFixed(2),
+          Number(p.saldo_kg || 0).toFixed(2),
+          p.classificacao || '',
+        ].join(';'),
+      )
+      .join('\n')
+
     const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    link.download = `Produtos_${new Date().getTime()}.csv`
+    link.download = `Produtos_WMSphere_${new Date().toISOString().slice(0, 10)}.csv`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
   }
-
-  const [filtroClassificacao, setFiltroClassificacao] = useState('TODOS')
-  const [paginaAtual, setPaginaAtual] = useState(1)
-  const [itensPorPagina, setItensPorPagina] = useState(50)
 
   const contagens = useMemo(() => {
     let mp = 0
@@ -264,12 +455,7 @@ export function Produtos() {
       else if (p.classificacao === 'SUBPRODUTO') sub += 1
       else if (!p.classificacao) sem += 1
     }
-    return {
-      TODOS: produtos.length,
-      MATERIA_PRIMA: mp,
-      SUBPRODUTO: sub,
-      SEM_CLASSIFICACAO: sem,
-    }
+    return { TODOS: produtos.length, MATERIA_PRIMA: mp, SUBPRODUTO: sub, SEM_CLASSIFICACAO: sem }
   }, [produtos])
 
   const filtrados = useMemo(() => {
@@ -280,7 +466,8 @@ export function Produtos() {
         (p.descricao && p.descricao.toLowerCase().includes(q)) ||
         (p.codigo && String(p.codigo).toLowerCase().includes(q)) ||
         (p.codigo_auxiliar && String(p.codigo_auxiliar).toLowerCase().includes(q)) ||
-        (p.ean && String(p.ean).toLowerCase().includes(q))
+        (p.ean && String(p.ean).toLowerCase().includes(q)) ||
+        (p.especificacao_nome && p.especificacao_nome.toLowerCase().includes(q))
 
       const classOk =
         filtroClassificacao === 'TODOS'
@@ -289,341 +476,528 @@ export function Produtos() {
             ? !p.classificacao
             : p.classificacao === filtroClassificacao
 
-      return buscaOk && classOk
+      const espOk =
+        filtroEspecie === 'TODOS'
+          ? true
+          : String(p.especie || 'OUTROS').toUpperCase() === filtroEspecie
+
+      const semEspecOk = !apenasSemEspec || !p.especificacao_id
+
+      return buscaOk && classOk && espOk && semEspecOk
     })
-  }, [produtos, busca, filtroClassificacao])
+  }, [produtos, busca, filtroClassificacao, filtroEspecie, apenasSemEspec])
 
   const totalPaginas = Math.max(1, Math.ceil(filtrados.length / itensPorPagina))
   const paginaSegura = Math.min(paginaAtual, totalPaginas)
   const indiceInicio = (paginaSegura - 1) * itensPorPagina
   const paginados = useMemo(
     () => filtrados.slice(indiceInicio, indiceInicio + itensPorPagina),
-    [filtrados, indiceInicio, itensPorPagina]
+    [filtrados, indiceInicio, itensPorPagina],
   )
 
   useEffect(() => {
     setPaginaAtual(1)
-  }, [busca, filtroClassificacao, itensPorPagina])
+  }, [busca, filtroClassificacao, filtroEspecie, apenasSemEspec, itensPorPagina])
+
+  const todosPaginaMarcados = paginados.length > 0 && paginados.every((p) => selecionados.has(p.id))
+  const toggleTodosPagina = () => {
+    setSelecionados((prev) => {
+      const next = new Set(prev)
+      if (todosPaginaMarcados) {
+        paginados.forEach((p) => next.delete(p.id))
+      } else {
+        paginados.forEach((p) => next.add(p.id))
+      }
+      return next
+    })
+  }
 
   const materiasPrimas = useMemo(
     () => produtos.filter((p) => p.classificacao === 'MATERIA_PRIMA' && p.id !== formData.id),
-    [produtos, formData.id]
+    [produtos, formData.id],
   )
 
   return (
-    <div className="fade-in" style={{ maxWidth: 1400, margin: '0 auto', paddingBottom: 24 }}>
-      <div className="page-header">
+    <div className="fade-in" style={{ maxWidth: 1480, margin: '0 auto', paddingBottom: 28 }}>
+      {/* HEADER */}
+      <div className="page-header" style={{ marginBottom: 14 }}>
         <div>
-          <h1 className="page-header__title flex items-center gap-12">
-            <Box className="text-primary" size={26} /> Cadastro de Produtos
+          <h1 className="page-header__title flex items-center gap-10">
+            <Box className="text-primary" size={24} /> Produtos &amp; Especificações
           </h1>
           <p className="page-header__subtitle">
-            Gerenciamento de SKUs, Registro DIPOA, NCM/Fiscal e Árvore BOM de Produção
+            Cadastro global de SKUs, especificações de rótulo industrial (100×70), custos, preço médio de venda e estoque mínimo dinâmico
           </p>
         </div>
-        <div className="flex gap-12 flex-wrap">
-          <button type="button" className="btn btn--secondary" onClick={exportarCSV}>
-            <Download size={17} /> Exportar CSV
+
+        <div className="flex gap-8 flex-wrap">
+          <button
+            type="button"
+            className={`btn ${abaPagina === 'PRODUTOS' ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => setAbaPagina('PRODUTOS')}
+          >
+            <Package size={15} /> Catálogo ({produtos.length})
           </button>
-          <button type="button" className="btn btn--primary" onClick={abrirNovoProduto}>
-            <Plus size={17} /> Novo Produto
+          <button
+            type="button"
+            className={`btn ${abaPagina === 'ESPECIFICACOES' ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => setAbaPagina('ESPECIFICACOES')}
+          >
+            <Tag size={15} /> Especificações de Rótulo ({especificacoes.length})
           </button>
+          {abaPagina === 'PRODUTOS' ? (
+            <>
+              <button type="button" className="btn btn--secondary" onClick={exportarCSV}>
+                <Download size={15} /> Exportar CSV
+              </button>
+              <button type="button" className="btn btn--primary" onClick={abrirNovoProduto}>
+                <Plus size={15} /> Novo Produto
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn btn--primary" onClick={abrirNovaEspec}>
+              <Plus size={15} /> Nova Especificação
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="p-16 border-b border-border" style={{ background: 'var(--bg-2)' }}>
-          <div className="flex gap-16 flex-wrap items-center justify-between">
-            <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: 380 }}>
-              <Search
-                size={16}
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-muted)',
-                }}
-              />
-              <input
-                type="text"
-                placeholder="Buscar por código ou descrição..."
-                className="form-input w-full"
-                style={{ paddingLeft: 38 }}
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-              />
-            </div>
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 1: CATÁLOGO DE PRODUTOS                                             */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {abaPagina === 'PRODUTOS' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          {/* BARRA DE BUSCA & FILTROS */}
+          <div className="p-14 border-b border-border" style={{ background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="flex gap-10 flex-wrap items-center justify-between">
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', flex: '1 1 360px' }}>
+                <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 360 }}>
+                  <Search
+                    size={15}
+                    style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Buscar código, descrição, EAN ou especificação..."
+                    className="form-input w-full"
+                    style={{ paddingLeft: 34, height: 36 }}
+                    value={busca}
+                    onChange={(e) => setBusca(e.target.value)}
+                  />
+                </div>
 
-            {/* Filtros de Classificação */}
-            <div className="flex gap-8 flex-wrap">
-              {[
-                { label: 'Todos', value: 'TODOS' },
-                { label: 'Matéria Prima', value: 'MATERIA_PRIMA' },
-                { label: 'Subproduto', value: 'SUBPRODUTO' },
-                { label: 'Não Classificados', value: 'SEM_CLASSIFICACAO' },
-              ].map((f) => (
-                <button
-                  key={f.value}
-                  type="button"
-                  onClick={() => setFiltroClassificacao(f.value)}
+                <select
+                  className="form-input"
+                  style={{ width: 145, height: 36, fontSize: 12 }}
+                  value={filtroEspecie}
+                  onChange={(e) => setFiltroEspecie(e.target.value)}
+                >
+                  <option value="TODOS">Todas Espécies</option>
+                  <option value="BOVINO">Bovinos</option>
+                  <option value="SUINO">Suínos</option>
+                  <option value="AVES">Aves</option>
+                  <option value="EMPORIO">Empório</option>
+                  <option value="INSUMO">Insumos</option>
+                  <option value="OUTROS">Outros</option>
+                </select>
+
+                <label
                   style={{
-                    padding: '6px 14px',
-                    borderRadius: 20,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
                     fontSize: 12,
-                    fontWeight: 600,
-                    border: '1.5px solid',
-                    borderColor:
-                      filtroClassificacao === f.value
-                        ? f.value === 'SEM_CLASSIFICACAO'
-                          ? 'var(--warning)'
-                          : f.value === 'MATERIA_PRIMA'
-                            ? 'var(--success)'
-                            : f.value === 'SUBPRODUTO'
-                              ? '#f59e0b'
-                              : 'var(--accent)'
-                        : 'transparent',
-                    backgroundColor:
-                      filtroClassificacao === f.value
-                        ? f.value === 'SEM_CLASSIFICACAO'
-                          ? 'rgba(245,158,11,0.15)'
-                          : f.value === 'MATERIA_PRIMA'
-                            ? 'rgba(34,197,94,0.15)'
-                            : f.value === 'SUBPRODUTO'
-                              ? 'rgba(245,158,11,0.15)'
-                              : 'rgba(59,130,246,0.18)'
-                        : 'var(--bg-3)',
-                    color:
-                      filtroClassificacao === f.value
-                        ? f.value === 'SEM_CLASSIFICACAO'
-                          ? 'var(--warning)'
-                          : f.value === 'MATERIA_PRIMA'
-                            ? 'var(--success)'
-                            : f.value === 'SUBPRODUTO'
-                              ? '#f59e0b'
-                              : '#93c5fd'
-                        : 'var(--text-secondary)',
+                    color: apenasSemEspec ? '#fbbf24' : 'var(--text-secondary)',
                     cursor: 'pointer',
-                    transition: 'all 0.15s',
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    background: apenasSemEspec ? 'rgba(245,158,11,0.14)' : 'var(--bg-3)',
+                    border: `1px solid ${apenasSemEspec ? 'rgba(245,158,11,0.45)' : 'var(--border)'}`,
                   }}
                 >
-                  {f.value === 'SEM_CLASSIFICACAO' && filtroClassificacao !== 'SEM_CLASSIFICACAO'
-                    ? `⚠️ ${f.label}`
-                    : f.label}{' '}
-                  ({contagens[f.value] ?? 0})
-                </button>
-              ))}
+                  <input
+                    type="checkbox"
+                    checked={apenasSemEspec}
+                    onChange={(e) => setApenasSemEspec(e.target.checked)}
+                  />
+                  Sem Especificação
+                </label>
+              </div>
+
+              <div className="flex gap-6 flex-wrap">
+                {[
+                  { label: 'Todos', value: 'TODOS' },
+                  { label: 'Matéria Prima', value: 'MATERIA_PRIMA' },
+                  { label: 'Subproduto', value: 'SUBPRODUTO' },
+                  { label: 'Não Classif.', value: 'SEM_CLASSIFICACAO' },
+                ].map((f) => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    onClick={() => setFiltroClassificacao(f.value)}
+                    className={`btn btn--sm ${filtroClassificacao === f.value ? 'btn--primary' : 'btn--ghost'}`}
+                  >
+                    {f.label} <span style={{ opacity: 0.75 }}>({contagens[f.value] ?? 0})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* BARRA DE EDIÇÃO EM LOTE QUANDO HÁ ITENS MARCADOS */}
+            {selecionados.size > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  background: 'rgba(59, 130, 246, 0.14)',
+                  border: '1px solid rgba(59, 130, 246, 0.45)',
+                }}
+              >
+                <div className="flex items-center gap-8 text-sm font-bold" style={{ color: '#93c5fd' }}>
+                  <CheckSquare size={16} />
+                  {selecionados.size} produto(s) selecionado(s)
+                </div>
+                <div className="flex gap-8">
+                  <button type="button" className="btn btn--primary btn--sm" onClick={() => setModalLote(true)}>
+                    <SlidersHorizontal size={14} /> Aplicar Especificação / Tara / Validade em Lote
+                  </button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setSelecionados(new Set())}>
+                    Limpar Seleção
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* TABELA GERENCIAL */}
+          <div className="table-wrap" style={{ overflowX: 'auto' }}>
+            {loading ? (
+              <div className="p-32 text-center text-muted">Carregando catálogo de produtos...</div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: 34, textAlign: 'center' }}>
+                      <input type="checkbox" checked={todosPaginaMarcados} onChange={toggleTodosPagina} />
+                    </th>
+                    <th>Código</th>
+                    <th>Produto &amp; Especificação (Rótulo)</th>
+                    <th>Espécie / Cons. / Val. / Tara</th>
+                    <th style={{ textAlign: 'right' }}>Últ. Compra / Custo</th>
+                    <th style={{ textAlign: 'right' }}>Preço Médio Venda</th>
+                    <th style={{ textAlign: 'right' }}>Est. Mín. Dinâmico</th>
+                    <th style={{ textAlign: 'right' }}>Saldo</th>
+                    <th style={{ textAlign: 'right' }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginados.map((p) => {
+                    const saldoKg = Number(p.saldo_kg || 0)
+                    const estMin = Number(p.estoque_minimo_dinamico_kg || 0)
+                    const abaixoMin = estMin > 0 && saldoKg < estMin
+                    const custoRef = Number(p.custo_medio_kg || 0)
+                    const ultCompra = Number(p.ultimo_preco_compra || 0)
+                    const precoMedVenda = Number(p.preco_medio_venda || 0)
+                    const marcado = selecionados.has(p.id)
+
+                    return (
+                      <tr
+                        key={p.id}
+                        id={`row-produto-${p.id}`}
+                        style={{
+                          transition: 'background 0.3s',
+                          background:
+                            savedRowId === p.id
+                              ? 'rgba(99,102,241,0.18)'
+                              : marcado
+                                ? 'rgba(59,130,246,0.08)'
+                                : '',
+                        }}
+                      >
+                        <td style={{ textAlign: 'center' }}>
+                          <input type="checkbox" checked={marcado} onChange={() => alternarSelecionado(p.id)} />
+                        </td>
+                        <td className="td-mono font-bold">{p.codigo || '-'}</td>
+                        <td style={{ maxWidth: 320 }}>
+                          <div className="font-semibold truncate" title={p.descricao}>
+                            {p.descricao}
+                          </div>
+                          <div className="flex items-center gap-6 flex-wrap" style={{ marginTop: 3 }}>
+                            {p.especificacao_nome ? (
+                              <span
+                                className="badge badge--info"
+                                style={{ fontSize: 10, maxWidth: 270, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                title={p.especificacao_nome}
+                              >
+                                {p.especificacao_nome}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted" style={{ fontSize: 10.5 }}>
+                                Sem especificação de rótulo
+                              </span>
+                            )}
+                            {p.classificacao === 'MATERIA_PRIMA' && (
+                              <span className="badge badge--success" style={{ fontSize: 10 }}>M. Prima</span>
+                            )}
+                            {p.classificacao === 'SUBPRODUTO' && (
+                              <span className="badge badge--warning" style={{ fontSize: 10 }}>Subproduto</span>
+                            )}
+                          </div>
+                          {p.pai_descricao && (
+                            <div className="text-xs text-muted" style={{ marginTop: 2, fontSize: 10.5 }}>
+                              ↳ Origem: {p.pai_descricao}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <div className="flex items-center gap-4 flex-wrap">
+                            <span className="badge badge--neutral" style={{ fontSize: 10 }}>
+                              {p.especie || 'AUTO'}
+                            </span>
+                            <span className="text-xs text-muted">{p.conservacao || 'RESFRIADO'}</span>
+                          </div>
+                          <div className="text-xs font-mono text-muted" style={{ marginTop: 2 }}>
+                            Val {p.validade_dias ?? 5}d • Tara {(Number(p.tara_embalagem_kg || 0) * 1000).toFixed(0)}g
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div className="font-mono font-bold text-xs">
+                            {ultCompra > 0 ? fmtMoeda(ultCompra) : custoRef > 0 ? fmtMoeda(custoRef) : '—'}
+                          </div>
+                          <div className="text-xs text-muted font-mono" style={{ fontSize: 10.5 }}>
+                            Custo: {custoRef > 0 ? fmtMoeda(custoRef) : '—'}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div
+                            className="font-mono font-bold text-sm"
+                            style={{ color: precoMedVenda > 0 ? '#22c55e' : 'var(--text-muted)' }}
+                          >
+                            {precoMedVenda > 0 ? fmtMoeda(precoMedVenda) : '—'}
+                          </div>
+                          {precoMedVenda > 0 && custoRef > 0 && (
+                            <div className="text-xs font-mono text-muted" style={{ fontSize: 10.5 }}>
+                              Mg {(((precoMedVenda - custoRef) / precoMedVenda) * 100).toFixed(1)}%
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {estMin > 0 ? (
+                            <div
+                              className="font-mono font-bold text-xs"
+                              style={{ color: abaixoMin ? '#f59e0b' : 'var(--text-primary)' }}
+                              title={`Consumo médio: ${Number(p.consumo_medio_dia_total_kg || 0).toFixed(2)} kg/dia`}
+                            >
+                              {abaixoMin && <AlertTriangle size={11} style={{ display: 'inline', marginRight: 3 }} />}
+                              {fmtKg(estMin, 1)}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted">Sem giro</span>
+                          )}
+                          {Number(p.consumo_medio_dia_total_kg || 0) > 0 && (
+                            <div className="text-xs text-muted font-mono" style={{ fontSize: 10 }}>
+                              {Number(p.consumo_medio_dia_total_kg).toFixed(1)} kg/dia
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div
+                            className="inline-flex flex-col items-end px-8 py-4 rounded text-xs font-bold"
+                            style={{
+                              background: saldoKg > 0 ? 'var(--success-muted)' : 'var(--bg-3)',
+                              color: saldoKg > 0 ? 'var(--success)' : 'var(--text-muted)',
+                            }}
+                          >
+                            <span>{saldoKg.toFixed(1)} kg</span>
+                            <span style={{ fontSize: 10, opacity: 0.8 }}>{Number(p.qtd_caixas || 0)} cx</span>
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div className="flex items-center justify-end gap-4">
+                            <button
+                              type="button"
+                              title="Editar e ver painel gerencial"
+                              onClick={() => handleEdit(p)}
+                              className="btn-icon"
+                              style={{ color: 'var(--accent-hover)' }}
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              title="Excluir"
+                              onClick={() => handleDelete(p.id, p.descricao)}
+                              className="btn-icon"
+                              style={{ color: 'var(--danger)' }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {filtrados.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="text-center p-32 text-muted">
+                        Nenhum produto encontrado para este filtro.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* PAGINAÇÃO */}
+          {!loading && filtrados.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '12px 16px',
+                background: 'var(--bg-2)',
+                borderTop: '1px solid var(--border)',
+                fontSize: 12.5,
+              }}
+            >
+              <div className="text-muted">
+                Mostrando <strong style={{ color: 'var(--text-primary)' }}>{indiceInicio + 1}</strong>–
+                <strong style={{ color: 'var(--text-primary)' }}>
+                  {Math.min(indiceInicio + itensPorPagina, filtrados.length)}
+                </strong>{' '}
+                de <strong style={{ color: 'var(--text-primary)' }}>{filtrados.length.toLocaleString('pt-BR')}</strong>{' '}
+                produtos
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <label className="text-muted flex items-center gap-6">
+                  Por página:
+                  <select
+                    className="form-input"
+                    style={{ width: 76, padding: '4px 8px', fontSize: 12 }}
+                    value={itensPorPagina}
+                    onChange={(e) => setItensPorPagina(Number(e.target.value))}
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={200}>200</option>
+                  </select>
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button type="button" className="btn btn--secondary btn--sm" disabled={paginaSegura <= 1} onClick={() => setPaginaAtual(1)}>
+                    «
+                  </button>
+                  <button type="button" className="btn btn--secondary btn--sm" disabled={paginaSegura <= 1} onClick={() => setPaginaAtual((p) => Math.max(1, p - 1))}>
+                    <ChevronLeft size={14} /> Anterior
+                  </button>
+                  <span className="font-mono text-xs" style={{ padding: '0 6px', color: 'var(--text-secondary)' }}>
+                    Pág. {paginaSegura} / {totalPaginas}
+                  </span>
+                  <button type="button" className="btn btn--secondary btn--sm" disabled={paginaSegura >= totalPaginas} onClick={() => setPaginaAtual((p) => Math.min(totalPaginas, p + 1))}>
+                    Próxima <ChevronRight size={14} />
+                  </button>
+                  <button type="button" className="btn btn--secondary btn--sm" disabled={paginaSegura >= totalPaginas} onClick={() => setPaginaAtual(totalPaginas)}>
+                    »
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 2: ESPECIFICAÇÕES DE RÓTULO (ETIQUETAS INDUSTRIAIS 100×70)          */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {abaPagina === 'ESPECIFICACOES' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="p-16 border-b border-border" style={{ background: 'var(--bg-2)' }}>
+            <div className="font-bold text-sm">Especificações Oficiais de Rotulagem Industrial (100×70mm)</div>
+            <div className="text-xs text-muted mt-4">
+              Este título aparece em destaque no topo das etiquetas adesivas de caixa (Retorno de Produção, Desmembramento, Recebimento e Reimpressão).
             </div>
           </div>
-        </div>
 
-        <div className="table-wrap" style={{ overflowX: 'auto' }}>
-          {loading ? (
-            <div className="p-32 text-center text-muted">Carregando produtos...</div>
-          ) : (
+          <div className="table-wrap" style={{ overflowX: 'auto' }}>
             <table>
               <thead>
                 <tr>
                   <th>Código</th>
-                  <th>Descrição</th>
-                  <th>Grupo</th>
-                  <th>Classificação</th>
-                  <th style={{ width: 120 }}>Curva</th>
-                  <th style={{ textAlign: 'right' }}>Saldo Estoque</th>
-                  <th style={{ textAlign: 'right' }}>Valor Unit.</th>
+                  <th>Texto Oficial da Especificação (Rótulo)</th>
+                  <th>Espécie</th>
+                  <th>Conservação</th>
+                  <th>Osso</th>
+                  <th>Temperatura no Rótulo</th>
+                  <th style={{ textAlign: 'right' }}>Produtos</th>
                   <th style={{ textAlign: 'right' }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {paginados.map((p) => (
-                  <tr
-                    key={p.id}
-                    id={`row-produto-${p.id}`}
-                    style={{
-                      transition: 'background 0.5s',
-                      background: savedRowId === p.id ? 'rgba(99,102,241,0.18)' : '',
-                    }}
-                  >
-                    <td className="td-mono">{p.codigo || '-'}</td>
-                    <td style={{ maxWidth: 260 }} title={p.descricao}>
-                      <div className="font-semibold truncate">{p.descricao}</div>
-                      {p.pai_descricao && <div className="text-xs text-muted mt-4">↳ Origem: {p.pai_descricao}</div>}
-                    </td>
-                    <td>{p.grupo || '-'}</td>
-                    <td>
-                      {p.classificacao === 'MATERIA_PRIMA' && <span className="badge badge--success">M. Prima</span>}
-                      {p.classificacao === 'SUBPRODUTO' && <span className="badge badge--warning">Subproduto</span>}
-                      {!p.classificacao && <span className="badge badge--neutral">Não Def.</span>}
-                    </td>
-                    <td>
-                      <CurvaBadge curva={p.status_curva} />
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div
-                        className="inline-flex flex-col items-end px-10 py-4 rounded text-xs font-bold"
-                        style={{
-                          background: parseFloat(p.saldo_kg) > 0 ? 'var(--success-muted)' : 'var(--bg-3)',
-                          color: parseFloat(p.saldo_kg) > 0 ? 'var(--success)' : 'var(--text-muted)',
-                        }}
-                      >
-                        <span>{parseFloat(p.saldo_kg || 0).toFixed(1)} kg</span>
-                        <span style={{ fontSize: 10, opacity: 0.8 }}>{parseFloat(p.qtd_caixas || 0)} cx</span>
-                      </div>
-                    </td>
-                    <td style={{ textAlign: 'right' }} className="text-success font-bold text-sm font-mono">
-                      R$ {parseFloat(p.valor_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="flex items-center justify-end gap-6">
-                        <button
-                          type="button"
-                          title="Editar"
-                          onClick={() => handleEdit(p)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: 32,
-                            height: 32,
-                            borderRadius: 8,
-                            border: '1px solid transparent',
-                            backgroundColor: 'transparent',
-                            cursor: 'pointer',
-                            color: 'var(--accent-hover)',
-                          }}
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          title="Excluir"
-                          onClick={() => handleDelete(p.id, p.descricao)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: 32,
-                            height: 32,
-                            borderRadius: 8,
-                            border: '1px solid transparent',
-                            backgroundColor: 'transparent',
-                            cursor: 'pointer',
-                            color: 'var(--danger)',
-                          }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filtrados.length === 0 && (
+                {especificacoes.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center p-32 text-muted">
-                      Nenhum produto encontrado.
+                    <td colSpan={8} className="text-center p-24 text-muted">
+                      Nenhuma especificação cadastrada.
                     </td>
                   </tr>
+                ) : (
+                  especificacoes.map((esp) => (
+                    <tr key={esp.id}>
+                      <td className="font-mono text-xs font-bold text-info">{esp.codigo || '-'}</td>
+                      <td className="font-bold text-sm">{esp.nome}</td>
+                      <td>
+                        <span className="badge badge--neutral">{esp.especie}</span>
+                      </td>
+                      <td>
+                        <span className={`badge ${esp.conservacao === 'CONGELADO' ? 'badge--info' : 'badge--success'}`}>
+                          <Snowflake size={11} /> {esp.conservacao}
+                        </span>
+                      </td>
+                      <td className="text-xs">{Number(esp.com_osso) === 1 ? 'Com Osso' : 'Sem Osso'}</td>
+                      <td className="text-xs text-muted">{esp.temperatura_rotulo || '-'}</td>
+                      <td className="font-mono font-bold" style={{ textAlign: 'right' }}>
+                        {esp.qtd_produtos || 0}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="flex items-center justify-end gap-4">
+                          <button type="button" className="btn-icon" style={{ color: 'var(--accent-hover)' }} onClick={() => abrirEditarEspec(esp)}>
+                            <Edit2 size={14} />
+                          </button>
+                          <button type="button" className="btn-icon" style={{ color: 'var(--danger)' }} onClick={() => handleExcluirEspec(esp)}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
-          )}
-        </div>
-
-        {/* BARRA DE PAGINAÇÃO */}
-        {!loading && filtrados.length > 0 && (
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '12px 16px',
-              background: 'var(--bg-2)',
-              borderTop: '1px solid var(--border)',
-              fontSize: 12.5,
-            }}
-          >
-            <div className="text-muted">
-              Mostrando <strong style={{ color: 'var(--text-primary)' }}>{indiceInicio + 1}</strong>–
-              <strong style={{ color: 'var(--text-primary)' }}>
-                {Math.min(indiceInicio + itensPorPagina, filtrados.length)}
-              </strong>{' '}
-              de <strong style={{ color: 'var(--text-primary)' }}>{filtrados.length.toLocaleString('pt-BR')}</strong>{' '}
-              produtos
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <label className="text-muted flex items-center gap-6">
-                Por página:
-                <select
-                  className="form-input"
-                  style={{ width: 76, padding: '4px 8px', fontSize: 12 }}
-                  value={itensPorPagina}
-                  onChange={(e) => setItensPorPagina(Number(e.target.value))}
-                >
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--sm"
-                  disabled={paginaSegura <= 1}
-                  onClick={() => setPaginaAtual(1)}
-                  title="Primeira página"
-                >
-                  «
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--sm"
-                  disabled={paginaSegura <= 1}
-                  onClick={() => setPaginaAtual((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft size={14} /> Anterior
-                </button>
-                <span className="font-mono text-xs" style={{ padding: '0 6px', color: 'var(--text-secondary)' }}>
-                  Pág. {paginaSegura} / {totalPaginas}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--sm"
-                  disabled={paginaSegura >= totalPaginas}
-                  onClick={() => setPaginaAtual((p) => Math.min(totalPaginas, p + 1))}
-                >
-                  Próxima <ChevronRight size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--sm"
-                  disabled={paginaSegura >= totalPaginas}
-                  onClick={() => setPaginaAtual(totalPaginas)}
-                  title="Última página"
-                >
-                  »
-                </button>
-              </div>
-            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* MODAL DE NOVO / EDITAR PRODUTO — COM SCROLL LIMPO, CABEÇALHO/RODAPÉ FIXOS E Z-INDEX ACIMA DA SIDEBAR */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL DE PRODUTO COM ABAS + KPI AO VIVO (PREÇO MÉDIO + EST. MÍNIMO)     */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
       {isEditing && (
         <div
           className="modal-overlay"
           style={{ padding: 20, zIndex: 1050 }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) resetForm()
-          }}
+          onClick={(e) => e.target === e.currentTarget && resetForm()}
         >
           <div
             style={{
               width: '100%',
-              maxWidth: 920,
+              maxWidth: 960,
               maxHeight: '92vh',
               display: 'flex',
               flexDirection: 'column',
@@ -634,14 +1008,14 @@ export function Produtos() {
               overflow: 'hidden',
             }}
           >
-            {/* CABEÇALHO FIXO */}
+            {/* CABEÇALHO */}
             <div
               style={{
                 flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '16px 22px',
+                padding: '14px 22px',
                 background: 'var(--bg-2)',
                 borderBottom: '1px solid var(--border)',
               }}
@@ -649,10 +1023,10 @@ export function Produtos() {
               <div>
                 <h2 className="text-lg font-bold flex items-center gap-8 m-0">
                   {formData.id ? <Edit2 size={18} className="text-primary" /> : <Plus size={18} className="text-primary" />}
-                  {formData.id ? 'Editar Produto' : 'Novo Produto'}
+                  {formData.id ? `${formData.codigo} — ${formData.descricao}` : 'Novo Produto'}
                 </h2>
                 <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-                  Preencha os dados gerais, custos/DIPOA/NCM e classificação BOM abaixo (role para baixo se necessário).
+                  Cadastro unificado para todas as filiais • Preços de venda são geridos em Tabelas de Preço
                 </div>
               </div>
               <button type="button" className="btn-icon" onClick={resetForm} title="Fechar">
@@ -660,316 +1034,485 @@ export function Produtos() {
               </button>
             </div>
 
-            {/* CORPO COM SCROLL SUAVE PARA ROLAR LIVREMENTE */}
+            {/* PAINEL GERENCIAL AO VIVO (AO EDITAR UM PRODUTO EXISTENTE) */}
+            {formData.id && (
+              <div
+                style={{
+                  flexShrink: 0,
+                  padding: '12px 22px',
+                  background: '#0d1526',
+                  borderBottom: '1px solid var(--border)',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  gap: 10,
+                }}
+              >
+                {loadingResumo ? (
+                  <div style={{ gridColumn: '1 / -1' }} className="text-xs text-muted">
+                    Calculando preço médio de venda, margem e estoque mínimo dinâmico em tempo real...
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                      <div className="text-xs text-muted uppercase flex items-center gap-4">
+                        <DollarSign size={12} /> Últ. Compra / Custo
+                      </div>
+                      <div className="font-mono font-bold text-sm" style={{ marginTop: 2 }}>
+                        {fmtMoeda(resumoGerencial?.ultimo_preco_compra || formData.ultimo_preco_compra || 0)}
+                      </div>
+                      <div className="text-xs text-muted font-mono">
+                        Custo Médio: {fmtMoeda(resumoGerencial?.custo_medio_kg || formData.custo_medio_kg || 0)}
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid rgba(34,197,94,0.35)' }}>
+                      <div className="text-xs text-muted uppercase flex items-center gap-4">
+                        <TrendingUp size={12} className="text-success" /> Preço Médio Venda
+                      </div>
+                      <div className="font-mono font-bold text-sm text-success" style={{ marginTop: 2 }}>
+                        {Number(resumoGerencial?.preco_medio_venda || 0) > 0
+                          ? fmtMoeda(resumoGerencial.preco_medio_venda)
+                          : 'Sem vendas ainda'}
+                      </div>
+                      <div className="text-xs text-muted font-mono">
+                        Margem Real:{' '}
+                        <strong style={{ color: Number(resumoGerencial?.margem_real_pct || 0) >= 0 ? '#4ade80' : '#f87171' }}>
+                          {Number(resumoGerencial?.margem_real_pct || 0).toFixed(1)}%
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid rgba(245,158,11,0.35)' }}>
+                      <div className="text-xs text-muted uppercase flex items-center gap-4">
+                        <Activity size={12} className="text-warning" /> Est. Mín. Dinâmico
+                      </div>
+                      <div className="font-mono font-bold text-sm text-warning" style={{ marginTop: 2 }}>
+                        {fmtKg(resumoGerencial?.estoque_minimo_dinamico_kg || 0, 1)}
+                      </div>
+                      <div className="text-xs text-muted font-mono">
+                        Giro: {Number(resumoGerencial?.consumo_medio_dia_total_kg || 0).toFixed(2)} kg/d
+                        {resumoGerencial?.cobertura_dias != null ? ` • Cob. ${resumoGerencial.cobertura_dias}d` : ''}
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                      <div className="text-xs text-muted uppercase">Tabelas de Preço</div>
+                      <div className="font-mono font-bold text-sm text-info" style={{ marginTop: 2 }}>
+                        {(resumoGerencial?.tabelas_preco || []).length} tabela(s)
+                      </div>
+                      <div className="text-xs text-muted truncate">
+                        {resumoGerencial?.tabelas_preco?.[0]
+                          ? `${resumoGerencial.tabelas_preco[0].tabela_nome}: ${fmtMoeda(resumoGerencial.tabelas_preco[0].preco_venda)}`
+                          : 'Configure em Tabelas de Preço'}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ABAS DO MODAL */}
             <div
               style={{
-                flex: '1 1 auto',
-                minHeight: 0,
-                overflowY: 'auto',
-                padding: 22,
+                flexShrink: 0,
+                display: 'flex',
+                gap: 6,
+                padding: '10px 22px',
+                background: 'var(--bg-2)',
+                borderBottom: '1px solid var(--border)',
+                flexWrap: 'wrap',
               }}
             >
-              <form id="produto-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                {/* SESSÃO 1: DADOS GERAIS */}
-                <div className="card" style={{ padding: 18, background: 'var(--bg-2)' }}>
-                  <h3
-                    className="text-xs font-bold uppercase text-primary pb-8 mb-16"
-                    style={{ borderBottom: '1px solid var(--border)', letterSpacing: '0.06em' }}
-                  >
-                    1. Dados Gerais do Produto
-                  </h3>
-                  <div className="form-grid form-grid--3 mb-16">
-                    <div className="form-group">
-                      <label className="form-label">Código Interno (SKU)</label>
-                      <input
-                        type="text"
-                        className="form-input font-mono"
-                        value={formData.codigo}
-                        onChange={(e) => {
-                          codigoEditadoRef.current = true
-                          setFormData({ ...formData, codigo: e.target.value })
-                        }}
-                        required={Boolean(formData.id)}
-                        placeholder="Automático"
-                        title="Gerado automaticamente. Apague para informar outro código manualmente."
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Código Auxiliar</label>
-                      <input
-                        type="text"
-                        className="form-input font-mono"
-                        value={formData.codigo_auxiliar}
-                        onChange={(e) => setFormData({ ...formData, codigo_auxiliar: e.target.value })}
-                        placeholder="Ex: 5951"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">EAN / GTIN Principal</label>
-                      <input
-                        type="text"
-                        className="form-input font-mono"
-                        value={formData.ean}
-                        onChange={(e) => setFormData({ ...formData, ean: e.target.value })}
-                        placeholder="Opcional"
-                      />
-                    </div>
-                  </div>
-                  <div className="form-grid form-grid--3">
-                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                      <label className="form-label">Descrição do Produto *</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={formData.descricao}
-                        onChange={(e) => setFormData({ ...formData, descricao: e.target.value.toUpperCase() })}
-                        placeholder="Ex: PICANHA BOVINA RESFRIADA VACUO"
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Grupo Comercial</label>
-                      <select
-                        className="form-input"
-                        value={formData.grupo}
-                        onChange={(e) => setFormData({ ...formData, grupo: e.target.value })}
-                      >
-                        <option value="">Selecione um Grupo...</option>
-                        <option value="BOVINO">BOVINO</option>
-                        <option value="SUINO">SUINO</option>
-                        <option value="AVES">AVES</option>
-                        <option value="EMBUTIDOS">EMBUTIDOS</option>
-                        <option value="MATERIAL USO E CONS">MATERIAL DE USO E CONSUMO</option>
-                        <option value="BEBIDAS ALCOOLICA">BEBIDAS ALCOÓLICA</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
+              {[
+                { id: 'IDENTIFICACAO', label: '1. Identificação & Rótulo' },
+                { id: 'ARMAZENAGEM', label: '2. Conservação, Validade & Taras' },
+                { id: 'CUSTOS', label: '3. Custos, Inteligência & Fiscal' },
+                { id: 'BOM', label: '4. Produção / BOM' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`btn btn--sm ${abaModal === t.id ? 'btn--primary' : 'btn--ghost'}`}
+                  onClick={() => setAbaModal(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-                {/* SESSÃO 2: LOGÍSTICA E COMERCIAL */}
-                <div className="card" style={{ padding: 18, background: 'var(--bg-2)' }}>
-                  <h3
-                    className="text-xs font-bold uppercase text-primary pb-8 mb-16"
-                    style={{ borderBottom: '1px solid var(--border)', letterSpacing: '0.06em' }}
-                  >
-                    2. Logística e Comercial
-                  </h3>
-                  <div className="form-grid form-grid--4">
-                    <div className="form-group">
-                      <label className="form-label">Tipo de Produto</label>
-                      <select
-                        className="form-input"
-                        value={formData.tipo_produto}
-                        onChange={(e) => setFormData({ ...formData, tipo_produto: e.target.value })}
-                      >
-                        <option value="Materia Prima">Matéria Prima</option>
-                        <option value="Produto Acabado">Produto Acabado</option>
-                        <option value="Insumos">Insumos</option>
-                      </select>
+            {/* FORMULÁRIO */}
+            <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: 22 }}>
+              <form id="produto-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* ABA 1: IDENTIFICAÇÃO & RÓTULO */}
+                {abaModal === 'IDENTIFICACAO' && (
+                  <div className="card" style={{ padding: 18, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div className="form-grid form-grid--3">
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Código Interno (SKU)</label>
+                        <input
+                          type="text"
+                          className="form-input font-mono"
+                          value={formData.codigo}
+                          onChange={(e) => {
+                            codigoEditadoRef.current = true
+                            setFormData({ ...formData, codigo: e.target.value })
+                          }}
+                          required={Boolean(formData.id)}
+                          placeholder="Automático"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Código Auxiliar</label>
+                        <input
+                          type="text"
+                          className="form-input font-mono"
+                          value={formData.codigo_auxiliar}
+                          onChange={(e) => setFormData({ ...formData, codigo_auxiliar: e.target.value })}
+                          placeholder="Ex: 5951"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">EAN / GTIN Principal (Empório / Caixa)</label>
+                        <input
+                          type="text"
+                          className="form-input font-mono"
+                          value={formData.ean}
+                          onChange={(e) => setFormData({ ...formData, ean: e.target.value })}
+                          placeholder="Ex: 7894900011517"
+                        />
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Curva ABC</label>
-                      <select
-                        className="form-input"
-                        value={formData.status_curva}
-                        onChange={(e) => setFormData({ ...formData, status_curva: e.target.value })}
-                      >
-                        <option value="A">Curva A (Alta)</option>
-                        <option value="B">Curva B (Média)</option>
-                        <option value="C">Curva C (Baixa)</option>
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Unidade Base</label>
-                      <select
-                        className="form-input"
-                        value={formData.unidade}
-                        onChange={(e) => setFormData({ ...formData, unidade: e.target.value })}
-                      >
-                        <option value="CX">CX (Caixa)</option>
-                        <option value="KG">KG (Quilograma)</option>
-                        <option value="UN">UN (Unidade)</option>
-                        <option value="PC">PC (Peça)</option>
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Valor Unitário (R$) *</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="form-input text-right font-mono"
-                        value={formData.valor_unitario}
-                        onChange={(e) => setFormData({ ...formData, valor_unitario: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
-                  <div className="form-grid form-grid--4 mt-12">
-                    <div className="form-group">
-                      <label className="form-label">Espécie / Categoria (Açougue)</label>
-                      <select
-                        className="form-input"
-                        value={formData.especie}
-                        onChange={(e) => setFormData({ ...formData, especie: e.target.value })}
-                      >
-                        <option value="">Auto (pelo Grupo / NCM)</option>
-                        <option value="BOVINO">Bovino</option>
-                        <option value="SUINO">Suíno</option>
-                        <option value="AVES">Aves</option>
-                        <option value="EMPORIO">Empório</option>
-                        <option value="INSUMO">Insumo / Embalagem</option>
-                        <option value="OUTROS">Outros</option>
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Armazenagem / Conservação</label>
-                      <select
-                        className="form-input"
-                        value={formData.conservacao}
-                        onChange={(e) => setFormData({ ...formData, conservacao: e.target.value })}
-                      >
-                        <option value="RESFRIADO">Resfriado (0°C a 4°C)</option>
-                        <option value="CONGELADO">Congelado (-18°C)</option>
-                        <option value="SECO">Seco / Temperatura Ambiente</option>
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Validade Padrão (dias)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="3650"
-                        className="form-input text-right font-mono"
-                        value={formData.validade_dias}
-                        onChange={(e) => setFormData({ ...formData, validade_dias: e.target.value })}
-                        placeholder="Ex: 5"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Tara Bandeja / Embalagem (kg)</label>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        min="0"
-                        className="form-input text-right font-mono"
-                        value={formData.tara_embalagem_kg}
-                        onChange={(e) => setFormData({ ...formData, tara_embalagem_kg: e.target.value })}
-                        placeholder="Ex: 0.0200 (20g)"
-                      />
-                    </div>
-                  </div>
-                </div>
 
-                {/* SESSÃO 3: CUSTOS, EMBALAGEM PRIMÁRIA, DIPOA & FISCAL */}
-                <div className="card" style={{ padding: 18, background: 'var(--bg-2)' }}>
-                  <h3
-                    className="text-xs font-bold uppercase text-primary pb-8 mb-16"
-                    style={{ borderBottom: '1px solid var(--border)', letterSpacing: '0.06em' }}
-                  >
-                    3. Custos, Embalagem Primária, DIPOA &amp; Fiscal
-                  </h3>
-                  <div className="form-grid form-grid--3 mb-16">
-                    <div className="form-group">
-                      <label className="form-label">Custo Médio (R$/kg)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="form-input text-right font-mono"
-                        value={formData.custo_medio_kg}
-                        onChange={(e) => setFormData({ ...formData, custo_medio_kg: e.target.value })}
-                      />
+                    <div className="form-grid form-grid--3">
+                      <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
+                        <label className="form-label">Descrição do Produto / Corte *</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={formData.descricao}
+                          onChange={(e) => setFormData({ ...formData, descricao: e.target.value.toUpperCase() })}
+                          placeholder="Ex: PICANHA BOVINA RESFRIADA"
+                          required
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Grupo Comercial</label>
+                        <select
+                          className="form-input"
+                          value={formData.grupo}
+                          onChange={(e) => setFormData({ ...formData, grupo: e.target.value })}
+                        >
+                          <option value="">Selecione...</option>
+                          <option value="BOVINO">BOVINO</option>
+                          <option value="SUINO">SUINO</option>
+                          <option value="AVES">AVES</option>
+                          <option value="EMBUTIDOS">EMBUTIDOS</option>
+                          <option value="EMPORIO">EMPÓRIO</option>
+                          <option value="BEBIDAS ALCOOLICA">BEBIDAS</option>
+                          <option value="MATERIAL USO E CONS">MATERIAL DE USO E CONSUMO</option>
+                        </select>
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Peso Padrão Caixa (kg)</label>
-                      <input
-                        type="number"
-                        step="0.001"
-                        min="0"
-                        className="form-input text-right font-mono"
-                        value={formData.peso_padrao_cx}
-                        onChange={(e) => setFormData({ ...formData, peso_padrao_cx: e.target.value })}
-                        placeholder="Ex: 20.000"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Tara Saco / Vácuo por Peça (kg)</label>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        min="0"
-                        className="form-input text-right font-mono"
-                        value={formData.tara_primaria_peca_kg}
-                        onChange={(e) => setFormData({ ...formData, tara_primaria_peca_kg: e.target.value })}
-                        placeholder="Ex: 0.0150 (15g)"
-                      />
-                    </div>
-                  </div>
-                  <div className="form-grid form-grid--4">
-                    <div className="form-group">
-                      <label className="form-label">
-                        Registro DIPOA{!/embalag|insumo/i.test(formData.tipo_produto || '') ? ' *' : ''}
+
+                    <div
+                      style={{
+                        padding: 14,
+                        borderRadius: 10,
+                        background: 'rgba(59,130,246,0.08)',
+                        border: '1px solid rgba(59,130,246,0.32)',
+                      }}
+                    >
+                      <label className="form-label" style={{ color: '#93c5fd', fontWeight: 700 }}>
+                        Especificação do Produto (Sai em destaque na Etiqueta Industrial 100×70mm)
                       </label>
-                      <input
-                        type="text"
-                        className="form-input font-mono"
-                        value={formData.registro_dipoa}
-                        onChange={(e) => setFormData({ ...formData, registro_dipoa: e.target.value.toUpperCase() })}
-                        placeholder="Ex: 005 ou 007"
-                        required={!formData.id && !/embalag|insumo/i.test(formData.tipo_produto || '')}
-                      />
-                      <span className="form-hint">Sai na etiqueta: REG. DIPOA/SISP 007/1929</span>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">NCM</label>
-                      <input
-                        type="text"
-                        className="form-input font-mono"
-                        value={formData.ncm}
-                        onChange={(e) => setFormData({ ...formData, ncm: e.target.value })}
-                        placeholder="Ex: 02013000"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">CEST</label>
-                      <input
-                        type="text"
-                        className="form-input font-mono"
-                        value={formData.cest}
-                        onChange={(e) => setFormData({ ...formData, cest: e.target.value })}
-                        placeholder="Opcional"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Origem Mercadoria</label>
                       <select
                         className="form-input"
-                        value={formData.origem_mercadoria}
-                        onChange={(e) => setFormData({ ...formData, origem_mercadoria: e.target.value })}
+                        value={formData.especificacao_id}
+                        onChange={(e) => handleSelecionarEspecificacaoNoProduto(e.target.value)}
                       >
-                        <option value="0">0 - Nacional</option>
-                        <option value="1">1 - Estrangeira (Imp. Direta)</option>
-                        <option value="2">2 - Estrangeira (Merc. Interno)</option>
+                        <option value="">Nenhuma especificação vinculada...</option>
+                        {especificacoes.map((esp) => (
+                          <option key={esp.id} value={esp.id}>
+                            {esp.nome} ({esp.especie} • {esp.conservacao})
+                          </option>
+                        ))}
                       </select>
+                      <div className="text-xs text-muted mt-4">
+                        Exemplo na etiqueta de caixa: <strong>CARNE RESFRIADA DE BOVINO SEM OSSO</strong> acima do nome do corte.
+                      </div>
+                    </div>
+
+                    <div className="form-grid form-grid--4">
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Tipo de Produto</label>
+                        <select
+                          className="form-input"
+                          value={formData.tipo_produto}
+                          onChange={(e) => setFormData({ ...formData, tipo_produto: e.target.value })}
+                        >
+                          <option value="Materia Prima">Matéria Prima</option>
+                          <option value="Produto Acabado">Produto Acabado</option>
+                          <option value="Insumos">Insumos</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Unidade Base</label>
+                        <select
+                          className="form-input"
+                          value={formData.unidade}
+                          onChange={(e) => setFormData({ ...formData, unidade: e.target.value })}
+                        >
+                          <option value="CX">CX (Caixa)</option>
+                          <option value="KG">KG (Quilograma)</option>
+                          <option value="UN">UN (Unidade)</option>
+                          <option value="PC">PC (Peça)</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Curva ABC</label>
+                        <select
+                          className="form-input"
+                          value={formData.status_curva}
+                          onChange={(e) => setFormData({ ...formData, status_curva: e.target.value })}
+                        >
+                          <option value="A">Curva A (Alta)</option>
+                          <option value="B">Curva B (Média)</option>
+                          <option value="C">Curva C (Baixa)</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">
+                          Registro DIPOA{!/embalag|insumo/i.test(formData.tipo_produto || '') ? ' *' : ''}
+                        </label>
+                        <input
+                          type="text"
+                          className="form-input font-mono"
+                          value={formData.registro_dipoa}
+                          onChange={(e) => setFormData({ ...formData, registro_dipoa: e.target.value.toUpperCase() })}
+                          placeholder="Ex: 005 ou 007"
+                          required={!formData.id && !/embalag|insumo/i.test(formData.tipo_produto || '')}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
-                {/* SESSÃO 4: INTELIGÊNCIA BOM */}
-                <div className="card" style={{ padding: 18, background: 'var(--bg-2)' }}>
-                  <h3
-                    className="text-xs font-bold uppercase text-primary pb-8 mb-12 flex items-center gap-8"
-                    style={{ borderBottom: '1px solid var(--border)', letterSpacing: '0.06em' }}
-                  >
-                    <Layers size={15} /> 4. Inteligência de Produção (BOM / Rendimento)
-                  </h3>
-                  <p className="text-xs text-muted mb-12">
-                    Define o papel deste corte na fábrica. Subprodutos podem ser vinculados a várias matérias-primas de origem.
-                  </p>
+                {/* ABA 2: ARMAZENAGEM, VALIDADE & TARAS */}
+                {abaModal === 'ARMAZENAGEM' && (
+                  <div className="card" style={{ padding: 18, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div className="text-xs text-muted">
+                      A <strong>Validade Padrão</strong> e a <strong>Tara da Embalagem</strong> definidas aqui são carregadas automaticamente e bloqueadas contra alteração manual na balança do Açougue.
+                    </div>
+                    <div className="form-grid form-grid--4">
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Espécie / Categoria</label>
+                        <select
+                          className="form-input"
+                          value={formData.especie}
+                          onChange={(e) => setFormData({ ...formData, especie: e.target.value })}
+                        >
+                          <option value="">Auto (pelo Grupo / NCM)</option>
+                          <option value="BOVINO">Bovino</option>
+                          <option value="SUINO">Suíno</option>
+                          <option value="AVES">Aves</option>
+                          <option value="EMPORIO">Empório</option>
+                          <option value="INSUMO">Insumo / Embalagem</option>
+                          <option value="OUTROS">Outros</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Armazenagem / Conservação</label>
+                        <select
+                          className="form-input"
+                          value={formData.conservacao}
+                          onChange={(e) => setFormData({ ...formData, conservacao: e.target.value })}
+                        >
+                          <option value="RESFRIADO">Resfriado (0°C a 4°C)</option>
+                          <option value="CONGELADO">Congelado (-18°C)</option>
+                          <option value="SECO">Seco / Temperatura Ambiente</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Validade Padrão (dias) *</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="3650"
+                          className="form-input text-right font-mono"
+                          value={formData.validade_dias}
+                          onChange={(e) => setFormData({ ...formData, validade_dias: e.target.value })}
+                        />
+                        <span className="form-hint">Calculada automaticamente nas etiquetas.</span>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Tara Bandeja / Embalagem (kg)</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          className="form-input text-right font-mono"
+                          value={formData.tara_embalagem_kg}
+                          onChange={(e) => setFormData({ ...formData, tara_embalagem_kg: e.target.value })}
+                          placeholder="0.0200"
+                        />
+                        <span className="form-hint">Ex: 0.0200 = 20 gramas (trava no Açougue).</span>
+                      </div>
+                    </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Papel deste produto na produção</label>
+                    <div className="form-grid form-grid--2">
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Peso Padrão Caixa Industrial (kg)</label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          className="form-input text-right font-mono"
+                          value={formData.peso_padrao_cx}
+                          onChange={(e) => setFormData({ ...formData, peso_padrao_cx: e.target.value })}
+                          placeholder="Ex: 20.000"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Tara Saco / Vácuo por Peça (kg)</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          className="form-input text-right font-mono"
+                          value={formData.tara_primaria_peca_kg}
+                          onChange={(e) => setFormData({ ...formData, tara_primaria_peca_kg: e.target.value })}
+                          placeholder="Ex: 0.0150 (15g)"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ABA 3: CUSTOS, INTELIGÊNCIA & FISCAL */}
+                {abaModal === 'CUSTOS' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div className="card" style={{ padding: 18, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div className="form-grid form-grid--4">
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Último Preço Compra (R$)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="form-input text-right font-mono"
+                            value={formData.ultimo_preco_compra}
+                            onChange={(e) => setFormData({ ...formData, ultimo_preco_compra: e.target.value })}
+                          />
+                          <span className="form-hint">Atualizado automaticamente via XML NF-e.</span>
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Custo Médio (R$/kg ou un)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="form-input text-right font-mono"
+                            value={formData.custo_medio_kg}
+                            onChange={(e) => setFormData({ ...formData, custo_medio_kg: e.target.value })}
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">NCM</label>
+                          <input
+                            type="text"
+                            className="form-input font-mono"
+                            value={formData.ncm}
+                            onChange={(e) => setFormData({ ...formData, ncm: e.target.value })}
+                            placeholder="Ex: 02013000"
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">CEST</label>
+                          <input
+                            type="text"
+                            className="form-input font-mono"
+                            value={formData.cest}
+                            onChange={(e) => setFormData({ ...formData, cest: e.target.value })}
+                            placeholder="Opcional"
+                          />
+                        </div>
+                      </div>
+                      <div className="form-grid form-grid--2">
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Origem Mercadoria</label>
+                          <select
+                            className="form-input"
+                            value={formData.origem_mercadoria}
+                            onChange={(e) => setFormData({ ...formData, origem_mercadoria: e.target.value })}
+                          >
+                            <option value="0">0 - Nacional</option>
+                            <option value="1">1 - Estrangeira (Imp. Direta)</option>
+                            <option value="2">2 - Estrangeira (Merc. Interno)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* DETALHAMENTO DE CONSUMO DINÂMICO E TABELAS DE PREÇO */}
+                    {formData.id && resumoGerencial && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div className="card" style={{ padding: 14, background: 'var(--bg-2)' }}>
+                          <div className="text-xs font-bold uppercase text-warning mb-8">
+                            Composição do Estoque Mínimo Dinâmico (30 dias)
+                          </div>
+                          <div className="text-xs" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span className="text-muted">Saídas p/ Ordens de Produção (OP):</span>
+                              <strong className="font-mono">{Number(resumoGerencial.consumo_medio_dia_op_kg || 0).toFixed(2)} kg/dia</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span className="text-muted">Saídas p/ Pedidos / Expedição:</span>
+                              <strong className="font-mono">{Number(resumoGerencial.consumo_medio_dia_pedidos_kg || 0).toFixed(2)} kg/dia</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span className="text-muted">Saídas Varejo / PDV:</span>
+                              <strong className="font-mono">{Number(resumoGerencial.consumo_medio_dia_pdv_kg || 0).toFixed(2)} kg/dia</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                              <span>Estoque Mínimo Recomendado (7 dias):</span>
+                              <strong className="font-mono text-warning">{fmtKg(resumoGerencial.estoque_minimo_dinamico_kg || 0, 1)}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="card" style={{ padding: 14, background: 'var(--bg-2)' }}>
+                          <div className="text-xs font-bold uppercase text-info mb-8">
+                            Tabelas de Preço Vinculadas ({(resumoGerencial.tabelas_preco || []).length})
+                          </div>
+                          {(resumoGerencial.tabelas_preco || []).length === 0 ? (
+                            <div className="text-xs text-muted">
+                              Este produto ainda não possui preço cadastrado em nenhuma tabela. Configure no módulo <strong>Tabelas de Preço</strong>.
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {resumoGerencial.tabelas_preco.map((t) => (
+                                <div key={t.tabela_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                                  <span>
+                                    <strong>{t.tabela_nome}</strong>{' '}
+                                    <span className="text-xs text-muted">({t.finalidade})</span>
+                                  </span>
+                                  <span className="font-mono font-bold text-success">{fmtMoeda(t.preco_venda)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ABA 4: PRODUÇÃO / BOM */}
+                {abaModal === 'BOM' && (
+                  <div className="card" style={{ padding: 18, background: 'var(--bg-2)' }}>
+                    <div className="flex items-center gap-8 text-xs font-bold uppercase text-primary mb-10">
+                      <Layers size={15} /> Classificação &amp; Árvore BOM de Produção
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
                       {[
                         { val: 'MATERIA_PRIMA', label: 'Matéria Prima (Raiz)', cor: '#22c55e', bg: 'rgba(34,197,94,0.16)' },
@@ -997,7 +1540,6 @@ export function Produtos() {
                               fontWeight: 700,
                               fontSize: 12.5,
                               cursor: 'pointer',
-                              transition: 'all 0.15s',
                             }}
                           >
                             {op.label}
@@ -1005,101 +1547,70 @@ export function Produtos() {
                         )
                       })}
                     </div>
-                  </div>
 
-                  {formData.classificacao === 'SUBPRODUTO' && (
-                    <div
-                      className="mt-16 p-16 rounded"
-                      style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}
-                    >
-                      <label className="form-label text-warning font-bold">Múltiplos Pais (Matéria-Prima de Origem)</label>
-                      <p className="text-xs text-muted mb-12">
-                        Marque as matérias-primas que geram este corte e, opcionalmente, o % de rendimento esperado:
-                      </p>
-
-                      <div
-                        style={{
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          border: '1px solid var(--border)',
-                          borderRadius: 8,
-                          background: 'var(--bg-2)',
-                          padding: 8,
-                        }}
-                      >
-                        {materiasPrimas.length === 0 ? (
-                          <div className="p-16 text-center text-muted text-sm">
-                            Nenhuma Matéria Prima cadastrada ainda.
-                          </div>
-                        ) : (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 6 }}>
-                            {materiasPrimas.map((mp) => {
-                              const marcado = formData.pais_ids.includes(mp.id)
-                              return (
-                                <div
-                                  key={mp.id}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 8,
-                                    padding: '6px 10px',
-                                    borderRadius: 6,
-                                    border: `1px solid ${marcado ? 'var(--accent)' : 'transparent'}`,
-                                    background: marcado ? 'var(--accent-muted)' : 'transparent',
-                                  }}
-                                >
-                                  <label className="flex items-center gap-8 flex-1 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={marcado}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setFormData({ ...formData, pais_ids: [...formData.pais_ids, mp.id] })
-                                        } else {
-                                          setFormData({
-                                            ...formData,
-                                            pais_ids: formData.pais_ids.filter((id) => id !== mp.id),
-                                          })
-                                        }
-                                      }}
-                                    />
-                                    <span className="text-xs font-semibold">{mp.descricao}</span>
-                                  </label>
-                                  {marcado && (
-                                    <input
-                                      type="number"
-                                      step="0.1"
-                                      min="0"
-                                      max="100"
-                                      className="form-input font-mono text-right"
-                                      style={{ width: 82, padding: '4px 6px', fontSize: 12 }}
-                                      placeholder="% Rend."
-                                      title="Rendimento esperado (%) deste corte sobre a matéria-prima"
-                                      value={formData.rendimentos_map?.[mp.id] ?? ''}
-                                      onChange={(e) =>
-                                        setFormData({
-                                          ...formData,
-                                          rendimentos_map: {
-                                            ...(formData.rendimentos_map || {}),
-                                            [mp.id]: e.target.value,
-                                          },
-                                        })
+                    {formData.classificacao === 'SUBPRODUTO' && (
+                      <div className="mt-14 p-14 rounded" style={{ background: 'var(--bg-1)', border: '1px solid var(--border)' }}>
+                        <label className="form-label text-warning font-bold">Matérias-Primas de Origem &amp; Rendimento (%)</label>
+                        <div style={{ maxHeight: 220, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 6, marginTop: 8 }}>
+                          {materiasPrimas.map((mp) => {
+                            const marcado = formData.pais_ids.includes(mp.id)
+                            return (
+                              <div
+                                key={mp.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  padding: '6px 10px',
+                                  borderRadius: 6,
+                                  border: `1px solid ${marcado ? 'var(--accent)' : 'var(--border)'}`,
+                                  background: marcado ? 'var(--accent-muted)' : 'var(--bg-2)',
+                                }}
+                              >
+                                <label className="flex items-center gap-8 flex-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={marcado}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setFormData({ ...formData, pais_ids: [...formData.pais_ids, mp.id] })
+                                      } else {
+                                        setFormData({ ...formData, pais_ids: formData.pais_ids.filter((id) => id !== mp.id) })
                                       }
-                                    />
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
+                                    }}
+                                  />
+                                  <span className="text-xs font-semibold">{mp.descricao}</span>
+                                </label>
+                                {marcado && (
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    max="100"
+                                    className="form-input font-mono text-right"
+                                    style={{ width: 76, padding: '4px 6px', fontSize: 12 }}
+                                    placeholder="% Rend"
+                                    value={formData.rendimentos_map?.[mp.id] ?? ''}
+                                    onChange={(e) =>
+                                      setFormData({
+                                        ...formData,
+                                        rendimentos_map: { ...(formData.rendimentos_map || {}), [mp.id]: e.target.value },
+                                      })
+                                    }
+                                  />
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </form>
             </div>
 
-            {/* RODAPÉ FIXO SEMPRE VISÍVEL */}
+            {/* RODAPÉ FIXO */}
             <div
               style={{
                 flexShrink: 0,
@@ -1114,14 +1625,202 @@ export function Produtos() {
               <button type="button" className="btn btn--ghost" onClick={resetForm}>
                 Cancelar
               </button>
-              <button type="submit" form="produto-form" className="btn btn--primary">
-                <Save size={16} /> Salvar Produto
+              <button type="submit" form="produto-form" className="btn btn--primary" disabled={salvandoProd}>
+                <Save size={16} /> {salvandoProd ? 'Salvando...' : 'Salvar Produto'}
               </button>
             </div>
           </div>
         </div>
       )}
-      {/* MODAL DE CONFIRMAÇÃO / ALERTA */}
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL EDIÇÃO EM LOTE                                                    */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {modalLote && (
+        <div className="modal-overlay" style={{ zIndex: 1060 }} onClick={(e) => e.target === e.currentTarget && setModalLote(false)}>
+          <div className="modal" style={{ maxWidth: 560, width: '96%', padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>
+                Edição em Lote ({selecionados.size} produto(s))
+              </h3>
+              <button type="button" className="btn-icon" onClick={() => setModalLote(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleSalvarLote} style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="text-xs text-muted">
+                Marque apenas os campos que deseja aplicar aos {selecionados.size} produtos selecionados:
+              </div>
+
+              <div className="card" style={{ padding: 12, background: 'var(--bg-2)' }}>
+                <label className="flex items-center gap-8 font-bold text-xs mb-6 cursor-pointer">
+                  <input type="checkbox" checked={formLote.aplicarEspec} onChange={(e) => setFormLote((p) => ({ ...p, aplicarEspec: e.target.checked }))} />
+                  Aplicar Especificação de Rótulo (100×70mm)
+                </label>
+                {formLote.aplicarEspec && (
+                  <select className="form-input" value={formLote.especificacao_id} onChange={(e) => setFormLote((p) => ({ ...p, especificacao_id: e.target.value }))}>
+                    <option value="">Remover especificação</option>
+                    {especificacoes.map((esp) => (
+                      <option key={esp.id} value={esp.id}>{esp.nome}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="card" style={{ padding: 12, background: 'var(--bg-2)' }}>
+                  <label className="flex items-center gap-8 font-bold text-xs mb-6 cursor-pointer">
+                    <input type="checkbox" checked={formLote.aplicarEspecie} onChange={(e) => setFormLote((p) => ({ ...p, aplicarEspecie: e.target.checked }))} />
+                    Alterar Espécie
+                  </label>
+                  {formLote.aplicarEspecie && (
+                    <select className="form-input" value={formLote.especie} onChange={(e) => setFormLote((p) => ({ ...p, especie: e.target.value }))}>
+                      <option value="BOVINO">Bovino</option>
+                      <option value="SUINO">Suíno</option>
+                      <option value="AVES">Aves</option>
+                      <option value="EMPORIO">Empório</option>
+                      <option value="INSUMO">Insumo</option>
+                      <option value="OUTROS">Outros</option>
+                    </select>
+                  )}
+                </div>
+
+                <div className="card" style={{ padding: 12, background: 'var(--bg-2)' }}>
+                  <label className="flex items-center gap-8 font-bold text-xs mb-6 cursor-pointer">
+                    <input type="checkbox" checked={formLote.aplicarConservacao} onChange={(e) => setFormLote((p) => ({ ...p, aplicarConservacao: e.target.checked }))} />
+                    Alterar Conservação
+                  </label>
+                  {formLote.aplicarConservacao && (
+                    <select className="form-input" value={formLote.conservacao} onChange={(e) => setFormLote((p) => ({ ...p, conservacao: e.target.value }))}>
+                      <option value="RESFRIADO">Resfriado</option>
+                      <option value="CONGELADO">Congelado</option>
+                      <option value="SECO">Seco</option>
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="card" style={{ padding: 12, background: 'var(--bg-2)' }}>
+                  <label className="flex items-center gap-8 font-bold text-xs mb-6 cursor-pointer">
+                    <input type="checkbox" checked={formLote.aplicarValidade} onChange={(e) => setFormLote((p) => ({ ...p, aplicarValidade: e.target.checked }))} />
+                    Alterar Validade Padrão (dias)
+                  </label>
+                  {formLote.aplicarValidade && (
+                    <input type="number" min="0" max="3650" className="form-input font-mono text-right" value={formLote.validade_dias} onChange={(e) => setFormLote((p) => ({ ...p, validade_dias: e.target.value }))} />
+                  )}
+                </div>
+
+                <div className="card" style={{ padding: 12, background: 'var(--bg-2)' }}>
+                  <label className="flex items-center gap-8 font-bold text-xs mb-6 cursor-pointer">
+                    <input type="checkbox" checked={formLote.aplicarTara} onChange={(e) => setFormLote((p) => ({ ...p, aplicarTara: e.target.checked }))} />
+                    Alterar Tara Embalagem (kg)
+                  </label>
+                  {formLote.aplicarTara && (
+                    <input type="number" step="0.0001" min="0" className="form-input font-mono text-right" value={formLote.tara_embalagem_kg} onChange={(e) => setFormLote((p) => ({ ...p, tara_embalagem_kg: e.target.value }))} />
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button type="button" className="btn btn--ghost" onClick={() => setModalLote(false)}>Cancelar</button>
+                <button type="submit" className="btn btn--primary" disabled={salvandoLote}>
+                  {salvandoLote ? 'Aplicando...' : `Aplicar em ${selecionados.size} Produto(s)`}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL ESPECIFICAÇÃO DE RÓTULO                                           */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {modalEspec && (
+        <div className="modal-overlay" style={{ zIndex: 1060 }} onClick={(e) => e.target === e.currentTarget && setModalEspec(false)}>
+          <div className="modal" style={{ maxWidth: 560, width: '96%', padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>
+                {formEspec.id ? 'Editar Especificação de Rótulo' : 'Nova Especificação de Rótulo'}
+              </h3>
+              <button type="button" className="btn-icon" onClick={() => setModalEspec(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleSalvarEspec} style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Texto Oficial no Rótulo *</label>
+                <input
+                  className="form-input"
+                  required
+                  value={formEspec.nome}
+                  onChange={(e) => setFormEspec((p) => ({ ...p, nome: e.target.value.toUpperCase() }))}
+                  placeholder="Ex: CARNE RESFRIADA DE BOVINO SEM OSSO"
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Espécie</label>
+                  <select className="form-input" value={formEspec.especie} onChange={(e) => setFormEspec((p) => ({ ...p, especie: e.target.value }))}>
+                    <option value="BOVINO">Bovino</option>
+                    <option value="SUINO">Suíno</option>
+                    <option value="AVES">Aves</option>
+                    <option value="OUTROS">Outros</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Conservação</label>
+                  <select
+                    className="form-input"
+                    value={formEspec.conservacao}
+                    onChange={(e) =>
+                      setFormEspec((p) => ({
+                        ...p,
+                        conservacao: e.target.value,
+                        temperatura_rotulo:
+                          e.target.value === 'CONGELADO'
+                            ? 'MANTER CONGELADO A -18°C OU MAIS FRIO'
+                            : e.target.value === 'RESFRIADO'
+                              ? 'MANTER RESFRIADO DE 0°C A 4°C'
+                              : 'CONSERVAR EM LOCAL SECO E AREJADO',
+                      }))
+                    }
+                  >
+                    <option value="RESFRIADO">Resfriado</option>
+                    <option value="CONGELADO">Congelado</option>
+                    <option value="SECO">Seco</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Código (Opcional)</label>
+                  <input className="form-input font-mono" value={formEspec.codigo} onChange={(e) => setFormEspec((p) => ({ ...p, codigo: e.target.value.toUpperCase() }))} placeholder="Auto" />
+                </div>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Texto de Temperatura / Conservação no Rótulo</label>
+                <input
+                  className="form-input"
+                  value={formEspec.temperatura_rotulo}
+                  onChange={(e) => setFormEspec((p) => ({ ...p, temperatura_rotulo: e.target.value.toUpperCase() }))}
+                  placeholder="Ex: MANTER RESFRIADO DE 0°C A 4°C"
+                />
+              </div>
+              <label className="flex items-center gap-8 text-sm cursor-pointer">
+                <input type="checkbox" checked={formEspec.com_osso} onChange={(e) => setFormEspec((p) => ({ ...p, com_osso: e.target.checked }))} />
+                Corte com Osso
+              </label>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button type="button" className="btn btn--ghost" onClick={() => setModalEspec(false)}>Cancelar</button>
+                <button type="submit" className="btn btn--primary" disabled={salvandoEspec}>
+                  <Save size={15} /> {salvandoEspec ? 'Salvando...' : 'Salvar Especificação'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <ModalDialog
         isOpen={modal.isOpen}
         type={modal.type}

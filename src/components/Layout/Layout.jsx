@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes, Tag } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -503,6 +503,12 @@ function Sidebar({ collapsed = false, onCollapse }) {
               <NavLink to="/gerenciador-acougue" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
                 <Store size={18} /> Gerenciador do Açougue
               </NavLink>
+              <NavLink to="/emporio" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+                <ShoppingBag size={18} /> Empório (Entrada &amp; Estoque)
+              </NavLink>
+              <NavLink to="/tabelas-preco" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+                <Tag size={18} /> Tabelas de Preço
+              </NavLink>
               <NavLink to="/inventario-loja" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
                 <CheckSquare size={18} /> Inventário Varejo &amp; Açougue
               </NavLink>
@@ -655,7 +661,7 @@ function Sidebar({ collapsed = false, onCollapse }) {
       )}
       {temPermissao(operador, 'produtos') && (
         <NavLink to="/produtos" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-          <Box size={18} /> Consulta e Produtos
+          <Box size={18} /> Produtos &amp; Especificações
         </NavLink>
       )}
       {temPermissao(operador, 'ean_etiquetas') && (
@@ -672,6 +678,11 @@ function Sidebar({ collapsed = false, onCollapse }) {
       {temEstruturaComercial && (
         <>
           <div className="sidebar__section-label">Comercial &amp; Estrutura</div>
+          {!isFilialVarejo && temAlgumaPermissao(operador, ['produtos', 'pedidos', 'varejo_acougue', 'parametros_comerciais']) && (
+            <NavLink to="/tabelas-preco" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
+              <Tag size={18} /> Tabelas de Preço
+            </NavLink>
+          )}
           {temAlgumaPermissao(operador, ['clientes', 'pedidos', 'financeiro_pedidos']) && (
             <NavLink to="/clientes" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
               <Building2 size={18} /> Clientes &amp; Especif.

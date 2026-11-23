@@ -115,7 +115,7 @@ export function InventarioLoja() {
     try {
       await varejoQueries.liberarInventario(inv.id, !inv.liberado_operador)
       toastSuccess(
-        !inv.liberado_operador ? 'Liberado para Operadores' : 'Bloqueado para Operadores',
+        !inv.liberado_operador ? 'Liberado para Coleta' : 'Bloqueado para Coleta',
         inv.codigo,
       )
       await carregar()
@@ -210,7 +210,7 @@ export function InventarioLoja() {
             <CheckSquare size={20} className="text-primary" /> Inventário — Varejo &amp; Açougue
           </h1>
           <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-            Gerenciador do Analista (Empório contagem às cegas + Açougue bipado) e Coletor do Operador (bipar etiquetas + pesar MPs)
+            Gerenciador de Inventário (Empório contagem às cegas + Açougue bipado) e Coleta / Bipagem (etiquetas QR + pesagem de MPs)
           </div>
         </div>
 
@@ -220,7 +220,7 @@ export function InventarioLoja() {
             className={`btn ${modo === 'ANALISTA' ? 'btn--primary' : 'btn--ghost'}`}
             onClick={() => setModo('ANALISTA')}
           >
-            <ClipboardList size={15} /> Gerenciador (Analista)
+            <ClipboardList size={15} /> Gerenciador de Inventário
           </button>
           <button
             type="button"
@@ -232,7 +232,7 @@ export function InventarioLoja() {
               }
             }}
           >
-            <QrCode size={15} /> Inventário Açougue (Operador)
+            <QrCode size={15} /> Coleta / Bipagem (Açougue)
             {invsLiberadosOperador.length > 0 && (
               <span className="badge badge--success" style={{ marginLeft: 4 }}>{invsLiberadosOperador.length}</span>
             )}
@@ -365,7 +365,7 @@ export function InventarioLoja() {
                         onClick={() => handleAlternarLiberacao(invAtual)}
                       >
                         {invAtual.liberado_operador ? <Unlock size={13} /> : <Lock size={13} />}
-                        {invAtual.liberado_operador ? 'Liberado p/ Operador' : 'Bloqueado p/ Operador'}
+                        {invAtual.liberado_operador ? 'Liberado p/ Coleta' : 'Bloqueado p/ Coleta'}
                       </button>
                     )}
                     {invAtual.status === 'ABERTO' && (
@@ -575,7 +575,7 @@ export function InventarioLoja() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {invsLiberadosOperador.length === 0 ? (
             <div className="card p-32 text-center text-muted">
-              Nenhum inventário do Açougue liberado pelo analista no momento.
+              Nenhum inventário do Açougue liberado para coleta no momento.
             </div>
           ) : (
             <>

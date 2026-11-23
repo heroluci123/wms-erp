@@ -6,6 +6,7 @@ import {
   etiquetasAcougue,
   produtoArvore,
   produtos,
+  tabelasPrecoItens,
   varejoEstoque,
   varejoInventarios,
   varejoMovimentacoes,
@@ -21,6 +22,7 @@ import {
   toNum,
 } from '../wms/helpers.js'
 import { detectarEspecieProduto } from '../interunidades/helpers.js'
+import { obterTabelaAtivaAcougue } from '../precos/routes.js'
 
 const PERM_ACOUGUE = ['varejo_acougue', 'pdv_caixa', 'interunidades']
 
@@ -218,8 +220,54 @@ export function registerAcougueRoutes(app: FastifyInstance, conn: DbConnection):
       const hoje = hojeIsoLocal()
       const etqsVendidasHoje = etqsNorm.filter((e) => e.status === 'VENDIDA' && String(e.vendida_em || '').slice(0, 10) === hoje)
 
+      // Alertas de Validade (etiquetas EM_ESTOQUE + MPs ABERTA_ACOUGUE)
+      const hojeMs = new Date(`${hoje}T12:00:00Z`).getTime()
+      const calcularDiasRest = (valStr: unknown) => {
+        if (!valStr) return null
+        const iso = String(valStr).slice(0, 10)
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null
+        return Math.round((new Date(`${iso}T12:00:00Z`).getTime() - hojeMs) / 86_400_000)
+      }
+      const alertasValidade: Array<Record<string, unknown>> = []
+      for (const e of etqsEmEstoque) {
+        const dias = calcularDiasRest(e.validade)
+        if (dias !== null && dias <= 3) {
+          alertasValidade.push({
+            origem: 'ETIQUETA',
+            codigo: e.codigo_etiqueta,
+            produto_descricao: e.produto_descricao,
+            especie: e.especie,
+            peso_kg: e.peso_liquido_kg,
+            validade: e.validade,
+            dias_restantes: dias,
+            severidade: dias < 0 ? 'VENCIDO' : dias <= 1 ? 'CRITICO' : 'ATENCAO',
+          })
+        }
+      }
+      for (const m of mpsAbertas) {
+        const dias = calcularDiasRest(m.validade)
+        if (dias !== null && dias <= 3) {
+          alertasValidade.push({
+            origem: 'MATERIA_PRIMA',
+            codigo: m.ean_caixa,
+            produto_descricao: m.produto_descricao,
+            especie: m.especie,
+            peso_kg: m.peso_restante_kg,
+            validade: m.validade,
+            dias_restantes: dias,
+            severidade: dias < 0 ? 'VENCIDO' : dias <= 1 ? 'CRITICO' : 'ATENCAO',
+          })
+        }
+      }
+      alertasValidade.sort((a, b) => Number(a.dias_restantes) - Number(b.dias_restantes))
+
+      const ativaTab = await obterTabelaAtivaAcougue(conn.db, ctx.tenantId, ctx.filialId)
+
       return {
         success: true,
+        tabela_ativa: ativaTab.tabela
+          ? { id: ativaTab.tabela.id, codigo: ativaTab.tabela.codigo, nome: ativaTab.tabela.nome, finalidade: ativaTab.tabela.finalidade }
+          : null,
         kpis: {
           qtd_mp_transito: mpsTransito.length,
           kg_mp_transito: Number(mpsTransito.reduce((s, m) => s + m.peso_inicial_kg, 0).toFixed(3)),
@@ -229,7 +277,9 @@ export function registerAcougueRoutes(app: FastifyInstance, conn: DbConnection):
           kg_etiquetas_estoque: Number(etqsEmEstoque.reduce((s, e) => s + e.peso_liquido_kg, 0).toFixed(3)),
           valor_etiquetas_estoque: Number(etqsEmEstoque.reduce((s, e) => s + e.valor_total, 0).toFixed(2)),
           qtd_vendidas_hoje: etqsVendidasHoje.length,
+          qtd_alertas_validade: alertasValidade.length,
         },
+        alertas_validade: alertasValidade,
         mps_transito: mpsTransito,
         mps_abertas: mpsAbertas,
         mps_encerradas: mpsEncerradas,
@@ -429,19 +479,52 @@ export function registerAcougueRoutes(app: FastifyInstance, conn: DbConnection):
     },
   )
 
-  // ── 4) CATÁLOGO PERSONALIZÁVEL DE PRODUTOS PARA A TELA DE PESAGEM DO AÇOUGUEIRO ──
+  // ── 4) CATÁLOGO OTIMIZADO & PAGINADO PARA PESAGEM (SOMENTE ITENS COM PREÇO NA TABELA ATIVA) ──
   app.get(
     '/api/acougue/produtos-pesagem',
     { preHandler: requirePermission(PERM_ACOUGUE, { write: false, bloquearCliente: true }) },
     async (req) => {
       const ctx = req.authCtx!
-      const q = (req.query || {}) as { especie?: string; busca?: string; codigo?: string }
+      const q = (req.query || {}) as {
+        especie?: string
+        busca?: string
+        codigo?: string
+        page?: string
+        limit?: string
+      }
 
-      const [prods, estLoja, arvore, mpsAbertas] = await Promise.all([
+      const { cfg, tabela: tabelaAtiva } = await obterTabelaAtivaAcougue(conn.db, ctx.tenantId, ctx.filialId)
+      if (!tabelaAtiva) {
+        return {
+          success: true,
+          tabela_ativa: null,
+          em_tabela_alternativa: false,
+          total: 0,
+          page: 1,
+          limit: 48,
+          total_pages: 1,
+          contagens_especie: { TODOS: 0, BOVINO: 0, SUINO: 0, AVES: 0, EMPORIO: 0, OUTROS: 0 },
+          data: [],
+        }
+      }
+
+      const [itensTabela, estLoja, arvore, mpsAbertas] = await Promise.all([
         conn.db
-          .select()
-          .from(produtos)
-          .where(and(eq(produtos.tenantId, ctx.tenantId), eq(produtos.ativo, 1)))
+          .select({
+            precoVenda: tabelasPrecoItens.precoVenda,
+            descontoPct: tabelasPrecoItens.descontoPct,
+            produto: produtos,
+          })
+          .from(tabelasPrecoItens)
+          .innerJoin(produtos, eq(produtos.id, tabelasPrecoItens.produtoId))
+          .where(
+            and(
+              eq(tabelasPrecoItens.tenantId, ctx.tenantId),
+              eq(tabelasPrecoItens.tabelaPrecoId, tabelaAtiva.id),
+              eq(produtos.ativo, 1),
+              sql`${tabelasPrecoItens.precoVenda} > 0`,
+            ),
+          )
           .orderBy(asc(produtos.descricao)),
         conn.db
           .select()
@@ -477,64 +560,150 @@ export function registerAcougueRoutes(app: FastifyInstance, conn: DbConnection):
       }
 
       const espFiltro = String(q.especie || 'TODOS').toUpperCase()
-      const busca = String(q.busca || '').trim().toLowerCase()
+      const busca = String(q.busca || (q as { q?: string }).q || '').trim().toLowerCase()
       const codExato = String(q.codigo || '').trim().toLowerCase()
+      const page = Math.max(1, Number(q.page || 1) || 1)
+      const limit = Math.min(120, Math.max(12, Number(q.limit || 48) || 48))
 
-      const lista = prods
-        .map((p) => {
-          const est = estMap.get(p.id)
-          const especie =
-            p.especie ||
-            detectarEspecieProduto({ grupo: p.grupo, ncm: p.ncm, descricao: p.descricao })
-          const pais = paisPorFilho.get(p.id) || []
-          const mpIdsCandidatos = Array.from(new Set([...pais, p.id]))
-          const saldoMpDisponivel = Number(
-            mpIdsCandidatos.reduce((s, id) => s + (saldoMpPorProd.get(id) || 0), 0).toFixed(3),
+      const normalizados = itensTabela.map((row) => {
+        const p = row.produto
+        const est = estMap.get(p.id)
+        const especie =
+          p.especie || detectarEspecieProduto({ grupo: p.grupo, ncm: p.ncm, descricao: p.descricao })
+        const pais = paisPorFilho.get(p.id) || []
+        const mpIdsCandidatos = Array.from(new Set([...pais, p.id]))
+        const saldoMpDisponivel = Number(
+          mpIdsCandidatos.reduce((s, id) => s + (saldoMpPorProd.get(id) || 0), 0).toFixed(3),
+        )
+        return {
+          id: p.id,
+          codigo: p.codigo || '',
+          codigo_auxiliar: p.codigoAuxiliar || '',
+          ean: p.ean || '',
+          descricao: p.descricao,
+          especie,
+          grupo: p.grupo || '',
+          conservacao: p.conservacao || 'RESFRIADO',
+          validade_dias: Number(p.validadeDias ?? 5),
+          tara_embalagem_kg: toNum(p.taraEmbalagemKg, 0) || toNum(p.taraPrimariaPecaKg, 0),
+          unidade: est?.unidadeVenda || (p.unidade === 'UN' ? 'UN' : 'KG'),
+          preco_kg: toNum(row.precoVenda, 0),
+          desconto_tabela_pct: toNum(row.descontoPct, 0),
+          codigo_balanca: est?.codigoBalanca || (p.codigo || '').replace(/\D/g, '').slice(-5),
+          mp_pais_ids: pais,
+          saldo_mp_disponivel_kg: saldoMpDisponivel,
+        }
+      })
+
+      const contagensEspecie: Record<string, number> = {
+        TODOS: normalizados.length,
+        BOVINO: 0,
+        SUINO: 0,
+        AVES: 0,
+        EMPORIO: 0,
+        OUTROS: 0,
+      }
+      for (const p of normalizados) {
+        const k = contagensEspecie[p.especie] !== undefined ? p.especie : 'OUTROS'
+        contagensEspecie[k] += 1
+      }
+
+      const filtrados = normalizados.filter((p) => {
+        if (codExato) {
+          return (
+            p.codigo.toLowerCase() === codExato ||
+            p.codigo.replace(/^0+/, '').toLowerCase() === codExato.replace(/^0+/, '') ||
+            p.codigo_balanca.toLowerCase() === codExato ||
+            p.ean.toLowerCase() === codExato
           )
-          return {
-            id: p.id,
-            codigo: p.codigo || '',
-            codigo_auxiliar: p.codigoAuxiliar || '',
-            ean: p.ean || '',
-            descricao: p.descricao,
-            especie,
-            grupo: p.grupo || '',
-            conservacao: p.conservacao || 'RESFRIADO',
-            validade_dias: Number(p.validadeDias ?? 5),
-            tara_embalagem_kg: toNum(p.taraEmbalagemKg, 0) || toNum(p.taraPrimariaPecaKg, 0),
-            unidade: est?.unidadeVenda || (p.unidade === 'UN' ? 'UN' : 'KG'),
-            preco_kg: toNum(est?.precoVendaVarejo, 0) || toNum(p.valorUnitario, 0),
-            codigo_balanca: est?.codigoBalanca || (p.codigo || '').replace(/\D/g, '').slice(-5),
-            mp_pais_ids: pais,
-            saldo_mp_disponivel_kg: saldoMpDisponivel,
-          }
-        })
-        .filter((p) => {
-          if (codExato) {
-            return (
-              p.codigo.toLowerCase() === codExato ||
-              p.codigo.replace(/^0+/, '').toLowerCase() === codExato.replace(/^0+/, '') ||
-              p.codigo_balanca.toLowerCase() === codExato ||
-              p.ean.toLowerCase() === codExato
-            )
-          }
-          if (espFiltro !== 'TODOS' && p.especie !== espFiltro) return false
-          if (busca) {
-            return (
-              p.descricao.toLowerCase().includes(busca) ||
-              p.codigo.toLowerCase().includes(busca) ||
-              p.codigo_balanca.toLowerCase().includes(busca) ||
-              p.grupo.toLowerCase().includes(busca)
-            )
-          }
-          return true
-        })
+        }
+        if (espFiltro !== 'TODOS' && p.especie !== espFiltro) return false
+        if (busca) {
+          return (
+            p.descricao.toLowerCase().includes(busca) ||
+            p.codigo.toLowerCase().includes(busca) ||
+            p.codigo_balanca.toLowerCase().includes(busca) ||
+            p.grupo.toLowerCase().includes(busca)
+          )
+        }
+        return true
+      })
 
-      return { success: true, data: lista }
+      const total = filtrados.length
+      const totalPages = Math.max(1, Math.ceil(total / limit))
+      const safePage = Math.min(page, totalPages)
+      const slice = filtrados.slice((safePage - 1) * limit, safePage * limit)
+
+      return {
+        success: true,
+        tabela_ativa: {
+          id: tabelaAtiva.id,
+          codigo: tabelaAtiva.codigo,
+          nome: tabelaAtiva.nome,
+          finalidade: tabelaAtiva.finalidade,
+          padrao: Number(tabelaAtiva.padrao) === 1,
+        },
+        em_tabela_alternativa: Boolean(cfg?.tabelaPadraoId && cfg.tabelaPadraoId !== tabelaAtiva.id),
+        alterada_por_nome: cfg?.alteradaPorNome || '',
+        total,
+        page: safePage,
+        limit,
+        total_pages: totalPages,
+        contagens_especie: contagensEspecie,
+        data: slice,
+      }
     },
   )
 
-  // ── 5) PESAR PRODUTO NO AÇOUGUE: GERA ETIQUETA 80x45 QR COM SERIAL + BAIXA AUTOMÁTICA FEFO NA MP VIVA ──
+  // ── 4b) ETIQUETAS GERADAS NO DIA (PARA O PAINEL LATERAL DA PESAGEM) ─────────
+  app.get(
+    '/api/acougue/etiquetas-dia',
+    { preHandler: requirePermission(PERM_ACOUGUE, { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const hoje = hojeIsoLocal()
+      const rows = await conn.db
+        .select()
+        .from(etiquetasAcougue)
+        .where(
+          and(
+            eq(etiquetasAcougue.tenantId, ctx.tenantId),
+            eq(etiquetasAcougue.filialId, ctx.filialId),
+            eq(etiquetasAcougue.dataPesagem, hoje),
+          ),
+        )
+        .orderBy(desc(etiquetasAcougue.createdAt))
+        .limit(200)
+
+      return {
+        success: true,
+        data_ref: hoje,
+        data: rows.map((e) => ({
+          id: e.id,
+          codigo_etiqueta: e.codigoEtiqueta,
+          produto_id: e.produtoId,
+          codigo: e.produtoCodigo,
+          descricao: e.produtoDescricao,
+          especie: e.especie,
+          conservacao: e.conservacao,
+          unidade: 'KG',
+          peso_bruto_kg: toNum(e.pesoBrutoKg, 0),
+          tara_kg: toNum(e.taraKg, 0),
+          peso_kg: toNum(e.pesoLiquidoKg, 0),
+          preco_unitario: toNum(e.precoKg, 0),
+          valor_total: toNum(e.valorTotal, 0),
+          lote: e.lote,
+          validade: e.validade,
+          payload_qr: e.payloadQr,
+          status: e.status,
+          mp_baixada_ean: e.eanMpOrigem || null,
+          created_at: e.createdAt,
+        })),
+      }
+    },
+  )
+
+  // ── 5) PESAR PRODUTO NO AÇOUGUE: TARA, VALIDADE E PREÇO 100% TRAVADOS NO SERVIDOR! ──
   app.post(
     '/api/acougue/pesar-etiqueta',
     { preHandler: requirePermission(['varejo_acougue']) },
@@ -543,11 +712,7 @@ export function registerAcougueRoutes(app: FastifyInstance, conn: DbConnection):
       const body = (req.body || {}) as {
         produto_id?: string
         peso_bruto_kg?: number
-        tara_kg?: number
-        preco_kg?: number
-        validade?: string
         lote?: string
-        conservacao?: string
       }
 
       const prodId = parseUuidOrBadRequest(body.produto_id, 'produto_id')
@@ -576,31 +741,47 @@ export function registerAcougueRoutes(app: FastifyInstance, conn: DbConnection):
           )
           .limit(1)
 
-        const taraDefault = toNum(prod.taraEmbalagemKg, 0) || toNum(prod.taraPrimariaPecaKg, 0)
-        const tara =
-          body.tara_kg !== undefined && Number.isFinite(Number(body.tara_kg))
-            ? Math.max(0, Number(body.tara_kg))
-            : taraDefault
-
+        // TRAVA 1: Tara puxada exclusivamente do cadastro do produto
+        const tara = toNum(prod.taraEmbalagemKg, 0) || toNum(prod.taraPrimariaPecaKg, 0)
         const pesoLiquido = Number((pesoBruto - tara).toFixed(3))
         if (pesoLiquido <= 0) {
-          throw new HttpError(400, 'Peso líquido deve ser maior que zero após descontar a tara da embalagem.')
+          throw new HttpError(
+            400,
+            `Peso líquido inválido após descontar a tara cadastrada (${tara.toFixed(4)} kg). Informe um peso maior.`,
+          )
         }
 
-        const precoKg =
-          body.preco_kg !== undefined && Number.isFinite(Number(body.preco_kg)) && Number(body.preco_kg) > 0
-            ? Number(body.preco_kg)
-            : toNum(est?.precoVendaVarejo, 0) || toNum(prod.valorUnitario, 0)
+        // TRAVA 2: Preço puxado exclusivamente da Tabela de Preços Ativa do Açougue
+        const { tabela: tabelaAtiva } = await obterTabelaAtivaAcougue(tx, ctx.tenantId, ctx.filialId)
+        if (!tabelaAtiva) {
+          throw new HttpError(400, 'Nenhuma Tabela de Preços ativa configurada para o Açougue.')
+        }
+        const [itemTab] = await tx
+          .select({ precoVenda: tabelasPrecoItens.precoVenda })
+          .from(tabelasPrecoItens)
+          .where(
+            and(
+              eq(tabelasPrecoItens.tabelaPrecoId, tabelaAtiva.id),
+              eq(tabelasPrecoItens.produtoId, prodId),
+            ),
+          )
+          .limit(1)
+
+        const precoKg = itemTab ? toNum(itemTab.precoVenda, 0) : 0
+        if (precoKg <= 0) {
+          throw new HttpError(
+            400,
+            `O produto "${prod.descricao}" não possui preço cadastrado na tabela ativa (${tabelaAtiva.codigo} — ${tabelaAtiva.nome}).`,
+          )
+        }
         const valorTotal = Number((pesoLiquido * precoKg).toFixed(2))
 
+        // TRAVA 3: Validade calculada exclusivamente pelos dias definidos no cadastro do produto
         const hoje = hojeIsoLocal()
-        const validadeFinal =
-          body.validade && /^\d{4}-\d{2}-\d{2}$/.test(body.validade)
-            ? body.validade
-            : somarDiasData(hoje, Number(prod.validadeDias ?? 5))
+        const validadeFinal = somarDiasData(hoje, Number(prod.validadeDias ?? 5))
         const especie =
           prod.especie || detectarEspecieProduto({ grupo: prod.grupo, ncm: prod.ncm, descricao: prod.descricao })
-        const conservacao = String(body.conservacao || prod.conservacao || 'RESFRIADO').toUpperCase()
+        const conservacao = String(prod.conservacao || 'RESFRIADO').toUpperCase()
 
         // BAIXA AUTOMÁTICA FEFO NA ETIQUETA DE MP VIVA (mesma etiqueta vinda da 1/2!)
         const arvorePais = await tx
