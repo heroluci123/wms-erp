@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes, Tag, CornerDownLeft } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map as MapIcon, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes, Tag, CornerDownLeft } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -20,7 +20,7 @@ const ICON_MAP = {
   LogOut,
   MapPin,
   Users,
-  Map,
+  Map: MapIcon,
   Layers,
   Barcode,
   Factory,
@@ -460,14 +460,14 @@ function Sidebar({ collapsed = false, onCollapse }) {
 
   const secoesAgrupadas = useMemo(() => {
     const grupos = []
-    const mapa = new Map()
+    const mapa = Object.create(null)
     for (const m of modulosVisiveis) {
-      if (!mapa.has(m.section)) {
+      if (!mapa[m.section]) {
         const g = { section: m.section, items: [] }
-        mapa.set(m.section, g)
+        mapa[m.section] = g
         grupos.push(g)
       }
-      mapa.get(m.section).items.push(m)
+      mapa[m.section].items.push(m)
     }
     return grupos
   }, [modulosVisiveis])
