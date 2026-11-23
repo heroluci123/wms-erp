@@ -6,12 +6,12 @@ import {
   Banknote,
   BookOpen,
   CheckCircle2,
+  Clock,
   Copy,
   CreditCard,
   DollarSign,
   Lock,
   Percent,
-  Plus,
   Printer,
   QrCode,
   Receipt,
@@ -21,7 +21,6 @@ import {
   ShoppingCart,
   Trash2,
   Unlock,
-  UserCheck,
   Users,
   X,
 } from 'lucide-react'
@@ -93,13 +92,14 @@ export function PdvCaixa() {
   const [modalPagamento, setModalPagamento] = useState(false)
   const [formaAtiva, setFormaAtiva] = useState('DINHEIRO')
   const [valorFormaInput, setValorFormaInput] = useState('')
+  const [parcelasCredito, setParcelasCredito] = useState('1')
   const [pagamentos, setPagamentos] = useState([])
   const [finalizando, setFinalizando] = useState(false)
   const [buscaCrediario, setBuscaCrediario] = useState('')
 
-  // PIX QR Code nativo
-  const [pixInfo, setPixInfo] = useState(null)
-  const [pixQrUrl, setPixQrUrl] = useState('')
+  // Cobrança em andamento (PIX QR dinâmico com valor exato ou Aguardando Maquininha TEF)
+  const [cobrancaPendente, setCobrancaPendente] = useState(null)
+  const [nsuTefInput, setNsuTefInput] = useState('')
   const [gerandoPix, setGerandoPix] = useState(false)
 
   // Última venda concluída (para reimpressão rápida de Cupom / Comprovante Crediário)
@@ -188,6 +188,10 @@ export function PdvCaixa() {
     const onKeyDown = (e) => {
       if (!caixa) return
       if (e.key === 'Escape') {
+        if (cobrancaPendente) {
+          setCobrancaPendente(null)
+          return
+        }
         setModalCliente(false)
         setModalDesconto(false)
         setModalPagamento(false)
@@ -386,50 +390,73 @@ export function PdvCaixa() {
     setPagamentos([])
     setFormaAtiva('DINHEIRO')
     setValorFormaInput(valorTotal.toFixed(2))
-    setPixInfo(null)
-    setPixQrUrl('')
+    setParcelasCredito('1')
+    setCobrancaPendente(null)
+    setNsuTefInput('')
     setBuscaCrediario('')
     setModalPagamento(true)
   }
 
-  // Gerar QR Code PIX automático ao selecionar PIX ou clicar em Gerar
-  const gerarQrCodePix = async (valorAlvo) => {
-    const v = Number(valorAlvo || faltaPagar || valorTotal)
-    if (!Number.isFinite(v) || v <= 0) return
-    setGerandoPix(true)
-    try {
-      const res = await varejoQueries.gerarPixPdv({ valor: v, descricao: `PDV ${caixa?.codigo || ''}` })
-      setPixInfo(res.data)
-      const dataUrl = await QRCode.toDataURL(res.data.payload, {
-        width: 220,
-        margin: 1,
-        color: { dark: '#000000', light: '#ffffff' },
-      })
-      setPixQrUrl(dataUrl)
-    } catch (err) {
-      toastError('Erro ao gerar PIX', err.message)
-    } finally {
-      setGerandoPix(false)
-    }
-  }
-
   const selecionarForma = (formaId) => {
-    setFormaAtiva(formaId)
-    const valSug = faltaPagar > 0 ? faltaPagar : valorTotal
-    setValorFormaInput(valSug.toFixed(2))
-    if (formaId === 'PIX' && valSug > 0) {
-      gerarQrCodePix(valSug)
-    }
-  }
-
-  const adicionarPagamento = (formaOverride = null, valorOverride = null) => {
-    const forma = formaOverride || formaAtiva
-    const val = Number(String(valorOverride ?? (valorFormaInput || faltaPagar)).replace(',', '.'))
-    if (!Number.isFinite(val) || val <= 0) {
-      toastWarning('Valor inválido', 'Informe um valor maior que zero.')
+    if (cobrancaPendente) {
+      toastWarning('Cobrança em andamento', 'Confirme ou cancele a cobrança atual antes de trocar a forma de pagamento.')
       return
     }
-    if (forma === 'CREDIARIO') {
+    setFormaAtiva(formaId)
+    setValorFormaInput(faltaPagar > 0 ? faltaPagar.toFixed(2) : '')
+  }
+
+  const registrarRecebimentoConfirmado = (itemPg) => {
+    const novoList = [...pagamentos, itemPg]
+    setPagamentos(novoList)
+    const novoTotalPago = Number(novoList.reduce((s, p) => s + Number(p.valor || 0), 0).toFixed(2))
+    const novoResto = Math.max(0, Number((valorTotal - novoTotalPago).toFixed(2)))
+    setValorFormaInput(novoResto > 0 ? novoResto.toFixed(2) : '')
+    setCobrancaPendente(null)
+    setNsuTefInput('')
+  }
+
+  const removerPagamentoConfirmado = (idx) => {
+    if (cobrancaPendente) {
+      toastWarning('Cobrança em andamento', 'Cancele a cobrança atual antes de alterar recebimentos já lançados.')
+      return
+    }
+    const novoList = pagamentos.filter((_, i) => i !== idx)
+    setPagamentos(novoList)
+    const novoTotalPago = Number(novoList.reduce((s, p) => s + Number(p.valor || 0), 0).toFixed(2))
+    const novoResto = Math.max(0, Number((valorTotal - novoTotalPago).toFixed(2)))
+    setValorFormaInput(novoResto > 0 ? novoResto.toFixed(2) : '')
+  }
+
+  // Inicia cobrança ou recebe imediatamente (Dinheiro / Crediário)
+  const iniciarCobrancaOuReceber = async () => {
+    if (cobrancaPendente) return
+    if (faltaPagar <= 0.009) {
+      toastWarning('Compra já quitada', 'O valor total já foi 100% recebido. Clique em Confirmar & Finalizar Venda.')
+      return
+    }
+
+    const val = Number(String(valorFormaInput || '').replace(',', '.'))
+    if (!Number.isFinite(val) || val <= 0) {
+      toastWarning('Valor inválido', 'Informe um valor maior que zero para cobrar ou receber.')
+      return
+    }
+    const valArred = Number(val.toFixed(2))
+
+    if (formaAtiva !== 'DINHEIRO' && valArred > faltaPagar + 0.009) {
+      toastWarning(
+        'Valor acima do saldo restante',
+        `Para ${FORMAS_PAG.find((x) => x.id === formaAtiva)?.label || formaAtiva}, o valor máximo restante é ${fmtMoeda(faltaPagar)}.`,
+      )
+      return
+    }
+
+    if (formaAtiva === 'DINHEIRO') {
+      registrarRecebimentoConfirmado({ forma: 'DINHEIRO', valor: valArred })
+      return
+    }
+
+    if (formaAtiva === 'CREDIARIO') {
       if (!clienteSel) {
         toastError('Selecione o cliente', 'Escolha um cliente com crediário liberado abaixo.')
         return
@@ -444,47 +471,81 @@ export function PdvCaixa() {
       }
       const jaCred = pagamentos.filter((p) => p.forma === 'CREDIARIO').reduce((s, p) => s + p.valor, 0)
       const disp = Number(clienteSel.credito_disponivel || 0)
-      if (jaCred + val > disp + 0.009) {
+      if (jaCred + valArred > disp + 0.009) {
         toastError(
           'Limite de crediário insuficiente',
-          `Disponível: ${fmtMoeda(disp)} • Solicitado: ${fmtMoeda(jaCred + val)}.`,
+          `Disponível: ${fmtMoeda(disp)} • Solicitado: ${fmtMoeda(jaCred + valArred)}.`,
         )
         return
       }
-    }
-    if (forma !== 'DINHEIRO' && val > faltaPagar + 0.009) {
-      toastWarning('Valor acima do saldo', `Para ${forma}, o valor máximo restante é ${fmtMoeda(faltaPagar)}.`)
+      registrarRecebimentoConfirmado({
+        forma: 'CREDIARIO',
+        valor: valArred,
+        detalhe: clienteSel.nome_fantasia || clienteSel.razao_social,
+      })
       return
     }
-    const novoList = [...pagamentos, { forma, valor: Number(val.toFixed(2)) }]
-    setPagamentos(novoList)
-    const novoTotalPago = novoList.reduce((s, p) => s + p.valor, 0)
-    const novoResto = Math.max(0, Number((valorTotal - novoTotalPago).toFixed(2)))
-    setValorFormaInput(novoResto > 0 ? novoResto.toFixed(2) : '')
+
+    if (formaAtiva === 'PIX') {
+      setGerandoPix(true)
+      try {
+        const res = await varejoQueries.gerarPixPdv({
+          valor: valArred,
+          descricao: `PDV ${caixa?.codigo || ''}`,
+        })
+        const dataUrl = await QRCode.toDataURL(res.data.payload, {
+          width: 240,
+          margin: 1,
+          color: { dark: '#000000', light: '#ffffff' },
+        })
+        setCobrancaPendente({
+          forma: 'PIX',
+          valor: valArred,
+          pixInfo: res.data,
+          qrUrl: dataUrl,
+        })
+      } catch (err) {
+        toastError('Erro ao gerar cobrança PIX', err.message)
+      } finally {
+        setGerandoPix(false)
+      }
+      return
+    }
+
+    if (formaAtiva === 'DEBITO' || formaAtiva === 'CREDITO') {
+      setNsuTefInput('')
+      setCobrancaPendente({
+        forma: formaAtiva,
+        valor: valArred,
+        parcelas: formaAtiva === 'CREDITO' ? Number(parcelasCredito || 1) : 1,
+      })
+    }
   }
 
+  const confirmarCobrancaPendente = () => {
+    if (!cobrancaPendente) return
+    const nsuLimpo = nsuTefInput.trim()
+    registrarRecebimentoConfirmado({
+      forma: cobrancaPendente.forma,
+      valor: cobrancaPendente.valor,
+      parcelas: cobrancaPendente.parcelas || 1,
+      nsu: nsuLimpo || undefined,
+    })
+    toastSuccess(
+      `${cobrancaPendente.forma === 'PIX' ? 'PIX confirmado' : 'Pagamento aprovado'}!`,
+      `${fmtMoeda(cobrancaPendente.valor)} lançado nos recebimentos.`,
+    )
+  }
+
+  const pagamentoCompleto = valorTotal > 0 && faltaPagar <= 0.009 && !cobrancaPendente
+
   const handleConfirmarVenda = async () => {
-    let pagsFinal = pagamentos
-    if (pagsFinal.length === 0) {
-      const val = Number(String(valorFormaInput || valorTotal).replace(',', '.'))
-      if (formaAtiva === 'CREDIARIO') {
-        if (!clienteSel || Number(clienteSel.crediario_ativo) !== 1) {
-          toastError('Selecione o cliente', 'Escolha um cliente com crediário liberado antes de finalizar.')
-          return
-        }
-        if (val > Number(clienteSel.credito_disponivel || 0) + 0.009) {
-          toastError(
-            'Limite insuficiente',
-            `Limite disponível de ${clienteSel.nome_fantasia || clienteSel.razao_social}: ${fmtMoeda(clienteSel.credito_disponivel)}.`,
-          )
-          return
-        }
-      }
-      pagsFinal = [{ forma: formaAtiva, valor: Number((val > 0 ? val : valorTotal).toFixed(2)) }]
+    if (cobrancaPendente) {
+      toastWarning('Cobrança em andamento', 'Confirme ou cancele a cobrança pendente antes de finalizar.')
+      return
     }
-    const soma = pagsFinal.reduce((s, p) => s + p.valor, 0)
-    if (soma + 0.009 < valorTotal) {
-      toastError('Pagamento incompleto', `Ainda falta receber ${fmtMoeda(valorTotal - soma)}.`)
+    if (pagamentos.length === 0 || faltaPagar > 0.009) {
+      toastError('Pagamento incompleto', `Ainda falta receber ${fmtMoeda(faltaPagar)} para concluir a venda.`)
       return
     }
 
@@ -509,7 +570,7 @@ export function PdvCaixa() {
           etiqueta_acougue_id: it.etiqueta_acougue_id || null,
           codigo_etiqueta: it.codigo_etiqueta || '',
         })),
-        pagamentos: pagsFinal,
+        pagamentos: pagamentos.map((p) => ({ forma: p.forma, valor: p.valor })),
       })
 
       const venda = res.data
@@ -519,8 +580,8 @@ export function PdvCaixa() {
       setPagamentos([])
       setDescontoAplicado({ tipo: 'VALOR', pct: 0, valor: 0 })
       setClienteSel(null)
-      setPixInfo(null)
-      setPixQrUrl('')
+      setCobrancaPendente(null)
+      setNsuTefInput('')
 
       toastSuccess(
         `Venda ${venda.codigo} concluída!`,
@@ -1291,39 +1352,89 @@ export function PdvCaixa() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL 3: FINALIZAR COMPRA — PAGAMENTOS (DINHEIRO/PIX QR/CARTÃO/CREDIÁRIO) */}
+      {/* MODAL 3: FINALIZAR COMPRA — RECEBIMENTOS & COBRANÇAS (TRAVA 100%)       */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {modalPagamento && (
-        <div className="modal-overlay" style={{ zIndex: 1070 }} onClick={(e) => e.target === e.currentTarget && !finalizando && setModalPagamento(false)}>
-          <div className="modal" style={{ maxWidth: 780, width: '96%', padding: 0, overflow: 'hidden', maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '14px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 1070 }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !finalizando && !cobrancaPendente) {
+              setModalPagamento(false)
+            }
+          }}
+        >
+          <div
+            className="modal"
+            style={{
+              maxWidth: 800,
+              width: '96%',
+              padding: 0,
+              overflow: 'hidden',
+              maxHeight: '94vh',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div
+              style={{
+                padding: '14px 20px',
+                background: 'var(--bg-2)',
+                borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
               <div>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <DollarSign size={18} color="#22c55e" /> Finalizar Compra — Pagamento
+                  <DollarSign size={18} color="#22c55e" /> Recebimento da Venda
                 </h3>
                 <div className="text-xs text-muted">
-                  Escolha uma ou mais formas de pagamento para fechar a venda
+                  Lance os pagamentos até quitar 100% do valor para liberar a finalização da venda
                 </div>
               </div>
-              <button type="button" className="btn-icon" onClick={() => !finalizando && setModalPagamento(false)}>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => {
+                  if (!finalizando) {
+                    setCobrancaPendente(null)
+                    setModalPagamento(false)
+                  }
+                }}
+              >
                 <X size={18} />
               </button>
             </div>
 
             <div style={{ padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* RESUMO NUMÉRICO NO TOPO DO MODAL */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              {/* RESUMO NUMÉRICO NO TOPO DO MODAL (4 BLOCOS CLAROS) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
                 <div style={{ padding: 12, borderRadius: 10, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
                   <div className="text-xs text-muted uppercase">Total da Compra</div>
-                  <div className="font-mono font-bold" style={{ fontSize: 22, color: '#f8fafc' }}>{fmtMoeda(valorTotal)}</div>
+                  <div className="font-mono font-bold" style={{ fontSize: 20, color: '#f8fafc' }}>{fmtMoeda(valorTotal)}</div>
                 </div>
                 <div style={{ padding: 12, borderRadius: 10, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-                  <div className="text-xs text-muted uppercase">Falta Pagar</div>
-                  <div className="font-mono font-bold" style={{ fontSize: 22, color: faltaPagar > 0 ? '#fbbf24' : '#22c55e' }}>{fmtMoeda(faltaPagar)}</div>
+                  <div className="text-xs text-muted uppercase">Já Recebido</div>
+                  <div className="font-mono font-bold" style={{ fontSize: 20, color: '#4ade80' }}>{fmtMoeda(totalPago)}</div>
+                </div>
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 10,
+                    background: faltaPagar > 0.009 ? 'rgba(245,158,11,0.12)' : 'rgba(34,197,94,0.12)',
+                    border: `1px solid ${faltaPagar > 0.009 ? 'rgba(245,158,11,0.45)' : 'rgba(34,197,94,0.45)'}`,
+                  }}
+                >
+                  <div className="text-xs text-muted uppercase">Falta Receber</div>
+                  <div className="font-mono font-bold" style={{ fontSize: 20, color: faltaPagar > 0.009 ? '#fbbf24' : '#22c55e' }}>
+                    {fmtMoeda(faltaPagar)}
+                  </div>
                 </div>
                 <div style={{ padding: 12, borderRadius: 10, background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
                   <div className="text-xs text-muted uppercase">Troco</div>
-                  <div className="font-mono font-bold" style={{ fontSize: 22, color: '#38bdf8' }}>{fmtMoeda(troco)}</div>
+                  <div className="font-mono font-bold" style={{ fontSize: 20, color: '#38bdf8' }}>{fmtMoeda(troco)}</div>
                 </div>
               </div>
 
@@ -1332,13 +1443,15 @@ export function PdvCaixa() {
                 {FORMAS_PAG.map((f) => {
                   const Icon = f.icon
                   const ativa = formaAtiva === f.id
+                  const travada = Boolean(cobrancaPendente) || faltaPagar <= 0.009
                   return (
                     <button
                       key={f.id}
                       type="button"
+                      disabled={Boolean(cobrancaPendente) && !ativa}
                       onClick={() => selecionarForma(f.id)}
                       style={{
-                        padding: '12px 8px',
+                        padding: '11px 8px',
                         borderRadius: 10,
                         border: `2px solid ${ativa ? f.cor : 'var(--border)'}`,
                         background: ativa ? `${f.cor}22` : 'var(--bg-2)',
@@ -1347,7 +1460,8 @@ export function PdvCaixa() {
                         flexDirection: 'column',
                         alignItems: 'center',
                         gap: 6,
-                        cursor: 'pointer',
+                        cursor: travada && !ativa ? 'not-allowed' : 'pointer',
+                        opacity: Boolean(cobrancaPendente) && !ativa ? 0.45 : 1,
                         fontWeight: 700,
                         fontSize: 12,
                       }}
@@ -1359,192 +1473,431 @@ export function PdvCaixa() {
                 })}
               </div>
 
-              {/* ÁREA CONTEXTUAL POR FORMA DE PAGAMENTO */}
-              <div style={{ padding: 14, borderRadius: 10, background: 'var(--bg-2)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                    <label className="form-label">Valor em {FORMAS_PAG.find((x) => x.id === formaAtiva)?.label} (R$)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="form-input font-mono"
-                      style={{ height: 44, fontSize: 18, fontWeight: 700 }}
-                      value={valorFormaInput}
-                      onChange={(e) => setValorFormaInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          adicionarPagamento()
-                        }
-                      }}
-                    />
-                  </div>
-                  <button type="button" className="btn btn--primary" style={{ height: 44 }} onClick={() => adicionarPagamento()}>
-                    <Plus size={16} /> Adicionar Parcela
-                  </button>
-                </div>
-
-                {/* ATALHOS DE CÉDULAS PARA DINHEIRO */}
-                {formaAtiva === 'DINHEIRO' && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => setValorFormaInput((faltaPagar || valorTotal).toFixed(2))}>
-                      Exato ({fmtMoeda(faltaPagar || valorTotal)})
-                    </button>
-                    {[20, 50, 100, 200].map((nota) => (
-                      <button
-                        key={nota}
-                        type="button"
-                        className="btn btn--ghost btn--sm font-mono"
-                        onClick={() => setValorFormaInput(nota.toFixed(2))}
-                      >
-                        R$ {nota}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* QR CODE PIX GERADO AUTOMATICAMENTE */}
-                {formaAtiva === 'PIX' && (
+              {/* ESTADO A: COBRANÇA EM ANDAMENTO (AGUARDANDO PIX QR OU MAQUININHA TEF) */}
+              {cobrancaPendente ? (
+                cobrancaPendente.forma === 'PIX' ? (
                   <div
                     style={{
+                      padding: 18,
+                      borderRadius: 12,
+                      background: 'rgba(6, 182, 212, 0.1)',
+                      border: '2px solid rgba(6, 182, 212, 0.65)',
                       display: 'flex',
-                      gap: 16,
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      padding: 12,
-                      borderRadius: 10,
-                      background: 'var(--bg-1)',
-                      border: '1px dashed rgba(6,182,212,0.5)',
+                      flexDirection: 'column',
+                      gap: 14,
                     }}
                   >
-                    <div style={{ background: '#ffffff', padding: 8, borderRadius: 8, width: 164, height: 164, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {gerandoPix ? (
-                        <span style={{ color: '#000', fontSize: 12 }}>Gerando QR...</span>
-                      ) : pixQrUrl ? (
-                        <img src={pixQrUrl} alt="QR Code PIX" style={{ width: 148, height: 148 }} />
-                      ) : (
-                        <span style={{ color: '#666', fontSize: 11, textAlign: 'center' }}>Clique em Gerar QR PIX</span>
-                      )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Clock size={18} color="#22d3ee" />
+                        <span className="font-bold" style={{ fontSize: 16, color: '#22d3ee' }}>
+                          Aguardando Pagamento PIX — {fmtMoeda(cobrancaPendente.valor)}
+                        </span>
+                      </div>
+                      <span className="badge badge--info" style={{ fontSize: 11 }}>
+                        MODO SIMULAÇÃO • PRONTO P/ WEBHOOK
+                      </span>
                     </div>
-                    <div style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      <div className="font-bold text-sm" style={{ color: '#22d3ee' }}>
-                        QR Code PIX — {fmtMoeda(pixInfo?.valor || Number(valorFormaInput || faltaPagar))}
-                      </div>
-                      <div className="text-xs text-muted">
-                        Recebedor: <strong>{pixInfo?.nome_recebedor || '-'}</strong> • Chave: <code className="font-mono">{pixInfo?.chave_pix || '-'}</code>
-                      </div>
-                      {pixInfo?.usando_chave_fallback && (
-                        <div className="text-xs" style={{ color: '#fbbf24' }}>
-                          Dica: cadastre sua Chave PIX oficial em Financeiro → Contas Bancárias.
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--sm"
-                          onClick={() => gerarQrCodePix(Number(valorFormaInput || faltaPagar || valorTotal))}
-                        >
-                          <RefreshCw size={13} /> Atualizar Valor QR
-                        </button>
-                        {pixInfo?.payload && (
-                          <button
-                            type="button"
-                            className="btn btn--ghost btn--sm"
-                            onClick={() => {
-                              navigator.clipboard?.writeText(pixInfo.payload)
-                              toastSuccess('PIX Copia e Cola copiado!', 'Código BR Code copiado para área de transferência.')
-                            }}
-                          >
-                            <Copy size={13} /> Copia e Cola
-                          </button>
+
+                    <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div
+                        style={{
+                          background: '#ffffff',
+                          padding: 10,
+                          borderRadius: 10,
+                          width: 196,
+                          height: 196,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                          boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                        }}
+                      >
+                        {cobrancaPendente.qrUrl ? (
+                          <img src={cobrancaPendente.qrUrl} alt="QR Code PIX" style={{ width: 176, height: 176 }} />
+                        ) : (
+                          <span style={{ color: '#000', fontSize: 12 }}>Gerando QR...</span>
                         )}
                       </div>
+
+                      <div style={{ flex: 1, minWidth: 230, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div className="text-xs text-muted">
+                          Peça ao cliente para escanear o QR Code com o valor exato de{' '}
+                          <strong style={{ color: '#ffffff', fontSize: 14 }}>{fmtMoeda(cobrancaPendente.valor)}</strong>.
+                        </div>
+                        <div className="text-xs text-muted">
+                          Recebedor: <strong style={{ color: '#e2e8f0' }}>{cobrancaPendente.pixInfo?.nome_recebedor || '-'}</strong>
+                          <br />
+                          Chave PIX: <code className="font-mono">{cobrancaPendente.pixInfo?.chave_pix || '-'}</code>
+                        </div>
+                        {cobrancaPendente.pixInfo?.usando_chave_fallback && (
+                          <div className="text-xs" style={{ color: '#fbbf24' }}>
+                            Dica: cadastre sua Chave PIX oficial em Financeiro → Contas Bancárias.
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                          {cobrancaPendente.pixInfo?.payload && (
+                            <button
+                              type="button"
+                              className="btn btn--secondary btn--sm"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(cobrancaPendente.pixInfo.payload)
+                                toastSuccess('PIX Copia e Cola copiado!', 'Código BR Code copiado para área de transferência.')
+                              }}
+                            >
+                              <Copy size={13} /> Copiar PIX Copia e Cola
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                        borderTop: '1px solid rgba(6, 182, 212, 0.25)',
+                        paddingTop: 12,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => setCobrancaPendente(null)}
+                      >
+                        <X size={15} /> Cancelar Cobrança PIX
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--success"
+                        style={{ height: 44, padding: '0 22px', fontWeight: 800 }}
+                        onClick={confirmarCobrancaPendente}
+                      >
+                        <CheckCircle2 size={16} /> Confirmar Pagamento Recebido ({fmtMoeda(cobrancaPendente.valor)})
+                      </button>
                     </div>
                   </div>
-                )}
-
-                {/* LISTA DE CLIENTES COM CREDIÁRIO ABERTO + LIMITE TOTAL/UTILIZADO/DISPONÍVEL */}
-                {formaAtiva === 'CREDIARIO' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <div className="text-xs font-bold uppercase" style={{ color: '#fbbf24' }}>
-                        Clientes com Crediário Liberado ({clientesCrediario.length})
+                ) : (
+                  /* AGUARDANDO MAQUININHA (TEF) — DÉBITO OU CRÉDITO */
+                  <div
+                    style={{
+                      padding: 18,
+                      borderRadius: 12,
+                      background:
+                        cobrancaPendente.forma === 'CREDITO'
+                          ? 'rgba(168, 85, 247, 0.11)'
+                          : 'rgba(59, 130, 246, 0.11)',
+                      border: `2px solid ${
+                        cobrancaPendente.forma === 'CREDITO'
+                          ? 'rgba(168, 85, 247, 0.65)'
+                          : 'rgba(59, 130, 246, 0.65)'
+                      }`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 14,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <CreditCard size={18} color={cobrancaPendente.forma === 'CREDITO' ? '#c084fc' : '#60a5fa'} />
+                        <span
+                          className="font-bold"
+                          style={{ fontSize: 16, color: cobrancaPendente.forma === 'CREDITO' ? '#c084fc' : '#60a5fa' }}
+                        >
+                          Aguardando Maquininha — {cobrancaPendente.forma === 'CREDITO' ? `Crédito (${cobrancaPendente.parcelas || 1}x)` : 'Débito'} •{' '}
+                          {fmtMoeda(cobrancaPendente.valor)}
+                        </span>
                       </div>
+                      <span className="badge badge--neutral" style={{ fontSize: 11 }}>
+                        MODO SIMULAÇÃO • PRONTO P/ TEF
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-muted">
+                      Passe ou aproxime o cartão na maquininha no valor exato de{' '}
+                      <strong style={{ color: '#ffffff', fontSize: 14 }}>{fmtMoeda(cobrancaPendente.valor)}</strong>. Assim que aprovar, clique em{' '}
+                      <strong>Confirmar Aprovação</strong>.
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0, maxWidth: 280 }}>
+                      <label className="form-label">NSU / Cód. Autorização (Opcional)</label>
                       <input
                         type="text"
-                        className="form-input"
-                        style={{ width: 240, height: 32, fontSize: 12 }}
-                        placeholder="Filtrar cliente crediário..."
-                        value={buscaCrediario}
-                        onChange={(e) => setBuscaCrediario(e.target.value)}
+                        className="form-input font-mono"
+                        placeholder="Ex: 482910"
+                        value={nsuTefInput}
+                        onChange={(e) => setNsuTefInput(e.target.value)}
                       />
                     </div>
 
-                    <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {clientesCrediario.length === 0 ? (
-                        <div className="text-xs text-muted p-12 text-center">
-                          Nenhum cliente com crediário ativo encontrado. Libere em <strong>Clientes (Varejo)</strong>.
-                        </div>
-                      ) : (
-                        clientesCrediario.map((c) => {
-                          const sel = clienteSel?.id === c.id
-                          const lim = Number(c.limite_credito || 0)
-                          const util = Number(c.credito_utilizado || 0)
-                          const disp = Number(c.credito_disponivel || 0)
-                          const pctUso = lim > 0 ? Math.min(100, Math.round((util / lim) * 100)) : 0
-                          return (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => setClienteSel(c)}
-                              style={{
-                                textAlign: 'left',
-                                padding: '10px 12px',
-                                borderRadius: 8,
-                                background: sel ? 'rgba(245,158,11,0.16)' : 'var(--bg-1)',
-                                border: `1.5px solid ${sel ? '#f59e0b' : 'var(--border)'}`,
-                                color: 'var(--text-primary)',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                                <div>
-                                  <span className="font-bold text-sm">{c.nome_fantasia || c.razao_social}</span>
-                                  <span className="text-xs text-muted font-mono" style={{ marginLeft: 8 }}>
-                                    {c.cnpj_cpf}
-                                  </span>
-                                </div>
-                                <div className="text-xs font-mono">
-                                  Disp: <strong style={{ color: disp > 0 ? '#22c55e' : '#ef4444' }}>{fmtMoeda(disp)}</strong>
-                                  <span className="text-muted"> • Util: {fmtMoeda(util)} / Lim: {fmtMoeda(lim)}</span>
-                                </div>
-                              </div>
-                              <div style={{ height: 5, background: 'var(--bg-3)', borderRadius: 4, marginTop: 6, overflow: 'hidden' }}>
-                                <div
-                                  style={{
-                                    width: `${pctUso}%`,
-                                    height: '100%',
-                                    background: pctUso >= 90 ? '#ef4444' : pctUso >= 65 ? '#f59e0b' : '#22c55e',
-                                  }}
-                                />
-                              </div>
-                            </button>
-                          )
-                        })
-                      )}
-                    </div>
-                    <div className="text-xs text-muted">
-                      Ao concluir no Crediário, o sistema gera automaticamente o título no Financeiro e emite o <strong>comprovante térmico para assinatura do cliente</strong>.
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                        borderTop: '1px solid rgba(255,255,255,0.1)',
+                        paddingTop: 12,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => setCobrancaPendente(null)}
+                      >
+                        <X size={15} /> Cancelar Cobrança
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--success"
+                        style={{ height: 44, padding: '0 22px', fontWeight: 800 }}
+                        onClick={confirmarCobrancaPendente}
+                      >
+                        <CheckCircle2 size={16} /> Confirmar Aprovação ({fmtMoeda(cobrancaPendente.valor)})
+                      </button>
                     </div>
                   </div>
-                )}
-              </div>
+                )
+              ) : faltaPagar <= 0.009 ? (
+                /* ESTADO B: COMPRA 100% QUITADA */
+                <div
+                  style={{
+                    padding: 16,
+                    borderRadius: 12,
+                    background: 'rgba(34, 197, 94, 0.12)',
+                    border: '1.5px solid rgba(34, 197, 94, 0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                >
+                  <CheckCircle2 size={24} color="#22c55e" />
+                  <div>
+                    <div className="font-bold text-sm" style={{ color: '#4ade80' }}>
+                      Pagamento 100% recebido!
+                    </div>
+                    <div className="text-xs text-muted">
+                      {troco > 0
+                        ? `Devolva ${fmtMoeda(troco)} de troco e clique em Confirmar & Finalizar Venda abaixo.`
+                        : 'Clique em Confirmar & Finalizar Venda abaixo para emitir o cupom e concluir.'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* ESTADO C: LANÇAR NOVA COBRANÇA / RECEBIMENTO */
+                <div
+                  style={{
+                    padding: 14,
+                    borderRadius: 10,
+                    background: 'var(--bg-2)',
+                    border: '1px solid var(--border)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: '1 1 200px', marginBottom: 0 }}>
+                      <label className="form-label">
+                        Valor para {FORMAS_PAG.find((x) => x.id === formaAtiva)?.label} (R$)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="form-input font-mono"
+                        style={{ height: 46, fontSize: 20, fontWeight: 800 }}
+                        value={valorFormaInput}
+                        onChange={(e) => setValorFormaInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            iniciarCobrancaOuReceber()
+                          }
+                        }}
+                        autoFocus
+                      />
+                    </div>
 
-              {/* PARCELAS ADICIONADAS (PAGAMENTO MISTO) */}
+                    {formaAtiva === 'CREDITO' && (
+                      <div className="form-group" style={{ width: 120, marginBottom: 0 }}>
+                        <label className="form-label">Parcelas</label>
+                        <select
+                          className="form-input font-mono"
+                          style={{ height: 46, padding: '0 10px', fontWeight: 700 }}
+                          value={parcelasCredito}
+                          onChange={(e) => setParcelasCredito(e.target.value)}
+                        >
+                          {[1, 2, 3, 4, 5, 6].map((n) => (
+                            <option key={n} value={String(n)}>
+                              {n}x {n === 1 ? '(À vista)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      style={{ height: 46, padding: '0 20px', fontWeight: 800, fontSize: 14 }}
+                      disabled={gerandoPix}
+                      onClick={iniciarCobrancaOuReceber}
+                    >
+                      {formaAtiva === 'DINHEIRO' && (
+                        <>
+                          <Banknote size={17} /> Receber Dinheiro
+                        </>
+                      )}
+                      {formaAtiva === 'PIX' && (
+                        <>
+                          <QrCode size={17} /> {gerandoPix ? 'Gerando QR...' : 'Cobrar via PIX'}
+                        </>
+                      )}
+                      {formaAtiva === 'DEBITO' && (
+                        <>
+                          <CreditCard size={17} /> Cobrar no Débito
+                        </>
+                      )}
+                      {formaAtiva === 'CREDITO' && (
+                        <>
+                          <CreditCard size={17} /> Cobrar no Crédito ({parcelasCredito}x)
+                        </>
+                      )}
+                      {formaAtiva === 'CREDIARIO' && (
+                        <>
+                          <BookOpen size={17} /> Lançar no Crediário
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* ATALHOS DE CÉDULAS PARA DINHEIRO */}
+                  {formaAtiva === 'DINHEIRO' && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => setValorFormaInput(faltaPagar.toFixed(2))}
+                      >
+                        Exato ({fmtMoeda(faltaPagar)})
+                      </button>
+                      {[20, 50, 100, 200].map((nota) => (
+                        <button
+                          key={nota}
+                          type="button"
+                          className="btn btn--ghost btn--sm font-mono"
+                          onClick={() => setValorFormaInput(nota.toFixed(2))}
+                        >
+                          R$ {nota}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {formaAtiva === 'PIX' && (
+                    <div className="text-xs text-muted">
+                      Digite o valor desejado (total ou parcial — ex.: <strong>{fmtMoeda(faltaPagar)}</strong> ou outro valor) e clique em{' '}
+                      <strong>Cobrar via PIX</strong> para gerar o QR Code dinâmico exato e aguardar a confirmação.
+                    </div>
+                  )}
+
+                  {(formaAtiva === 'DEBITO' || formaAtiva === 'CREDITO') && (
+                    <div className="text-xs text-muted">
+                      Informe o valor a cobrar no cartão e clique em{' '}
+                      <strong>{formaAtiva === 'DEBITO' ? 'Cobrar no Débito' : 'Cobrar no Crédito'}</strong> para enviar à maquininha (modo simulação pronto para TEF).
+                    </div>
+                  )}
+
+                  {/* LISTA DE CLIENTES COM CREDIÁRIO ABERTO + LIMITE TOTAL/UTILIZADO/DISPONÍVEL */}
+                  {formaAtiva === 'CREDIARIO' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <div className="text-xs font-bold uppercase" style={{ color: '#fbbf24' }}>
+                          Clientes com Crediário Liberado ({clientesCrediario.length})
+                        </div>
+                        <input
+                          type="text"
+                          className="form-input"
+                          style={{ width: 240, height: 32, fontSize: 12 }}
+                          placeholder="Filtrar cliente crediário..."
+                          value={buscaCrediario}
+                          onChange={(e) => setBuscaCrediario(e.target.value)}
+                        />
+                      </div>
+
+                      <div style={{ maxHeight: 190, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {clientesCrediario.length === 0 ? (
+                          <div className="text-xs text-muted p-12 text-center">
+                            Nenhum cliente com crediário ativo encontrado. Libere em <strong>Clientes (Varejo)</strong>.
+                          </div>
+                        ) : (
+                          clientesCrediario.map((c) => {
+                            const sel = clienteSel?.id === c.id
+                            const lim = Number(c.limite_credito || 0)
+                            const util = Number(c.credito_utilizado || 0)
+                            const disp = Number(c.credito_disponivel || 0)
+                            const pctUso = lim > 0 ? Math.min(100, Math.round((util / lim) * 100)) : 0
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => setClienteSel(c)}
+                                style={{
+                                  textAlign: 'left',
+                                  padding: '10px 12px',
+                                  borderRadius: 8,
+                                  background: sel ? 'rgba(245,158,11,0.16)' : 'var(--bg-1)',
+                                  border: `1.5px solid ${sel ? '#f59e0b' : 'var(--border)'}`,
+                                  color: 'var(--text-primary)',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                  <div>
+                                    <span className="font-bold text-sm">{c.nome_fantasia || c.razao_social}</span>
+                                    <span className="text-xs text-muted font-mono" style={{ marginLeft: 8 }}>
+                                      {c.cnpj_cpf}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs font-mono">
+                                    Disp: <strong style={{ color: disp > 0 ? '#22c55e' : '#ef4444' }}>{fmtMoeda(disp)}</strong>
+                                    <span className="text-muted"> • Util: {fmtMoeda(util)} / Lim: {fmtMoeda(lim)}</span>
+                                  </div>
+                                </div>
+                                <div style={{ height: 5, background: 'var(--bg-3)', borderRadius: 4, marginTop: 6, overflow: 'hidden' }}>
+                                  <div
+                                    style={{
+                                      width: `${pctUso}%`,
+                                      height: '100%',
+                                      background: pctUso >= 90 ? '#ef4444' : pctUso >= 65 ? '#f59e0b' : '#22c55e',
+                                    }}
+                                  />
+                                </div>
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                      <div className="text-xs text-muted">
+                        Ao concluir no Crediário, o sistema gera o título no Financeiro e emite o <strong>comprovante térmico para assinatura do cliente</strong>.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* RECEBIMENTOS CONFIRMADOS */}
               {pagamentos.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div className="text-xs font-bold uppercase text-muted">Pagamentos Lançados</div>
+                  <div className="text-xs font-bold uppercase text-muted">
+                    Recebimentos Confirmados ({pagamentos.length})
+                  </div>
                   {pagamentos.map((pg, idx) => (
                     <div
                       key={`${pg.forma}-${idx}`}
@@ -1552,19 +1905,28 @@ export function PdvCaixa() {
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
-                        padding: '8px 12px',
+                        padding: '9px 14px',
                         borderRadius: 8,
-                        background: 'var(--bg-2)',
-                        border: '1px solid var(--border)',
+                        background: 'rgba(34, 197, 94, 0.08)',
+                        border: '1px solid rgba(34, 197, 94, 0.35)',
                       }}
                     >
-                      <span className="font-bold text-sm">{pg.forma}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <CheckCircle2 size={15} color="#22c55e" />
+                        <span className="font-bold text-sm">
+                          {pg.forma}
+                          {pg.forma === 'CREDITO' && pg.parcelas > 1 ? ` (${pg.parcelas}x)` : ''}
+                        </span>
+                        {pg.nsu && <span className="badge badge--neutral font-mono" style={{ fontSize: 10 }}>NSU {pg.nsu}</span>}
+                        {pg.detalhe && <span className="text-xs text-muted">• {pg.detalhe}</span>}
+                      </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span className="font-mono font-bold text-success">{fmtMoeda(pg.valor)}</span>
                         <button
                           type="button"
                           className="btn-icon text-danger"
-                          onClick={() => setPagamentos((prev) => prev.filter((_, i) => i !== idx))}
+                          title="Remover recebimento"
+                          onClick={() => removerPagamentoConfirmado(idx)}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -1575,18 +1937,65 @@ export function PdvCaixa() {
               )}
             </div>
 
-            <div style={{ padding: '14px 20px', background: 'var(--bg-2)', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <button type="button" className="btn btn--ghost" onClick={() => setModalPagamento(false)} disabled={finalizando}>
+            {/* RODAPÉ COM TRAVA ESTRITA 100% */}
+            <div
+              style={{
+                padding: '14px 20px',
+                background: 'var(--bg-2)',
+                borderTop: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 10,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => {
+                  setCobrancaPendente(null)
+                  setModalPagamento(false)
+                }}
+                disabled={finalizando}
+              >
                 Voltar (ESC)
               </button>
               <button
                 type="button"
-                className="btn btn--success"
-                style={{ height: 46, padding: '0 26px', fontSize: 15, fontWeight: 800 }}
-                disabled={finalizando}
+                className={`btn ${pagamentoCompleto ? 'btn--success' : 'btn--ghost'}`}
+                style={{
+                  height: 46,
+                  padding: '0 26px',
+                  fontSize: 15,
+                  fontWeight: 800,
+                  opacity: pagamentoCompleto ? 1 : 0.65,
+                  cursor: pagamentoCompleto && !finalizando ? 'pointer' : 'not-allowed',
+                  ...(pagamentoCompleto
+                    ? {}
+                    : {
+                        background: 'var(--bg-3)',
+                        color: 'var(--text-muted)',
+                        border: '1px solid var(--border)',
+                      }),
+                }}
+                disabled={!pagamentoCompleto || finalizando}
                 onClick={handleConfirmarVenda}
               >
-                <CheckCircle2 size={18} /> {finalizando ? 'Processando...' : `Confirmar Venda (${fmtMoeda(valorTotal)})`}
+                {pagamentoCompleto ? (
+                  <>
+                    <CheckCircle2 size={18} />{' '}
+                    {finalizando ? 'Finalizando...' : `Confirmar & Finalizar Venda (${fmtMoeda(valorTotal)})`}
+                  </>
+                ) : cobrancaPendente ? (
+                  <>
+                    <Clock size={17} /> Conclua ou cancele a cobrança em andamento
+                  </>
+                ) : (
+                  <>
+                    <Lock size={16} /> Falta Receber {fmtMoeda(faltaPagar)}
+                  </>
+                )}
               </button>
             </div>
           </div>

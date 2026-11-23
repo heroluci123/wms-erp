@@ -470,8 +470,39 @@ test('Etapa 3 Completa: Filial Loja 1/1, PDV (QR 80x45 + Balanca EAN-2 + NFC-e),
     assert.equal(resEtqDia.statusCode, 200, resEtqDia.body)
     assert.equal(resEtqDia.json().data.length, 2, 'Deve retornar as 2 etiquetas geradas no dia')
 
-    // Entrada rápida no Empório (2 fardos x 12 = 24 UN no endereço EMPORIO) + Isolamento Estoque por Endereço!
-    const resEmpEnt = await app.inject({
+    // Cadastro Empório / Revenda com fator_conversao_compra=12 e preco_inicial_tabela=5.50 -> vincula automático na TAB-001 sem DIPOA!
+    const resProdCoca = await app.inject({
+      method: 'POST',
+      url: '/api/cadastros/produtos',
+      headers: hdrLoja,
+      payload: {
+        descricao: 'COCA-COLA LATA 350ML',
+        ean: '7894900011517',
+        tipo_produto: 'Revenda / Emporio',
+        especie: 'EMPORIO',
+        grupo: 'BEBIDAS',
+        unidade: 'UN',
+        conservacao: 'SECO',
+        validade_dias: 180,
+        fator_conversao_compra: 12,
+        ultimo_preco_compra: 3.1,
+        preco_inicial_tabela: 5.5,
+      },
+    })
+    assert.equal(resProdCoca.statusCode, 201, resProdCoca.body)
+    const prodCocaId = resProdCoca.json().id as string
+
+    const resScanCoca = await app.inject({
+      method: 'GET',
+      url: '/api/pdv/buscar-codigo?q=7894900011517',
+      headers: hdrLoja,
+    })
+    assert.equal(resScanCoca.statusCode, 200, resScanCoca.body)
+    assert.equal(resScanCoca.json().match_exato.produto_id, prodCocaId)
+    assert.equal(resScanCoca.json().match_exato.preco_unitario, 5.5, 'Preço inicial informado no cadastro deve valer na TAB-001')
+
+    // Governança Empório: 1) sem PIN -> 400; 1b) PIN errado -> 403; 2) com PIN 1234 + motivo -> 201 (2 fardos x 12 = 24 UN); 3) desligar parâmetro -> 403 mesmo com PIN!
+    const resEmpSemPin = await app.inject({
       method: 'POST',
       url: '/api/varejo/emporio/entrada',
       headers: hdrLoja,
@@ -479,12 +510,88 @@ test('Etapa 3 Completa: Filial Loja 1/1, PDV (QR 80x45 + Balanca EAN-2 + NFC-e),
         ean_ou_codigo: '7891111222233',
         qtd_volumes: 2,
         fator_conversao: 12,
+        motivo: 'Tentativa sem PIN',
+      },
+    })
+    assert.equal(resEmpSemPin.statusCode, 400, 'Carga inicial no Empório sem PIN gerencial deve retornar 400')
+
+    const resEmpPinErrado = await app.inject({
+      method: 'POST',
+      url: '/api/varejo/emporio/entrada',
+      headers: hdrLoja,
+      payload: {
+        ean_ou_codigo: '7891111222233',
+        qtd_volumes: 2,
+        fator_conversao: 12,
+        motivo: 'Tentativa PIN errado',
+        pin: '9999',
+      },
+    })
+    assert.equal(resEmpPinErrado.statusCode, 403, 'Carga inicial no Empório com PIN incorreto deve retornar 403')
+
+    const resEmpEnt = await app.inject({
+      method: 'POST',
+      url: '/api/varejo/emporio/entrada',
+      headers: hdrLoja,
+      payload: {
+        ean_ou_codigo: '7891111222233',
+        tipo_operacao: 'CARGA_INICIAL',
+        qtd_volumes: 2,
+        fator_conversao: 12,
         custo_unitario: 18,
         preco_venda: 29.9,
+        motivo: 'Carga inicial de implantação do Empório',
+        pin: '1234',
       },
     })
     assert.equal(resEmpEnt.statusCode, 201, resEmpEnt.body)
     assert.equal(resEmpEnt.json().data.qtd_entrada, 24)
+    assert.equal(resEmpEnt.json().data.autorizado_por, 'Luciano')
+
+    // Carga inicial na Coca-Cola usando o fator_conversao_compra=12 cadastrado (sem informar fator no payload!)
+    const resEmpCoca = await app.inject({
+      method: 'POST',
+      url: '/api/varejo/emporio/entrada',
+      headers: hdrLoja,
+      payload: {
+        ean_ou_codigo: '7894900011517',
+        tipo_operacao: 'CARGA_INICIAL',
+        qtd_volumes: 3,
+        motivo: '3 fardos iniciais Coca-Cola',
+        pin: '1234',
+      },
+    })
+    assert.equal(resEmpCoca.statusCode, 201, resEmpCoca.body)
+    assert.equal(resEmpCoca.json().data.qtd_entrada, 36, 'Deve usar automaticamente fator_conversao_compra=12 do produto (3x12=36)')
+
+    // Desativar permitir_carga_inicial_emporio -> bloqueia 403 mesmo com PIN válido!
+    const resDesligaEmp = await app.inject({
+      method: 'PATCH',
+      url: '/api/configuracoes/modulos',
+      headers: hdrMatriz,
+      payload: { permitir_carga_inicial_emporio: false },
+    })
+    assert.equal(resDesligaEmp.statusCode, 200, resDesligaEmp.body)
+
+    const resEmpBloqParam = await app.inject({
+      method: 'POST',
+      url: '/api/varejo/emporio/entrada',
+      headers: hdrLoja,
+      payload: {
+        ean_ou_codigo: '7894900011517',
+        qtd_volumes: 1,
+        motivo: 'Tentativa após bloqueio',
+        pin: '1234',
+      },
+    })
+    assert.equal(resEmpBloqParam.statusCode, 403, 'Com permitir_carga_inicial_emporio=false deve retornar 403 mesmo com PIN válido')
+
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/configuracoes/modulos',
+      headers: hdrMatriz,
+      payload: { permitir_carga_inicial_emporio: true },
+    })
 
     const resEstLoja = await app.inject({ method: 'GET', url: '/api/estoque/caixas', headers: hdrLoja })
     assert.equal(resEstLoja.statusCode, 200, resEstLoja.body)

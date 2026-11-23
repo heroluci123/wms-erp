@@ -1798,6 +1798,7 @@ CREATE INDEX IF NOT EXISTS idx_prod_espec_tenant ON produto_especificacoes(tenan
 
 ALTER TABLE produtos ADD COLUMN IF NOT EXISTS especificacao_id UUID REFERENCES produto_especificacoes(id) ON DELETE SET NULL;
 ALTER TABLE produtos ADD COLUMN IF NOT EXISTS ultimo_preco_compra NUMERIC(14,4) NOT NULL DEFAULT 0;
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS fator_conversao_compra NUMERIC(10,3) NOT NULL DEFAULT 1;
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS tabela_preco_id UUID;
 
 CREATE TABLE IF NOT EXISTS tabelas_preco (

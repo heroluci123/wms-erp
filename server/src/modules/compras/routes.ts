@@ -106,6 +106,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
           exigir_temperatura_recebimento: Boolean(raw.exigir_temperatura_recebimento),
           exigir_nf_para_expedir: Boolean(raw.exigir_nf_para_expedir),
           controlar_estoque_insumos: Boolean(raw.controlar_estoque_insumos),
+          permitir_carga_inicial_emporio: raw.permitir_carga_inicial_emporio !== false,
           padrao_balanca_loja: String(raw.padrao_balanca_loja || 'AUTO').toUpperCase(),
           tolerancia_recebimento_pct:
             raw.tolerancia_recebimento_pct != null && Number.isFinite(Number(raw.tolerancia_recebimento_pct))
@@ -138,6 +139,7 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         exigir_temperatura_recebimento?: boolean
         exigir_nf_para_expedir?: boolean
         controlar_estoque_insumos?: boolean
+        permitir_carga_inicial_emporio?: boolean
         padrao_balanca_loja?: string
         tolerancia_recebimento_pct?: number
       }
@@ -160,6 +162,9 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       }
       if (body.controlar_estoque_insumos !== undefined) {
         next.controlar_estoque_insumos = Boolean(body.controlar_estoque_insumos)
+      }
+      if (body.permitir_carga_inicial_emporio !== undefined) {
+        next.permitir_carga_inicial_emporio = Boolean(body.permitir_carga_inicial_emporio)
       }
       if (body.padrao_balanca_loja !== undefined) {
         const permitidos = ['AUTO', 'TOLEDO_PRECO_4', 'TOLEDO_PRECO_5', 'TOLEDO_PESO_4', 'TOLEDO_PESO_5']

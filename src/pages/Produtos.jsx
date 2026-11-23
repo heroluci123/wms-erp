@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Plus,
   Search,
@@ -8,6 +9,7 @@ import {
   Download,
   Save,
   Box,
+  Boxes,
   Layers,
   ChevronLeft,
   ChevronRight,
@@ -20,6 +22,9 @@ import {
   Snowflake,
   Package,
   AlertTriangle,
+  ShoppingBag,
+  Factory,
+  ScanBarcode,
 } from 'lucide-react'
 import * as produtosQueries from '../queries/produtos'
 import { ModalDialog } from '../components/shared/ModalDialog'
@@ -55,6 +60,8 @@ const FORM_PRODUTO_INICIAL = {
   tara_embalagem_kg: 0,
   classificacao: '',
   peso_padrao_cx: '',
+  fator_conversao_compra: 1,
+  preco_inicial_tabela: '',
   tara_primaria_peca_kg: 0,
   ncm: '',
   cest: '',
@@ -62,6 +69,19 @@ const FORM_PRODUTO_INICIAL = {
   registro_dipoa: '',
   pais_ids: [],
   rendimentos_map: {},
+}
+
+function detectarModoProduto(p) {
+  const esp = String(p?.especie || '').toUpperCase()
+  const tipo = String(p?.tipo_produto || '')
+  const grupo = String(p?.grupo || '')
+  if (esp === 'EMPORIO' || /revenda|emp[oó]rio|bebida|mercearia|carv[aã]o/i.test(`${tipo} ${grupo}`)) {
+    return 'EMPORIO'
+  }
+  if (esp === 'INSUMO' || /insumo|embalag|uso e cons/i.test(`${tipo} ${grupo}`)) {
+    return 'INSUMO'
+  }
+  return 'CARNES'
 }
 
 const FORM_ESPEC_INICIAL = {
@@ -76,6 +96,7 @@ const FORM_ESPEC_INICIAL = {
 
 export function Produtos() {
   const { toastSuccess, toastError, toastWarning } = useAppStore()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [abaPagina, setAbaPagina] = useState('PRODUTOS') // 'PRODUTOS' | 'ESPECIFICACOES'
 
   const [produtos, setProdutos] = useState([])
@@ -115,8 +136,9 @@ export function Produtos() {
     setModal({ isOpen: true, type: 'confirm', title, message, onConfirm })
   const closeModal = () => setModal((m) => ({ ...m, isOpen: false }))
 
-  // Modal de Produto (com Abas + Resumo Gerencial ao Vivo)
+  // Modal de Produto (Adaptativo: CARNES | EMPORIO | INSUMO + Resumo Gerencial ao Vivo)
   const [isEditing, setIsEditing] = useState(false)
+  const [modoProduto, setModoProduto] = useState('CARNES') // 'CARNES' | 'EMPORIO' | 'INSUMO'
   const [abaModal, setAbaModal] = useState('IDENTIFICACAO') // IDENTIFICACAO | ARMAZENAGEM | CUSTOS | BOM
   const [savedRowId, setSavedRowId] = useState(null)
   const [salvandoProd, setSalvandoProd] = useState(false)
@@ -154,9 +176,63 @@ export function Produtos() {
 
   const resetForm = () => {
     setIsEditing(false)
+    setModoProduto('CARNES')
     setAbaModal('IDENTIFICACAO')
     setResumoGerencial(null)
     setFormData(FORM_PRODUTO_INICIAL)
+  }
+
+  const selecionarModoProduto = (novoModo) => {
+    setModoProduto(novoModo)
+    setAbaModal('IDENTIFICACAO')
+    setFormData((prev) => {
+      if (novoModo === 'EMPORIO') {
+        return {
+          ...prev,
+          tipo_produto: 'Revenda / Emporio',
+          especie: 'EMPORIO',
+          grupo: !prev.grupo || ['BOVINO', 'SUINO', 'AVES', 'MATERIAL USO E CONS'].includes(prev.grupo) ? 'EMPORIO' : prev.grupo,
+          unidade: prev.unidade === 'CX' ? 'UN' : prev.unidade || 'UN',
+          conservacao: !prev.id ? 'SECO' : prev.conservacao || 'SECO',
+          validade_dias: !prev.id && Number(prev.validade_dias) === 5 ? 180 : prev.validade_dias,
+          tara_embalagem_kg: 0,
+          tara_primaria_peca_kg: 0,
+          especificacao_id: '',
+          registro_dipoa: '',
+          classificacao: '',
+          pais_ids: [],
+        }
+      }
+      if (novoModo === 'INSUMO') {
+        return {
+          ...prev,
+          tipo_produto: 'Insumos',
+          especie: 'INSUMO',
+          grupo: !prev.grupo || ['BOVINO', 'SUINO', 'AVES', 'EMPORIO'].includes(prev.grupo) ? 'MATERIAL USO E CONS' : prev.grupo,
+          unidade: prev.unidade === 'CX' ? 'UN' : prev.unidade || 'UN',
+          conservacao: !prev.id ? 'SECO' : prev.conservacao || 'SECO',
+          validade_dias: !prev.id && Number(prev.validade_dias) === 5 ? 365 : prev.validade_dias,
+          tara_embalagem_kg: 0,
+          tara_primaria_peca_kg: 0,
+          especificacao_id: '',
+          registro_dipoa: '',
+          classificacao: '',
+          pais_ids: [],
+        }
+      }
+      return {
+        ...prev,
+        tipo_produto:
+          prev.tipo_produto === 'Revenda / Emporio' || prev.tipo_produto === 'Insumos'
+            ? 'Materia Prima'
+            : prev.tipo_produto || 'Materia Prima',
+        especie: prev.especie === 'EMPORIO' || prev.especie === 'INSUMO' ? '' : prev.especie,
+        grupo: prev.grupo === 'EMPORIO' || prev.grupo === 'MATERIAL USO E CONS' ? 'BOVINO' : prev.grupo,
+        unidade: !prev.id ? 'CX' : prev.unidade || 'CX',
+        conservacao: !prev.id ? 'RESFRIADO' : prev.conservacao || 'RESFRIADO',
+        validade_dias: !prev.id && Number(prev.validade_dias) > 90 ? 5 : prev.validade_dias,
+      }
+    })
   }
 
   const handleEdit = (p) => {
@@ -169,6 +245,8 @@ export function Produtos() {
         }
       })
     }
+    const modoDet = detectarModoProduto(p)
+    setModoProduto(modoDet)
     setFormData({
       id: p.id,
       codigo: p.codigo || '',
@@ -176,19 +254,21 @@ export function Produtos() {
       ean: p.ean || '',
       descricao: p.descricao || '',
       status_curva: p.status_curva || 'C',
-      unidade: p.unidade || 'CX',
+      unidade: p.unidade || (modoDet === 'CARNES' ? 'CX' : 'UN'),
       valor_unitario: p.valor_unitario || 0,
       custo_medio_kg: p.custo_medio_kg || 0,
       ultimo_preco_compra: p.ultimo_preco_compra || 0,
       especificacao_id: p.especificacao_id || '',
-      tipo_produto: p.tipo_produto || 'Materia Prima',
+      tipo_produto: p.tipo_produto || (modoDet === 'EMPORIO' ? 'Revenda / Emporio' : modoDet === 'INSUMO' ? 'Insumos' : 'Materia Prima'),
       grupo: p.grupo || '',
       especie: p.especie || '',
-      conservacao: p.conservacao || 'RESFRIADO',
-      validade_dias: p.validade_dias != null ? p.validade_dias : 5,
+      conservacao: p.conservacao || (modoDet === 'CARNES' ? 'RESFRIADO' : 'SECO'),
+      validade_dias: p.validade_dias != null ? p.validade_dias : modoDet === 'CARNES' ? 5 : 180,
       tara_embalagem_kg: p.tara_embalagem_kg != null ? p.tara_embalagem_kg : 0,
       classificacao: p.classificacao || '',
       peso_padrao_cx: p.peso_padrao_cx != null ? p.peso_padrao_cx : '',
+      fator_conversao_compra: p.fator_conversao_compra != null ? p.fator_conversao_compra : 1,
+      preco_inicial_tabela: '',
       tara_primaria_peca_kg: p.tara_primaria_peca_kg || 0,
       ncm: p.ncm || '',
       cest: p.cest || '',
@@ -218,17 +298,56 @@ export function Produtos() {
       .finally(() => setLoadingResumo(false))
   }
 
-  const abrirNovoProduto = async () => {
-    resetForm()
+  const abrirNovoProduto = useCallback(async (modoInicial = 'CARNES') => {
+    setIsEditing(false)
+    setAbaModal('IDENTIFICACAO')
+    setResumoGerencial(null)
+    setModoProduto(modoInicial)
     codigoEditadoRef.current = false
     const codLocal = sugerirProximoCodigoLocal(produtos)
-    setFormData((prev) => ({ ...prev, codigo: codLocal }))
+    const base =
+      modoInicial === 'EMPORIO'
+        ? {
+            ...FORM_PRODUTO_INICIAL,
+            codigo: codLocal,
+            tipo_produto: 'Revenda / Emporio',
+            especie: 'EMPORIO',
+            grupo: 'EMPORIO',
+            unidade: 'UN',
+            conservacao: 'SECO',
+            validade_dias: 180,
+            fator_conversao_compra: 1,
+          }
+        : modoInicial === 'INSUMO'
+          ? {
+              ...FORM_PRODUTO_INICIAL,
+              codigo: codLocal,
+              tipo_produto: 'Insumos',
+              especie: 'INSUMO',
+              grupo: 'MATERIAL USO E CONS',
+              unidade: 'UN',
+              conservacao: 'SECO',
+              validade_dias: 365,
+              fator_conversao_compra: 1,
+            }
+          : { ...FORM_PRODUTO_INICIAL, codigo: codLocal }
+    setFormData(base)
     setIsEditing(true)
     const codServidor = await obterProximoCodigoDisponivel('produto', produtos)
     if (!codigoEditadoRef.current) {
       setFormData((prev) => (prev.id ? prev : { ...prev, codigo: codServidor }))
     }
-  }
+  }, [produtos])
+
+  // Suporte a atalho direto /produtos?novo=emporio (vindo da tela do Empório)
+  useEffect(() => {
+    const novoParam = searchParams.get('novo')
+    if (!loading && novoParam) {
+      const m = novoParam.toLowerCase() === 'emporio' ? 'EMPORIO' : novoParam.toLowerCase() === 'insumo' ? 'INSUMO' : 'CARNES'
+      abrirNovoProduto(m)
+      setSearchParams({}, { replace: true })
+    }
+  }, [loading, searchParams, setSearchParams, abrirNovoProduto])
 
   const handleSelecionarEspecificacaoNoProduto = (especId) => {
     const esp = especificacoes.find((x) => String(x.id) === String(especId))
@@ -550,7 +669,7 @@ export function Produtos() {
               <button type="button" className="btn btn--secondary" onClick={exportarCSV}>
                 <Download size={15} /> Exportar CSV
               </button>
-              <button type="button" className="btn btn--primary" onClick={abrirNovoProduto}>
+              <button type="button" className="btn btn--primary" onClick={() => abrirNovoProduto('CARNES')}>
                 <Plus size={15} /> Novo Produto
               </button>
             </>
@@ -588,7 +707,7 @@ export function Produtos() {
 
                 <select
                   className="form-input"
-                  style={{ width: 145, height: 36, fontSize: 12 }}
+                  style={{ width: 174, height: 36, padding: '0 10px', fontSize: 12, lineHeight: 'normal' }}
                   value={filtroEspecie}
                   onChange={(e) => setFiltroEspecie(e.target.value)}
                 >
@@ -735,6 +854,14 @@ export function Produtos() {
                                 title={p.especificacao_nome}
                               >
                                 {p.especificacao_nome}
+                              </span>
+                            ) : detectarModoProduto(p) === 'EMPORIO' ? (
+                              <span className="badge badge--success" style={{ fontSize: 10 }}>
+                                Empório / Revenda{Number(p.fator_conversao_compra || 1) > 1 ? ` • Fardo ×${Number(p.fator_conversao_compra)}` : ''}
+                              </span>
+                            ) : detectarModoProduto(p) === 'INSUMO' ? (
+                              <span className="badge badge--neutral" style={{ fontSize: 10 }}>
+                                Insumo / Embalagem
                               </span>
                             ) : (
                               <span className="text-xs text-muted" style={{ fontSize: 10.5 }}>
@@ -1111,24 +1238,108 @@ export function Produtos() {
               </div>
             )}
 
-            {/* ABAS DO MODAL */}
+            {/* SELETOR DE PERFIL DO PRODUTO (ADAPTA O FORMULÁRIO AUTOMATICAMENTE) */}
+            <div
+              style={{
+                flexShrink: 0,
+                padding: '10px 22px',
+                background: 'var(--bg-2)',
+                borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, flex: '1 1 520px' }}>
+                {[
+                  {
+                    id: 'CARNES',
+                    label: 'Carnes / Industrial',
+                    desc: 'Cortes, caixas, DIPOA, tara e BOM',
+                    icon: Factory,
+                    cor: '#3b82f6',
+                  },
+                  {
+                    id: 'EMPORIO',
+                    label: 'Empório / Revenda',
+                    desc: 'Bebidas, carvão, EAN-13 e fardo',
+                    icon: ShoppingBag,
+                    cor: '#22c55e',
+                  },
+                  {
+                    id: 'INSUMO',
+                    label: 'Insumos / Embalagens',
+                    desc: 'Sacos, caixas vazias, limpeza',
+                    icon: Boxes,
+                    cor: '#f59e0b',
+                  },
+                ].map((m) => {
+                  const Icon = m.icon
+                  const ativo = modoProduto === m.id
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => selecionarModoProduto(m.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '8px 12px',
+                        borderRadius: 10,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        border: `1.5px solid ${ativo ? m.cor : 'var(--border)'}`,
+                        background: ativo ? `${m.cor}1d` : 'var(--bg-1)',
+                        color: ativo ? '#ffffff' : 'var(--text-secondary)',
+                      }}
+                    >
+                      <Icon size={17} color={ativo ? m.cor : '#94a3b8'} style={{ flexShrink: 0 }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div className="font-bold text-xs" style={{ color: ativo ? '#ffffff' : 'var(--text-primary)' }}>
+                          {m.label}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {m.desc}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* ABAS DO MODAL (ADAPTADAS AO PERFIL SELECIONADO) */}
             <div
               style={{
                 flexShrink: 0,
                 display: 'flex',
                 gap: 6,
-                padding: '10px 22px',
+                padding: '9px 22px',
                 background: 'var(--bg-2)',
                 borderBottom: '1px solid var(--border)',
                 flexWrap: 'wrap',
               }}
             >
-              {[
-                { id: 'IDENTIFICACAO', label: '1. Identificação & Rótulo' },
-                { id: 'ARMAZENAGEM', label: '2. Conservação, Validade & Taras' },
-                { id: 'CUSTOS', label: '3. Custos, Inteligência & Fiscal' },
-                { id: 'BOM', label: '4. Produção / BOM' },
-              ].map((t) => (
+              {(modoProduto === 'CARNES'
+                ? [
+                    { id: 'IDENTIFICACAO', label: '1. Identificação & Rótulo' },
+                    { id: 'ARMAZENAGEM', label: '2. Conservação, Validade & Taras' },
+                    { id: 'CUSTOS', label: '3. Custos, Inteligência & Fiscal' },
+                    { id: 'BOM', label: '4. Produção / BOM' },
+                  ]
+                : modoProduto === 'EMPORIO'
+                  ? [
+                      { id: 'IDENTIFICACAO', label: '1. Produto, EAN & Fardo' },
+                      { id: 'CUSTOS', label: '2. Custos, Preço & Fiscal' },
+                    ]
+                  : [
+                      { id: 'IDENTIFICACAO', label: '1. Identificação & Embalagem' },
+                      { id: 'CUSTOS', label: '2. Custos & Fiscal' },
+                    ]
+              ).map((t) => (
                 <button
                   key={t.id}
                   type="button"
@@ -1143,8 +1354,308 @@ export function Produtos() {
             {/* FORMULÁRIO */}
             <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: 22 }}>
               <form id="produto-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {/* ABA 1: IDENTIFICAÇÃO & RÓTULO */}
-                {abaModal === 'IDENTIFICACAO' && (
+                {/* ═══════════════════════════════════════════════════════════════ */}
+                {/* ABA 1 — MODO EMPÓRIO / REVENDA (TELA LIMPA E DEDICADA)          */}
+                {/* ═══════════════════════════════════════════════════════════════ */}
+                {abaModal === 'IDENTIFICACAO' && modoProduto === 'EMPORIO' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div className="card" style={{ padding: 18, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div className="form-grid form-grid--3">
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Código Interno (SKU)</label>
+                          <input
+                            type="text"
+                            className="form-input font-mono"
+                            value={formData.codigo}
+                            onChange={(e) => {
+                              codigoEditadoRef.current = true
+                              setFormData({ ...formData, codigo: e.target.value })
+                            }}
+                            required={Boolean(formData.id)}
+                            placeholder="Automático"
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ color: '#4ade80', fontWeight: 700 }}>
+                            EAN-13 / Código de Barras (Bipável no PDV)
+                          </label>
+                          <div style={{ position: 'relative' }}>
+                            <ScanBarcode
+                              size={15}
+                              style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#4ade80' }}
+                            />
+                            <input
+                              type="text"
+                              className="form-input font-mono"
+                              style={{ paddingLeft: 32 }}
+                              value={formData.ean}
+                              onChange={(e) => setFormData({ ...formData, ean: e.target.value })}
+                              placeholder="Ex: 7894900011517"
+                            />
+                          </div>
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Categoria Empório</label>
+                          <select
+                            className="form-input"
+                            value={formData.grupo || 'EMPORIO'}
+                            onChange={(e) => setFormData({ ...formData, grupo: e.target.value })}
+                          >
+                            <option value="EMPORIO">Empório / Mercearia</option>
+                            <option value="BEBIDAS">Bebidas / Refrigerantes</option>
+                            <option value="BEBIDAS ALCOOLICA">Bebidas Alcoólicas</option>
+                            <option value="CARVAO">Carvão &amp; Churrasco</option>
+                            <option value="TEMPEROS">Temperos &amp; Molhos</option>
+                            <option value="EMBUTIDOS">Embutidos / Frios</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="form-grid form-grid--3">
+                        <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
+                          <label className="form-label">Descrição do Produto *</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={formData.descricao}
+                            onChange={(e) => setFormData({ ...formData, descricao: e.target.value.toUpperCase() })}
+                            placeholder="Ex: COCA-COLA LATA 350ML ou CARVÃO VEGETAL 5KG"
+                            required
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Curva ABC</label>
+                          <select
+                            className="form-input"
+                            value={formData.status_curva}
+                            onChange={(e) => setFormData({ ...formData, status_curva: e.target.value })}
+                          >
+                            <option value="A">Curva A (Alta)</option>
+                            <option value="B">Curva B (Média)</option>
+                            <option value="C">Curva C (Baixa)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* CONVERSÃO COMPRA (FARDO) → VENDA (UNIDADE) + CONSERVAÇÃO */}
+                      <div
+                        style={{
+                          padding: 14,
+                          borderRadius: 10,
+                          background: 'rgba(34,197,94,0.08)',
+                          border: '1px solid rgba(34,197,94,0.32)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 12,
+                        }}
+                      >
+                        <div className="form-grid form-grid--4">
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Unidade de Venda (PDV)</label>
+                            <select
+                              className="form-input"
+                              value={formData.unidade}
+                              onChange={(e) => setFormData({ ...formData, unidade: e.target.value })}
+                            >
+                              <option value="UN">UN (Unidade)</option>
+                              <option value="PC">PC (Peça)</option>
+                              <option value="KG">KG (Quilograma)</option>
+                              <option value="LT">LT (Litro)</option>
+                              <option value="CX">CX (Caixa)</option>
+                            </select>
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Unid. por Fardo/Caixa</label>
+                            <input
+                              type="number"
+                              step="1"
+                              min="1"
+                              className="form-input font-mono text-right"
+                              value={formData.fator_conversao_compra}
+                              onChange={(e) => setFormData({ ...formData, fator_conversao_compra: e.target.value })}
+                              placeholder="12"
+                            />
+                            <span className="form-hint">Ex.: 12 p/ fardo de 12 latas (XML converte automático).</span>
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Conservação</label>
+                            <select
+                              className="form-input"
+                              value={formData.conservacao}
+                              onChange={(e) => setFormData({ ...formData, conservacao: e.target.value })}
+                            >
+                              <option value="SECO">Seco / Ambiente</option>
+                              <option value="RESFRIADO">Resfriado (0°C a 4°C)</option>
+                              <option value="CONGELADO">Congelado (-18°C)</option>
+                            </select>
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Validade Padrão (dias)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="3650"
+                              className="form-input font-mono text-right"
+                              value={formData.validade_dias}
+                              onChange={(e) => setFormData({ ...formData, validade_dias: e.target.value })}
+                            />
+                          </div>
+                        </div>
+
+                        {!formData.id && (
+                          <div className="form-grid form-grid--3" style={{ borderTop: '1px solid rgba(34,197,94,0.22)', paddingTop: 12 }}>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label className="form-label">Últ. Preço Compra (R$/un)</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="form-input font-mono text-right"
+                                value={formData.ultimo_preco_compra}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    ultimo_preco_compra: e.target.value,
+                                    custo_medio_kg: Number(formData.custo_medio_kg || 0) === 0 ? e.target.value : formData.custo_medio_kg,
+                                  })
+                                }
+                                placeholder="0,00"
+                              />
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label className="form-label" style={{ color: '#4ade80', fontWeight: 700 }}>
+                                Preço Inicial Tabela Padrão (R$)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="form-input font-mono text-right"
+                                style={{ fontWeight: 700 }}
+                                value={formData.preco_inicial_tabela}
+                                onChange={(e) => setFormData({ ...formData, preco_inicial_tabela: e.target.value })}
+                                placeholder="Ex: 5.50 (Opcional)"
+                              />
+                              <span className="form-hint">Já vincula automaticamente na tabela padrão do PDV.</span>
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label className="form-label">NCM (Opcional)</label>
+                              <input
+                                type="text"
+                                className="form-input font-mono"
+                                value={formData.ncm}
+                                onChange={(e) => setFormData({ ...formData, ncm: e.target.value })}
+                                placeholder="Ex: 22021000"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ═══════════════════════════════════════════════════════════════ */}
+                {/* ABA 1 — MODO INSUMOS / EMBALAGENS (TELA LIMPA E DEDICADA)       */}
+                {/* ═══════════════════════════════════════════════════════════════ */}
+                {abaModal === 'IDENTIFICACAO' && modoProduto === 'INSUMO' && (
+                  <div className="card" style={{ padding: 18, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div className="form-grid form-grid--3">
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Código Interno (SKU)</label>
+                        <input
+                          type="text"
+                          className="form-input font-mono"
+                          value={formData.codigo}
+                          onChange={(e) => {
+                            codigoEditadoRef.current = true
+                            setFormData({ ...formData, codigo: e.target.value })
+                          }}
+                          required={Boolean(formData.id)}
+                          placeholder="Automático"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">EAN / Código de Barras</label>
+                        <input
+                          type="text"
+                          className="form-input font-mono"
+                          value={formData.ean}
+                          onChange={(e) => setFormData({ ...formData, ean: e.target.value })}
+                          placeholder="Opcional"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Categoria</label>
+                        <select
+                          className="form-input"
+                          value={formData.grupo || 'MATERIAL USO E CONS'}
+                          onChange={(e) => setFormData({ ...formData, grupo: e.target.value })}
+                        >
+                          <option value="MATERIAL USO E CONS">Material de Uso e Consumo</option>
+                          <option value="EMBALAGENS">Embalagens / Sacos / Caixas</option>
+                          <option value="HIGIENE">Higiene &amp; Limpeza</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Descrição do Insumo / Embalagem *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={formData.descricao}
+                        onChange={(e) => setFormData({ ...formData, descricao: e.target.value.toUpperCase() })}
+                        placeholder="Ex: SACO VÁCUO 25X35 TRANSPARENTE"
+                        required
+                      />
+                    </div>
+
+                    <div className="form-grid form-grid--3">
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Unidade de Controle</label>
+                        <select
+                          className="form-input"
+                          value={formData.unidade}
+                          onChange={(e) => setFormData({ ...formData, unidade: e.target.value })}
+                        >
+                          <option value="UN">UN (Unidade)</option>
+                          <option value="PCT">PCT (Pacote)</option>
+                          <option value="CX">CX (Caixa)</option>
+                          <option value="RL">RL (Rolo)</option>
+                          <option value="KG">KG (Quilograma)</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Unid. por Fardo/Caixa</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          className="form-input font-mono text-right"
+                          value={formData.fator_conversao_compra}
+                          onChange={(e) => setFormData({ ...formData, fator_conversao_compra: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Armazenagem</label>
+                        <select
+                          className="form-input"
+                          value={formData.conservacao}
+                          onChange={(e) => setFormData({ ...formData, conservacao: e.target.value })}
+                        >
+                          <option value="SECO">Seco / Temperatura Ambiente</option>
+                          <option value="RESFRIADO">Resfriado</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ═══════════════════════════════════════════════════════════════ */}
+                {/* ABA 1 — MODO CARNES / INDUSTRIAL (COMPLETO)                     */}
+                {/* ═══════════════════════════════════════════════════════════════ */}
+                {abaModal === 'IDENTIFICACAO' && modoProduto === 'CARNES' && (
                   <div className="card" style={{ padding: 18, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 14 }}>
                     <div className="form-grid form-grid--3">
                       <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1172,7 +1683,7 @@ export function Produtos() {
                         />
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">EAN / GTIN Principal (Empório / Caixa)</label>
+                        <label className="form-label">EAN / GTIN Principal</label>
                         <input
                           type="text"
                           className="form-input font-mono"
@@ -1207,9 +1718,6 @@ export function Produtos() {
                           <option value="SUINO">SUINO</option>
                           <option value="AVES">AVES</option>
                           <option value="EMBUTIDOS">EMBUTIDOS</option>
-                          <option value="EMPORIO">EMPÓRIO</option>
-                          <option value="BEBIDAS ALCOOLICA">BEBIDAS</option>
-                          <option value="MATERIAL USO E CONS">MATERIAL DE USO E CONSUMO</option>
                         </select>
                       </div>
                     </div>
@@ -1223,7 +1731,7 @@ export function Produtos() {
                       }}
                     >
                       <label className="form-label" style={{ color: '#93c5fd', fontWeight: 700 }}>
-                        Especificação do Produto (Sai em destaque na Etiqueta Industrial 100×70mm)
+                        Especificação do Produto
                       </label>
                       <select
                         className="form-input"
@@ -1237,9 +1745,6 @@ export function Produtos() {
                           </option>
                         ))}
                       </select>
-                      <div className="text-xs text-muted mt-4">
-                        Exemplo na etiqueta de caixa: <strong>CARNE RESFRIADA DE BOVINO SEM OSSO</strong> acima do nome do corte.
-                      </div>
                     </div>
 
                     <div className="form-grid form-grid--4">
@@ -1252,7 +1757,6 @@ export function Produtos() {
                         >
                           <option value="Materia Prima">Matéria Prima</option>
                           <option value="Produto Acabado">Produto Acabado</option>
-                          <option value="Insumos">Insumos</option>
                         </select>
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1281,24 +1785,22 @@ export function Produtos() {
                         </select>
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">
-                          Registro DIPOA{!/embalag|insumo/i.test(formData.tipo_produto || '') ? ' *' : ''}
-                        </label>
+                        <label className="form-label">Registro DIPOA *</label>
                         <input
                           type="text"
                           className="form-input font-mono"
                           value={formData.registro_dipoa}
                           onChange={(e) => setFormData({ ...formData, registro_dipoa: e.target.value.toUpperCase() })}
                           placeholder="Ex: 005 ou 007"
-                          required={!formData.id && !/embalag|insumo/i.test(formData.tipo_produto || '')}
+                          required={!formData.id && modoProduto === 'CARNES'}
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* ABA 2: ARMAZENAGEM, VALIDADE & TARAS */}
-                {abaModal === 'ARMAZENAGEM' && (
+                {/* ABA 2: ARMAZENAGEM, VALIDADE & TARAS (SOMENTE CARNES / INDUSTRIAL) */}
+                {abaModal === 'ARMAZENAGEM' && modoProduto === 'CARNES' && (
                   <div className="card" style={{ padding: 18, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div className="text-xs text-muted">
                       A <strong>Validade Padrão</strong> e a <strong>Tara da Embalagem</strong> definidas aqui são carregadas automaticamente e bloqueadas contra alteração manual na balança do Açougue.
@@ -1450,6 +1952,23 @@ export function Produtos() {
                             <option value="2">2 - Estrangeira (Merc. Interno)</option>
                           </select>
                         </div>
+                        {!formData.id && (
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label" style={{ color: '#4ade80' }}>
+                              Preço Inicial Tabela Padrão (R$) — Opcional
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              className="form-input text-right font-mono"
+                              value={formData.preco_inicial_tabela}
+                              onChange={(e) => setFormData({ ...formData, preco_inicial_tabela: e.target.value })}
+                              placeholder="Ex: 5.50 ou 59.90"
+                            />
+                            <span className="form-hint">Já cadastra o item na Tabela Padrão do PDV/Açougue.</span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1507,8 +2026,8 @@ export function Produtos() {
                   </div>
                 )}
 
-                {/* ABA 4: PRODUÇÃO / BOM */}
-                {abaModal === 'BOM' && (
+                {/* ABA 4: PRODUÇÃO / BOM (SOMENTE CARNES / INDUSTRIAL) */}
+                {abaModal === 'BOM' && modoProduto === 'CARNES' && (
                   <div className="card" style={{ padding: 18, background: 'var(--bg-2)' }}>
                     <div className="flex items-center gap-8 text-xs font-bold uppercase text-primary mb-10">
                       <Layers size={15} /> Classificação &amp; Árvore BOM de Produção

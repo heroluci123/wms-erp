@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { DbConnection } from '../../db/client.js'
 import {
+  auditoriaAcessos,
   clientes,
   empresas,
   estoqueCaixas,
@@ -30,10 +31,12 @@ import { uuidv7 } from '../../utils/uuid.js'
 import {
   gerarCodigoDocumento,
   hojeIsoLocal,
+  lerTenantFeatures,
   parseUuidOrBadRequest,
   toDec,
   toNum,
 } from '../wms/helpers.js'
+import { validarPinGerencial } from '../precos/routes.js'
 import {
   calcularTributacaoItem,
   gerarChaveAcessoNfe,
@@ -396,7 +399,7 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
     },
   )
 
-  // ── ENTRADA RÁPIDA DE EMPÓRIO (EAN-13 + FATOR DE CONVERSÃO FARDO × UNIDADE) ─
+  // ── CARGA INICIAL / AJUSTE MANUAL DE EMPÓRIO (PROTEGIDO POR PIN + PARÂMETRO + AUDITORIA) ─
   app.post(
     '/api/varejo/emporio/entrada',
     { preHandler: requirePermission(['varejo_acougue', 'produtos', 'recebimento']) },
@@ -412,14 +415,31 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
         preco_venda?: number
         estoque_minimo?: number
         observacao?: string
+        motivo?: string
+        tipo_operacao?: string // CARGA_INICIAL | AJUSTE_ENTRADA | AJUSTE_SAIDA
+        pin?: string
       }
 
-      const qtdVolumes = Number(body.qtd_volumes || 0)
-      const fator = Math.max(1, Number(body.fator_conversao || 1))
-      if (!Number.isFinite(qtdVolumes) || qtdVolumes <= 0) {
-        throw new HttpError(400, 'Informe uma quantidade de entrada maior que zero.')
+      const features = await lerTenantFeatures(conn.db, ctx.tenantId)
+      if (features.permitir_carga_inicial_emporio === false) {
+        throw new HttpError(
+          403,
+          'Carga Inicial e ajustes manuais no Empório estão desativados em Parâmetros Comerciais. Utilize Entrada Fiscal (XML NF-e) ou Inventário.',
+        )
       }
-      const qtdTotal = Number((qtdVolumes * fator).toFixed(3))
+
+      const autorizador = await validarPinGerencial(conn.db, ctx.tenantId, String(body.pin || ''))
+
+      const motivoLimpo = String(body.motivo || body.observacao || '').trim()
+      if (motivoLimpo.length < 3) {
+        throw new HttpError(400, 'Informe o motivo obrigatório para esta movimentação manual no Empório.')
+      }
+
+      const tipoOp = String(body.tipo_operacao || 'CARGA_INICIAL').toUpperCase()
+      const qtdVolumes = Number(body.qtd_volumes || 0)
+      if (!Number.isFinite(qtdVolumes) || qtdVolumes <= 0) {
+        throw new HttpError(400, 'Informe uma quantidade maior que zero.')
+      }
 
       let prod: typeof produtos.$inferSelect | undefined
       if (body.produto_id) {
@@ -455,6 +475,15 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
         throw new HttpError(404, 'Produto não encontrado pelo EAN/código informado. Cadastre o produto primeiro.')
       }
 
+      const fatorDefault = Math.max(1, toNum(prod.fatorConversaoCompra, 1))
+      const fator =
+        body.fator_conversao !== undefined && Number(body.fator_conversao) > 0
+          ? Number(body.fator_conversao)
+          : fatorDefault
+      const qtdTotal = Number((qtdVolumes * fator).toFixed(3))
+      const ehSaida = tipoOp === 'AJUSTE_SAIDA'
+      const deltaAssinado = ehSaida ? -qtdTotal : qtdTotal
+
       const out = await conn.db.transaction(async (tx) => {
         const [atual] = await tx
           .select()
@@ -469,7 +498,7 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
           .limit(1)
 
         const saldoAnt = atual ? toNum(atual.saldoQtd, 0) : 0
-        const saldoNovo = Number((saldoAnt + qtdTotal).toFixed(3))
+        const saldoNovo = Number(Math.max(0, saldoAnt + deltaAssinado).toFixed(3))
         const unidade = String(body.unidade_venda || atual?.unidadeVenda || (prod!.unidade === 'KG' ? 'KG' : 'UN')).toUpperCase() === 'KG' ? 'KG' : 'UN'
         const precoVenda =
           body.preco_venda !== undefined && Number(body.preco_venda) > 0
@@ -564,16 +593,31 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
           tenantId: ctx.tenantId,
           filialId: ctx.filialId,
           produtoId: prod!.id,
-          tipo: 'ENTRADA_EMPORIO',
-          qtd: toDec(qtdTotal, 3),
+          tipo: ehSaida ? 'AJUSTE_SAIDA_EMPORIO' : tipoOp === 'CARGA_INICIAL' ? 'CARGA_INICIAL_EMPORIO' : 'AJUSTE_ENTRADA_EMPORIO',
+          qtd: toDec(deltaAssinado, 3),
           saldoAnterior: toDec(saldoAnt, 3),
           saldoNovo: toDec(saldoNovo, 3),
-          referenciaTipo: 'EMPORIO',
-          observacao:
-            String(body.observacao || '').trim() ||
-            `Entrada Empório: ${qtdVolumes} vol × ${fator} = +${qtdTotal} ${unidade}`,
+          referenciaTipo: 'EMPORIO_MANUAL_PIN',
+          observacao: `[${tipoOp} • Aut: ${autorizador.nome}] ${motivoLimpo} (${qtdVolumes} vol × ${fator} = ${ehSaida ? '-' : '+'}${qtdTotal} ${unidade})`,
           operadorId: ctx.operador.id,
           operadorNome: ctx.operador.nome,
+        })
+
+        await tx.insert(auditoriaAcessos).values({
+          id: uuidv7(),
+          tenantId: ctx.tenantId,
+          targetUserId: autorizador.id,
+          targetUserNome: autorizador.nome,
+          acao: tipoOp === 'CARGA_INICIAL' ? 'CARGA_INICIAL_EMPORIO' : 'AJUSTE_MANUAL_EMPORIO',
+          detalhesAntes: { produto: prod!.descricao, saldo_anterior: saldoAnt },
+          detalhesDepois: {
+            produto: prod!.descricao,
+            qtd: deltaAssinado,
+            saldo_novo: saldoNovo,
+            motivo: motivoLimpo,
+          },
+          executorId: ctx.operador.id,
+          executorNome: ctx.operador.nome,
         })
 
         return {
@@ -586,6 +630,7 @@ export function registerVarejoRoutes(app: FastifyInstance, conn: DbConnection): 
           saldo_anterior: saldoAnt,
           saldo_novo: saldoNovo,
           preco_venda: precoVenda,
+          autorizado_por: autorizador.nome,
           endereco: 'EMPORIO',
         }
       })

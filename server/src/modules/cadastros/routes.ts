@@ -9,6 +9,8 @@ import {
   locais,
   produtoArvore,
   produtos,
+  tabelasPreco,
+  tabelasPrecoItens,
   taras,
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
@@ -49,6 +51,8 @@ const ProdutoSchema = z.object({
   tara_embalagem_kg: z.coerce.number().min(0).max(50).default(0),
   classificacao: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : null)),
   peso_padrao_cx: z.coerce.number().min(0).nullish(),
+  fator_conversao_compra: z.coerce.number().min(0.001).default(1),
+  preco_inicial_tabela: z.coerce.number().min(0).optional(),
   tara_primaria_peca_kg: z.coerce.number().min(0).default(0),
   ncm: z.string().nullish().transform((v) => (v ?? '').trim()),
   cest: z.string().nullish().transform((v) => (v ?? '').trim()),
@@ -187,6 +191,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             p.tara_embalagem_kg,
             p.classificacao,
             p.peso_padrao_cx,
+            p.fator_conversao_compra,
             p.tara_primaria_peca_kg,
             p.ncm,
             p.cest,
@@ -256,6 +261,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           especificacao_nome: r.especificacao_nome ? String(r.especificacao_nome) : '',
           especificacao_temperatura: r.especificacao_temperatura ? String(r.especificacao_temperatura) : '',
           peso_padrao_cx: r.peso_padrao_cx != null ? Number(r.peso_padrao_cx) : null,
+          fator_conversao_compra: Number(r.fator_conversao_compra || 1),
           tara_primaria_peca_kg: Number(r.tara_primaria_peca_kg || 0),
           tara_embalagem_kg: Number(r.tara_embalagem_kg || 0),
           validade_dias: Number(r.validade_dias ?? 5),
@@ -429,12 +435,36 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           taraEmbalagemKg: String(d.tara_embalagem_kg),
           classificacao: d.classificacao,
           pesoPadraoCx: d.peso_padrao_cx != null ? String(d.peso_padrao_cx) : null,
+          fatorConversaoCompra: String(d.fator_conversao_compra || 1),
           taraPrimariaPecaKg: String(d.tara_primaria_peca_kg),
           ncm: d.ncm,
           cest: d.cest,
           origemMercadoria: d.origem_mercadoria,
           registroDipoa: d.registro_dipoa,
         })
+
+        // Se informou Preço Inicial na Tabela Padrão ao criar o produto, vincula automaticamente na tabela padrão (ex: TAB-001)
+        if (d.preco_inicial_tabela && Number(d.preco_inicial_tabela) > 0) {
+          const [tabPadrao] = await tx
+            .select({ id: tabelasPreco.id })
+            .from(tabelasPreco)
+            .where(and(eq(tabelasPreco.tenantId, ctx.tenantId), eq(tabelasPreco.ativo, 1)))
+            .orderBy(desc(tabelasPreco.padrao), asc(tabelasPreco.codigo))
+            .limit(1)
+          if (tabPadrao) {
+            await tx
+              .insert(tabelasPrecoItens)
+              .values({
+                id: uuidv7(),
+                tenantId: ctx.tenantId,
+                tabelaPrecoId: tabPadrao.id,
+                produtoId: id,
+                precoVenda: Number(d.preco_inicial_tabela).toFixed(4),
+                descontoPct: '0.00',
+              })
+              .onConflictDoNothing()
+          }
+        }
 
         if (d.classificacao === 'SUBPRODUTO' && vinculos.length > 0) {
           for (const v of vinculos) {
@@ -496,6 +526,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             taraEmbalagemKg: String(d.tara_embalagem_kg),
             classificacao: d.classificacao,
             pesoPadraoCx: d.peso_padrao_cx != null ? String(d.peso_padrao_cx) : null,
+            fatorConversaoCompra: String(d.fator_conversao_compra || 1),
             taraPrimariaPecaKg: String(d.tara_primaria_peca_kg),
             ncm: d.ncm,
             cest: d.cest,

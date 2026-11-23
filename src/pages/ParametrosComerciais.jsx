@@ -49,11 +49,12 @@ export function ParametrosComerciais() {
   const [simTipo, setSimTipo] = useState('SAIDA')
   const [simResultado, setSimResultado] = useState(null)
 
-  // Parâmetros Recebimento, Doca & Expedição Fiscal
+  // Parâmetros Recebimento, Doca, Empório & Expedição Fiscal
   const [recCfg, setRecCfg] = useState({
     trava_recebimento_sem_pc: true,
     exigir_temperatura_recebimento: false,
     exigir_nf_para_expedir: false,
+    permitir_carga_inicial_emporio: true,
     tolerancia_recebimento_pct: 3,
   })
   const [salvandoRecCfg, setSalvandoRecCfg] = useState(false)
@@ -71,6 +72,7 @@ export function ParametrosComerciais() {
           trava_recebimento_sem_pc: Boolean(modCfg.trava_recebimento_sem_pc),
           exigir_temperatura_recebimento: Boolean(modCfg.exigir_temperatura_recebimento),
           exigir_nf_para_expedir: Boolean(modCfg.exigir_nf_para_expedir),
+          permitir_carga_inicial_emporio: modCfg.permitir_carga_inicial_emporio !== false,
           tolerancia_recebimento_pct:
             modCfg.tolerancia_recebimento_pct != null ? Number(modCfg.tolerancia_recebimento_pct) : 3,
         })
@@ -681,9 +683,10 @@ export function ParametrosComerciais() {
                       trava_recebimento_sem_pc: recCfg.trava_recebimento_sem_pc,
                       exigir_temperatura_recebimento: recCfg.exigir_temperatura_recebimento,
                       exigir_nf_para_expedir: recCfg.exigir_nf_para_expedir,
+                      permitir_carga_inicial_emporio: recCfg.permitir_carga_inicial_emporio,
                       tolerancia_recebimento_pct: Number(recCfg.tolerancia_recebimento_pct || 3),
                     })
-                    toastSuccess('Parâmetros Salvos ✅', 'Regras de Doca, Temperatura e Trava Fiscal atualizadas!')
+                    toastSuccess('Parâmetros Salvos', 'Regras operacionais, governança do Empório e trava fiscal atualizadas!')
                   } catch (err) {
                     toastError('Erro', err.message)
                   } finally {
@@ -703,7 +706,7 @@ export function ParametrosComerciais() {
                     onChange={(e) => setRecCfg((p) => ({ ...p, tolerancia_recebimento_pct: e.target.value }))}
                   />
                   <span className="text-xs text-muted mt-4">
-                    Padrão recomendado: <strong>3%</strong>. Se a diferença entre peso recebido e pedido passar dessa margem, o operador fica impedido de concluir direto e apenas o Analista pode aprovar.
+                    Padrão recomendado: <strong>3%</strong>. Se a diferença entre peso recebido e pedido passar dessa margem, exige aprovação gerencial.
                   </span>
                 </div>
 
@@ -733,6 +736,28 @@ export function ParametrosComerciais() {
                 <div
                   className="p-14 rounded flex flex-col gap-6"
                   style={{
+                    background: recCfg.permitir_carga_inicial_emporio ? 'rgba(245,158,11,0.08)' : 'var(--bg-2)',
+                    border: recCfg.permitir_carga_inicial_emporio
+                      ? '1px solid rgba(245,158,11,0.35)'
+                      : '1px solid var(--border)',
+                  }}
+                >
+                  <label className="flex items-center gap-8 text-sm font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(recCfg.permitir_carga_inicial_emporio)}
+                      onChange={(e) => setRecCfg((p) => ({ ...p, permitir_carga_inicial_emporio: e.target.checked }))}
+                    />
+                    Permitir Carga Inicial / Ajustes Manuais no Empório (mediante PIN Gerencial)
+                  </label>
+                  <span className="text-xs text-muted" style={{ paddingLeft: 24 }}>
+                    Mantenha <strong>ATIVADA</strong> durante a implantação para dar a carga inicial do estoque do Empório (sempre exigindo PIN Gerencial e motivo em auditoria). Quando <strong>DESATIVADA</strong>, a entrada de mercadorias no Empório ocorre exclusivamente via <strong>Importação de XML NF-e</strong> ou <strong>Inventário Cego</strong>.
+                  </span>
+                </div>
+
+                <div
+                  className="p-14 rounded flex flex-col gap-6"
+                  style={{
                     background: recCfg.exigir_nf_para_expedir ? 'rgba(16,185,129,0.08)' : 'var(--bg-2)',
                     border: recCfg.exigir_nf_para_expedir
                       ? '1px solid rgba(16,185,129,0.35)'
@@ -748,7 +773,7 @@ export function ParametrosComerciais() {
                     Exigir NF-e faturada antes de expedir / despachar caminhão (Trava Fiscal de Carregamento)
                   </label>
                   <span className="text-xs text-muted" style={{ paddingLeft: 24 }}>
-                    Quando <strong>ATIVADA</strong>, pedidos separados geram pendência automática no Faturamento e a expedição/despacho do caminhão fica bloqueada até emitir a NF-e no Módulo Fiscal. Mantenha <strong>DESATIVADA</strong> para contas sem faturamento interno (ex.: PAVAN).
+                    Quando <strong>ATIVADA</strong>, pedidos separados geram pendência automática no Faturamento e a expedição/despacho do caminhão fica bloqueada até emitir a NF-e no Módulo Fiscal. Mantenha <strong>DESATIVADA</strong> para contas sem faturamento interno.
                   </span>
                 </div>
 

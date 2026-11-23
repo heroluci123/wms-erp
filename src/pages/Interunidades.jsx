@@ -97,8 +97,8 @@ export function Interunidades() {
       if (aba === 'TRANSF_LOJA') {
         res = await interunidadesQueries.biparTransferenciaLoja({ ean_caixa: ean })
         toastSuccess(
-          `Transferida p/ Loja 1/1 (${res.data.codigo})`,
-          `${res.data.produto_descricao} • ${fmtKg(res.data.peso_kg)} já disponível no Açougue/PDV!`,
+          `Transferida p/ Loja (${res.data.codigo})`,
+          `${res.data.produto_descricao} • ${fmtKg(res.data.peso_kg)} enviada para o Açougue/Varejo!`,
         )
       } else if (aba === 'REMESSA_IND') {
         res = await interunidadesQueries.biparRemessaIndustrializacao({
@@ -106,7 +106,7 @@ export function Interunidades() {
           especie: especieOverride || undefined,
         })
         toastSuccess(
-          `Remessa 1/2 → 2/1 [${res.data.especie}]`,
+          `Remessa p/ Industrialização [${res.data.especie}]`,
           `${res.data.produto_descricao} • ${fmtKg(res.data.peso_kg)} na fila do Faturamento Diário (CFOP 5901).`,
         )
       } else if (aba === 'RETORNO_PROD') {
@@ -115,7 +115,7 @@ export function Interunidades() {
           endereco_destino: enderecoRetorno,
         })
         toastSuccess(
-          `Retorno 2/1 → 1/2 (${res.data.codigo})`,
+          `Retorno Produção → Estoque (${res.data.codigo})`,
           `${res.data.produto_descricao} • ${fmtKg(res.data.peso_kg)} liberado no estoque de vendas da Matriz (sem NF).`,
         )
       }
@@ -161,17 +161,17 @@ export function Interunidades() {
     }
   }
 
-  if (!apiAtiva) return <ApiModeRequiredBanner titulo="Central Inter-Unidades (1/2 ↔ 2/1 ↔ 1/1)" />
+  if (!apiAtiva) return <ApiModeRequiredBanner titulo="Central Inter-Unidades" />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div>
           <h1 className="page-header__title flex items-center gap-10">
-            <ArrowLeftRight size={24} className="text-primary" /> Central Inter-Unidades & Faturamento Diário
+            <ArrowLeftRight size={24} className="text-primary" /> Inter-Unidades &amp; Faturamento Diário
           </h1>
           <p className="page-header__subtitle">
-            Bipagem rápida entre Matriz ({mapaFiliais.matriz?.codigo || '1/2'}), FG Industrialização ({mapaFiliais.industria?.codigo || '2/1'}) e Loja/Açougue ({mapaFiliais.loja?.codigo || '1/1'}) sem travar a operação
+            Movimentação rápida entre {mapaFiliais.matriz?.nome || 'Matriz'}, {mapaFiliais.industria?.nome || 'Unidade Industrial'} e {mapaFiliais.loja?.nome || 'Loja / Açougue'} sem travar a operação
           </p>
         </div>
         <button type="button" className="btn btn--ghost btn--sm" onClick={carregar} disabled={loading}>
@@ -182,9 +182,9 @@ export function Interunidades() {
       {/* ABAS */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
         {[
-          { id: 'TRANSF_LOJA', label: '1/2 → 1/1 Transferência Loja', icon: Store },
-          { id: 'REMESSA_IND', label: '1/2 → 2/1 Remessa Industrialização', icon: Factory },
-          { id: 'RETORNO_PROD', label: '2/1 → 1/2 Retorno p/ Estoque (s/ NF)', icon: PackageCheck },
+          { id: 'TRANSF_LOJA', label: 'Transferência p/ Loja', icon: Store },
+          { id: 'REMESSA_IND', label: 'Remessa p/ Industrialização', icon: Factory },
+          { id: 'RETORNO_PROD', label: 'Retorno Produção → Estoque (s/ NF)', icon: PackageCheck },
           { id: 'FATURAMENTO', label: `Faturamento Diário (${lotesDiario.length} lote(s))`, icon: FileCheck2 },
           { id: 'HISTORICO', label: `Histórico (${movimentacoes.length})`, icon: History },
         ].map((t) => {
@@ -202,7 +202,7 @@ export function Interunidades() {
         })}
       </div>
 
-      {/* ABAS DE BIPAGEM RÁPIDA (1/2->1/1 | 1/2->2/1 | 2/1->1/2) */}
+      {/* ABAS DE BIPAGEM RÁPIDA */}
       {['TRANSF_LOJA', 'REMESSA_IND', 'RETORNO_PROD'].includes(aba) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div
@@ -217,17 +217,17 @@ export function Interunidades() {
           >
             <div>
               <h2 className="text-base font-bold m-0">
-                {aba === 'TRANSF_LOJA' && 'Bipar Caixa — Transferência Matriz (1/2) → Filial Loja / Açougue (1/1)'}
-                {aba === 'REMESSA_IND' && 'Bipar Caixa — Remessa p/ Industrialização (1/2 → 2/1 FG Foods)'}
-                {aba === 'RETORNO_PROD' && 'Bipar Caixa — Retorno Produção → Estoque de Vendas Matriz (2/1 → 1/2)'}
+                {aba === 'TRANSF_LOJA' && 'Bipar Caixa — Transferência Matriz → Loja / Açougue'}
+                {aba === 'REMESSA_IND' && 'Bipar Caixa — Remessa p/ Industrialização'}
+                {aba === 'RETORNO_PROD' && 'Bipar Caixa — Retorno Produção → Estoque Matriz'}
               </h2>
               <p className="text-xs text-muted m-0" style={{ marginTop: 4 }}>
                 {aba === 'TRANSF_LOJA' &&
-                  'Sai da câmara fria da Matriz e soma o peso real imediatamente no Estoque da Loja (1/1) para venda no PDV. Acumula para NF-e CFOP 5152 no Faturamento Diário.'}
+                  'Sai da câmara fria da Matriz mantendo a mesma etiqueta viva em trânsito até a entrada de MP no Açougue. Acumula para NF-e CFOP 5152 no Faturamento Diário.'}
                 {aba === 'REMESSA_IND' &&
-                  'Libera a matéria-prima na hora para a OP na 2/1 e separa automaticamente em BOVINO, SUÍNO e AVES no Faturamento Diário (CFOP 5901). Dica: se bipar uma caixa da 1/2 direto na OP da 2/1, ela também cai nessa fila automaticamente!'}
+                  'Libera a matéria-prima na hora para a Ordem de Produção e separa automaticamente em BOVINO, SUÍNO e AVES no Faturamento Diário (CFOP 5901). Dica: ao bipar uma caixa da Matriz direto na OP industrial, ela também entra nessa fila automaticamente.'}
                 {aba === 'RETORNO_PROD' &&
-                  'Não precisa esperar a OP finalizar! Basta bipar o código de barras da caixa produzida na 2/1 que ela entra imediatamente no estoque da Matriz (1/2) pronta para Pedidos de Venda. Movimento operacional sem faturamento.'}
+                  'Não precisa esperar a OP finalizar! Basta bipar o código de barras da caixa produzida para que entre imediatamente no estoque da Matriz pronta para Pedidos de Venda. Movimento operacional sem faturamento.'}
               </p>
             </div>
 
@@ -271,7 +271,7 @@ export function Interunidades() {
 
               {aba === 'RETORNO_PROD' && (
                 <div style={{ width: 210 }}>
-                  <label className="form-label">Endereço Destino na 1/2</label>
+                  <label className="form-label">Endereço Destino na Matriz</label>
                   <input
                     type="text"
                     className="form-input font-mono"

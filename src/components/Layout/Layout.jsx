@@ -504,7 +504,7 @@ function Sidebar({ collapsed = false, onCollapse }) {
                 <Store size={18} /> Gerenciador do Açougue
               </NavLink>
               <NavLink to="/emporio" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-                <ShoppingBag size={18} /> Empório (Entrada &amp; Estoque)
+                <ShoppingBag size={18} /> Empório (Estoque)
               </NavLink>
               <NavLink to="/tabelas-preco" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
                 <Tag size={18} /> Tabelas de Preço
@@ -543,7 +543,7 @@ function Sidebar({ collapsed = false, onCollapse }) {
           <div className="sidebar__section-label">Faturamento</div>
           {temAlgumaPermissao(operador, ['interunidades', 'movimentacao', 'fiscal', 'varejo_acougue']) && (
             <NavLink to="/interunidades" className={({isActive}) => `sidebar__nav-item ${isActive ? 'active' : ''}`}>
-              <ArrowRightLeft size={18} /> Inter-Unidades (1/2↔2/1↔1/1)
+              <ArrowRightLeft size={18} /> Inter-Unidades
             </NavLink>
           )}
           {temAlgumaPermissao(operador, ['whatsapp_inbox', 'pedidos']) && (

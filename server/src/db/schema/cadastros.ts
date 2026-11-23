@@ -63,6 +63,7 @@ export const produtos = pgTable(
     classificacao: text('classificacao'), // MATERIA_PRIMA | SUBPRODUTO | APARA | ACABADO
     produtoPaiId: uuid('produto_pai_id'),
     pesoPadraoCx: numeric('peso_padrao_cx', { precision: 14, scale: 3 }),
+    fatorConversaoCompra: numeric('fator_conversao_compra', { precision: 10, scale: 3 }).notNull().default('1'),
     taraPrimariaPecaKg: numeric('tara_primaria_peca_kg', { precision: 14, scale: 4 }).notNull().default('0'),
     ncm: text('ncm').notNull().default(''),
     cest: text('cest').notNull().default(''),

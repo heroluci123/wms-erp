@@ -236,6 +236,8 @@ export async function criar({
   tara_embalagem_kg,
   classificacao,
   peso_padrao_cx,
+  fator_conversao_compra,
+  preco_inicial_tabela,
   tara_primaria_peca_kg,
   ncm,
   cest,
@@ -267,6 +269,14 @@ export async function criar({
           tara_embalagem_kg: Number(tara_embalagem_kg || 0),
           classificacao,
           peso_padrao_cx: peso_padrao_cx === '' || peso_padrao_cx == null ? null : Number(peso_padrao_cx),
+          fator_conversao_compra:
+            fator_conversao_compra === '' || fator_conversao_compra == null
+              ? 1
+              : Math.max(0.001, Number(fator_conversao_compra)),
+          preco_inicial_tabela:
+            preco_inicial_tabela === '' || preco_inicial_tabela == null || Number(preco_inicial_tabela) <= 0
+              ? undefined
+              : Number(preco_inicial_tabela),
           tara_primaria_peca_kg: Number(tara_primaria_peca_kg || 0),
           ncm,
           cest,
@@ -344,6 +354,7 @@ export async function atualizar({
   tara_embalagem_kg,
   classificacao,
   peso_padrao_cx,
+  fator_conversao_compra,
   tara_primaria_peca_kg,
   ncm,
   cest,
@@ -375,6 +386,10 @@ export async function atualizar({
           tara_embalagem_kg: Number(tara_embalagem_kg || 0),
           classificacao,
           peso_padrao_cx: peso_padrao_cx === '' || peso_padrao_cx == null ? null : Number(peso_padrao_cx),
+          fator_conversao_compra:
+            fator_conversao_compra === '' || fator_conversao_compra == null
+              ? 1
+              : Math.max(0.001, Number(fator_conversao_compra)),
           tara_primaria_peca_kg: Number(tara_primaria_peca_kg || 0),
           ncm,
           cest,

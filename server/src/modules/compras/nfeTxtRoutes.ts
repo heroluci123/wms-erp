@@ -2050,6 +2050,28 @@ ${dupsXml}
                 .where(and(eq(produtos.id, it.produto_id), eq(produtos.tenantId, ctx.tenantId)))
             }
             if ((pcRow?.tipoCompra === 'EMPORIO' || ehFilialVarejoEnt) && pcRow?.tipoCompra !== 'INSUMO' && it.produto_id && it.quantidade > 0) {
+              // Se a NF-e veio em fardo/caixa/pacote e o produto tem fator_conversao_compra > 1, converte para unidades automaticamente!
+              const [prodEmpMeta] = await tx
+                .select({ fatorConversaoCompra: produtos.fatorConversaoCompra, unidade: produtos.unidade })
+                .from(produtos)
+                .where(eq(produtos.id, it.produto_id))
+                .limit(1)
+              const unXml = String(it.unidade || 'UN').toUpperCase()
+              const ehEmbalagemMultipla = /^(FD|CX|CAIXA|FARDO|PCT|PACK|DP|FDO|EMB)$/i.test(unXml)
+              const fatorConv = ehEmbalagemMultipla ? Math.max(1, toNum(prodEmpMeta?.fatorConversaoCompra, 1)) : 1
+              const qtdEmporioFinal = Number((it.quantidade * fatorConv).toFixed(3))
+              if (fatorConv > 1 && it.custo_unitario_com_frete > 0) {
+                const custoUnConvertido = Number((it.custo_unitario_com_frete / fatorConv).toFixed(4))
+                await tx
+                  .update(produtos)
+                  .set({
+                    ultimoPrecoCompra: toDec(custoUnConvertido, 4),
+                    custoMedioKg: toDec(custoUnConvertido, 4),
+                    updatedAt: new Date(),
+                  })
+                  .where(and(eq(produtos.id, it.produto_id), eq(produtos.tenantId, ctx.tenantId)))
+              }
+
               const [estEmp] = await tx
                 .select()
                 .from(varejoEstoque)
@@ -2062,7 +2084,7 @@ ${dupsXml}
                 )
                 .limit(1)
               const antEmp = estEmp ? toNum(estEmp.saldoQtd, 0) : 0
-              const novoEmp = Number((antEmp + it.quantidade).toFixed(3))
+              const novoEmp = Number((antEmp + qtdEmporioFinal).toFixed(3))
               if (estEmp) {
                 await tx
                   .update(varejoEstoque)
@@ -2074,7 +2096,7 @@ ${dupsXml}
                   tenantId: ctx.tenantId,
                   filialId: ctx.filialId,
                   produtoId: it.produto_id,
-                  unidadeVenda: String(it.unidade || 'UN').toUpperCase() === 'KG' ? 'KG' : 'UN',
+                  unidadeVenda: String(prodEmpMeta?.unidade || it.unidade || 'UN').toUpperCase() === 'KG' ? 'KG' : 'UN',
                   saldoQtd: toDec(novoEmp, 3),
                   precoVendaVarejo: '0.0000',
                   estoqueMinimo: '0.000',
@@ -2088,11 +2110,11 @@ ${dupsXml}
                 filialId: ctx.filialId,
                 produtoId: it.produto_id,
                 tipo: 'ENTRADA_COMPRA',
-                qtd: toDec(it.quantidade, 3),
+                qtd: toDec(qtdEmporioFinal, 3),
                 saldoAnterior: toDec(antEmp, 3),
                 saldoNovo: toDec(novoEmp, 3),
                 referenciaTipo: 'NFE_COMPRA',
-                observacao: `Entrada XML NF ${xmlParsed.numero_nf}${pcRow ? ` (${pcRow.codigo})` : ''}`,
+                observacao: `Entrada XML NF ${xmlParsed.numero_nf}${pcRow ? ` (${pcRow.codigo})` : ''}${fatorConv > 1 ? ` • ${it.quantidade} ${unXml} × ${fatorConv}` : ''}`,
                 operadorId: ctx.operador.id,
                 operadorNome: ctx.operador.nome,
               })
