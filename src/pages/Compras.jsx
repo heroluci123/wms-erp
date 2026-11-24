@@ -31,6 +31,7 @@ import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos.js'
 import { RelatorioRecebimentoPrint } from '../components/shared/RelatorioRecebimentoPrint'
 import { SeletorItemCompra } from '../components/compras/SeletorItemCompra'
+import { FornecedorSearchSelect, ProdutoSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -974,18 +975,13 @@ export function Compras() {
             >
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">1. Fornecedor / Frigorífico *</label>
-                <select
-                  className="form-input"
+                <FornecedorSearchSelect
+                  fornecedores={fornecedores}
                   value={impFornId}
-                  onChange={(e) => handleSelecionarFornecedorTxt(e.target.value)}
-                >
-                  <option value="">Selecione o fornecedor (ou auto pelo XML)...</option>
-                  {fornecedores.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.nome_fantasia} ({f.cnpj_cpf})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => handleSelecionarFornecedorTxt(val)}
+                  emptyLabel="Automático pelo XML / Nenhum"
+                  placeholder="Selecione ou pesquise o fornecedor (nome, CNPJ, SIF)..."
+                />
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1168,24 +1164,20 @@ export function Compras() {
                           <td style={{ textAlign: 'right' }} className="font-mono text-xs">
                             {c.qtd_caixas > 0 ? `${c.qtd_caixas} cx • ` : ''}{fmtKg(c.peso_kg)}
                           </td>
-                          <td style={{ minWidth: 260 }}>
-                            <select
-                              className="form-input"
+                          <td style={{ minWidth: 270 }}>
+                            <ProdutoSearchSelect
+                              produtos={produtosOrdenados}
                               value={pidSel}
-                              onChange={(e) =>
+                              compact
+                              onChange={(val) =>
                                 setImpDeparaEdits((prev) => ({
                                   ...prev,
-                                  [c.codigo_fornecedor]: e.target.value,
+                                  [c.codigo_fornecedor]: val,
                                 }))
                               }
-                            >
-                              <option value="">-- Selecionar produto interno --</option>
-                              {produtosOrdenados.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.codigo} — {p.descricao}
-                                </option>
-                              ))}
-                            </select>
+                              emptyLabel="-- Sem vínculo --"
+                              placeholder="Buscar produto interno (cód., nome, EAN)..."
+                            />
                           </td>
                           <td>
                             {pidSel ? (
@@ -1302,17 +1294,15 @@ export function Compras() {
               <h2 className="text-base font-bold flex items-center gap-8">
                 <ArrowRightLeft size={18} className="text-primary" /> Tabela De-Para Permanente (Fornecedor → Produto WMS)
               </h2>
-              <select
-                className="form-input"
-                style={{ width: 260 }}
-                value={filtroFornDepara}
-                onChange={(e) => setFiltroFornDepara(e.target.value)}
-              >
-                <option value="">Todos os Fornecedores</option>
-                {fornecedores.map((f) => (
-                  <option key={f.id} value={f.id}>{f.nome_fantasia}</option>
-                ))}
-              </select>
+              <div style={{ width: 310, maxWidth: '100%' }}>
+                <FornecedorSearchSelect
+                  fornecedores={fornecedores}
+                  value={filtroFornDepara}
+                  onChange={(val) => setFiltroFornDepara(val)}
+                  emptyLabel="Todos os Fornecedores"
+                  placeholder="Filtrar por fornecedor..."
+                />
+              </div>
             </div>
 
             {podeEscrever && (
@@ -1330,12 +1320,12 @@ export function Compras() {
               >
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Fornecedor *</label>
-                  <select className="form-input" value={novoDpFornId} onChange={(e) => setNovoDpFornId(e.target.value)}>
-                    <option value="">Selecione...</option>
-                    {fornecedores.map((f) => (
-                      <option key={f.id} value={f.id}>{f.nome_fantasia}</option>
-                    ))}
-                  </select>
+                  <FornecedorSearchSelect
+                    fornecedores={fornecedores}
+                    value={novoDpFornId}
+                    onChange={(val) => setNovoDpFornId(val)}
+                    placeholder="Pesquisar fornecedor..."
+                  />
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Cód. no Fornecedor *</label>
@@ -1347,12 +1337,12 @@ export function Compras() {
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Produto Interno WMS *</label>
-                  <select className="form-input" value={novoDpProdId} onChange={(e) => setNovoDpProdId(e.target.value)}>
-                    <option value="">Selecione...</option>
-                    {produtosOrdenados.map((p) => (
-                      <option key={p.id} value={p.id}>{p.codigo} — {p.descricao}</option>
-                    ))}
-                  </select>
+                  <ProdutoSearchSelect
+                    produtos={produtosOrdenados}
+                    value={novoDpProdId}
+                    onChange={(val) => setNovoDpProdId(val)}
+                    placeholder="Pesquisar produto interno..."
+                  />
                 </div>
                 <button type="submit" className="btn btn--info">
                   <Plus size={15} /> Vincular
@@ -1493,19 +1483,13 @@ export function Compras() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
                   <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
                     <label className="form-label">Fornecedor / Frigorífico *</label>
-                    <select
-                      className="form-input"
+                    <FornecedorSearchSelect
+                      fornecedores={fornecedores}
                       value={fornecedorId}
-                      onChange={(e) => setFornecedorId(e.target.value)}
-                      required
-                    >
-                      <option value="">Selecione o fornecedor...</option>
-                      {fornecedores.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.nome_fantasia} ({f.uf}) {f.registro_sanitario_sif ? `• SIF ${f.registro_sanitario_sif}` : ''}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setFornecedorId(val)}
+                      placeholder="Digite razão social, fantasia, CNPJ ou SIF..."
+                      modalTitle="Pesquisar Fornecedor / Frigorífico"
+                    />
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">Tipo de Compra / Finalidade (CFOP Auto)</label>

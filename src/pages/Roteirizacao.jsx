@@ -42,6 +42,7 @@ import { roteirizacaoQueries } from '../queries/roteirizacao'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { RomaneioConsolidadoRotaPrint } from '../components/shared/RomaneioConsolidadoRotaPrint'
+import { SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} kg`
@@ -1113,18 +1114,18 @@ export function Roteirizacao() {
                   </div>
                   <div>
                     <label className="form-label">Transportadora</label>
-                    <select
-                      className="form-input"
+                    <SmartSearchSelect
+                      items={transportadoras}
                       value={formDados.transportadora_id}
-                      onChange={(e) => setFormDados((f) => ({ ...f, transportadora_id: e.target.value }))}
-                    >
-                      <option value="">-- Frota Própria / À Definir --</option>
-                      {transportadoras.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.nome_fantasia || t.razao_social}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setFormDados((f) => ({ ...f, transportadora_id: val }))}
+                      icon="truck"
+                      getCode={(t) => String(t?.codigo || t?.uf || '')}
+                      getLabel={(t) => String(t?.nome_fantasia || t?.razao_social || '')}
+                      getSubLabel={(t) => [t?.cnpj_cpf, [t?.cidade, t?.uf].filter(Boolean).join('/')].filter(Boolean).join(' • ')}
+                      emptyLabel="-- Frota Própria / À Definir --"
+                      placeholder="Pesquisar transportadora..."
+                      modalTitle="Selecionar Transportadora"
+                    />
                   </div>
                   <div>
                     <label className="form-label">Placa Veículo</label>

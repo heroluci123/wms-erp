@@ -31,6 +31,7 @@ import { fiscalQueries } from '../queries/fiscal'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { MesSelector } from '../components/shared/MesSelector'
+import { ProdutoSearchSelect, SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 import {
   DanfePrintModal,
   PacoteLotePrintModal,
@@ -1825,12 +1826,18 @@ export function Fiscal() {
                       <label className="form-label">
                         2. Transportadora {exigeTransp ? '* (Obrigatória para Frete 0 / 1)' : '(Opcional)'}
                       </label>
-                      <select
-                        className="form-input"
+                      <SmartSearchSelect
+                        items={transportadorasCat}
                         value={previewPedido.transportadora_id}
-                        onChange={(e) => {
-                          const tid = e.target.value
-                          const tr = transportadorasCat.find((x) => x.id === tid) || null
+                        icon="truck"
+                        getCode={(t) => String(t?.codigo || t?.uf || '')}
+                        getLabel={(t) => String(t?.razao_social || '')}
+                        getSubLabel={(t) => [t?.cnpj_cpf, [t?.cidade, t?.uf].filter(Boolean).join('/')].filter(Boolean).join(' • ')}
+                        getSearchText={(t) => `${t?.codigo || ''} ${t?.razao_social || ''} ${t?.nome_fantasia || ''} ${t?.cnpj_cpf || ''} ${t?.cidade || ''} ${t?.uf || ''}`}
+                        emptyLabel="-- Selecione a transportadora --"
+                        placeholder="Pesquisar transportadora (nome, CNPJ, cidade)..."
+                        modalTitle="Selecionar Transportadora"
+                        onChange={(tid, tr) => {
                           const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
                           setPreviewPedido({
                             ...previewPedido,
@@ -1841,14 +1848,7 @@ export function Fiscal() {
                             transportadora_antt: vPad?.rntrc_antt || tr?.rntrc_antt || '',
                           })
                         }}
-                      >
-                        <option value="">-- Selecione a transportadora --</option>
-                        {transportadorasCat.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.razao_social} {t.cnpj_cpf ? `(${t.cnpj_cpf})` : ''} {t.cidade ? `• ${t.cidade}/${t.uf}` : ''}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
 
                     {/* 3. Veículo Cadastrado */}
@@ -2129,12 +2129,18 @@ export function Fiscal() {
 
                   <div>
                     <label className="form-label">2. Transportadora Padrão do Lote *</label>
-                    <select
-                      className="form-input"
+                    <SmartSearchSelect
+                      items={transportadorasCat}
                       value={modalLote.transportadora_id}
-                      onChange={(e) => {
-                        const tid = e.target.value
-                        const tr = transportadorasCat.find((x) => x.id === tid) || null
+                      icon="truck"
+                      getCode={(t) => String(t?.codigo || t?.uf || '')}
+                      getLabel={(t) => String(t?.razao_social || '')}
+                      getSubLabel={(t) => [t?.cnpj_cpf, [t?.cidade, t?.uf].filter(Boolean).join('/')].filter(Boolean).join(' • ')}
+                      getSearchText={(t) => `${t?.codigo || ''} ${t?.razao_social || ''} ${t?.nome_fantasia || ''} ${t?.cnpj_cpf || ''} ${t?.cidade || ''} ${t?.uf || ''}`}
+                      emptyLabel="-- Selecione a transportadora para copiar --"
+                      placeholder="Pesquisar transportadora do lote..."
+                      modalTitle="Selecionar Transportadora do Lote"
+                      onChange={(tid, tr) => {
                         const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
                         setModalLote({
                           ...modalLote,
@@ -2145,14 +2151,7 @@ export function Fiscal() {
                           transportadora_antt: vPad?.rntrc_antt || tr?.rntrc_antt || '',
                         })
                       }}
-                    >
-                      <option value="">-- Selecione a transportadora para copiar para todas as NFs --</option>
-                      {transportadorasCat.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.razao_social} {t.cnpj_cpf ? `(${t.cnpj_cpf})` : ''} {t.cidade ? `• ${t.cidade}/${t.uf}` : ''}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div className="form-grid form-grid--3">
@@ -2393,11 +2392,13 @@ export function Fiscal() {
               </div>
               <div>
                 <label className="form-label">Selecionar Produto Cadastrado (Opcional)</label>
-                <select
-                  className="form-input"
+                <ProdutoSearchSelect
+                  produtos={produtosCat}
                   value={avulsaForm.produto_id}
-                  onChange={(e) => {
-                    const p = produtosCat.find((x) => x.id === e.target.value)
+                  emptyLabel="-- Ou digite manualmente abaixo --"
+                  placeholder="Pesquisar produto cadastrado (cód., descrição, EAN, Empório, Insumos)..."
+                  modalTitle="Selecionar Produto para Nota Fiscal Avulsa"
+                  onChange={(pid, p) => {
                     if (p) {
                       setAvulsaForm({
                         ...avulsaForm,
@@ -2407,16 +2408,11 @@ export function Fiscal() {
                         ncm: p.ncm || '02013000',
                         valor_unitario: String(p.valor_unitario || ''),
                       })
+                    } else {
+                      setAvulsaForm({ ...avulsaForm, produto_id: '' })
                     }
                   }}
-                >
-                  <option value="">-- Ou digite manualmente abaixo --</option>
-                  {produtosCat.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.codigo} — {p.descricao} ({fmtMoeda(p.valor_unitario)}/kg)
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
               <div className="form-grid form-grid--3">
                 <div style={{ gridColumn: 'span 2' }}>
@@ -2449,13 +2445,18 @@ export function Fiscal() {
                     </div>
                     <div>
                       <label className="form-label">2. Transportadora {exige ? '*' : '(Opcional)'}</label>
-                      <select
-                        className="form-input"
-                        required={exige}
+                      <SmartSearchSelect
+                        items={transportadorasCat}
                         value={avulsaForm.transportadora_id}
-                        onChange={(e) => {
-                          const tid = e.target.value
-                          const tr = transportadorasCat.find((x) => x.id === tid) || null
+                        icon="truck"
+                        getCode={(t) => String(t?.codigo || t?.uf || '')}
+                        getLabel={(t) => String(t?.razao_social || '')}
+                        getSubLabel={(t) => [t?.cnpj_cpf, [t?.cidade, t?.uf].filter(Boolean).join('/')].filter(Boolean).join(' • ')}
+                        getSearchText={(t) => `${t?.codigo || ''} ${t?.razao_social || ''} ${t?.nome_fantasia || ''} ${t?.cnpj_cpf || ''} ${t?.cidade || ''} ${t?.uf || ''}`}
+                        emptyLabel="-- Selecione --"
+                        placeholder="Pesquisar transportadora..."
+                        modalTitle="Selecionar Transportadora"
+                        onChange={(tid, tr) => {
                           const vPad = tr?.veiculos?.find((v) => v.padrao) || tr?.veiculos?.[0] || null
                           setAvulsaForm({
                             ...avulsaForm,
@@ -2465,14 +2466,7 @@ export function Fiscal() {
                             veiculo_uf: vPad?.uf_placa || tr?.uf || 'SP',
                           })
                         }}
-                      >
-                        <option value="">-- Selecione --</option>
-                        {transportadorasCat.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.razao_social}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
                     <div className="form-grid form-grid--3">
                       <div>

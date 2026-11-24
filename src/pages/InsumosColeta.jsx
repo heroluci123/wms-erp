@@ -20,6 +20,7 @@ import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ModalEtiquetaZebra80x45 } from '../components/shared/EtiquetaZebra80x45'
+import { ProdutoSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -602,19 +603,13 @@ export function InsumosColeta() {
 
             <div>
               <label className="form-label">Produto / Insumo *</label>
-              <select
-                required
-                className="form-input"
+              <ProdutoSearchSelect
+                produtos={produtosCatalogo}
                 value={novoForm.produto_id}
-                onChange={(e) => setNovoForm((p) => ({ ...p, produto_id: e.target.value }))}
-              >
-                <option value="">-- Selecione --</option>
-                {produtosCatalogo.slice(0, 500).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.codigo ? `${p.codigo} — ` : ''}{p.descricao}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setNovoForm((p) => ({ ...p, produto_id: val }))}
+                placeholder="Pesquisar insumo, embalagem, etiqueta ou produto..."
+                modalTitle="Pesquisar Produto / Insumo (Catálogo Completo)"
+              />
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 10 }}>

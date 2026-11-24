@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowRightLeft, Package, Plus, Search, X } from 'lucide-react'
+import { classificarCategoriaProduto } from '../shared/SmartSearchSelect'
 
 const normTxt = (s) =>
   String(s || '')
@@ -41,7 +42,7 @@ export function SeletorItemCompra({
   // Modal expandido da Lupa
   const [modalBuscaAberto, setModalBuscaAberto] = useState(false)
   const [modalBuscaTexto, setModalBuscaTexto] = useState('')
-  const [modalSomenteMp, setModalSomenteMp] = useState(false)
+  const [modalCategoria, setModalCategoria] = useState('TODOS')
   const [modalSomenteDepara, setModalSomenteDepara] = useState(false)
 
   const codigoRef = useRef(null)
@@ -136,26 +137,20 @@ export function SeletorItemCompra({
 
   const produtosModalFiltrados = useMemo(() => {
     const q = normTxt(modalBuscaTexto)
+    const tokens = q ? q.split(/\s+/).filter(Boolean) : []
     return produtos.filter((p) => {
-      if (modalSomenteMp && p.classificacao !== 'MATERIA_PRIMA' && p.tipo_produto !== 'Materia Prima') {
+      if (modalCategoria !== 'TODOS' && classificarCategoriaProduto(p) !== modalCategoria) {
         return false
       }
       const dps = deparaPorProdutoId.get(String(p.id)) || []
       if (modalSomenteDepara && dps.length === 0) return false
-      if (!q) return true
-      const matchDepara = dps.some(
-        (d) => normTxt(d.codigo_fornecedor).includes(q) || normTxt(d.descricao_fornecedor).includes(q),
+      if (tokens.length === 0) return true
+      const hay = normTxt(
+        `${p.codigo || ''} ${p.codigo_auxiliar || ''} ${p.descricao || ''} ${p.ean || ''} ${p.grupo || ''} ${p.tipo_produto || ''} ${p.especie || ''} ${dps.map((d) => `${d.codigo_fornecedor} ${d.descricao_fornecedor}`).join(' ')}`,
       )
-      return (
-        normTxt(p.descricao).includes(q) ||
-        normTxt(p.codigo).includes(q) ||
-        normTxt(p.codigo_auxiliar).includes(q) ||
-        normTxt(p.ean).includes(q) ||
-        normTxt(p.grupo).includes(q) ||
-        matchDepara
-      )
+      return tokens.every((t) => hay.includes(t))
     })
-  }, [produtos, modalBuscaTexto, modalSomenteMp, modalSomenteDepara, deparaPorProdutoId])
+  }, [produtos, modalBuscaTexto, modalCategoria, modalSomenteDepara, deparaPorProdutoId])
 
   const limparCampos = (focarCodigo = false) => {
     setProdutoSelecionado(null)
@@ -708,34 +703,59 @@ export function SeletorItemCompra({
               </button>
             </div>
 
-            <div className="flex gap-12 items-center mb-12 flex-wrap">
-              <div style={{ flex: '1 1 280px' }}>
-                <input
-                  ref={modalBuscaRef}
-                  className="form-input"
-                  placeholder="Filtrar por nosso código, cód. fornecedor (De-Para), EAN, descrição ou grupo..."
-                  value={modalBuscaTexto}
-                  onChange={(e) => setModalBuscaTexto(e.target.value)}
-                />
-              </div>
-              <label className="flex items-center gap-6 cursor-pointer text-xs text-muted">
-                <input
-                  type="checkbox"
-                  checked={modalSomenteMp}
-                  onChange={(e) => setModalSomenteMp(e.target.checked)}
-                />
-                Somente Matéria-Prima
-              </label>
-              {fornecedorId && (
-                <label className="flex items-center gap-6 cursor-pointer text-xs text-muted">
+            <div className="flex flex-col gap-10 mb-12">
+              <div className="flex gap-12 items-center flex-wrap">
+                <div style={{ flex: '1 1 280px' }}>
                   <input
-                    type="checkbox"
-                    checked={modalSomenteDepara}
-                    onChange={(e) => setModalSomenteDepara(e.target.checked)}
+                    ref={modalBuscaRef}
+                    className="form-input"
+                    placeholder="Filtrar por nosso código, cód. fornecedor (De-Para), EAN, descrição, empório, insumos..."
+                    value={modalBuscaTexto}
+                    onChange={(e) => setModalBuscaTexto(e.target.value)}
                   />
-                  Com De-Para deste fornecedor ({deparasFornecedor.length})
-                </label>
-              )}
+                </div>
+                {fornecedorId && (
+                  <label className="flex items-center gap-6 cursor-pointer text-xs text-muted">
+                    <input
+                      type="checkbox"
+                      checked={modalSomenteDepara}
+                      onChange={(e) => setModalSomenteDepara(e.target.checked)}
+                    />
+                    Com De-Para deste fornecedor ({deparasFornecedor.length})
+                  </label>
+                )}
+              </div>
+              <div className="flex gap-6 flex-wrap items-center">
+                {[
+                  { id: 'TODOS', label: 'Todos' },
+                  { id: 'MATERIA_PRIMA', label: 'Matéria-Prima' },
+                  { id: 'CARNES_CORTES', label: 'Cortes & Acabados' },
+                  { id: 'EMPORIO', label: 'Empório / Revenda' },
+                  { id: 'INSUMO', label: 'Insumos & Embalagens' },
+                  { id: 'HIGIENE', label: 'Higiene / Consumo' },
+                ].map((cat) => {
+                  const ativo = modalCategoria === cat.id
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setModalCategoria(cat.id)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: ativo ? '1px solid #38bdf8' : '1px solid var(--border)',
+                        background: ativo ? 'rgba(56, 189, 248, 0.2)' : 'var(--bg-2)',
+                        color: ativo ? '#f8fafc' : '#94a3b8',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {cat.label}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
             <div style={{ overflowY: 'auto', flex: 1, border: '1px solid var(--border)', borderRadius: 8 }}>

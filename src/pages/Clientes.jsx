@@ -22,6 +22,7 @@ import * as produtosQueries from '../queries/produtos'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ModalDialog } from '../components/shared/ModalDialog'
 import { ConsultaCnpjModal } from '../components/shared/ConsultaCnpjModal'
+import { ProdutoSearchSelect, SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 import { formatarCnpjInput } from '../utils/cnpj'
 import {
   encontrarCodigoDuplicadoLocal,
@@ -744,14 +745,17 @@ export function Clientes() {
                 <div className="form-grid form-grid--3">
                   <div>
                     <label className="form-label">Vendedor Padrão</label>
-                    <select className="form-input" value={form.vendedor_padrao_id} onChange={(e) => setForm({ ...form, vendedor_padrao_id: e.target.value })}>
-                      <option value="">-- Nenhum --</option>
-                      {vendedores.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.codigo} - {v.nome} {v.sigla ? `(${v.sigla})` : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <SmartSearchSelect
+                      items={vendedores}
+                      value={form.vendedor_padrao_id}
+                      onChange={(val) => setForm({ ...form, vendedor_padrao_id: val })}
+                      icon="user"
+                      getCode={(v) => String(v?.codigo || v?.sigla || '')}
+                      getLabel={(v) => String(v?.nome || '')}
+                      emptyLabel="-- Nenhum --"
+                      placeholder="Pesquisar vendedor..."
+                      modalTitle="Selecionar Vendedor Padrão"
+                    />
                   </div>
                   <div>
                     <label className="form-label">Forma de Pagamento Padrão</label>
@@ -922,14 +926,13 @@ export function Clientes() {
                 <div className="form-grid form-grid--3">
                   <div>
                     <label className="form-label">Produto / Corte *</label>
-                    <select className="form-input" value={formEspec.produto_id} onChange={(e) => setFormEspec({ ...formEspec, produto_id: e.target.value })} required>
-                      <option value="">-- Selecionar produto --</option>
-                      {produtos.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.codigo} - {p.descricao}
-                        </option>
-                      ))}
-                    </select>
+                    <ProdutoSearchSelect
+                      produtos={produtos}
+                      value={formEspec.produto_id}
+                      onChange={(val) => setFormEspec({ ...formEspec, produto_id: val })}
+                      placeholder="Pesquisar produto/corte (cód., descrição, EAN)..."
+                      modalTitle="Selecionar Produto / Corte do Cliente"
+                    />
                   </div>
                   <div>
                     <label className="form-label">Código Auxiliar no Cliente</label>

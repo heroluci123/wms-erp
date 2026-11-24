@@ -28,6 +28,7 @@ import { mapaProducaoQueries } from '../queries/mapaProducao'
 import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos.js'
 import { hojeIsoLocal } from '../utils/rastreabilidade.js'
+import { ClienteSearchSelect, ProdutoSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg`
@@ -1000,21 +1001,18 @@ export function MapaProducao() {
                             <td className="text-xs" style={{ minWidth: 130 }}>
                               {it.cliente_nome || <span className="text-muted">Estoque / Interno</span>}
                             </td>
-                            <td style={{ minWidth: 185 }}>
-                              <select
-                                className="form-input"
-                                style={{ fontSize: 11, marginBottom: 4 }}
-                                value={it.materia_prima_id || ''}
-                                onChange={(e) => salvarCampoItem(it, { materia_prima_id: e.target.value || null })}
-                              >
-                                <option value="">-- Selecione MP --</option>
-                                {mpsLista.map((mp) => (
-                                  <option key={mp.id} value={mp.id}>
-                                    {mp.codigo ? `${mp.codigo} — ` : ''}
-                                    {mp.descricao}
-                                  </option>
-                                ))}
-                              </select>
+                            <td style={{ minWidth: 230 }}>
+                              <div style={{ marginBottom: 4 }}>
+                                <ProdutoSearchSelect
+                                  produtos={mpsLista}
+                                  value={it.materia_prima_id || ''}
+                                  compact
+                                  onChange={(val) => salvarCampoItem(it, { materia_prima_id: val || null })}
+                                  emptyLabel="-- Sem MP definida --"
+                                  placeholder="Buscar MP..."
+                                  modalTitle="Selecionar Matéria-Prima"
+                                />
+                              </div>
                               <div className="flex items-center gap-4">
                                 <span className="text-xs text-muted">Qtd MP:</span>
                                 <input
@@ -1132,27 +1130,25 @@ export function MapaProducao() {
             <form onSubmit={handleSalvarVinculoManual} className="card mb-16">
               <div className="text-xs font-bold uppercase text-muted mb-8">Novo Vínculo Manual na Árvore</div>
               <div className="flex gap-8 flex-wrap items-end">
-                <div className="form-group" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+                <div className="form-group" style={{ flex: 1, minWidth: 230, marginBottom: 0 }}>
                   <label className="form-label">Matéria-Prima (Pai)</label>
-                  <select className="form-input" value={novoPaiId} onChange={(e) => setNovoPaiId(e.target.value)} required>
-                    <option value="">Selecione MP...</option>
-                    {mpsLista.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.codigo} — {p.descricao}
-                      </option>
-                    ))}
-                  </select>
+                  <ProdutoSearchSelect
+                    produtos={mpsLista}
+                    value={novoPaiId}
+                    onChange={(val) => setNovoPaiId(val)}
+                    placeholder="Pesquisar matéria-prima (pai)..."
+                    modalTitle="Selecionar Matéria-Prima (Pai)"
+                  />
                 </div>
-                <div className="form-group" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+                <div className="form-group" style={{ flex: 1, minWidth: 230, marginBottom: 0 }}>
                   <label className="form-label">Corte / Subproduto (Filho)</label>
-                  <select className="form-input" value={novoFilhoId} onChange={(e) => setNovoFilhoId(e.target.value)} required>
-                    <option value="">Selecione corte...</option>
-                    {subprodutosLista.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.codigo} — {p.descricao}
-                      </option>
-                    ))}
-                  </select>
+                  <ProdutoSearchSelect
+                    produtos={subprodutosLista}
+                    value={novoFilhoId}
+                    onChange={(val) => setNovoFilhoId(val)}
+                    placeholder="Pesquisar corte / subproduto..."
+                    modalTitle="Selecionar Corte / Subproduto (Filho)"
+                  />
                 </div>
                 <div className="form-group" style={{ width: 130, marginBottom: 0 }}>
                   <label className="form-label">% Rendimento</label>
@@ -1552,14 +1548,13 @@ export function MapaProducao() {
                   <div className="form-grid form-grid--3" style={{ gap: 8 }}>
                     <div>
                       <label className="form-label">Corte *</label>
-                      <select className="form-input" required value={semForm.produto_id} onChange={(e) => setSemForm({ ...semForm, produto_id: e.target.value })}>
-                        <option value="">-- Selecionar --</option>
-                        {subprodutosLista.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.codigo} — {p.descricao}
-                          </option>
-                        ))}
-                      </select>
+                      <ProdutoSearchSelect
+                        produtos={subprodutosLista}
+                        value={semForm.produto_id}
+                        onChange={(val) => setSemForm({ ...semForm, produto_id: val })}
+                        placeholder="Pesquisar corte..."
+                        modalTitle="Selecionar Corte na Programação Semanal"
+                      />
                     </div>
                     <div>
                       <label className="form-label">Meta (kg) *</label>
@@ -1573,25 +1568,24 @@ export function MapaProducao() {
                   <div className="form-grid form-grid--3 mt-8" style={{ gap: 8 }}>
                     <div>
                       <label className="form-label">Cliente (opcional)</label>
-                      <select className="form-input" value={semForm.cliente_id} onChange={(e) => setSemForm({ ...semForm, cliente_id: e.target.value })}>
-                        <option value="">-- Estoque / Geral --</option>
-                        {clientes.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.razao_social}
-                          </option>
-                        ))}
-                      </select>
+                      <ClienteSearchSelect
+                        clientes={clientes}
+                        value={semForm.cliente_id}
+                        onChange={(val) => setSemForm({ ...semForm, cliente_id: val })}
+                        emptyLabel="-- Estoque / Geral --"
+                        placeholder="Pesquisar cliente..."
+                      />
                     </div>
                     <div>
                       <label className="form-label">Matéria-Prima</label>
-                      <select className="form-input" value={semForm.materia_prima_id} onChange={(e) => setSemForm({ ...semForm, materia_prima_id: e.target.value })}>
-                        <option value="">-- Via Árvore --</option>
-                        {mpsLista.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.codigo} — {m.descricao}
-                          </option>
-                        ))}
-                      </select>
+                      <ProdutoSearchSelect
+                        produtos={mpsLista}
+                        value={semForm.materia_prima_id}
+                        onChange={(val) => setSemForm({ ...semForm, materia_prima_id: val })}
+                        emptyLabel="-- Via Árvore --"
+                        placeholder="Pesquisar MP..."
+                        modalTitle="Selecionar Matéria-Prima"
+                      />
                     </div>
                     <div className="flex items-end">
                       <button type="submit" className="btn btn--success w-full">
@@ -1677,25 +1671,23 @@ export function MapaProducao() {
                 <div className="form-grid form-grid--3" style={{ gap: 10 }}>
                   <div>
                     <label className="form-label">Produto / Corte *</label>
-                    <select className="form-input" required value={especForm.produto_id} onChange={(e) => setEspecForm({ ...especForm, produto_id: e.target.value })}>
-                      <option value="">-- Selecionar --</option>
-                      {subprodutosLista.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.codigo} — {p.descricao}
-                        </option>
-                      ))}
-                    </select>
+                    <ProdutoSearchSelect
+                      produtos={subprodutosLista}
+                      value={especForm.produto_id}
+                      onChange={(val) => setEspecForm({ ...especForm, produto_id: val })}
+                      placeholder="Pesquisar corte..."
+                      modalTitle="Selecionar Produto / Corte"
+                    />
                   </div>
                   <div>
                     <label className="form-label">Cliente (opcional — em branco = geral)</label>
-                    <select className="form-input" value={especForm.cliente_id} onChange={(e) => setEspecForm({ ...especForm, cliente_id: e.target.value })}>
-                      <option value="">Padrão Geral (todos os clientes)</option>
-                      {clientes.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.razao_social}
-                        </option>
-                      ))}
-                    </select>
+                    <ClienteSearchSelect
+                      clientes={clientes}
+                      value={especForm.cliente_id}
+                      onChange={(val) => setEspecForm({ ...especForm, cliente_id: val })}
+                      emptyLabel="Padrão Geral (todos os clientes)"
+                      placeholder="Pesquisar cliente..."
+                    />
                   </div>
                   <div>
                     <label className="form-label">Conservação</label>
@@ -1713,14 +1705,14 @@ export function MapaProducao() {
                   </div>
                   <div>
                     <label className="form-label">Matéria-Prima Padrão</label>
-                    <select className="form-input" value={especForm.materia_prima_id} onChange={(e) => setEspecForm({ ...especForm, materia_prima_id: e.target.value })}>
-                      <option value="">-- Via Árvore --</option>
-                      {mpsLista.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.codigo} — {m.descricao}
-                        </option>
-                      ))}
-                    </select>
+                    <ProdutoSearchSelect
+                      produtos={mpsLista}
+                      value={especForm.materia_prima_id}
+                      onChange={(val) => setEspecForm({ ...especForm, materia_prima_id: val })}
+                      emptyLabel="-- Via Árvore --"
+                      placeholder="Pesquisar MP..."
+                      modalTitle="Selecionar Matéria-Prima Padrão"
+                    />
                   </div>
                   <div className="flex items-end">
                     <button type="submit" className="btn btn--primary w-full">
@@ -1814,14 +1806,13 @@ export function MapaProducao() {
               <div className="form-grid form-grid--2">
                 <div>
                   <label className="form-label">Produto / Corte *</label>
-                  <select className="form-input" required value={linhaForm.produto_id} onChange={(e) => setLinhaForm({ ...linhaForm, produto_id: e.target.value })}>
-                    <option value="">-- Selecionar corte --</option>
-                    {subprodutosLista.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.codigo} — {p.descricao}
-                      </option>
-                    ))}
-                  </select>
+                  <ProdutoSearchSelect
+                    produtos={subprodutosLista}
+                    value={linhaForm.produto_id}
+                    onChange={(val) => setLinhaForm({ ...linhaForm, produto_id: val })}
+                    placeholder="Pesquisar corte..."
+                    modalTitle="Selecionar Produto / Corte"
+                  />
                 </div>
                 <div>
                   <label className="form-label">Quantidade Prevista (kg) *</label>
@@ -1831,25 +1822,24 @@ export function MapaProducao() {
               <div className="form-grid form-grid--2">
                 <div>
                   <label className="form-label">Cliente (opcional)</label>
-                  <select className="form-input" value={linhaForm.cliente_id} onChange={(e) => setLinhaForm({ ...linhaForm, cliente_id: e.target.value })}>
-                    <option value="">-- Estoque / Interno --</option>
-                    {clientes.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.razao_social}
-                      </option>
-                    ))}
-                  </select>
+                  <ClienteSearchSelect
+                    clientes={clientes}
+                    value={linhaForm.cliente_id}
+                    onChange={(val) => setLinhaForm({ ...linhaForm, cliente_id: val })}
+                    emptyLabel="-- Estoque / Interno --"
+                    placeholder="Pesquisar cliente..."
+                  />
                 </div>
                 <div>
                   <label className="form-label">Matéria-Prima (opcional — via Árvore)</label>
-                  <select className="form-input" value={linhaForm.materia_prima_id} onChange={(e) => setLinhaForm({ ...linhaForm, materia_prima_id: e.target.value })}>
-                    <option value="">-- Automática --</option>
-                    {mpsLista.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.codigo} — {m.descricao}
-                      </option>
-                    ))}
-                  </select>
+                  <ProdutoSearchSelect
+                    produtos={mpsLista}
+                    value={linhaForm.materia_prima_id}
+                    onChange={(val) => setLinhaForm({ ...linhaForm, materia_prima_id: val })}
+                    emptyLabel="-- Automática --"
+                    placeholder="Pesquisar MP..."
+                    modalTitle="Selecionar Matéria-Prima"
+                  />
                 </div>
               </div>
               <div className="form-grid form-grid--3">

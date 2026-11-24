@@ -6,6 +6,7 @@ import { cadastrosQueries } from '../queries/cadastros'
 import { operadoresQueries } from '../queries/operadores'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ModalDialog } from '../components/shared/ModalDialog'
+import { SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 import {
   encontrarCodigoDuplicadoLocal,
   obterProximoCodigoDisponivel,
@@ -273,14 +274,18 @@ export function Vendedores() {
                 </div>
                 <div>
                   <label className="form-label">Conta de Acesso (opcional)</label>
-                  <select className="form-input" value={form.operador_id} onChange={(e) => setForm({ ...form, operador_id: e.target.value })}>
-                    <option value="">-- Sem vínculo --</option>
-                    {operadores.map((op) => (
-                      <option key={op.id} value={op.id}>
-                        {op.nome} ({op.login})
-                      </option>
-                    ))}
-                  </select>
+                  <SmartSearchSelect
+                    items={operadores}
+                    value={form.operador_id}
+                    onChange={(val) => setForm({ ...form, operador_id: val })}
+                    icon="user"
+                    getCode={(op) => String(op?.login || '')}
+                    getLabel={(op) => String(op?.nome || '')}
+                    getSubLabel={(op) => [op?.perfil, op?.setor].filter(Boolean).join(' • ')}
+                    emptyLabel="-- Sem vínculo --"
+                    placeholder="Pesquisar conta de acesso..."
+                    modalTitle="Vincular Conta de Acesso (Operador)"
+                  />
                 </div>
               </div>
               <div>

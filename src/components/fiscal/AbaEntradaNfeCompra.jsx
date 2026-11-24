@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { fiscalQueries } from '../../queries/fiscal'
 import * as produtosQueries from '../../queries/produtos'
+import { ProdutoSearchSelect } from '../shared/SmartSearchSelect'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -744,26 +745,17 @@ export function AbaEntradaNfeCompra({
                             NCM {it.ncm} • CFOP {it.cfop} {it.lote ? `• Lote ${it.lote}` : ''}
                           </div>
                         </td>
-                        <td style={{ minWidth: 220 }}>
-                          <select
-                            className="form-input"
-                            style={{
-                              fontSize: 12,
-                              padding: '4px 8px',
-                              borderColor: !prodIdAtual ? '#f59e0b' : undefined,
-                            }}
+                        <td style={{ minWidth: 250 }}>
+                          <ProdutoSearchSelect
+                            produtos={produtosCatalogo}
                             value={prodIdAtual}
-                            onChange={(e) =>
-                              setDeparaMap((prev) => ({ ...prev, [it.codigo_fornecedor]: e.target.value }))
+                            compact
+                            onChange={(val) =>
+                              setDeparaMap((prev) => ({ ...prev, [it.codigo_fornecedor]: val }))
                             }
-                          >
-                            <option value="">-- Vincular produto interno (De-Para) --</option>
-                            {produtosCatalogo.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                [{p.codigo}] {p.descricao}
-                              </option>
-                            ))}
-                          </select>
+                            emptyLabel="-- Vincular produto interno (De-Para) --"
+                            placeholder="Buscar produto interno (cód., nome, EAN)..."
+                          />
                         </td>
                         <td style={{ textAlign: 'right' }} className="font-mono text-xs">
                           {Number(it.quantidade || 0).toFixed(3)} {it.unidade}

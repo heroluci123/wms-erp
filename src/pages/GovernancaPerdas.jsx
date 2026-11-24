@@ -28,6 +28,7 @@ import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { MesSelector } from '../components/shared/MesSelector'
+import { FornecedorSearchSelect, ProdutoSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const fmtMoeda = (v) =>
   `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -352,6 +353,9 @@ export function GovernancaPerdas() {
 
   const handleConfirmarBaixaPerda = async (e) => {
     e.preventDefault()
+    if (modalPerda === 'MANUAL' && !perdaForm.produto_id) {
+      return toastWarning('Selecione o produto para registrar a perda manual.')
+    }
     try {
       const payload =
         modalPerda === 'MANUAL'
@@ -1222,27 +1226,23 @@ export function GovernancaPerdas() {
 
               <div className="p-12 rounded" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
                 <div className="text-xs font-bold text-muted mb-8">ADICIONAR PRODUTOS PARA COTAR</div>
-                <div className="flex gap-8 flex-wrap">
-                  <select
-                    className="form-input"
-                    style={{ flex: '2 1 220px' }}
-                    value={itemCotProdId}
-                    onChange={(e) => setItemCotProdId(e.target.value)}
-                  >
-                    <option value="">-- Selecione o Produto --</option>
-                    {produtos.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.codigo} — {p.descricao}
-                      </option>
-                    ))}
-                  </select>
+                <div className="flex gap-8 flex-wrap items-center">
+                  <div style={{ flex: '2 1 260px', minWidth: 0 }}>
+                    <ProdutoSearchSelect
+                      produtos={produtos}
+                      value={itemCotProdId}
+                      onChange={(val) => setItemCotProdId(val)}
+                      placeholder="Digite código, descrição ou clique na lupa (Carnes, Empório, Insumos)..."
+                      modalTitle="Pesquisar Produto para Cotação (RFQ)"
+                    />
+                  </div>
                   <input
                     type="number"
                     step="1"
                     min="1"
                     className="form-input font-mono"
                     style={{ width: 100 }}
-                    placeholder="Kg"
+                    placeholder="Qtd"
                     value={itemCotKg}
                     onChange={(e) => setItemCotKg(e.target.value)}
                   />
@@ -1325,19 +1325,13 @@ export function GovernancaPerdas() {
             <form onSubmit={handleSalvarProposta} className="flex flex-col gap-12">
               <div>
                 <label className="form-label">Fornecedor / Frigorífico *</label>
-                <select
-                  className="form-input"
-                  required
+                <FornecedorSearchSelect
+                  fornecedores={fornecedores}
                   value={propForm.fornecedor_id}
-                  onChange={(e) => setPropForm((f) => ({ ...f, fornecedor_id: e.target.value }))}
-                >
-                  <option value="">-- Selecione --</option>
-                  {fornecedores.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.nome_fantasia || f.razao_social} {f.registro_sanitario_sif ? `(SIF ${f.registro_sanitario_sif})` : ''}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setPropForm((f) => ({ ...f, fornecedor_id: val }))}
+                  placeholder="Digite nome, CNPJ ou SIF do fornecedor..."
+                  modalTitle="Pesquisar Fornecedor / Frigorífico"
+                />
               </div>
               <div className="form-grid form-grid--3">
                 <div>
@@ -1479,19 +1473,13 @@ export function GovernancaPerdas() {
                 <>
                   <div>
                     <label className="form-label">Produto *</label>
-                    <select
-                      className="form-input"
-                      required
+                    <ProdutoSearchSelect
+                      produtos={produtos}
                       value={perdaForm.produto_id}
-                      onChange={(e) => setPerdaForm((f) => ({ ...f, produto_id: e.target.value }))}
-                    >
-                      <option value="">-- Selecione --</option>
-                      {produtos.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.codigo} — {p.descricao}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setPerdaForm((f) => ({ ...f, produto_id: val }))}
+                      placeholder="Pesquisar produto por código, nome ou categoria..."
+                      modalTitle="Pesquisar Produto para Registro de Perda"
+                    />
                   </div>
                   <div>
                     <label className="form-label">Peso Perdido (kg) *</label>

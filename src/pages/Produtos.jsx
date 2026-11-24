@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import * as produtosQueries from '../queries/produtos'
 import { ModalDialog } from '../components/shared/ModalDialog'
+import { SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 import { useAppStore } from '../store/appStore'
 import {
   encontrarCodigoDuplicadoLocal,
@@ -1733,18 +1734,18 @@ export function Produtos() {
                       <label className="form-label" style={{ color: '#93c5fd', fontWeight: 700 }}>
                         Especificação do Produto
                       </label>
-                      <select
-                        className="form-input"
+                      <SmartSearchSelect
+                        items={especificacoes}
                         value={formData.especificacao_id}
-                        onChange={(e) => handleSelecionarEspecificacaoNoProduto(e.target.value)}
-                      >
-                        <option value="">Nenhuma especificação vinculada...</option>
-                        {especificacoes.map((esp) => (
-                          <option key={esp.id} value={esp.id}>
-                            {esp.nome} ({esp.especie} • {esp.conservacao})
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => handleSelecionarEspecificacaoNoProduto(val)}
+                        icon="product"
+                        getCode={(esp) => String(esp?.especie || '')}
+                        getLabel={(esp) => String(esp?.nome || '')}
+                        getSubLabel={(esp) => [esp?.especie, esp?.conservacao, esp?.validade_dias ? `${esp.validade_dias}d` : ''].filter(Boolean).join(' • ')}
+                        emptyLabel="Nenhuma especificação vinculada..."
+                        placeholder="Pesquisar especificação de rótulo..."
+                        modalTitle="Selecionar Especificação do Produto"
+                      />
                     </div>
 
                     <div className="form-grid form-grid--4">
@@ -2177,12 +2178,18 @@ export function Produtos() {
                   Aplicar Especificação de Rótulo (100×70mm)
                 </label>
                 {formLote.aplicarEspec && (
-                  <select className="form-input" value={formLote.especificacao_id} onChange={(e) => setFormLote((p) => ({ ...p, especificacao_id: e.target.value }))}>
-                    <option value="">Remover especificação</option>
-                    {especificacoes.map((esp) => (
-                      <option key={esp.id} value={esp.id}>{esp.nome}</option>
-                    ))}
-                  </select>
+                  <SmartSearchSelect
+                    items={especificacoes}
+                    value={formLote.especificacao_id}
+                    onChange={(val) => setFormLote((p) => ({ ...p, especificacao_id: val }))}
+                    icon="product"
+                    getCode={(esp) => String(esp?.especie || '')}
+                    getLabel={(esp) => String(esp?.nome || '')}
+                    getSubLabel={(esp) => [esp?.especie, esp?.conservacao].filter(Boolean).join(' • ')}
+                    emptyLabel="Remover especificação"
+                    placeholder="Pesquisar especificação de rótulo..."
+                    modalTitle="Selecionar Especificação em Lote"
+                  />
                 )}
               </div>
 

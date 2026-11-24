@@ -20,6 +20,7 @@ import { comprasQueries } from '../queries/compras'
 import * as produtosQueries from '../queries/produtos'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ModalEtiquetaZebra80x45 } from '../components/shared/EtiquetaZebra80x45'
+import { ProdutoSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -662,13 +663,10 @@ export function VarejoLoja() {
 
             <div>
               <label className="form-label">Produto *</label>
-              <select
-                required
-                className="form-input"
+              <ProdutoSearchSelect
+                produtos={produtosCatalogo}
                 value={ajForm.produto_id}
-                onChange={(e) => {
-                  const pid = e.target.value
-                  const p = produtosCatalogo.find((x) => x.id === pid)
+                onChange={(pid, p) => {
                   setAjForm((prev) => ({
                     ...prev,
                     produto_id: pid,
@@ -676,14 +674,9 @@ export function VarejoLoja() {
                     codigo_balanca: prev.codigo_balanca || String(p?.codigo || '').replace(/\D/g, '').slice(-5),
                   }))
                 }}
-              >
-                <option value="">-- Selecione o produto --</option>
-                {produtosCatalogo.slice(0, 500).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.codigo ? `${p.codigo} — ` : ''}{p.descricao}
-                  </option>
-                ))}
-              </select>
+                placeholder="Pesquisar produto (cód., descrição, EAN, Empório)..."
+                modalTitle="Selecionar Produto da Loja"
+              />
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>

@@ -42,6 +42,7 @@ import { temPermissao } from '../utils/permissoes'
 import { FolhaPedidoPrint } from '../components/shared/FolhaPedidoPrint'
 import { RomaneioEmbarquePrint } from '../components/shared/RomaneioEmbarquePrint'
 import { EtiquetaReservaZebraModal } from '../components/shared/EtiquetaZebraPrint'
+import { ClienteSearchSelect, SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const STATUS_BADGE = {
   RASCUNHO: { label: 'Rascunho', cls: 'badge--neutral' },
@@ -1492,16 +1493,19 @@ export function Pedidos() {
               </div>
               {apiAtiva && (
                 <>
-                  <div style={{ flex: '0 1 170px' }}>
+                  <div style={{ flex: '0 1 220px', minWidth: 185 }}>
                     <label className="form-label">Vendedor</label>
-                    <select className="form-input" value={filtroVendedorId} onChange={(e) => setFiltroVendedorId(e.target.value)}>
-                      <option value="">Todos</option>
-                      {vendedores.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.nome}
-                        </option>
-                      ))}
-                    </select>
+                    <SmartSearchSelect
+                      items={vendedores}
+                      value={filtroVendedorId}
+                      onChange={(val) => setFiltroVendedorId(val)}
+                      icon="user"
+                      getCode={(v) => String(v?.sigla || v?.codigo || '')}
+                      getLabel={(v) => String(v?.nome || '')}
+                      emptyLabel="Todos os Vendedores"
+                      placeholder="Filtrar vendedor..."
+                      modalTitle="Selecionar Vendedor"
+                    />
                   </div>
                   <div style={{ flex: '0 1 150px' }}>
                     <label className="form-label">Setor / Origem</label>
@@ -2104,22 +2108,18 @@ export function Pedidos() {
 
             {mostrarTrocaCliente && (
               <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div style={{ flex: '1 1 280px' }}>
+                <div style={{ flex: '1 1 320px' }}>
                   <label className="form-label">Selecionar Cliente Cadastrado</label>
-                  <select
-                    className="form-input"
-                    value={clienteIdSelecionado || ''}
-                    onChange={(e) => {
-                      const val = e.target.value
+                  <ClienteSearchSelect
+                    clientes={clientes}
+                    value={clienteIdSelecionado ? String(clienteIdSelecionado) : ''}
+                    onChange={(val) => {
+                      if (!val) return
                       setClienteIdSelecionado(/^\d+$/.test(val) ? Number(val) : val)
                     }}
-                  >
-                    {clientes.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.codigo ? `[${c.codigo}] ` : ''}{c.razao_social} ({c.cidade}/{c.uf})
-                      </option>
-                    ))}
-                  </select>
+                    allowClear={false}
+                    placeholder="Pesquisar cliente (razão social, fantasia, código, CNPJ, cidade)..."
+                  />
                 </div>
                 <button
                   type="button"
@@ -2196,14 +2196,17 @@ export function Pedidos() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '10px' }}>
                 <div>
                   <label className="form-label">Vendedor (Comissão)</label>
-                  <select className="form-input" value={vendedorId} onChange={(e) => setVendedorId(e.target.value)}>
-                    <option value="">-- Nenhum --</option>
-                    {vendedores.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.sigla ? `(${v.sigla}) ` : ''}{v.nome}
-                      </option>
-                    ))}
-                  </select>
+                  <SmartSearchSelect
+                    items={vendedores}
+                    value={vendedorId}
+                    onChange={(val) => setVendedorId(val)}
+                    icon="user"
+                    getCode={(v) => String(v?.sigla || v?.codigo || '')}
+                    getLabel={(v) => String(v?.nome || '')}
+                    emptyLabel="-- Nenhum --"
+                    placeholder="Pesquisar vendedor..."
+                    modalTitle="Selecionar Vendedor"
+                  />
                 </div>
                 <div>
                   <label className="form-label">Forma de Pagamento</label>

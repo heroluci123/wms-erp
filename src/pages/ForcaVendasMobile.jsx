@@ -38,6 +38,7 @@ import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { PwaInstallBanner } from '../components/shared/PwaInstallBanner'
 import { MesSelector } from '../components/shared/MesSelector'
+import { ClienteSearchSelect, SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 import { gerarLinkGoogleMapsCoords, gerarLinkWhatsApp, obterGpsAtual } from '../utils/motoristaPwa'
 
 const fmtMoeda = (v) =>
@@ -626,20 +627,19 @@ export function ForcaVendasMobile() {
         <div className="flex items-center gap-8 flex-wrap">
           <MesSelector value={mesRef} onChange={setMesRef} align="right" />
           {resumo?.is_gestor && (resumo?.vendedores || []).length > 0 && (
-            <select
-              className="form-input"
-              style={{ width: 195 }}
-              value={vendedorFiltro}
-              onChange={(e) => setVendedorFiltro(e.target.value)}
-            >
-              <option value="">Todos os Vendedores</option>
-              {resumo.vendedores.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.sigla ? `[${v.sigla}] ` : ''}
-                  {v.nome}
-                </option>
-              ))}
-            </select>
+            <div style={{ width: 240 }}>
+              <SmartSearchSelect
+                items={resumo.vendedores}
+                value={vendedorFiltro}
+                onChange={(val) => setVendedorFiltro(val)}
+                icon="user"
+                getCode={(v) => String(v?.sigla || v?.codigo || '')}
+                getLabel={(v) => String(v?.nome || '')}
+                emptyLabel="Todos os Vendedores"
+                placeholder="Filtrar vendedor..."
+                modalTitle="Filtrar por Vendedor"
+              />
+            </div>
           )}
           <button className="btn btn--secondary" onClick={carregarResumo} disabled={loading}>
             <RefreshCw size={15} /> Atualizar
@@ -982,22 +982,17 @@ export function ForcaVendasMobile() {
               <div className="form-grid form-grid--2" style={{ gap: 10 }}>
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label className="form-label">Cliente Atacado *</label>
-                  <select
-                    className="form-input"
+                  <ClienteSearchSelect
+                    clientes={resumo?.carteira_clientes || []}
                     value={clienteSelId}
-                    onChange={(e) => {
-                      setClienteSelId(e.target.value)
+                    onChange={(val) => {
+                      setClienteSelId(val)
                       setCarrinho([])
                       setSimulacao(null)
                     }}
-                  >
-                    <option value="">-- Selecione o Cliente --</option>
-                    {(resumo?.carteira_clientes || []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nome_fantasia} {c.cidade ? `(${c.cidade}/${c.uf})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Pesquisar cliente da carteira (nome, cidade, CNPJ)..."
+                    modalTitle="Selecionar Cliente Atacado"
+                  />
                 </div>
 
                 <div>
@@ -1727,26 +1722,20 @@ export function ForcaVendasMobile() {
             </h3>
             <div>
               <label className="form-label">Cliente da Carteira</label>
-              <select
-                className="form-input"
+              <ClienteSearchSelect
+                clientes={resumo?.carteira_clientes || []}
                 value={visitaForm.cliente_id}
-                onChange={(e) => {
-                  const id = e.target.value
-                  const cli = (resumo?.carteira_clientes || []).find((c) => c.id === id)
+                onChange={(id, cli) => {
                   setVisitaForm((f) => ({
                     ...f,
                     cliente_id: id,
                     cliente_nome: cli ? cli.nome_fantasia || cli.razao_social : f.cliente_nome,
                   }))
                 }}
-              >
-                <option value="">-- Prospecto / Avulso --</option>
-                {(resumo?.carteira_clientes || []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nome_fantasia} ({c.cidade || '-'})
-                  </option>
-                ))}
-              </select>
+                emptyLabel="-- Prospecto / Avulso --"
+                placeholder="Pesquisar cliente da carteira ou deixar avulso..."
+                modalTitle="Selecionar Cliente da Carteira"
+              />
             </div>
             {!visitaForm.cliente_id && (
               <div>

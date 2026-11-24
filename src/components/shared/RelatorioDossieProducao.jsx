@@ -8,6 +8,7 @@ import * as producaoQueries from '../../queries/producao';
 import { exportProducaoExcel } from '../../utils/exportProducaoExcel';
 import { useAppStore } from '../../store/appStore';
 import { isCliente } from '../../utils/permissoes';
+import { SmartSearchSelect } from './SmartSearchSelect';
 
 const fmtKg = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg';
 const fmtKg3 = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' kg';
@@ -480,20 +481,22 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
         {/* FILTROS */}
         <div className="card p-16 mb-20" style={{ background: 'var(--bg-2)' }}>
           <form onSubmit={handleBuscar} className="flex gap-12 items-end flex-wrap">
-            <div className="form-group mb-0" style={{ minWidth: 210 }}>
+            <div className="form-group mb-0" style={{ minWidth: 250 }}>
               <label className="text-xs text-muted font-bold uppercase mb-4 block">Ordem de Produção (OP)</label>
-              <select
-                className="form-input form-input--sm"
-                value={filtroOpId}
-                onChange={e => setFiltroOpId(e.target.value)}
-              >
-                <option value="TODOS">Todas as OPs no período</option>
-                {opsDisponiveis.map(op => (
-                  <option key={op.id} value={String(op.id)}>
-                    {op.codigo} — {op.nome} ({op.status})
-                  </option>
-                ))}
-              </select>
+              <SmartSearchSelect
+                items={opsDisponiveis}
+                value={filtroOpId === 'TODOS' ? '' : String(filtroOpId)}
+                onChange={(val) => setFiltroOpId(val || 'TODOS')}
+                compact
+                icon="product"
+                getValue={(op) => String(op.id)}
+                getCode={(op) => String(op.codigo || '')}
+                getLabel={(op) => String(op.nome || op.codigo || '')}
+                getSubLabel={(op) => `Status: ${op.status || '-'}`}
+                emptyLabel="Todas as OPs no período"
+                placeholder="Pesquisar OP (código, nome)..."
+                modalTitle="Selecionar Ordem de Produção (OP)"
+              />
             </div>
             <div className="form-group mb-0" style={{ minWidth: 140 }}>
               <label className="text-xs text-muted font-bold uppercase mb-4 block">Data Inicial</label>
@@ -515,34 +518,40 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             </div>
 
             {clientesDisponiveis.length > 0 && (
-              <div className="form-group mb-0" style={{ minWidth: 150 }}>
+              <div className="form-group mb-0" style={{ minWidth: 210 }}>
                 <label className="text-xs text-muted font-bold uppercase mb-4 block">Cliente</label>
-                <select 
-                  className="form-input form-input--sm"
-                  value={filtroCliente}
-                  onChange={e => setFiltroCliente(e.target.value)}
-                >
-                  <option value="TODOS">Todos os Clientes</option>
-                  {clientesDisponiveis.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                <SmartSearchSelect
+                  items={clientesDisponiveis.map((c) => ({ id: c, nome: c }))}
+                  value={filtroCliente === 'TODOS' ? '' : filtroCliente}
+                  onChange={(val) => setFiltroCliente(val || 'TODOS')}
+                  compact
+                  icon="client"
+                  getValue={(c) => c.id}
+                  getCode={() => ''}
+                  getLabel={(c) => c.nome}
+                  emptyLabel="Todos os Clientes"
+                  placeholder="Filtrar cliente..."
+                  modalTitle="Filtrar por Cliente"
+                />
               </div>
             )}
 
             {!enderecoFixo && enderecosDisponiveis.length > 0 && (
-              <div className="form-group mb-0" style={{ minWidth: 160 }}>
+              <div className="form-group mb-0" style={{ minWidth: 200 }}>
                 <label className="text-xs text-muted font-bold uppercase mb-4 block">Local / Endereço</label>
-                <select 
-                  className="form-input form-input--sm"
-                  value={filtroEndereco}
-                  onChange={e => setFiltroEndereco(e.target.value)}
-                >
-                  <option value="TODOS">Todos os Locais</option>
-                  {enderecosDisponiveis.map(end => (
-                    <option key={end} value={end}>{end}</option>
-                  ))}
-                </select>
+                <SmartSearchSelect
+                  items={enderecosDisponiveis.map((end) => ({ id: end, nome: end }))}
+                  value={filtroEndereco === 'TODOS' ? '' : filtroEndereco}
+                  onChange={(val) => setFiltroEndereco(val || 'TODOS')}
+                  compact
+                  icon="location"
+                  getValue={(e) => e.id}
+                  getCode={() => ''}
+                  getLabel={(e) => e.nome}
+                  emptyLabel="Todos os Locais"
+                  placeholder="Filtrar endereço..."
+                  modalTitle="Filtrar por Local / Endereço"
+                />
               </div>
             )}
 

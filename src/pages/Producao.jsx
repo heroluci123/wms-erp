@@ -16,6 +16,7 @@ import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared
 import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx'
 import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao.jsx'
 import { FolhaOrdemProducaoPrint } from '../components/shared/FolhaOrdemProducaoPrint.jsx'
+import { ProdutoSearchSelect } from '../components/shared/SmartSearchSelect.jsx'
 import { feedbackSom } from '../utils/feedbackSom.js'
 import {
   fmtDataBR,
@@ -1677,22 +1678,13 @@ export function Producao() {
                     <label className="form-label" style={{ display: 'block', marginBottom: 6 }}>
                       Produto Produzido * {opSelecionada.previstos_saida?.length > 0 && !mostrarTodosProdutosSaida ? '(Configurados nesta OP)' : ''}
                     </label>
-                    <select
-                      className="form-input"
+                    <ProdutoSearchSelect
+                      produtos={produtosSaidaDisponiveis}
                       value={produtoSaidaId}
-                      onChange={e => setProdutoSaidaId(e.target.value)}
-                      required
-                    >
-                      <option value="">-- Selecione o produto produzido --</option>
-                      {produtosSaidaDisponiveis.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.codigo ? `[${p.codigo}] ` : ''}{p.descricao}
-                          {(p.peso_kg_previsto || p.qtd_caixas_prevista)
-                            ? ` (Prev:${p.peso_kg_previsto ? ` ${fmtKg2(p.peso_kg_previsto)}` : ''}${p.qtd_caixas_prevista ? ` ${p.peso_kg_previsto ? '• ' : ' '}${p.qtd_caixas_prevista} cx` : ''})`
-                            : ''}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setProdutoSaidaId(val)}
+                      placeholder="Pesquisar corte / produto produzido (cód., descrição)..."
+                      modalTitle="Selecionar Produto Produzido na OP"
+                    />
                   </div>
 
                   {/* Data Produção (pre-fill da OP), Lote Auto, Validade, Tara, Peso Bruto -> Peso Líquido */}

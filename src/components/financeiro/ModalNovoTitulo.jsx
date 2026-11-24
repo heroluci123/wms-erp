@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { hojeIsoLocal } from '../../utils/rastreabilidade'
+import { ClienteSearchSelect, FornecedorSearchSelect } from '../shared/SmartSearchSelect'
 
 export function ModalNovoTitulo({
   isOpen,
@@ -120,26 +121,24 @@ export function ModalNovoTitulo({
             {ehPagar ? (
               <div>
                 <label className="form-label">Fornecedor (Opcional)</label>
-                <select className="form-input" value={fornecedorId} onChange={(e) => setFornecedorId(e.target.value)}>
-                  <option value="">-- Sem fornecedor específico --</option>
-                  {fornecedores.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.nome_fantasia || f.razao_social}
-                    </option>
-                  ))}
-                </select>
+                <FornecedorSearchSelect
+                  fornecedores={fornecedores}
+                  value={fornecedorId}
+                  onChange={(val) => setFornecedorId(val)}
+                  emptyLabel="-- Sem fornecedor específico --"
+                  placeholder="Pesquisar fornecedor (nome, CNPJ, SIF)..."
+                />
               </div>
             ) : (
               <div>
                 <label className="form-label">Cliente (Opcional)</label>
-                <select className="form-input" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
-                  <option value="">-- Sem cliente específico --</option>
-                  {clientes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nome_fantasia || c.razao_social}
-                    </option>
-                  ))}
-                </select>
+                <ClienteSearchSelect
+                  clientes={clientes}
+                  value={clienteId}
+                  onChange={(val) => setClienteId(val)}
+                  emptyLabel="-- Sem cliente específico --"
+                  placeholder="Pesquisar cliente (nome, CNPJ/CPF)..."
+                />
               </div>
             )}
 

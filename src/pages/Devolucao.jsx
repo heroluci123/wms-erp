@@ -23,6 +23,7 @@ import { temAlgumaPermissao } from '../utils/permissoes'
 import { devolucoesQueries, MOTIVOS_DEVOLUCAO } from '../queries/devolucoes'
 import * as locaisQueries from '../queries/locais'
 import { RomaneioDevolucaoPrint } from '../components/shared/RomaneioDevolucaoPrint'
+import { SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg`
@@ -697,20 +698,25 @@ export function Devolucao() {
                       <MapPin size={14} /> 3. Endereço de Armazenagem no Retorno *
                     </label>
                     {enderecoModo === 'LISTA' ? (
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <select
-                          className="form-input"
-                          value={enderecoSelecionado}
-                          onChange={(e) => setEnderecoSelecionado(e.target.value)}
-                        >
-                          <option value="REC">REC (Doca Recebimento / Devolução)</option>
-                          <option value="DOCA-DEV">DOCA-DEV (Área de Devoluções)</option>
-                          {locais.map((l) => (
-                            <option key={l.id || l.endereco} value={l.endereco}>
-                              {l.endereco} {l.tipo_armazenamento ? `(${l.tipo_armazenamento})` : ''}
-                            </option>
-                          ))}
-                        </select>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <SmartSearchSelect
+                            items={[
+                              { endereco: 'REC', tipo_armazenamento: 'Doca Recebimento / Devolução' },
+                              { endereco: 'DOCA-DEV', tipo_armazenamento: 'Área de Devoluções' },
+                              ...locais.filter((l) => l.endereco !== 'REC' && l.endereco !== 'DOCA-DEV'),
+                            ]}
+                            value={enderecoSelecionado}
+                            onChange={(val) => val && setEnderecoSelecionado(val)}
+                            allowClear={false}
+                            icon="location"
+                            getValue={(l) => String(l.endereco)}
+                            getCode={(l) => String(l.endereco)}
+                            getLabel={(l) => l.tipo_armazenamento ? `${l.endereco} (${l.tipo_armazenamento})` : l.endereco}
+                            placeholder="Pesquisar endereço de retorno..."
+                            modalTitle="Selecionar Endereço de Armazenagem"
+                          />
+                        </div>
                         <button
                           type="button"
                           className="btn btn--secondary btn--sm"

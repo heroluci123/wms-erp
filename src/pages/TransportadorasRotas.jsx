@@ -5,6 +5,7 @@ import { isApiEnabled } from '../lib/apiClient'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ConsultaCnpjModal } from '../components/shared/ConsultaCnpjModal'
+import { SmartSearchSelect } from '../components/shared/SmartSearchSelect'
 import { formatarCnpjInput } from '../utils/cnpj'
 import {
   encontrarCodigoDuplicadoLocal,
@@ -454,14 +455,18 @@ export function TransportadorasRotas() {
               <div className="form-grid form-grid--2">
                 <div>
                   <label className="form-label">Transportadora Padrão</label>
-                  <select className="form-input" value={formRota.transportadora_id} onChange={(e) => setFormRota({ ...formRota, transportadora_id: e.target.value })}>
-                    <option value="">-- Própria / Livre --</option>
-                    {transportadoras.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.razao_social}
-                      </option>
-                    ))}
-                  </select>
+                  <SmartSearchSelect
+                    items={transportadoras}
+                    value={formRota.transportadora_id}
+                    onChange={(val) => setFormRota({ ...formRota, transportadora_id: val })}
+                    icon="truck"
+                    getCode={(t) => String(t?.codigo || t?.uf || '')}
+                    getLabel={(t) => String(t?.razao_social || '')}
+                    getSubLabel={(t) => [t?.cnpj_cpf, [t?.cidade, t?.uf].filter(Boolean).join('/')].filter(Boolean).join(' • ')}
+                    emptyLabel="-- Própria / Livre --"
+                    placeholder="Pesquisar transportadora..."
+                    modalTitle="Selecionar Transportadora Padrão"
+                  />
                 </div>
                 <div>
                   <label className="form-label">Veículo / Placa Padrão</label>

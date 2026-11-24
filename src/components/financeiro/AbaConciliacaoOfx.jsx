@@ -14,6 +14,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { financeiroQueries } from '../../queries/financeiro'
+import { SmartSearchSelect } from '../shared/SmartSearchSelect'
 
 const fmtMoeda = (v) =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -500,32 +501,25 @@ export function AbaConciliacaoOfx({ contas, onAtualizar, toastSuccess, toastErro
                               <span className="text-xs font-mono text-muted">FITID: {l.fitid}</span>
                             ) : l.acao === 'BAIXAR_TITULO' ? (
                               <div className="flex flex-col gap-4">
-                                <select
-                                  className="form-input"
-                                  style={{
-                                    height: 34,
-                                    fontSize: 12,
-                                    padding: '4px 8px',
-                                    borderColor: !l.titulo_id ? 'var(--danger)' : undefined,
-                                  }}
+                                <SmartSearchSelect
+                                  items={opcoesTit}
                                   value={l.titulo_id}
-                                  onChange={(e) =>
+                                  compact
+                                  icon={l.tipo === 'ENTRADA' ? 'client' : 'supplier'}
+                                  getCode={(t) => String(t?.codigo || '')}
+                                  getLabel={(t) => String(t?.parceiro_nome || t?.descricao || '')}
+                                  getSubLabel={(t) => `Venc. ${fmtData(t?.data_vencimento)} • ${t?.descricao || ''}`}
+                                  getMetaRight={(t) => fmtMoeda(t?.saldo_aberto)}
+                                  emptyLabel={`-- Selecione o título ${l.tipo === 'ENTRADA' ? 'a Receber' : 'a Pagar'} --`}
+                                  placeholder="Pesquisar título (cód., parceiro, valor)..."
+                                  modalTitle={`Selecionar Título ${l.tipo === 'ENTRADA' ? 'a Receber' : 'a Pagar'}`}
+                                  onChange={(val) =>
                                     atualizarLinha(l.fitid, {
-                                      titulo_id: e.target.value,
+                                      titulo_id: val,
                                       quitar_diferenca_desconto: false,
                                     })
                                   }
-                                >
-                                  <option value="">
-                                    -- Selecione o título {l.tipo === 'ENTRADA' ? 'a Receber' : 'a Pagar'} --
-                                  </option>
-                                  {opcoesTit.map((t) => (
-                                    <option key={t.id} value={t.id}>
-                                      {t.codigo} • {t.parceiro_nome || t.descricao} • Venc {fmtData(t.data_vencimento)} •
-                                      Aberto {fmtMoeda(t.saldo_aberto)}
-                                    </option>
-                                  ))}
-                                </select>
+                                />
                                 {diffMaior && (
                                   <div className="text-xs text-warning">
                                     Diferença de +{fmtMoeda(l.valor - titSel.saldo_aberto)} será lançada automaticamente

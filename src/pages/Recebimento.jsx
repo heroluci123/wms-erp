@@ -15,6 +15,7 @@ import { CadastroEanModal } from '../components/shared/CadastroEanModal.jsx';
 import PesagemTaraFields, { resolverTaraSelecionada } from '../components/shared/PesagemTaraFields.jsx';
 import EtiquetaZebraModal from '../components/shared/EtiquetaZebraPrint.jsx';
 import RecebimentoPedidoDoca from '../components/recebimento/RecebimentoPedidoDoca.jsx';
+import { SmartSearchSelect } from '../components/shared/SmartSearchSelect.jsx';
 import { hojeIsoLocal, validarPesagemTara, fmtDataBR, fmtKg2, fmtKg3 } from '../utils/rastreabilidade.js';
 
 // ─── Helper: exportar CSV ────────────────────────────────────────────────────
@@ -896,14 +897,18 @@ export function Recebimento() {
               </div>
               <div className="form-grid form-grid--3" style={{ gap: 8 }}>
                 <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
-                  <select className="form-input" value={pcSelecionadoId} onChange={(e) => setPcSelecionadoId(e.target.value)}>
-                    <option value="">{travaSemPc ? 'Selecione um Pedido de Compra aprovado (obrigatório)...' : 'Recebimento avulso (sem PC vinculado)...'}</option>
-                    {pcsDoca.map((pc) => (
-                      <option key={pc.id} value={pc.id}>
-                        {pc.codigo} — {pc.fornecedor_nome} ({pc.status}) {pc.fornecedor_sif ? `• SIF ${pc.fornecedor_sif}` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <SmartSearchSelect
+                    items={pcsDoca}
+                    value={pcSelecionadoId}
+                    onChange={(val) => setPcSelecionadoId(val)}
+                    icon="supplier"
+                    getCode={(pc) => String(pc?.codigo || '')}
+                    getLabel={(pc) => String(pc?.fornecedor_nome || pc?.codigo || '')}
+                    getSubLabel={(pc) => [pc?.status, pc?.fornecedor_sif ? `SIF ${pc.fornecedor_sif}` : ''].filter(Boolean).join(' • ')}
+                    emptyLabel={travaSemPc ? 'Selecione um Pedido de Compra aprovado (obrigatório)...' : 'Recebimento avulso (sem PC vinculado)...'}
+                    placeholder="Pesquisar Pedido de Compra (PC, fornecedor, SIF)..."
+                    modalTitle="Selecionar Pedido de Compra na Doca"
+                  />
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <input
@@ -1131,14 +1136,17 @@ export function Recebimento() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginBottom: 14 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Filtrar Pedido de Compra</label>
-                <select className="form-input" value={pcSelecionadoId} onChange={(e) => setPcSelecionadoId(e.target.value)}>
-                  <option value="">Todos os Lotes / Recebimentos</option>
-                  {pcsDoca.map((pc) => (
-                    <option key={pc.id} value={pc.id}>
-                      {pc.codigo} — {pc.fornecedor_nome}
-                    </option>
-                  ))}
-                </select>
+                <SmartSearchSelect
+                  items={pcsDoca}
+                  value={pcSelecionadoId}
+                  onChange={(val) => setPcSelecionadoId(val)}
+                  icon="supplier"
+                  getCode={(pc) => String(pc?.codigo || '')}
+                  getLabel={(pc) => String(pc?.fornecedor_nome || pc?.codigo || '')}
+                  emptyLabel="Todos os Lotes / Recebimentos"
+                  placeholder="Filtrar por PC ou fornecedor..."
+                  modalTitle="Filtrar por Pedido de Compra"
+                />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Status</label>
