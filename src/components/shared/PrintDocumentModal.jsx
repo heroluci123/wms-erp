@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Printer, X } from 'lucide-react'
 
 export const fmtKg = (v) =>
@@ -44,7 +45,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
     return () => clearTimeout(t)
   }, [autoPrint])
 
-  return (
+  const modalContent = (
     <div
       className="wms-print-overlay"
       style={{
@@ -222,13 +223,30 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
             size: A4 ${orientation};
             margin: 8mm 10mm 8mm 10mm;
           }
-          body * {
-            visibility: hidden !important;
+          html,
+          body {
+            width: auto !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+          }
+          /* Remove totalmente #root e demais elementos do fluxo para nunca gerar folha extra em branco */
+          body > *:not(.wms-print-overlay) {
+            display: none !important;
           }
           .wms-print-overlay {
             position: static !important;
+            inset: auto !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
             background: transparent !important;
             padding: 0 !important;
+            margin: 0 !important;
             overflow: visible !important;
             display: block !important;
           }
@@ -243,15 +261,16 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
             print-color-adjust: exact !important;
           }
           .wms-print-sheet {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+            position: static !important;
             width: 100% !important;
-            min-height: auto !important;
+            max-width: none !important;
+            min-height: 0 !important;
+            height: auto !important;
             padding: 0 !important;
             margin: 0 !important;
             box-shadow: none !important;
             border-radius: 0 !important;
+            background: #ffffff !important;
           }
         }
       `}</style>
@@ -299,4 +318,6 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
       <div className="wms-print-sheet">{children}</div>
     </div>
   )
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent
 }
