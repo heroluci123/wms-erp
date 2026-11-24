@@ -29,6 +29,7 @@ import { registerInsumosRoutes } from './modules/insumos/routes.js'
 import { registerPrecosRoutes } from './modules/precos/routes.js'
 import { registerEspecificacoesRoutes } from './modules/cadastros/especificacoesRoutes.js'
 import { registerComercialRoutes } from './modules/comercial/routes.js'
+import { registerGovernancaRoutes } from './modules/governanca/routes.js'
 
 export async function buildApp(
   conn: DbConnection,
@@ -112,6 +113,7 @@ export async function buildApp(
   registerPrecosRoutes(app, conn)
   registerEspecificacoesRoutes(app, conn)
   registerComercialRoutes(app, conn)
+  registerGovernancaRoutes(app, conn)
 
   return app
 }

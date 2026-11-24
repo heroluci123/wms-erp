@@ -343,3 +343,120 @@ export const eanSequencias = pgTable(
   },
   (t) => [uniqueIndex('uq_ean_seq_tenant_chave').on(t.tenantId, t.chave)]
 )
+
+// ── ETAPA 6: COTAÇÕES DE COMPRAS (RFQ) & CONTROLE DE PERDAS ───────────────────
+export const comprasCotacoes = pgTable(
+  'compras_cotacoes',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    codigo: text('codigo').notNull(),
+    titulo: text('titulo').notNull(),
+    tipoCompra: text('tipo_compra').notNull().default('MATERIA_PRIMA'),
+    dataValidade: date('data_validade'),
+    status: text('status').notNull().default('ABERTA'), // ABERTA | EM_ANALISE | FECHADA | CANCELADA
+    observacoes: text('observacoes').notNull().default(''),
+    pedidosGeradosJson: jsonb('pedidos_gerados_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    economiaEstimada: numeric('economia_estimada', { precision: 14, scale: 2 }).notNull().default('0'),
+    criadoPorId: uuid('criado_por_id').references(() => operadores.id, { onDelete: 'set null' }),
+    criadoPorNome: text('criado_por_nome').notNull().default(''),
+    fechadaPorNome: text('fechada_por_nome').notNull().default(''),
+    fechadaEm: timestamp('fechada_em', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_cotacoes_tenant_codigo').on(t.tenantId, t.codigo),
+    index('idx_cotacoes_tenant_status').on(t.tenantId, t.status),
+  ]
+)
+
+export const comprasCotacoesItens = pgTable(
+  'compras_cotacoes_itens',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    cotacaoId: uuid('cotacao_id')
+      .notNull()
+      .references(() => comprasCotacoes.id, { onDelete: 'cascade' }),
+    produtoId: uuid('produto_id')
+      .notNull()
+      .references(() => produtos.id),
+    qtdKgSolicitada: numeric('qtd_kg_solicitada', { precision: 14, scale: 3 }).notNull(),
+    ultimoPrecoRef: numeric('ultimo_preco_ref', { precision: 14, scale: 4 }).notNull().default('0'),
+    observacao: text('observacao').notNull().default(''),
+  },
+  (t) => [index('idx_cot_itens_cotacao').on(t.cotacaoId)]
+)
+
+export const comprasCotacoesPropostas = pgTable(
+  'compras_cotacoes_propostas',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    cotacaoId: uuid('cotacao_id')
+      .notNull()
+      .references(() => comprasCotacoes.id, { onDelete: 'cascade' }),
+    cotacaoItemId: uuid('cotacao_item_id')
+      .notNull()
+      .references(() => comprasCotacoesItens.id, { onDelete: 'cascade' }),
+    fornecedorId: uuid('fornecedor_id')
+      .notNull()
+      .references(() => fornecedores.id, { onDelete: 'cascade' }),
+    precoUnitarioKg: numeric('preco_unitario_kg', { precision: 14, scale: 4 }).notNull(),
+    freteKg: numeric('frete_kg', { precision: 14, scale: 4 }).notNull().default('0'),
+    prazoEntregaDias: integer('prazo_entrega_dias').notNull().default(2),
+    condicaoPagamento: text('condicao_pagamento').notNull().default(''),
+    observacao: text('observacao').notNull().default(''),
+    vencedor: integer('vencedor').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_cot_prop_item_forn').on(t.cotacaoItemId, t.fornecedorId),
+    index('idx_cot_prop_cotacao').on(t.cotacaoId),
+  ]
+)
+
+export const perdasRegistro = pgTable(
+  'perdas_registro',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    codigo: text('codigo').notNull(),
+    origem: text('origem').notNull().default('ESTOQUE_CAIXA'), // ESTOQUE_CAIXA | ETIQUETA_ACOUGUE | EMPORIO | MANUAL
+    caixaId: uuid('caixa_id'),
+    eanCaixa: text('ean_caixa').notNull().default(''),
+    produtoId: uuid('produto_id').references(() => produtos.id, { onDelete: 'set null' }),
+    produtoCodigo: text('produto_codigo').notNull().default(''),
+    produtoDescricao: text('produto_descricao').notNull(),
+    lote: text('lote').notNull().default(''),
+    validade: date('validade'),
+    endereco: text('endereco').notNull().default(''),
+    motivo: text('motivo').notNull().default('VENCIMENTO'), // VENCIMENTO | AVARIA | QUEBRA_DESOSSA | TEMPERATURA | FURTO_DIVERGENCIA | OUTROS
+    qtdKg: numeric('qtd_kg', { precision: 14, scale: 3 }).notNull().default('0'),
+    custoUnitario: numeric('custo_unitario', { precision: 14, scale: 4 }).notNull().default('0'),
+    custoTotalPerda: numeric('custo_total_perda', { precision: 14, scale: 2 }).notNull().default('0'),
+    observacoes: text('observacoes').notNull().default(''),
+    operadorId: uuid('operador_id').references(() => operadores.id, { onDelete: 'set null' }),
+    operadorNome: text('operador_nome').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_perdas_tenant_codigo').on(t.tenantId, t.codigo),
+    index('idx_perdas_tenant_filial_data').on(t.tenantId, t.filialId, t.createdAt),
+  ]
+)

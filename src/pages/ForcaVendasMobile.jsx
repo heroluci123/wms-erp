@@ -37,6 +37,7 @@ import { pedidosQueries } from '../queries/pedidos'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { PwaInstallBanner } from '../components/shared/PwaInstallBanner'
+import { MesSelector } from '../components/shared/MesSelector'
 import { gerarLinkGoogleMapsCoords, gerarLinkWhatsApp, obterGpsAtual } from '../utils/motoristaPwa'
 
 const fmtMoeda = (v) =>
@@ -623,13 +624,7 @@ export function ForcaVendasMobile() {
         </div>
 
         <div className="flex items-center gap-8 flex-wrap">
-          <input
-            type="month"
-            className="form-input"
-            style={{ width: 155 }}
-            value={mesRef}
-            onChange={(e) => setMesRef(e.target.value)}
-          />
+          <MesSelector value={mesRef} onChange={setMesRef} align="right" />
           {resumo?.is_gestor && (resumo?.vendedores || []).length > 0 && (
             <select
               className="form-input"

@@ -30,6 +30,7 @@ import { isApiEnabled } from '../lib/apiClient'
 import { fiscalQueries } from '../queries/fiscal'
 import { cadastrosQueries } from '../queries/cadastros'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
+import { MesSelector } from '../components/shared/MesSelector'
 import {
   DanfePrintModal,
   PacoteLotePrintModal,
@@ -1485,13 +1486,8 @@ export function Fiscal() {
                 Guarda legal de 5 anos de todos os XMLs autorizados, cancelados e eventos (CC-e / Inutilização).
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <input
-                type="month"
-                className="form-input font-mono"
-                value={mesCofre}
-                onChange={(e) => setMesCofre(e.target.value)}
-              />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <MesSelector value={mesCofre} onChange={setMesCofre} align="right" />
               <button
                 type="button"
                 className="btn btn--primary"

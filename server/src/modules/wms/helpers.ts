@@ -15,6 +15,7 @@ import {
   pedidos,
   produtos,
   romaneios,
+  tabelasPreco,
   taras,
   tenants,
 } from '../../db/schema/index.js'
@@ -285,12 +286,20 @@ export async function gerarCodigoDocumento(
     | 'PDV_CAIXA'
     | 'PDV_VENDA'
     | 'ETQ_ACOUGUE'
-    | 'TABELA_PRECO',
+    | 'TABELA_PRECO'
+    | 'COTACAO_COMPRA'
+    | 'PERDA_ESTOQUE',
   prefix: string,
   pad = 4,
 ): Promise<string> {
   let maxAtual = 0
-  if (chave === 'PEDIDO' || chave === 'ROMANEIO' || chave === 'OP' || chave === 'PALETE') {
+  if (
+    chave === 'PEDIDO' ||
+    chave === 'ROMANEIO' ||
+    chave === 'OP' ||
+    chave === 'PALETE' ||
+    chave === 'TABELA_PRECO'
+  ) {
     let rows: Array<{ codigo: string }> = []
     if (chave === 'PEDIDO') {
       rows = await tx
@@ -313,6 +322,13 @@ export async function gerarCodigoDocumento(
         .where(eq(ordensProducao.tenantId, tenantId))
         .orderBy(desc(ordensProducao.createdAt))
         .limit(20)
+    } else if (chave === 'TABELA_PRECO') {
+      rows = await tx
+        .select({ codigo: tabelasPreco.codigo })
+        .from(tabelasPreco)
+        .where(eq(tabelasPreco.tenantId, tenantId))
+        .orderBy(desc(tabelasPreco.createdAt))
+        .limit(50)
     } else {
       rows = await tx
         .select({ codigo: paletes.codigo })

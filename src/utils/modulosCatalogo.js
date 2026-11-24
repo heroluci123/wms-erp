@@ -270,6 +270,25 @@ export function obterModulosVisiveis(operador, isFilialVarejo) {
       visible: temAlgumaPermissao(operador, ['insumos_coleta', 'compras', 'varejo_acougue', 'producao_entrada']),
       keywords: ['compras', 'insumo', 'insumos', 'embalagem', 'saco vacuo', 'caixa papelao', 'coleta', 'retirada', 'almoxarifado', 'uso e consumo', 'material'],
     },
+    {
+      id: 'governanca-perdas',
+      to: '/governanca-perdas',
+      label: 'Governança & Perdas',
+      section: 'Compras & Insumos',
+      icon: 'ShieldCheck',
+      visible: temAlgumaPermissao(operador, [
+        'compras', 'fornecedores', 'recebimento', 'estoque_enderecos',
+        'consulta_estoque', 'relatorios_estoque', 'dashboard_executivo',
+        'varejo_acougue', 'financeiro',
+      ]),
+      keywords: [
+        'governanca', 'compras', 'cotacao', 'cotacoes', 'rfq', 'mapa comparativo',
+        'fornecedor', 'fornecedores', 'score', 'sif', 'ranking', 'pontualidade',
+        'temperatura', 'fefo', 'validade', 'vencimento', 'vencido', 'perda', 'perdas',
+        'descarte', 'quebra', 'promocao', 'liquidacao', 'queima', 'antifraude',
+        'auditoria', 'cancelamento', 'fraude', 'prevencao de perdas',
+      ],
+    },
 
     // ── FATURAMENTO ───────────────────────────────────────────────────────────
     {

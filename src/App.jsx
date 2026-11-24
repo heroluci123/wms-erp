@@ -63,6 +63,7 @@ import { EmporioEstoque } from './pages/EmporioEstoque'
 import { Interunidades } from './pages/Interunidades'
 import { InsumosColeta } from './pages/InsumosColeta'
 import { ForcaVendasMobile } from './pages/ForcaVendasMobile'
+import { GovernancaPerdas } from './pages/GovernancaPerdas'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -128,6 +129,7 @@ function App() {
           <Route path="estoque" element={<RequirePermissao permissoes={['estoque_enderecos']} element={<EstoqueEnderecos />} />} />
           <Route path="recebimento" element={<RequirePermissao permissoes={['recebimento', 'recebimento_consultar']} element={<Recebimento />} />} />
           <Route path="compras" element={<RequirePermissao permissoes={['compras', 'recebimento']} element={<Compras />} />} />
+          <Route path="governanca-perdas" element={<RequirePermissao permissoes={['compras', 'fornecedores', 'recebimento', 'estoque_enderecos', 'consulta_estoque', 'relatorios_estoque', 'dashboard_executivo', 'varejo_acougue', 'financeiro']} element={<GovernancaPerdas />} />} />
           <Route path="movimentacao" element={<RequirePermissao permissoes={['movimentacao', 'movimentacao_consultar']} element={<Movimentacao />} />} />
           <Route path="mapa-producao" element={<RequirePermissao permissoes={['mapa_producao', 'producao_criar_op']} element={<MapaProducao />} />} />
           <Route path="producao" element={<RequirePermissao permissoes={['retorno_producao', 'producao_entrada', 'producao_saida', 'producao_criar_op']} element={<Producao />} />} />

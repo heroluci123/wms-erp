@@ -1897,6 +1897,83 @@ CREATE TABLE IF NOT EXISTS comercial_visitas (
 CREATE INDEX IF NOT EXISTS idx_com_visitas_tenant_data ON comercial_visitas(tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_com_visitas_vendedor ON comercial_visitas(tenant_id, vendedor_id);
 CREATE INDEX IF NOT EXISTS idx_com_visitas_cliente ON comercial_visitas(tenant_id, cliente_id);
+
+-- Etapa 6: Governança de Compras (Cotações RFQ) & Prevenção de Perdas (FEFO / Descartes)
+CREATE TABLE IF NOT EXISTS compras_cotacoes (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  tipo_compra TEXT NOT NULL DEFAULT 'MATERIA_PRIMA',
+  data_validade DATE,
+  status TEXT NOT NULL DEFAULT 'ABERTA',
+  observacoes TEXT NOT NULL DEFAULT '',
+  pedidos_gerados_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  economia_estimada NUMERIC(14,2) NOT NULL DEFAULT 0,
+  criado_por_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  criado_por_nome TEXT NOT NULL DEFAULT '',
+  fechada_por_nome TEXT NOT NULL DEFAULT '',
+  fechada_em TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cotacoes_tenant_codigo ON compras_cotacoes(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_cotacoes_tenant_status ON compras_cotacoes(tenant_id, status);
+
+CREATE TABLE IF NOT EXISTS compras_cotacoes_itens (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  cotacao_id UUID NOT NULL REFERENCES compras_cotacoes(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES produtos(id),
+  qtd_kg_solicitada NUMERIC(14,3) NOT NULL,
+  ultimo_preco_ref NUMERIC(14,4) NOT NULL DEFAULT 0,
+  observacao TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_cot_itens_cotacao ON compras_cotacoes_itens(cotacao_id);
+
+CREATE TABLE IF NOT EXISTS compras_cotacoes_propostas (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  cotacao_id UUID NOT NULL REFERENCES compras_cotacoes(id) ON DELETE CASCADE,
+  cotacao_item_id UUID NOT NULL REFERENCES compras_cotacoes_itens(id) ON DELETE CASCADE,
+  fornecedor_id UUID NOT NULL REFERENCES fornecedores(id) ON DELETE CASCADE,
+  preco_unitario_kg NUMERIC(14,4) NOT NULL,
+  frete_kg NUMERIC(14,4) NOT NULL DEFAULT 0,
+  prazo_entrega_dias INTEGER NOT NULL DEFAULT 2,
+  condicao_pagamento TEXT NOT NULL DEFAULT '',
+  observacao TEXT NOT NULL DEFAULT '',
+  vencedor INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cot_prop_item_forn ON compras_cotacoes_propostas(cotacao_item_id, fornecedor_id);
+CREATE INDEX IF NOT EXISTS idx_cot_prop_cotacao ON compras_cotacoes_propostas(cotacao_id);
+
+CREATE TABLE IF NOT EXISTS perdas_registro (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  origem TEXT NOT NULL DEFAULT 'ESTOQUE_CAIXA',
+  caixa_id UUID,
+  ean_caixa TEXT NOT NULL DEFAULT '',
+  produto_id UUID REFERENCES produtos(id) ON DELETE SET NULL,
+  produto_codigo TEXT NOT NULL DEFAULT '',
+  produto_descricao TEXT NOT NULL,
+  lote TEXT NOT NULL DEFAULT '',
+  validade DATE,
+  endereco TEXT NOT NULL DEFAULT '',
+  motivo TEXT NOT NULL DEFAULT 'VENCIMENTO',
+  qtd_kg NUMERIC(14,3) NOT NULL DEFAULT 0,
+  custo_unitario NUMERIC(14,4) NOT NULL DEFAULT 0,
+  custo_total_perda NUMERIC(14,2) NOT NULL DEFAULT 0,
+  observacoes TEXT NOT NULL DEFAULT '',
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_perdas_tenant_codigo ON perdas_registro(tenant_id, codigo);
+CREATE INDEX IF NOT EXISTS idx_perdas_tenant_filial_data ON perdas_registro(tenant_id, filial_id, created_at);
 `
 
 export interface SeedDefaultsResult {
