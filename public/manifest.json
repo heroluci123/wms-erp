@@ -31,6 +31,13 @@
       "icons": [{ "src": "/icon.png", "sizes": "192x192" }]
     },
     {
+      "name": "Força de Vendas",
+      "short_name": "Vendas",
+      "description": "Carteira de clientes, metas e pedidos atacado",
+      "url": "/#/forca-vendas",
+      "icons": [{ "src": "/icon.png", "sizes": "192x192" }]
+    },
+    {
       "name": "PDV Frente de Caixa",
       "short_name": "PDV",
       "description": "Abrir frente de caixa",

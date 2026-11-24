@@ -62,6 +62,7 @@ import { TabelasPreco } from './pages/TabelasPreco'
 import { EmporioEstoque } from './pages/EmporioEstoque'
 import { Interunidades } from './pages/Interunidades'
 import { InsumosColeta } from './pages/InsumosColeta'
+import { ForcaVendasMobile } from './pages/ForcaVendasMobile'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -136,6 +137,7 @@ function App() {
           <Route path="pendencias" element={<RequirePermissao allowCliente={false} element={<CentralPendencias />} />} />
           <Route path="whatsapp-inbox" element={<RequirePermissao permissoes={['whatsapp_inbox', 'pedidos']} element={<WhatsappInbox />} />} />
           <Route path="pedidos" element={<RequirePermissao permissoes={['pedidos', 'financeiro_pedidos']} element={<Pedidos />} />} />
+          <Route path="forca-vendas" element={<RequirePermissao permissoes={['pedidos', 'financeiro_pedidos', 'clientes', 'vendedores']} element={<ForcaVendasMobile />} />} />
           <Route path="fiscal" element={<RequirePermissao permissoes={['fiscal', 'devolucao_fiscal', 'parametros_comerciais']} element={<Fiscal />} />} />
           <Route path="pdv" element={<RequirePermissao permissoes={['pdv_caixa', 'varejo_acougue']} element={<PdvCaixa />} />} />
           <Route path="acougue" element={<RequirePermissao permissoes={['varejo_acougue']} element={<AcougueOperacao />} />} />

@@ -17,6 +17,7 @@ import {
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
 import { cadastrosQueries } from '../queries/cadastros'
+import { precosQueries } from '../queries/varejo'
 import * as produtosQueries from '../queries/produtos'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { ModalDialog } from '../components/shared/ModalDialog'
@@ -50,6 +51,9 @@ const FORM_INICIAL = {
   marchante_padrao: '',
   rota_padrao_nome: '',
   limite_credito: 0,
+  tabela_preco_id: '',
+  desconto_ativo: 0,
+  desconto_max_pct: 0,
   permite_pagamento_entrega: 1,
   bloqueado_financeiro: 0,
   is_padrao: 0,
@@ -61,6 +65,7 @@ export function Clientes() {
   const [vendedores, setVendedores] = useState([])
   const [auxiliares, setAuxiliares] = useState({ formasPagamento: [], locaisCobranca: [], marchantes: [] })
   const [rotas, setRotas] = useState([])
+  const [tabelasPreco, setTabelasPreco] = useState([])
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -100,16 +105,18 @@ export function Clientes() {
   const carregar = useCallback(async () => {
     setLoading(true)
     try {
-      const [cliRes, vendRes, auxRes, rotRes] = await Promise.all([
+      const [cliRes, vendRes, auxRes, rotRes, tabRes] = await Promise.all([
         cadastrosQueries.listarClientes({ incluirInativos: true }),
         cadastrosQueries.listarVendedores().catch(() => []),
         cadastrosQueries.listarAuxiliares().catch(() => ({ formasPagamento: [], locaisCobranca: [], marchantes: [] })),
         cadastrosQueries.listarRotas().catch(() => []),
+        isApiEnabled() ? precosQueries.listarTabelas().catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
       ])
       setClientes(cliRes || [])
       setVendedores(vendRes || [])
       setAuxiliares(auxRes || { formasPagamento: [], locaisCobranca: [], marchantes: [] })
       setRotas(rotRes || [])
+      setTabelasPreco(tabRes?.data || [])
     } catch (err) {
       toastError('Erro ao carregar clientes', err.message)
     } finally {
@@ -196,6 +203,9 @@ export function Clientes() {
       marchante_padrao: c.marchante_padrao || marchantePadraoDefault,
       rota_padrao_nome: c.rota_padrao_nome || '',
       limite_credito: Number(c.limite_credito || 0),
+      tabela_preco_id: c.tabela_preco_id || '',
+      desconto_ativo: Number(c.desconto_ativo || 0),
+      desconto_max_pct: Number(c.desconto_max_pct || 0),
       permite_pagamento_entrega: Number(c.permite_pagamento_entrega ?? 1),
       bloqueado_financeiro: Number(c.bloqueado_financeiro || 0),
       is_padrao: Number(c.is_padrao || 0),
@@ -227,6 +237,9 @@ export function Clientes() {
         vendedor_padrao_id: form.vendedor_padrao_id || null,
         forma_pagamento_padrao_id: form.forma_pagamento_padrao_id || null,
         local_cobranca_padrao_id: form.local_cobranca_padrao_id || null,
+        tabela_preco_id: form.tabela_preco_id || null,
+        desconto_ativo: Number(form.desconto_max_pct || 0) > 0 ? 1 : Number(form.desconto_ativo || 0),
+        desconto_max_pct: Number(form.desconto_max_pct || 0),
         limite_credito: Number(form.limite_credito || 0),
       })
       toastSuccess('Cliente salvo', `${form.razao_social.toUpperCase()} salvo com sucesso.`)
@@ -803,6 +816,42 @@ export function Clientes() {
                   <div>
                     <label className="form-label">Limite de Crédito (R$)</label>
                     <input type="number" step="0.01" className="form-input" value={form.limite_credito} onChange={(e) => setForm({ ...form, limite_credito: e.target.value })} />
+                  </div>
+                </div>
+
+                <div className="form-grid form-grid--2 mt-12">
+                  <div>
+                    <label className="form-label">Tabela de Preço Padrão (Atacado / Contrato)</label>
+                    <select
+                      className="form-input"
+                      value={form.tabela_preco_id}
+                      onChange={(e) => setForm({ ...form, tabela_preco_id: e.target.value })}
+                    >
+                      <option value="">-- Usar Padrão Atacado / Base --</option>
+                      {tabelasPreco.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.codigo} — {t.nome} ({t.finalidade})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Desconto Máximo Negociado (%)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="100"
+                      className="form-input"
+                      value={form.desconto_max_pct}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          desconto_max_pct: e.target.value,
+                          desconto_ativo: Number(e.target.value || 0) > 0 ? 1 : 0,
+                        })
+                      }
+                    />
                   </div>
                 </div>
 

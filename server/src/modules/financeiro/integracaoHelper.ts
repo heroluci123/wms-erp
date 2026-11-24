@@ -146,7 +146,7 @@ export async function sincronizarTitulosPedidoVenda(
   }
 
   const valorTotal = toNum(ped.valorTotal, 0)
-  if (ped.status === 'RASCUNHO' || valorTotal <= 0) {
+  if (ped.status === 'RASCUNHO' || ped.status === 'BLOQUEADO_COMERCIAL' || valorTotal <= 0) {
     const abertosIds = existentes.filter((t) => t.status === 'ABERTO').map((t) => t.id)
     if (abertosIds.length > 0) {
       await tx.delete(financeiroTitulos).where(inArray(financeiroTitulos.id, abertosIds))

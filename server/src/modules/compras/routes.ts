@@ -112,6 +112,21 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
             raw.tolerancia_recebimento_pct != null && Number.isFinite(Number(raw.tolerancia_recebimento_pct))
               ? Number(raw.tolerancia_recebimento_pct)
               : 3,
+          trava_margem_ativa: Boolean(raw.trava_margem_ativa),
+          trava_credito_ativa: Boolean(raw.trava_credito_ativa),
+          margem_minima_padrao_pct:
+            raw.margem_minima_padrao_pct != null && Number.isFinite(Number(raw.margem_minima_padrao_pct))
+              ? Number(raw.margem_minima_padrao_pct)
+              : 12,
+          desconto_max_vendedor_pct:
+            raw.desconto_max_vendedor_pct != null && Number.isFinite(Number(raw.desconto_max_vendedor_pct))
+              ? Number(raw.desconto_max_vendedor_pct)
+              : 5,
+          dias_tolerancia_inadimplencia:
+            raw.dias_tolerancia_inadimplencia != null && Number.isFinite(Number(raw.dias_tolerancia_inadimplencia))
+              ? Number(raw.dias_tolerancia_inadimplencia)
+              : 3,
+          bloquear_venda_abaixo_custo: raw.bloquear_venda_abaixo_custo !== false,
         },
       }
     },
@@ -142,6 +157,12 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
         permitir_carga_inicial_emporio?: boolean
         padrao_balanca_loja?: string
         tolerancia_recebimento_pct?: number
+        trava_margem_ativa?: boolean
+        trava_credito_ativa?: boolean
+        margem_minima_padrao_pct?: number
+        desconto_max_vendedor_pct?: number
+        dias_tolerancia_inadimplencia?: number
+        bloquear_venda_abaixo_custo?: boolean
       }
       const atual = await lerTenantFeatures(conn.db, ctx.tenantId)
       const next: Record<string, unknown> = { ...atual }
@@ -174,6 +195,27 @@ export function registerComprasRoutes(app: FastifyInstance, conn: DbConnection):
       if (body.tolerancia_recebimento_pct !== undefined) {
         const tol = Math.min(25, Math.max(0, Number(body.tolerancia_recebimento_pct)))
         if (Number.isFinite(tol)) next.tolerancia_recebimento_pct = tol
+      }
+      if (body.trava_margem_ativa !== undefined) {
+        next.trava_margem_ativa = Boolean(body.trava_margem_ativa)
+      }
+      if (body.trava_credito_ativa !== undefined) {
+        next.trava_credito_ativa = Boolean(body.trava_credito_ativa)
+      }
+      if (body.margem_minima_padrao_pct !== undefined) {
+        const m = Math.min(90, Math.max(0, Number(body.margem_minima_padrao_pct)))
+        if (Number.isFinite(m)) next.margem_minima_padrao_pct = m
+      }
+      if (body.desconto_max_vendedor_pct !== undefined) {
+        const d = Math.min(100, Math.max(0, Number(body.desconto_max_vendedor_pct)))
+        if (Number.isFinite(d)) next.desconto_max_vendedor_pct = d
+      }
+      if (body.dias_tolerancia_inadimplencia !== undefined) {
+        const dias = Math.min(180, Math.max(0, Math.round(Number(body.dias_tolerancia_inadimplencia))))
+        if (Number.isFinite(dias)) next.dias_tolerancia_inadimplencia = dias
+      }
+      if (body.bloquear_venda_abaixo_custo !== undefined) {
+        next.bloquear_venda_abaixo_custo = Boolean(body.bloquear_venda_abaixo_custo)
       }
 
       await conn.db

@@ -300,6 +300,15 @@ export function obterModulosVisiveis(operador, isFilialVarejo) {
       keywords: ['pedido', 'pedidos', 'venda', 'vendas', 'atacado', 'faturamento', 'separacao', 'cliente', 'orcamento', 'comercial'],
     },
     {
+      id: 'forca-vendas',
+      to: '/forca-vendas',
+      label: 'Força de Vendas & Margem',
+      section: 'Faturamento',
+      icon: 'TrendingUp',
+      visible: temAlgumaPermissao(operador, ['pedidos', 'financeiro_pedidos', 'clientes', 'vendedores']),
+      keywords: ['forca de vendas', 'vendas', 'vendedor', 'comercial', 'atacado', 'margem', 'trava margem', 'aprovacao', 'desconto', 'comissao', 'meta', 'carteira', 'visita', 'crm', 'mobile', 'pwa', 'iphone', 'credito'],
+    },
+    {
       id: 'fiscal',
       to: '/fiscal',
       label: 'Fiscal (NF-e / NFC-e)',

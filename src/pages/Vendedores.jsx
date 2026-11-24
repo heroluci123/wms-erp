@@ -23,6 +23,8 @@ const FORM_INICIAL = {
   regra_liberacao: 'FATURAMENTO',
   meta_mensal_kg: 0,
   meta_mensal_valor: 0,
+  desconto_max_pct: 5,
+  margem_minima_pct: '',
 }
 
 const LABELS_COMISSAO = {
@@ -83,6 +85,11 @@ export function Vendedores() {
         pct_comissao: Number(form.pct_comissao || 0),
         meta_mensal_kg: Number(form.meta_mensal_kg || 0),
         meta_mensal_valor: Number(form.meta_mensal_valor || 0),
+        desconto_max_pct: Number(form.desconto_max_pct ?? 5),
+        margem_minima_pct:
+          form.margem_minima_pct !== '' && form.margem_minima_pct !== null && form.margem_minima_pct !== undefined
+            ? Number(form.margem_minima_pct)
+            : null,
       })
       toastSuccess('Vendedor salvo', `${form.nome} atualizado com sucesso.`)
       setModalOpen(false)
@@ -138,6 +145,7 @@ export function Vendedores() {
                 <th>Tipo Comissão</th>
                 <th>Liberação</th>
                 <th style={{ textAlign: 'right' }}>Comissão</th>
+                <th style={{ textAlign: 'right' }}>Limites (Desc / Mg)</th>
                 <th style={{ textAlign: 'right' }}>Metas Mensais</th>
                 <th style={{ textAlign: 'right' }}>Ações</th>
               </tr>
@@ -177,6 +185,12 @@ export function Vendedores() {
                         ? `R$ ${Number(v.pct_comissao || 0).toFixed(2)}/kg`
                         : `${Number(v.pct_comissao || 0).toFixed(2)}%`}
                     </td>
+                    <td style={{ textAlign: 'right' }} className="td-mono text-xs">
+                      <div>Desc ≤ {Number(v.desconto_max_pct ?? 5).toFixed(1)}%</div>
+                      <div className="td-muted">
+                        Mg ≥ {v.margem_minima_pct != null ? `${Number(v.margem_minima_pct).toFixed(1)}%` : 'Padrão'}
+                      </div>
+                    </td>
                     <td style={{ textAlign: 'right' }} className="td-mono">
                       <div>{Number(v.meta_mensal_kg || 0).toLocaleString('pt-BR')} kg</div>
                       <div className="td-muted">
@@ -200,6 +214,8 @@ export function Vendedores() {
                               regra_liberacao: v.regra_liberacao || 'FATURAMENTO',
                               meta_mensal_kg: Number(v.meta_mensal_kg || 0),
                               meta_mensal_valor: Number(v.meta_mensal_valor || 0),
+                              desconto_max_pct: Number(v.desconto_max_pct ?? 5),
+                              margem_minima_pct: v.margem_minima_pct != null ? Number(v.margem_minima_pct) : '',
                             })
                             setModalOpen(true)
                           }}
@@ -302,6 +318,33 @@ export function Vendedores() {
                 <div>
                   <label className="form-label">Meta Mensal (R$)</label>
                   <input type="number" step="0.01" className="form-input" value={form.meta_mensal_valor} onChange={(e) => setForm({ ...form, meta_mensal_valor: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-grid form-grid--2">
+                <div>
+                  <label className="form-label">Desconto Máximo Permitido (%)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="100"
+                    className="form-input"
+                    value={form.desconto_max_pct}
+                    onChange={(e) => setForm({ ...form, desconto_max_pct: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">Margem Mínima Individual (% — vazio = padrão)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="95"
+                    className="form-input"
+                    placeholder="Herda padrão da empresa"
+                    value={form.margem_minima_pct}
+                    onChange={(e) => setForm({ ...form, margem_minima_pct: e.target.value })}
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-8 pt-12 border-t border-border">

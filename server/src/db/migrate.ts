@@ -1860,6 +1860,43 @@ ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS motivo_recusa TEXT NOT NU
 ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS itens_recusados_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS entrega_lat NUMERIC(10,7);
 ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS entrega_lng NUMERIC(10,7);
+
+-- Etapa 5: Comercial Atacado, Força de Vendas Mobile & Trava de Margem / Crédito
+ALTER TABLE vendedores ADD COLUMN IF NOT EXISTS desconto_max_pct NUMERIC(6,2) NOT NULL DEFAULT 5;
+ALTER TABLE vendedores ADD COLUMN IF NOT EXISTS margem_minima_pct NUMERIC(6,2);
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tabela_preco_id UUID;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS custo_total_estimado NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS margem_bruta_pct NUMERIC(7,2);
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS alerta_comercial_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aprovado_comercial_por_id UUID;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aprovado_comercial_por_nome TEXT NOT NULL DEFAULT '';
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aprovado_comercial_em TIMESTAMPTZ;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aprovado_comercial_obs TEXT NOT NULL DEFAULT '';
+ALTER TABLE pedidos_itens ADD COLUMN IF NOT EXISTS preco_tabela_ref NUMERIC(14,4);
+ALTER TABLE pedidos_itens ADD COLUMN IF NOT EXISTS custo_unitario_ref NUMERIC(14,4) NOT NULL DEFAULT 0;
+ALTER TABLE pedidos_itens ADD COLUMN IF NOT EXISTS margem_item_pct NUMERIC(7,2);
+
+CREATE TABLE IF NOT EXISTS comercial_visitas (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  vendedor_id UUID REFERENCES vendedores(id) ON DELETE SET NULL,
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+  cliente_nome TEXT NOT NULL DEFAULT '',
+  tipo TEXT NOT NULL DEFAULT 'PRESENCIAL',
+  resultado TEXT NOT NULL DEFAULT 'CONTATO_REALIZADO',
+  pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL,
+  observacoes TEXT NOT NULL DEFAULT '',
+  lat NUMERIC(10,7),
+  lng NUMERIC(10,7),
+  proximo_contato_em DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_com_visitas_tenant_data ON comercial_visitas(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_com_visitas_vendedor ON comercial_visitas(tenant_id, vendedor_id);
+CREATE INDEX IF NOT EXISTS idx_com_visitas_cliente ON comercial_visitas(tenant_id, cliente_id);
 `
 
 export interface SeedDefaultsResult {

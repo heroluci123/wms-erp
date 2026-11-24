@@ -28,6 +28,7 @@ import { registerAcougueRoutes } from './modules/varejo/acougueRoutes.js'
 import { registerInsumosRoutes } from './modules/insumos/routes.js'
 import { registerPrecosRoutes } from './modules/precos/routes.js'
 import { registerEspecificacoesRoutes } from './modules/cadastros/especificacoesRoutes.js'
+import { registerComercialRoutes } from './modules/comercial/routes.js'
 
 export async function buildApp(
   conn: DbConnection,
@@ -110,6 +111,7 @@ export async function buildApp(
   registerInsumosRoutes(app, conn)
   registerPrecosRoutes(app, conn)
   registerEspecificacoesRoutes(app, conn)
+  registerComercialRoutes(app, conn)
 
   return app
 }

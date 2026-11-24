@@ -27,6 +27,12 @@ import { calcularESalvarParcelas } from './parcelasHelper.js'
 import { formatarResumoTravaEstoque, registrarPendenciaTravaEstoque, verificarEstoquePedido } from './travaEstoqueHelper.js'
 import { sincronizarTitulosPedidoVenda } from '../financeiro/integracaoHelper.js'
 import {
+  atualizarUltimaVendaClienteProdutos,
+  avaliarGovernancaComercialPedido,
+  registrarPendenciaTravaComercial,
+} from '../comercial/governancaHelper.js'
+import { validarPinGerencial } from '../precos/routes.js'
+import {
   assertEnderecosNaoBloqueados,
   gerarCodigoDocumento,
   hojeIsoLocal,
@@ -67,6 +73,9 @@ function limparMotivoTrava(raw?: string | null, status?: string): string {
   }
   if (status === 'BLOQUEADO_ESTOQUE') {
     return 'Estoque insuficiente ou comprometido por outro pedido em aberto'
+  }
+  if (status === 'BLOQUEADO_COMERCIAL') {
+    return 'Aguardando aprovação gerencial (Trava Comercial / Margem / Crédito)'
   }
   return ''
 }
@@ -276,6 +285,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         case 'STATUS_PADRAO':
           orderExprs = [
             sql`CASE ${pedidos.status}
+              WHEN 'BLOQUEADO_COMERCIAL' THEN 0
               WHEN 'BLOQUEADO_ESTOQUE' THEN 1
               WHEN 'LIBERADO' THEN 2
               WHEN 'EM_SEPARACAO' THEN 3
@@ -310,6 +320,13 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             pagamento_na_entrega: pedidos.pagamentoNaEntrega,
             previsao_entrega: pedidos.previsaoEntrega,
             valor_total: pedidos.valorTotal,
+            tabela_preco_id: pedidos.tabelaPrecoId,
+            custo_total_estimado: pedidos.custoTotalEstimado,
+            margem_bruta_pct: pedidos.margemBrutaPct,
+            alerta_comercial: pedidos.alertaComercialJson,
+            aprovado_comercial_por_nome: pedidos.aprovadoComercialPorNome,
+            aprovado_comercial_em: pedidos.aprovadoComercialEm,
+            aprovado_comercial_obs: pedidos.aprovadoComercialObs,
             observacoes: pedidos.observacoes,
             observacao_nf: pedidos.observacaoNf,
             origem_pedido: pedidos.origemPedido,
@@ -352,6 +369,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       const kpisGerais = {
         total: totalGeral,
         rascunho: countMap.get('RASCUNHO') || 0,
+        bloqueadosComercial: countMap.get('BLOQUEADO_COMERCIAL') || 0,
         bloqueadosEstoque: countMap.get('BLOQUEADO_ESTOQUE') || 0,
         liberados: countMap.get('LIBERADO') || 0,
         emSeparacao: countMap.get('EM_SEPARACAO') || 0,
@@ -365,6 +383,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         data: rows.map((r) => ({
           ...r,
           valor_total: toNum(r.valor_total, 0),
+          custo_total_estimado: toNum(r.custo_total_estimado, 0),
+          margem_bruta_pct: r.margem_bruta_pct != null ? toNum(r.margem_bruta_pct, 0) : null,
+          alerta_comercial: r.alerta_comercial && typeof r.alerta_comercial === 'object' ? r.alerta_comercial : {},
           total_kg_solicitado: toNum(r.total_kg_solicitado, 0),
           total_kg_separado: toNum(r.total_kg_separado, 0),
           motivo_trava: limparMotivoTrava(r.motivo_trava_raw, r.status),
@@ -483,6 +504,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           unidade_solicitada: pedidosItens.unidadeSolicitada,
           qtd_solicitada_exibicao: pedidosItens.qtdSolicitadaExibicao,
           preco_unitario: pedidosItens.precoUnitario,
+          preco_tabela_ref: pedidosItens.precoTabelaRef,
+          custo_unitario_ref: pedidosItens.custoUnitarioRef,
+          margem_item_pct: pedidosItens.margemItemPct,
           desconto_pct: pedidosItens.descontoPct,
           desconto_valor: pedidosItens.descontoValor,
           cfop_aplicado: pedidosItens.cfopAplicado,
@@ -588,6 +612,16 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           pagamento_na_entrega: pedido.pagamentoNaEntrega,
           previsao_entrega: pedido.previsaoEntrega,
           valor_total: toNum(pedido.valorTotal, 0),
+          tabela_preco_id: pedido.tabelaPrecoId || null,
+          custo_total_estimado: toNum(pedido.custoTotalEstimado, 0),
+          margem_bruta_pct: pedido.margemBrutaPct != null ? toNum(pedido.margemBrutaPct, 0) : null,
+          alerta_comercial:
+            pedido.alertaComercialJson && typeof pedido.alertaComercialJson === 'object'
+              ? pedido.alertaComercialJson
+              : {},
+          aprovado_comercial_por_nome: pedido.aprovadoComercialPorNome || '',
+          aprovado_comercial_em: pedido.aprovadoComercialEm || null,
+          aprovado_comercial_obs: pedido.aprovadoComercialObs || '',
           observacoes: pedido.observacoes,
           observacao_nf: pedido.observacaoNf || '',
           origem_pedido: pedido.origemPedido,
@@ -620,6 +654,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             qtd_solicitada_exibicao:
               it.qtd_solicitada_exibicao != null ? toNum(it.qtd_solicitada_exibicao, 0) : null,
             preco_unitario: toNum(it.preco_unitario, 0),
+            preco_tabela_ref: it.preco_tabela_ref != null ? toNum(it.preco_tabela_ref, 0) : null,
+            custo_unitario_ref: toNum(it.custo_unitario_ref, 0),
+            margem_item_pct: it.margem_item_pct != null ? toNum(it.margem_item_pct, 0) : null,
             desconto_pct: toNum(it.desconto_pct, 0),
             desconto_valor: toNum(it.desconto_valor, 0),
             estoque_disponivel_kg: toNum(it.estoque_disponivel_kg, 0),
@@ -642,6 +679,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       forma_pagamento_id?: string | null
       local_cobranca_id?: string | null
       natureza_id?: string | null
+      tabela_preco_id?: string | null
       marchante?: string
       pagamento_na_entrega?: boolean | number
       previsao_entrega?: string | null
@@ -651,6 +689,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       setor_solicitante?: string
       liberar?: boolean
       ignorar_trava_estoque?: boolean
+      aplicar_trava_comercial?: boolean
+      ignorar_trava_comercial?: boolean
+      pin_gerencial?: string
       itens: ItemPedidoInput[]
     }
 
@@ -709,6 +750,60 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       const codigo = await gerarCodigoDocumento(tx, ctx.tenantId, 'PEDIDO', 'PED', 4)
       let status = body.liberar === false || forcarRascunho ? 'RASCUNHO' : 'LIBERADO'
       let itensInsuficientes: Awaited<ReturnType<typeof verificarEstoquePedido>>['insuficientes'] = []
+
+      const vendedorFinalId = body.vendedor_id
+        ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
+        : cliDefaults?.vendedorPadraoId || null
+      const tabelaPrecoFinalId = body.tabela_preco_id
+        ? parseUuidOrBadRequest(body.tabela_preco_id, 'tabela_preco_id')
+        : cliDefaults?.tabelaPrecoId || null
+      const pgtoEntregaFlag =
+        body.pagamento_na_entrega != null
+          ? body.pagamento_na_entrega
+            ? 1
+            : 0
+          : cliDefaults?.permitePagamentoEntrega || 0
+
+      // Governança Comercial: Margem Real, Preço abaixo do custo, Teto de Desconto, Limite de Crédito & Inadimplência
+      const gov = await avaliarGovernancaComercialPedido(tx, {
+        tenantId: ctx.tenantId,
+        clienteId,
+        vendedorId: vendedorFinalId,
+        tabelaPrecoId: tabelaPrecoFinalId,
+        pagamentoNaEntrega: pgtoEntregaFlag === 1,
+        itens: itensConsolidados,
+        forcarAvaliacaoEstrita: body.aplicar_trava_comercial === true,
+      })
+
+      let aprovadoComercialPorId: string | null = null
+      let aprovadoComercialPorNome = ''
+      let aprovadoComercialEm: Date | null = null
+      let aprovadoComercialObs = ''
+
+      if (status === 'LIBERADO' && gov.alerta.exige_aprovacao) {
+        let liberadoPelaGestao = false
+        if (body.pin_gerencial && String(body.pin_gerencial).trim()) {
+          const gestorPin = await validarPinGerencial(tx, ctx.tenantId, body.pin_gerencial)
+          aprovadoComercialPorId = gestorPin.id
+          aprovadoComercialPorNome = gestorPin.nome
+          aprovadoComercialEm = new Date()
+          aprovadoComercialObs = 'Liberado no lançamento via PIN Gerencial'
+          liberadoPelaGestao = true
+        } else if (
+          body.ignorar_trava_comercial === true &&
+          ['MASTER', 'ADMINISTRADOR'].includes(String(ctx.operador.nivel || '').toUpperCase())
+        ) {
+          aprovadoComercialPorId = ctx.operador.id
+          aprovadoComercialPorNome = ctx.operador.nome
+          aprovadoComercialEm = new Date()
+          aprovadoComercialObs = 'Liberado diretamente por Master/Administrador'
+          liberadoPelaGestao = true
+        }
+        if (!liberadoPelaGestao) {
+          status = 'BLOQUEADO_COMERCIAL'
+        }
+      }
+
       if (status === 'LIBERADO' && body.ignorar_trava_estoque !== true) {
         const estoqueCheck = await verificarEstoquePedido(tx, {
           tenantId: ctx.tenantId,
@@ -746,9 +841,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         titulo: tituloTrim,
         clienteId,
         cliente: clienteNome,
-        vendedorId: body.vendedor_id
-          ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
-          : cliDefaults?.vendedorPadraoId || null,
+        vendedorId: vendedorFinalId,
         formaPagamentoId: body.forma_pagamento_id
           ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id')
           : cliDefaults?.formaPagamentoPadraoId || null,
@@ -756,13 +849,16 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           ? parseUuidOrBadRequest(body.local_cobranca_id, 'local_cobranca_id')
           : cliDefaults?.localCobrancaPadraoId || null,
         naturezaId: body.natureza_id ? parseUuidOrBadRequest(body.natureza_id, 'natureza_id') : null,
+        tabelaPrecoId: gov.tabela_preco_usada_id || tabelaPrecoFinalId,
+        custoTotalEstimado: toDec(gov.custo_total_estimado, 2),
+        margemBrutaPct: gov.margem_bruta_pct != null ? toDec(gov.margem_bruta_pct, 2) : null,
+        alertaComercialJson: gov.alerta,
+        aprovadoComercialPorId,
+        aprovadoComercialPorNome,
+        aprovadoComercialEm,
+        aprovadoComercialObs,
         marchante: marchanteFinal,
-        pagamentoNaEntrega:
-          body.pagamento_na_entrega != null
-            ? body.pagamento_na_entrega
-              ? 1
-              : 0
-            : cliDefaults?.permitePagamentoEntrega || 0,
+        pagamentoNaEntrega: pgtoEntregaFlag,
         previsaoEntrega: normalizarDataIso(body.previsao_entrega),
         valorTotal: toDec(valorTotal, 2),
         observacoes: String(body.observacoes || '').trim(),
@@ -795,25 +891,48 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       }
 
       await tx.insert(pedidosItens).values(
-        itensConsolidados.map((it) => ({
-          id: uuidv7(),
-          tenantId: ctx.tenantId,
-          pedidoId,
-          produtoId: it.produto_id,
-          codigoAux: it.codigo_aux,
-          qtdKgSolicitada: toDec(it.qtd_kg_solicitada, 3),
-          qtdCaixasSolicitada:
-            it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : null,
-          unidadeSolicitada: it.unidade_solicitada,
-          qtdSolicitadaExibicao: toDec(it.qtd_solicitada_exibicao, 3),
-          precoUnitario: toDec(it.preco_unitario, 4),
-          descontoPct: toDec(it.desconto_pct, 2),
-          descontoValor: toDec(it.desconto_valor, 2),
-          cfopAplicado: it.cfop_aplicado,
-          observacao: it.observacao,
-          alertaReclamacao: it.alerta_reclamacao,
-        })),
+        itensConsolidados.map((it) => {
+          const calc = gov.itens_calculados.get(it.produto_id)
+          return {
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            pedidoId,
+            produtoId: it.produto_id,
+            codigoAux: it.codigo_aux,
+            qtdKgSolicitada: toDec(it.qtd_kg_solicitada, 3),
+            qtdCaixasSolicitada:
+              it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : null,
+            unidadeSolicitada: it.unidade_solicitada,
+            qtdSolicitadaExibicao: toDec(it.qtd_solicitada_exibicao, 3),
+            precoUnitario: toDec(it.preco_unitario, 4),
+            precoTabelaRef: calc?.preco_tabela_ref != null ? toDec(calc.preco_tabela_ref, 4) : null,
+            custoUnitarioRef: toDec(calc?.custo_unitario_ref ?? 0, 4),
+            margemItemPct: calc?.margem_item_pct != null ? toDec(calc.margem_item_pct, 2) : null,
+            descontoPct: toDec(it.desconto_pct, 2),
+            descontoValor: toDec(it.desconto_valor, 2),
+            cfopAplicado: it.cfop_aplicado,
+            observacao: it.observacao,
+            alertaReclamacao: it.alerta_reclamacao,
+          }
+        }),
       )
+
+      await atualizarUltimaVendaClienteProdutos(tx, {
+        tenantId: ctx.tenantId,
+        clienteId,
+        itens: itensConsolidados,
+      })
+
+      if (status === 'BLOQUEADO_COMERCIAL') {
+        await registrarPendenciaTravaComercial(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          pedidoId,
+          codigoPedido: codigo,
+          clienteNome,
+          alerta: gov.alerta,
+        })
+      }
 
       if (status === 'BLOQUEADO_ESTOQUE' && itensInsuficientes.length > 0) {
         await registrarPendenciaTravaEstoque(tx, {
@@ -849,8 +968,18 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         id: pedidoId,
         codigo,
         status,
+        margem_bruta_pct: gov.margem_bruta_pct,
+        custo_total_estimado: gov.custo_total_estimado,
+        trava_comercial: status === 'BLOQUEADO_COMERCIAL',
+        motivo_trava_comercial: status === 'BLOQUEADO_COMERCIAL' ? gov.alerta.motivos.join(' | ') : '',
+        alerta_comercial: gov.alerta,
         trava_estoque: status === 'BLOQUEADO_ESTOQUE',
-        motivo_trava: status === 'BLOQUEADO_ESTOQUE' ? formatarResumoTravaEstoque(itensInsuficientes) : '',
+        motivo_trava:
+          status === 'BLOQUEADO_COMERCIAL'
+            ? gov.alerta.motivos.join(' | ')
+            : status === 'BLOQUEADO_ESTOQUE'
+              ? formatarResumoTravaEstoque(itensInsuficientes)
+              : '',
         itens_insuficientes: itensInsuficientes,
       }
     })
@@ -869,6 +998,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       forma_pagamento_id?: string | null
       local_cobranca_id?: string | null
       natureza_id?: string | null
+      tabela_preco_id?: string | null
       marchante?: string
       pagamento_na_entrega?: boolean | number
       previsao_entrega?: string | null
@@ -876,6 +1006,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       observacao_nf?: string
       liberar?: boolean
       ignorar_trava_estoque?: boolean
+      aplicar_trava_comercial?: boolean
+      ignorar_trava_comercial?: boolean
+      pin_gerencial?: string
       itens: ItemPedidoInput[]
     }
 
@@ -1050,9 +1183,80 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             }
           }
         }
-      } else {
+      }
+
+      const clienteFinalId = body.cliente_id
+        ? parseUuidOrBadRequest(body.cliente_id, 'cliente_id')
+        : atual.clienteId
+      const vendedorFinalId =
+        body.vendedor_id !== undefined
+          ? body.vendedor_id
+            ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
+            : null
+          : atual.vendedorId
+      const tabelaPrecoFinalId =
+        body.tabela_preco_id !== undefined
+          ? body.tabela_preco_id
+            ? parseUuidOrBadRequest(body.tabela_preco_id, 'tabela_preco_id')
+            : null
+          : atual.tabelaPrecoId
+      const pgtoEntregaFinal =
+        body.pagamento_na_entrega !== undefined
+          ? body.pagamento_na_entrega
+            ? 1
+            : 0
+          : atual.pagamentoNaEntrega
+
+      const gov = await avaliarGovernancaComercialPedido(tx, {
+        tenantId: ctx.tenantId,
+        clienteId: clienteFinalId,
+        vendedorId: vendedorFinalId,
+        tabelaPrecoId: tabelaPrecoFinalId,
+        pagamentoNaEntrega: pgtoEntregaFinal === 1,
+        itens: itensConsolidados,
+        forcarAvaliacaoEstrita: body.aplicar_trava_comercial === true || atual.status === 'BLOQUEADO_COMERCIAL',
+        ignorePedidoId: pedidoId,
+      })
+
+      let aprovadoPorId = atual.aprovadoComercialPorId
+      let aprovadoPorNome = atual.aprovadoComercialPorNome
+      let aprovadoEm = atual.aprovadoComercialEm
+      let aprovadoObs = atual.aprovadoComercialObs
+
+      if (!jaEmOperacao) {
         nextStatus =
-          body.liberar === true ? 'LIBERADO' : body.liberar === false ? 'RASCUNHO' : atual.status
+          body.liberar === true
+            ? 'LIBERADO'
+            : body.liberar === false
+              ? 'RASCUNHO'
+              : atual.status === 'BLOQUEADO_COMERCIAL' && !gov.alerta.exige_aprovacao
+                ? 'LIBERADO'
+                : atual.status
+
+        if (nextStatus === 'LIBERADO' && gov.alerta.exige_aprovacao) {
+          let liberadoPelaGestao = false
+          if (body.pin_gerencial && String(body.pin_gerencial).trim()) {
+            const gPin = await validarPinGerencial(tx, ctx.tenantId, body.pin_gerencial)
+            aprovadoPorId = gPin.id
+            aprovadoPorNome = gPin.nome
+            aprovadoEm = new Date()
+            aprovadoObs = 'Liberado na edição via PIN Gerencial'
+            liberadoPelaGestao = true
+          } else if (
+            body.ignorar_trava_comercial === true &&
+            ['MASTER', 'ADMINISTRADOR'].includes(String(ctx.operador.nivel || '').toUpperCase())
+          ) {
+            aprovadoPorId = ctx.operador.id
+            aprovadoPorNome = ctx.operador.nome
+            aprovadoEm = new Date()
+            aprovadoObs = 'Liberado na edição por Master/Administrador'
+            liberadoPelaGestao = true
+          }
+          if (!liberadoPelaGestao) {
+            nextStatus = 'BLOQUEADO_COMERCIAL'
+          }
+        }
+
         if (nextStatus === 'LIBERADO' && body.ignorar_trava_estoque !== true && itensFaltandoSeparar.length > 0) {
           const estoqueCheck = await verificarEstoquePedido(tx, {
             tenantId: ctx.tenantId,
@@ -1101,16 +1305,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         .update(pedidos)
         .set({
           titulo: tituloTrim,
-          clienteId: body.cliente_id
-            ? parseUuidOrBadRequest(body.cliente_id, 'cliente_id')
-            : atual.clienteId,
+          clienteId: clienteFinalId,
           cliente: clienteFinal,
-          vendedorId:
-            body.vendedor_id !== undefined
-              ? body.vendedor_id
-                ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
-                : null
-              : atual.vendedorId,
+          vendedorId: vendedorFinalId,
           formaPagamentoId: formaPgtoFinal,
           localCobrancaId:
             body.local_cobranca_id !== undefined
@@ -1124,13 +1321,16 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
                 ? parseUuidOrBadRequest(body.natureza_id, 'natureza_id')
                 : null
               : atual.naturezaId,
+          tabelaPrecoId: gov.tabela_preco_usada_id || tabelaPrecoFinalId,
+          custoTotalEstimado: toDec(gov.custo_total_estimado, 2),
+          margemBrutaPct: gov.margem_bruta_pct != null ? toDec(gov.margem_bruta_pct, 2) : null,
+          alertaComercialJson: gov.alerta,
+          aprovadoComercialPorId: aprovadoPorId,
+          aprovadoComercialPorNome: aprovadoPorNome,
+          aprovadoComercialEm: aprovadoEm,
+          aprovadoComercialObs: aprovadoObs,
           marchante: body.marchante !== undefined ? String(body.marchante || '').trim() : atual.marchante,
-          pagamentoNaEntrega:
-            body.pagamento_na_entrega !== undefined
-              ? body.pagamento_na_entrega
-                ? 1
-                : 0
-              : atual.pagamentoNaEntrega,
+          pagamentoNaEntrega: pgtoEntregaFinal,
           previsaoEntrega: previsaoFinal,
           valorTotal: toDec(valorTotal, 2),
           observacoes: body.observacoes != null ? body.observacoes.trim() : atual.observacoes,
@@ -1157,25 +1357,37 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
 
       await tx.delete(pedidosItens).where(eq(pedidosItens.pedidoId, pedidoId))
       await tx.insert(pedidosItens).values(
-        itensConsolidados.map((it) => ({
-          id: uuidv7(),
-          tenantId: ctx.tenantId,
-          pedidoId,
-          produtoId: it.produto_id,
-          codigoAux: it.codigo_aux,
-          qtdKgSolicitada: toDec(it.qtd_kg_solicitada, 3),
-          qtdCaixasSolicitada:
-            it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : null,
-          unidadeSolicitada: it.unidade_solicitada,
-          qtdSolicitadaExibicao: toDec(it.qtd_solicitada_exibicao, 3),
-          precoUnitario: toDec(it.preco_unitario, 4),
-          descontoPct: toDec(it.desconto_pct, 2),
-          descontoValor: toDec(it.desconto_valor, 2),
-          cfopAplicado: it.cfop_aplicado,
-          observacao: it.observacao,
-          alertaReclamacao: it.alerta_reclamacao,
-        })),
+        itensConsolidados.map((it) => {
+          const calc = gov.itens_calculados.get(it.produto_id)
+          return {
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            pedidoId,
+            produtoId: it.produto_id,
+            codigoAux: it.codigo_aux,
+            qtdKgSolicitada: toDec(it.qtd_kg_solicitada, 3),
+            qtdCaixasSolicitada:
+              it.qtd_caixas_solicitada != null ? String(it.qtd_caixas_solicitada) : null,
+            unidadeSolicitada: it.unidade_solicitada,
+            qtdSolicitadaExibicao: toDec(it.qtd_solicitada_exibicao, 3),
+            precoUnitario: toDec(it.preco_unitario, 4),
+            precoTabelaRef: calc?.preco_tabela_ref != null ? toDec(calc.preco_tabela_ref, 4) : null,
+            custoUnitarioRef: toDec(calc?.custo_unitario_ref ?? 0, 4),
+            margemItemPct: calc?.margem_item_pct != null ? toDec(calc.margem_item_pct, 2) : null,
+            descontoPct: toDec(it.desconto_pct, 2),
+            descontoValor: toDec(it.desconto_valor, 2),
+            cfopAplicado: it.cfop_aplicado,
+            observacao: it.observacao,
+            alertaReclamacao: it.alerta_reclamacao,
+          }
+        }),
       )
+
+      await atualizarUltimaVendaClienteProdutos(tx, {
+        tenantId: ctx.tenantId,
+        clienteId: clienteFinalId,
+        itens: itensConsolidados,
+      })
 
       await calcularESalvarParcelas(tx, {
         tenantId: ctx.tenantId,
@@ -1192,6 +1404,17 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         operadorId: ctx.operador.id,
         operadorNome: ctx.operador.nome,
       })
+
+      if (nextStatus === 'BLOQUEADO_COMERCIAL') {
+        await registrarPendenciaTravaComercial(tx, {
+          tenantId: ctx.tenantId,
+          filialId: ctx.filialId,
+          pedidoId,
+          codigoPedido: atual.codigo,
+          clienteNome: clienteFinal,
+          alerta: gov.alerta,
+        })
+      }
 
       if (nextStatus === 'BLOQUEADO_ESTOQUE' && itensInsuficientes.length > 0) {
         await registrarPendenciaTravaEstoque(tx, {
@@ -1212,15 +1435,25 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             and(
               eq(pendenciasSetor.tenantId, ctx.tenantId),
               eq(pendenciasSetor.referenciaId, pedidoId),
-              eq(pendenciasSetor.tipoPendencia, 'TRAVA_ESTOQUE_PEDIDO'),
+              inArray(pendenciasSetor.tipoPendencia, ['TRAVA_ESTOQUE_PEDIDO', 'TRAVA_COMERCIAL_PEDIDO']),
             ),
           )
       }
 
       return {
         status: nextStatus,
+        margem_bruta_pct: gov.margem_bruta_pct,
+        custo_total_estimado: gov.custo_total_estimado,
+        trava_comercial: nextStatus === 'BLOQUEADO_COMERCIAL',
+        motivo_trava_comercial: nextStatus === 'BLOQUEADO_COMERCIAL' ? gov.alerta.motivos.join(' | ') : '',
+        alerta_comercial: gov.alerta,
         trava_estoque: nextStatus === 'BLOQUEADO_ESTOQUE',
-        motivo_trava: nextStatus === 'BLOQUEADO_ESTOQUE' ? formatarResumoTravaEstoque(itensInsuficientes) : '',
+        motivo_trava:
+          nextStatus === 'BLOQUEADO_COMERCIAL'
+            ? gov.alerta.motivos.join(' | ')
+            : nextStatus === 'BLOQUEADO_ESTOQUE'
+              ? formatarResumoTravaEstoque(itensInsuficientes)
+              : '',
         reaberto_para_separacao: reabertoParaSeparacao,
         itens_insuficientes: itensInsuficientes,
       }
@@ -1232,7 +1465,11 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
   app.post('/api/pedidos/:id/liberar', { preHandler: requirePermission('pedidos') }, async (req) => {
     const ctx = req.authCtx!
     const pedidoId = parseUuidOrBadRequest((req.params as { id: string }).id, 'pedido_id')
-    const body = (req.body || {}) as { ignorar_trava_estoque?: boolean }
+    const body = (req.body || {}) as {
+      ignorar_trava_estoque?: boolean
+      ignorar_trava_comercial?: boolean
+      pin_gerencial?: string
+    }
     const ignorarTrava = body.ignorar_trava_estoque === true
 
     const resLib = await conn.db.transaction(async (tx) => {
@@ -1245,13 +1482,25 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       if (ped.status === 'LIBERADO') {
         return { id: pedidoId, codigo: ped.codigo, status: 'LIBERADO', trava_estoque: false, motivo_trava: '', itens_insuficientes: [] }
       }
+      if (ped.status === 'BLOQUEADO_COMERCIAL') {
+        throw new HttpError(
+          409,
+          `Pedido ${ped.codigo} está em Trava Comercial (Margem/Desconto/Crédito). Aprove pela Mesa Comercial ou informe o PIN Gerencial.`,
+        )
+      }
       if (!['RASCUNHO', 'BLOQUEADO_ESTOQUE'].includes(ped.status)) {
         throw new HttpError(400, 'Somente pedidos em RASCUNHO ou com Trava de Estoque podem ser liberados.')
       }
 
       const [itensPed, romAtivoRows, bipadoRows] = await Promise.all([
         tx
-          .select({ produto_id: pedidosItens.produtoId, qtd_kg_solicitada: pedidosItens.qtdKgSolicitada })
+          .select({
+            produto_id: pedidosItens.produtoId,
+            qtd_kg_solicitada: pedidosItens.qtdKgSolicitada,
+            preco_unitario: pedidosItens.precoUnitario,
+            desconto_pct: pedidosItens.descontoPct,
+            desconto_valor: pedidosItens.descontoValor,
+          })
           .from(pedidosItens)
           .where(eq(pedidosItens.pedidoId, pedidoId)),
         tx
@@ -1276,6 +1525,68 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           .where(and(eq(romaneios.pedidoId, pedidoId), eq(romaneios.tenantId, ctx.tenantId)))
           .groupBy(romaneiosItens.produtoId),
       ])
+
+      // Se estava em RASCUNHO e a trava comercial está ativa no tenant, avalia antes de liberar
+      if (ped.status === 'RASCUNHO') {
+        const gov = await avaliarGovernancaComercialPedido(tx, {
+          tenantId: ctx.tenantId,
+          clienteId: ped.clienteId,
+          vendedorId: ped.vendedorId,
+          tabelaPrecoId: ped.tabelaPrecoId,
+          pagamentoNaEntrega: Number(ped.pagamentoNaEntrega || 0) === 1,
+          itens: itensPed.map((i) => ({
+            produto_id: i.produto_id,
+            qtd_kg_solicitada: toNum(i.qtd_kg_solicitada, 0),
+            preco_unitario: toNum(i.preco_unitario, 0),
+            desconto_pct: toNum(i.desconto_pct, 0),
+            desconto_valor: toNum(i.desconto_valor, 0),
+          })),
+          ignorePedidoId: pedidoId,
+        })
+
+        if (gov.alerta.exige_aprovacao) {
+          let bypass = false
+          if (body.pin_gerencial && String(body.pin_gerencial).trim()) {
+            await validarPinGerencial(tx, ctx.tenantId, body.pin_gerencial)
+            bypass = true
+          } else if (
+            body.ignorar_trava_comercial === true &&
+            ['MASTER', 'ADMINISTRADOR'].includes(String(ctx.operador.nivel || '').toUpperCase())
+          ) {
+            bypass = true
+          }
+          if (!bypass) {
+            await tx
+              .update(pedidos)
+              .set({
+                status: 'BLOQUEADO_COMERCIAL',
+                custoTotalEstimado: toDec(gov.custo_total_estimado, 2),
+                margemBrutaPct: gov.margem_bruta_pct != null ? toDec(gov.margem_bruta_pct, 2) : null,
+                alertaComercialJson: gov.alerta,
+                updatedAt: new Date(),
+              })
+              .where(eq(pedidos.id, pedidoId))
+            await registrarPendenciaTravaComercial(tx, {
+              tenantId: ctx.tenantId,
+              filialId: ctx.filialId,
+              pedidoId,
+              codigoPedido: ped.codigo,
+              clienteNome: ped.cliente,
+              alerta: gov.alerta,
+            })
+            return {
+              id: pedidoId,
+              codigo: ped.codigo,
+              status: 'BLOQUEADO_COMERCIAL',
+              trava_comercial: true,
+              trava_estoque: false,
+              motivo_trava: gov.alerta.motivos.join(' | '),
+              alerta_comercial: gov.alerta,
+              itens_insuficientes: [],
+            }
+          }
+        }
+      }
 
       const romAtivo = romAtivoRows[0] || null
       const bipadoMap = new Map(bipadoRows.map((b) => [b.produto_id, toNum(b.kg_bipado, 0)]))

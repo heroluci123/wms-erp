@@ -112,6 +112,7 @@ export function CentralPendencias() {
     if (p.tipo_pendencia === 'VALIDACAO_RECEBIMENTO' || p.referencia_tabela === 'pedidos_compra') return '/compras'
     if (p.tipo_pendencia === 'OP_DE_MAPA' || p.referencia_tabela === 'mapas_producao') return '/mapa-producao'
     if (p.tipo_pendencia === 'DEVOLUCAO_FISCAL' || p.referencia_tabela === 'devolucoes') return '/devolucao'
+    if (p.tipo_pendencia === 'TRAVA_COMERCIAL_PEDIDO') return '/forca-vendas'
     if (p.referencia_tabela === 'pedidos') return '/pedidos'
     if (p.referencia_tabela === 'ordens_producao') return '/producao'
     const s = SETORES.find((x) => x.id === p.setor_destino)
@@ -163,6 +164,13 @@ export function CentralPendencias() {
           </div>
           <div className="kpi-card__value">{filaAoVivo.pedidos_trava_estoque || 0}</div>
           <div className="kpi-card__sub">Pedidos sem saldo p/ liberar</div>
+        </div>
+        <div className="kpi-card kpi-card--warning" style={{ cursor: 'pointer' }} onClick={() => navigate('/forca-vendas')}>
+          <div className="kpi-card__label flex items-center gap-6">
+            <Lock size={13} /> Trava Comercial / Margem
+          </div>
+          <div className="kpi-card__value">{filaAoVivo.pedidos_trava_comercial || 0}</div>
+          <div className="kpi-card__sub">Aguardando aprovação gerencial</div>
         </div>
         <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/producao')}>
           <div className="kpi-card__label flex items-center gap-6">
@@ -265,6 +273,10 @@ export function CentralPendencias() {
                       {p.tipo_pendencia === 'TRAVA_ESTOQUE_PEDIDO' ? (
                         <span className="badge badge--danger" style={{ gap: 4 }}>
                           <Lock size={11} /> TRAVA ESTOQUE
+                        </span>
+                      ) : p.tipo_pendencia === 'TRAVA_COMERCIAL_PEDIDO' ? (
+                        <span className="badge badge--warning" style={{ gap: 4 }}>
+                          <Lock size={11} /> TRAVA COMERCIAL
                         </span>
                       ) : (
                         p.tipo_pendencia

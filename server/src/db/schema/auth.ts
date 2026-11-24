@@ -154,6 +154,8 @@ export const vendedores = pgTable(
     regraLiberacao: text('regra_liberacao').notNull().default('FATURAMENTO'), // FATURAMENTO | LIQUIDACAO
     metaMensalKg: numeric('meta_mensal_kg', { precision: 14, scale: 3 }).notNull().default('0'),
     metaMensalValor: numeric('meta_mensal_valor', { precision: 14, scale: 2 }).notNull().default('0'),
+    descontoMaxPct: numeric('desconto_max_pct', { precision: 6, scale: 2 }).notNull().default('5'),
+    margemMinimaPct: numeric('margem_minima_pct', { precision: 6, scale: 2 }),
     ativo: integer('ativo').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

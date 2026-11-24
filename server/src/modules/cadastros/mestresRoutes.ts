@@ -152,6 +152,11 @@ const VendedorSchema = z.object({
   regra_liberacao: z.enum(['FATURAMENTO', 'LIQUIDACAO']).default('FATURAMENTO'),
   meta_mensal_kg: z.coerce.number().min(0).default(0),
   meta_mensal_valor: z.coerce.number().min(0).default(0),
+  desconto_max_pct: z.coerce.number().min(0).max(100).default(5),
+  margem_minima_pct: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(String(v).replace(',', '.'))),
+    z.number().min(0).max(95).nullable().optional(),
+  ),
 })
 
 const TransportadoraSchema = z.object({
@@ -1115,6 +1120,8 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           regra_liberacao: vendedores.regraLiberacao,
           meta_mensal_kg: vendedores.metaMensalKg,
           meta_mensal_valor: vendedores.metaMensalValor,
+          desconto_max_pct: vendedores.descontoMaxPct,
+          margem_minima_pct: vendedores.margemMinimaPct,
           ativo: vendedores.ativo,
           created_at: vendedores.createdAt,
         })
@@ -1129,6 +1136,8 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           pct_comissao: Number(r.pct_comissao || 0),
           meta_mensal_kg: Number(r.meta_mensal_kg || 0),
           meta_mensal_valor: Number(r.meta_mensal_valor || 0),
+          desconto_max_pct: Number(r.desconto_max_pct ?? 5),
+          margem_minima_pct: r.margem_minima_pct != null ? Number(r.margem_minima_pct) : null,
         })),
       }
     }
@@ -1154,6 +1163,8 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
         regraLiberacao: d.regra_liberacao,
         metaMensalKg: String(d.meta_mensal_kg),
         metaMensalValor: String(d.meta_mensal_valor),
+        descontoMaxPct: String(d.desconto_max_pct ?? 5),
+        margemMinimaPct: d.margem_minima_pct != null ? String(d.margem_minima_pct) : null,
       })
       return codResolvido
     })
@@ -1180,6 +1191,8 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           regraLiberacao: d.regra_liberacao,
           metaMensalKg: String(d.meta_mensal_kg),
           metaMensalValor: String(d.meta_mensal_valor),
+          descontoMaxPct: String(d.desconto_max_pct ?? 5),
+          margemMinimaPct: d.margem_minima_pct != null ? String(d.margem_minima_pct) : null,
         })
         .where(and(eq(vendedores.id, id), eq(vendedores.tenantId, ctx.tenantId)))
       return codResolvido

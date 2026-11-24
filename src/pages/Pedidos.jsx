@@ -45,6 +45,7 @@ import { EtiquetaReservaZebraModal } from '../components/shared/EtiquetaZebraPri
 
 const STATUS_BADGE = {
   RASCUNHO: { label: 'Rascunho', cls: 'badge--neutral' },
+  BLOQUEADO_COMERCIAL: { label: '🔒 Trava Comercial', cls: 'badge--warning' },
   BLOQUEADO_ESTOQUE: { label: '🔒 Trava Estoque', cls: 'badge--danger' },
   LIBERADO: { label: 'Liberado p/ Separação', cls: 'badge--info' },
   EM_SEPARACAO: { label: 'Em Separação', cls: 'badge--warning' },
@@ -1478,6 +1479,7 @@ export function Pedidos() {
                 <select className="form-input" value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
                   <option value="TODOS">Todos os Status</option>
                   <option value="RASCUNHO">Rascunho</option>
+                  <option value="BLOQUEADO_COMERCIAL">🔒 Trava Comercial / Margem</option>
                   <option value="BLOQUEADO_ESTOQUE">🔒 Trava Estoque</option>
                   <option value="LIBERADO">Liberado p/ Separação</option>
                   <option value="EM_SEPARACAO">Em Separação</option>
@@ -1756,27 +1758,50 @@ export function Pedidos() {
                                   R$ {Number(ped.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </strong>
                               )}
+                              {ped.margem_bruta_pct != null && (
+                                <span
+                                  className={`badge ${
+                                    Number(ped.margem_bruta_pct) < 0
+                                      ? 'badge--danger'
+                                      : Number(ped.margem_bruta_pct) < 12
+                                        ? 'badge--warning'
+                                        : 'badge--success'
+                                  }`}
+                                  style={{ fontSize: 10, marginLeft: 6 }}
+                                >
+                                  Mg {Number(ped.margem_bruta_pct).toFixed(1)}%
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td>
                             <span className={`badge ${st.cls}`}>{st.label}</span>
-                            {ped.status === 'BLOQUEADO_ESTOQUE' && (
+                            {(ped.status === 'BLOQUEADO_ESTOQUE' || ped.status === 'BLOQUEADO_COMERCIAL') && (
                               <div
                                 style={{
                                   marginTop: 5,
                                   fontSize: 11,
                                   lineHeight: 1.3,
-                                  color: '#fca5a5',
-                                  background: 'rgba(239, 68, 68, 0.12)',
-                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                  color: ped.status === 'BLOQUEADO_COMERCIAL' ? '#fde68a' : '#fca5a5',
+                                  background:
+                                    ped.status === 'BLOQUEADO_COMERCIAL'
+                                      ? 'rgba(245, 158, 11, 0.14)'
+                                      : 'rgba(239, 68, 68, 0.12)',
+                                  border:
+                                    ped.status === 'BLOQUEADO_COMERCIAL'
+                                      ? '1px solid rgba(245, 158, 11, 0.4)'
+                                      : '1px solid rgba(239, 68, 68, 0.3)',
                                   borderRadius: 6,
                                   padding: '4px 7px',
                                   maxWidth: 260,
                                 }}
-                                title={ped.motivo_trava || 'Estoque insuficiente ou comprometido'}
+                                title={ped.motivo_trava || 'Pedido retido por trava automática'}
                               >
                                 <strong>Motivo:</strong>{' '}
-                                {ped.motivo_trava || 'Estoque insuficiente ou comprometido por outro pedido em aberto'}
+                                {ped.motivo_trava ||
+                                  (ped.status === 'BLOQUEADO_COMERCIAL'
+                                    ? 'Aguardando aprovação gerencial (Margem/Desconto/Crédito)'
+                                    : 'Estoque insuficiente ou comprometido por outro pedido em aberto')}
                               </div>
                             )}
                           </td>
@@ -1855,6 +1880,16 @@ export function Pedidos() {
                                   onClick={() => handleLiberar(ped, { ignorarTrava: false })}
                                 >
                                   <Send size={14} /> Liberar
+                                </button>
+                              )}
+                              {ped.status === 'BLOQUEADO_COMERCIAL' && (
+                                <button
+                                  type="button"
+                                  className="btn btn--warning btn--sm"
+                                  title="Abrir Mesa de Aprovação Comercial"
+                                  onClick={() => navigate('/forca-vendas')}
+                                >
+                                  <Unlock size={14} /> Aprovar Margem
                                 </button>
                               )}
                               {ped.status === 'BLOQUEADO_ESTOQUE' && podeGerenciarPedidos && (

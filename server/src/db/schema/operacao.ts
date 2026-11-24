@@ -396,6 +396,14 @@ export const pedidos = pgTable(
     pagamentoNaEntrega: integer('pagamento_na_entrega').notNull().default(0),
     previsaoEntrega: date('previsao_entrega'),
     valorTotal: numeric('valor_total', { precision: 14, scale: 2 }).notNull().default('0'),
+    tabelaPrecoId: uuid('tabela_preco_id'),
+    custoTotalEstimado: numeric('custo_total_estimado', { precision: 14, scale: 2 }).notNull().default('0'),
+    margemBrutaPct: numeric('margem_bruta_pct', { precision: 7, scale: 2 }),
+    alertaComercialJson: jsonb('alerta_comercial_json').$type<Record<string, unknown>>().notNull().default({}),
+    aprovadoComercialPorId: uuid('aprovado_comercial_por_id'),
+    aprovadoComercialPorNome: text('aprovado_comercial_por_nome').notNull().default(''),
+    aprovadoComercialEm: timestamp('aprovado_comercial_em', { withTimezone: true }),
+    aprovadoComercialObs: text('aprovado_comercial_obs').notNull().default(''),
     observacoes: text('observacoes').notNull().default(''),
     observacaoNf: text('observacao_nf').notNull().default(''),
     origemPedido: text('origem_pedido').notNull().default('SUPPLY_CHAIN'), // SUPPLY_CHAIN | FINANCEIRO | WHATSAPP | VENDEDOR | PORTAL | SISTEMA
@@ -439,6 +447,9 @@ export const pedidosItens = pgTable(
     unidadeSolicitada: text('unidade_solicitada').notNull().default('KG'),
     qtdSolicitadaExibicao: numeric('qtd_solicitada_exibicao', { precision: 14, scale: 3 }),
     precoUnitario: numeric('preco_unitario', { precision: 14, scale: 4 }).notNull().default('0'),
+    precoTabelaRef: numeric('preco_tabela_ref', { precision: 14, scale: 4 }),
+    custoUnitarioRef: numeric('custo_unitario_ref', { precision: 14, scale: 4 }).notNull().default('0'),
+    margemItemPct: numeric('margem_item_pct', { precision: 7, scale: 2 }),
     descontoPct: numeric('desconto_pct', { precision: 6, scale: 2 }).notNull().default('0'),
     descontoValor: numeric('desconto_valor', { precision: 14, scale: 2 }).notNull().default('0'),
     cfopAplicado: text('cfop_aplicado').notNull().default(''),
@@ -720,4 +731,35 @@ export const devolucaoItens = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('idx_dev_itens_dev').on(t.devolucaoId)]
+)
+
+export const comercialVisitas = pgTable(
+  'comercial_visitas',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    vendedorId: uuid('vendedor_id').references(() => vendedores.id, { onDelete: 'set null' }),
+    operadorId: uuid('operador_id').references(() => operadores.id, { onDelete: 'set null' }),
+    operadorNome: text('operador_nome').notNull().default(''),
+    clienteId: uuid('cliente_id').references(() => clientes.id, { onDelete: 'set null' }),
+    clienteNome: text('cliente_nome').notNull().default(''),
+    tipo: text('tipo').notNull().default('PRESENCIAL'), // PRESENCIAL | WHATSAPP | TELEFONE
+    resultado: text('resultado').notNull().default('CONTATO_REALIZADO'), // PEDIDO_GERADO | ORCAMENTO | SEM_COMPRA | CLIENTE_FECHADO | RETORNO_AGENDADO | CONTATO_REALIZADO
+    pedidoId: uuid('pedido_id').references(() => pedidos.id, { onDelete: 'set null' }),
+    observacoes: text('observacoes').notNull().default(''),
+    lat: numeric('lat', { precision: 10, scale: 7 }),
+    lng: numeric('lng', { precision: 10, scale: 7 }),
+    proximoContatoEm: date('proximo_contato_em'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_com_visitas_tenant_data').on(t.tenantId, t.createdAt),
+    index('idx_com_visitas_vendedor').on(t.tenantId, t.vendedorId),
+    index('idx_com_visitas_cliente').on(t.tenantId, t.clienteId),
+  ]
 )

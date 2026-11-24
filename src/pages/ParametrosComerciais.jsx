@@ -49,13 +49,19 @@ export function ParametrosComerciais() {
   const [simTipo, setSimTipo] = useState('SAIDA')
   const [simResultado, setSimResultado] = useState(null)
 
-  // Parâmetros Recebimento, Doca, Empório & Expedição Fiscal
+  // Parâmetros Recebimento, Doca, Empório & Expedição Fiscal + Trava Comercial/Margem
   const [recCfg, setRecCfg] = useState({
     trava_recebimento_sem_pc: true,
     exigir_temperatura_recebimento: false,
     exigir_nf_para_expedir: false,
     permitir_carga_inicial_emporio: true,
     tolerancia_recebimento_pct: 3,
+    trava_margem_ativa: false,
+    trava_credito_ativa: false,
+    margem_minima_padrao_pct: 12,
+    desconto_max_vendedor_pct: 5,
+    dias_tolerancia_inadimplencia: 3,
+    bloquear_venda_abaixo_custo: true,
   })
   const [salvandoRecCfg, setSalvandoRecCfg] = useState(false)
 
@@ -75,6 +81,15 @@ export function ParametrosComerciais() {
           permitir_carga_inicial_emporio: modCfg.permitir_carga_inicial_emporio !== false,
           tolerancia_recebimento_pct:
             modCfg.tolerancia_recebimento_pct != null ? Number(modCfg.tolerancia_recebimento_pct) : 3,
+          trava_margem_ativa: Boolean(modCfg.trava_margem_ativa),
+          trava_credito_ativa: Boolean(modCfg.trava_credito_ativa),
+          margem_minima_padrao_pct:
+            modCfg.margem_minima_padrao_pct != null ? Number(modCfg.margem_minima_padrao_pct) : 12,
+          desconto_max_vendedor_pct:
+            modCfg.desconto_max_vendedor_pct != null ? Number(modCfg.desconto_max_vendedor_pct) : 5,
+          dias_tolerancia_inadimplencia:
+            modCfg.dias_tolerancia_inadimplencia != null ? Number(modCfg.dias_tolerancia_inadimplencia) : 3,
+          bloquear_venda_abaixo_custo: modCfg.bloquear_venda_abaixo_custo !== false,
         })
       }
     } catch (err) {
@@ -147,6 +162,7 @@ export function ParametrosComerciais() {
           { id: 'centros', label: 'Centros de Custo', icon: Layers },
           { id: 'marchantes', label: 'Marchantes', icon: Tag },
           { id: 'matriz', label: 'Matriz Tributária (Contador)', icon: Shield },
+          { id: 'comercial', label: 'Trava Comercial & Margem', icon: Calculator },
           { id: 'recebimento', label: 'Doca, Temperatura & Trava Fiscal', icon: Thermometer },
         ].map((t) => {
           const Icon = t.icon
@@ -662,6 +678,111 @@ export function ParametrosComerciais() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {aba === 'comercial' && (
+            <div className="card" style={{ maxWidth: 700 }}>
+              <h3 className="text-base font-bold mb-8 flex items-center gap-8">
+                <Calculator size={18} className="text-primary" /> Governança Comercial: Trava de Margem, Desconto &amp; Crédito
+              </h3>
+              <p className="text-xs text-muted mb-16">
+                Defina os pisos automáticos que retêm pedidos em <strong>Trava Comercial (BLOQUEADO_COMERCIAL)</strong> para aprovação gerencial ou liberação via PIN na Mesa Comercial.
+              </p>
+              <form
+                className="flex flex-col gap-16"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  setSalvandoRecCfg(true)
+                  try {
+                    await comprasQueries.salvarConfigModulos({
+                      trava_margem_ativa: recCfg.trava_margem_ativa,
+                      trava_credito_ativa: recCfg.trava_credito_ativa,
+                      margem_minima_padrao_pct: Number(recCfg.margem_minima_padrao_pct || 0),
+                      desconto_max_vendedor_pct: Number(recCfg.desconto_max_vendedor_pct || 0),
+                      dias_tolerancia_inadimplencia: Number(recCfg.dias_tolerancia_inadimplencia || 0),
+                      bloquear_venda_abaixo_custo: recCfg.bloquear_venda_abaixo_custo,
+                    })
+                    toastSuccess('Travas Comerciais Salvas', 'Regras de margem mínima, desconto e crédito aplicadas ao faturamento e Força de Vendas!')
+                  } catch (err) {
+                    toastError('Erro', err.message)
+                  } finally {
+                    setSalvandoRecCfg(false)
+                  }
+                }}
+              >
+                <div className="form-grid form-grid--3">
+                  <div>
+                    <label className="form-label">Margem Bruta Mínima (%)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="90"
+                      className="form-input"
+                      value={recCfg.margem_minima_padrao_pct}
+                      onChange={(e) => setRecCfg((p) => ({ ...p, margem_minima_padrao_pct: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">Desconto Máx. Vendedor (%)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="100"
+                      className="form-input"
+                      value={recCfg.desconto_max_vendedor_pct}
+                      onChange={(e) => setRecCfg((p) => ({ ...p, desconto_max_vendedor_pct: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">Tolerância Atraso (dias)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="180"
+                      className="form-input"
+                      value={recCfg.dias_tolerancia_inadimplencia}
+                      onChange={(e) => setRecCfg((p) => ({ ...p, dias_tolerancia_inadimplencia: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-8 text-sm font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(recCfg.trava_margem_ativa)}
+                    onChange={(e) => setRecCfg((p) => ({ ...p, trava_margem_ativa: e.target.checked }))}
+                  />
+                  Ativar Trava Automática de Margem Mínima e Teto de Desconto nos Pedidos
+                </label>
+
+                <label className="flex items-center gap-8 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(recCfg.bloquear_venda_abaixo_custo)}
+                    onChange={(e) => setRecCfg((p) => ({ ...p, bloquear_venda_abaixo_custo: e.target.checked }))}
+                  />
+                  Bloquear sempre qualquer item com preço líquido abaixo do custo médio / última compra
+                </label>
+
+                <label className="flex items-center gap-8 text-sm font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(recCfg.trava_credito_ativa)}
+                    onChange={(e) => setRecCfg((p) => ({ ...p, trava_credito_ativa: e.target.checked }))}
+                  />
+                  Ativar Trava Automática de Limite de Crédito &amp; Inadimplência (Clientes com bloqueio ou títulos vencidos)
+                </label>
+
+                <div className="flex justify-end">
+                  <button type="submit" className="btn btn--primary" disabled={!isApiEnabled() || salvandoRecCfg}>
+                    <CheckCircle2 size={16} /> {salvandoRecCfg ? 'Salvando...' : 'Salvar Regras Comerciais'}
+                  </button>
+                </div>
+              </form>
             </div>
           )}
 
