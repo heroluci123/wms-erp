@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { DbConnection } from '../../db/client.js'
 import {
+  auditoriaAcessos,
   clientes,
   estoqueCaixas,
   fiscalNotas,
@@ -2399,7 +2400,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
   app.post(
     '/api/romaneios/:id/caixa',
     { preHandler: requirePermission(['saida', 'expedicao', 'pedidos']) },
-    async (req) => {
+    async (req, reply) => {
       const ctx = req.authCtx!
       const romId = parseUuidOrBadRequest((req.params as { id: string }).id, 'romaneio_id')
       const body = req.body as {
@@ -2407,6 +2408,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         caixa_id?: string
         confirmarExtra?: boolean
         confirmarExcesso?: boolean
+        pin_gerencial?: string
       }
 
       const outcome = await conn.db.transaction(async (tx) => {
@@ -2426,14 +2428,14 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         const cleanEan = String(body.ean_caixa || '').trim()
         const caixaRes = body.caixa_id
           ? await tx.execute(sql`
-              SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao
+              SELECT ec.*, to_char(ec.validade, 'YYYY-MM-DD') AS validade_iso, p.codigo AS produto_codigo, p.descricao AS produto_descricao
               FROM estoque_caixas ec
               JOIN produtos p ON p.id = ec.produto_id
               WHERE ec.id = ${parseUuidOrBadRequest(body.caixa_id, 'caixa_id')} AND ec.tenant_id = ${ctx.tenantId}
               FOR UPDATE OF ec
             `)
           : await tx.execute(sql`
-              SELECT ec.*, p.codigo AS produto_codigo, p.descricao AS produto_descricao
+              SELECT ec.*, to_char(ec.validade, 'YYYY-MM-DD') AS validade_iso, p.codigo AS produto_codigo, p.descricao AS produto_descricao
               FROM estoque_caixas ec
               JOIN produtos p ON p.id = ec.produto_id
               WHERE ec.tenant_id = ${ctx.tenantId} AND ec.filial_id = ${ctx.filialId}
@@ -2445,12 +2447,16 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         const caixa = caixaRes.rows[0] as
           | {
               id: string
+              filial_id: string
               ean_caixa: string
               produto_id: string
               produto_codigo: string
               produto_descricao: string
               endereco: string | null
               peso_kg: string
+              validade: string | Date | null
+              validade_iso: string | null
+              lote: string | null
               status: string
               cliente_reservado_nome: string | null
               pedido_reservado_codigo: string | null
@@ -2482,6 +2488,98 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
 
         if (caixa.endereco) {
           await assertEnderecosNaoBloqueados(tx, ctx.tenantId, ctx.filialId, [caixa.endereco])
+        }
+
+        // ── LOSS PREVENTION (6B): TRAVA HARD-STOP FEFO PARA CAIXA VENCIDA ────
+        const hoje = hojeIsoLocal()
+        const valIso =
+          caixa.validade_iso ||
+          (caixa.validade instanceof Date
+            ? caixa.validade.toISOString().slice(0, 10)
+            : caixa.validade
+              ? String(caixa.validade).slice(0, 10)
+              : null)
+        let alertaFefo: {
+          existe_mais_antigo: boolean
+          ean_sugerido: string
+          endereco_sugerido: string
+          validade_mais_antiga: string
+          dias_diferenca: number
+        } | null = null
+
+        if (valIso && /^\d{4}-\d{2}-\d{2}$/.test(valIso)) {
+          if (valIso < hoje) {
+            const diasVencida = Math.max(
+              1,
+              Math.round((Date.parse(`${hoje}T00:00:00Z`) - Date.parse(`${valIso}T00:00:00Z`)) / 86400000),
+            )
+            if (!body.pin_gerencial || !String(body.pin_gerencial).trim()) {
+              return {
+                __status: 422,
+                success: false,
+                code: 'CAIXA_VENCIDA_BLOQUEADA',
+                validade: valIso,
+                dias_vencida: diasVencida,
+                error: `BLOQUEIO FEFO: A caixa ${caixa.ean_caixa} (${caixa.produto_descricao}) está VENCIDA há ${diasVencida} dia(s) (validade ${valIso.split('-').reverse().join('/')}). Expedição bloqueada — faça o descarte em Governança & Perdas ou informe o PIN Gerencial.`,
+              }
+            }
+            const gestorPin = await validarPinGerencial(tx, ctx.tenantId, body.pin_gerencial)
+            await tx.insert(auditoriaAcessos).values({
+              id: uuidv7(),
+              tenantId: ctx.tenantId,
+              targetUserNome: caixa.ean_caixa,
+              acao: 'OVERRIDE_CAIXA_VENCIDA_EXPEDICAO',
+              detalhesDepois: {
+                romaneio_codigo: rom.codigo,
+                produto: caixa.produto_descricao,
+                validade: valIso,
+                dias_vencida: diasVencida,
+                peso_kg: toNum(caixa.peso_kg, 0),
+                autorizado_por: gestorPin.nome,
+              },
+              executorId: ctx.operador.id,
+              executorNome: ctx.operador.nome,
+            })
+          } else {
+            // Verifica se existe caixa válida mais antiga parada na câmara (Fura-Fila FEFO)
+            const [maisAntiga] = await tx
+              .select({
+                id: estoqueCaixas.id,
+                eanCaixa: estoqueCaixas.eanCaixa,
+                endereco: estoqueCaixas.endereco,
+                validade: estoqueCaixas.validade,
+              })
+              .from(estoqueCaixas)
+              .where(
+                and(
+                  eq(estoqueCaixas.tenantId, ctx.tenantId),
+                  eq(estoqueCaixas.filialId, caixa.filial_id || ctx.filialId),
+                  eq(estoqueCaixas.produtoId, caixa.produto_id),
+                  eq(estoqueCaixas.status, 'DISPONIVEL'),
+                  sql`${estoqueCaixas.id} != ${caixa.id}`,
+                  sql`${estoqueCaixas.validade} IS NOT NULL`,
+                  sql`${estoqueCaixas.validade} >= ${hoje}::date`,
+                  sql`${estoqueCaixas.validade} < ${valIso}::date`,
+                ),
+              )
+              .orderBy(asc(estoqueCaixas.validade))
+              .limit(1)
+
+            if (maisAntiga?.validade) {
+              const valAntigaIso = String(maisAntiga.validade).slice(0, 10)
+              const diasDif = Math.max(
+                1,
+                Math.round((Date.parse(`${valIso}T00:00:00Z`) - Date.parse(`${valAntigaIso}T00:00:00Z`)) / 86400000),
+              )
+              alertaFefo = {
+                existe_mais_antigo: true,
+                ean_sugerido: maisAntiga.eanCaixa,
+                endereco_sugerido: maisAntiga.endereco || 'CÂMARA',
+                validade_mais_antiga: valAntigaIso,
+                dias_diferenca: diasDif,
+              }
+            }
+          }
         }
 
         const pesoCaixa = toNum(caixa.peso_kg, 0)
@@ -2591,8 +2689,29 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           await recalcularPosicaoEnderecos(tx, ctx.tenantId, ctx.filialId, [caixa.endereco])
         }
 
+        if (alertaFefo) {
+          await tx.insert(auditoriaAcessos).values({
+            id: uuidv7(),
+            tenantId: ctx.tenantId,
+            targetUserNome: caixa.ean_caixa,
+            acao: 'FURO_FILA_FEFO',
+            detalhesDepois: {
+              romaneio_codigo: rom.codigo,
+              produto: caixa.produto_descricao,
+              validade_bipada: valIso,
+              ean_mais_antiga: alertaFefo.ean_sugerido,
+              endereco_mais_antiga: alertaFefo.endereco_sugerido,
+              validade_mais_antiga: alertaFefo.validade_mais_antiga,
+              dias_diferenca: alertaFefo.dias_diferenca,
+            },
+            executorId: ctx.operador.id,
+            executorNome: ctx.operador.nome,
+          })
+        }
+
         return {
           success: true,
+          alerta_fefo: alertaFefo,
           caixa: {
             id: caixa.id,
             ean_caixa: caixa.ean_caixa,
@@ -2602,6 +2721,11 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           },
         }
       })
+
+      if ('__status' in outcome && outcome.__status === 422) {
+        const { __status: _st, ...payload } = outcome
+        return reply.status(422).send(payload)
+      }
 
       return outcome
     },

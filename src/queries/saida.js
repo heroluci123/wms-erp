@@ -431,6 +431,7 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
           ean_caixa: caixa?.ean_caixa,
           confirmarExtra: confirmado || Boolean(opcoes.confirmarExtra),
           confirmarExcesso: confirmado || Boolean(opcoes.confirmarExcesso),
+          ...(opcoes.pin_gerencial ? { pin_gerencial: opcoes.pin_gerencial } : {}),
         },
       })
       if (res.requiresConfirmation) {
@@ -444,7 +445,13 @@ export async function adicionarCaixa(romaneio_id, caixa, operador_id, operador_n
       }
       return res
     } catch (err) {
-      return { success: false, error: err.message }
+      return {
+        success: false,
+        code: err.code || err.data?.code,
+        validade: err.data?.validade,
+        dias_vencida: err.data?.dias_vencida,
+        error: err.message,
+      }
     }
   }
   try {

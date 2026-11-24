@@ -1974,6 +1974,24 @@ CREATE TABLE IF NOT EXISTS perdas_registro (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_perdas_tenant_codigo ON perdas_registro(tenant_id, codigo);
 CREATE INDEX IF NOT EXISTS idx_perdas_tenant_filial_data ON perdas_registro(tenant_id, filial_id, created_at);
+
+CREATE TABLE IF NOT EXISTS camaras_temperatura_log (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  filial_id UUID NOT NULL REFERENCES filiais(id) ON DELETE CASCADE,
+  local_nome TEXT NOT NULL,
+  tipo_ambiente TEXT NOT NULL DEFAULT 'RESFRIADO',
+  temperatura_c NUMERIC(6,2) NOT NULL,
+  temp_min_c NUMERIC(6,2) NOT NULL,
+  temp_max_c NUMERIC(6,2) NOT NULL,
+  conforme INTEGER NOT NULL DEFAULT 1,
+  desvio_c NUMERIC(6,2) NOT NULL DEFAULT 0,
+  acao_corretiva TEXT NOT NULL DEFAULT '',
+  operador_id UUID REFERENCES operadores(id) ON DELETE SET NULL,
+  operador_nome TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_camaras_temp_tenant_filial_data ON camaras_temperatura_log(tenant_id, filial_id, created_at);
 `
 
 export interface SeedDefaultsResult {

@@ -69,6 +69,8 @@ export function Saida() {
   const [codigoInput, setCodigoInput] = useState('')
   const [fefoAlerta, setFefoAlerta] = useState(null) // { caixa, alertas }
   const [regraAlerta, setRegraAlerta] = useState(null) // { caixa, tipoConfirmacao, mensagem }
+  const [bloqueioVencida, setBloqueioVencida] = useState(null) // { caixa, mensagem, validade, dias_vencida }
+  const [pinVencida, setPinVencida] = useState('')
   const [modalFinalizarParcial, setModalFinalizarParcial] = useState(null) // array de itens faltantes
   const [ultimoFinalizado, setUltimoFinalizado] = useState(null) // romaneio recém finalizado p/ impressão rápida
   const sepInputRef = useRef(null)
@@ -246,14 +248,25 @@ export function Saida() {
   }
 
   // ── Bipe de caixa na Separação ──
-  const executarAdicaoCaixa = async (cx, confirmado = false) => {
+  const executarAdicaoCaixa = async (cx, confirmado = false, pinGerencial = '') => {
     const addRes = await saidaQueries.adicionarCaixa(
       romaneioAtual.id,
       cx,
       operador.id,
       operador.nome,
-      { confirmado }
+      { confirmado, ...(pinGerencial ? { pin_gerencial: pinGerencial } : {}) }
     )
+
+    if (addRes.code === 'CAIXA_VENCIDA_BLOQUEADA') {
+      setBloqueioVencida({
+        caixa: cx,
+        mensagem: addRes.error,
+        validade: addRes.validade,
+        dias_vencida: addRes.dias_vencida,
+      })
+      setPinVencida('')
+      return
+    }
 
     if (addRes.requiresConfirmation) {
       setRegraAlerta({
@@ -266,6 +279,12 @@ export function Saida() {
 
     if (!addRes.success) {
       return toastError(addRes.error)
+    }
+
+    if (addRes.alerta_fefo?.existe_mais_antigo) {
+      toastWarning(
+        `Alerta FEFO auditado: existe caixa mais antiga (${addRes.alerta_fefo.ean_sugerido}) em ${addRes.alerta_fefo.endereco_sugerido} vencendo em ${addRes.alerta_fefo.validade_mais_antiga.split('-').reverse().join('/')}.`,
+      )
     }
 
     toastSuccess(`Caixa separada: ${cx.produto_descricao} (${Number(cx.peso_kg).toFixed(2)} kg)`)
@@ -1822,6 +1841,77 @@ export function Saida() {
       )}
 
       {/* ══════════════════════ MODAL FINALIZAÇÃO PARCIAL ══════════════════════ */}
+      {bloqueioVencida && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2, 6, 23, 0.88)',
+            zIndex: 1200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div className="card" style={{ maxWidth: '520px', width: '100%', padding: '22px', border: '2px solid #ef4444' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f87171', marginTop: 0 }}>
+              <AlertTriangle size={22} /> BLOQUEIO HARD-STOP FEFO — CAIXA VENCIDA
+            </h3>
+            <p className="text-sm" style={{ color: '#fecaca', lineHeight: 1.5 }}>
+              {bloqueioVencida.mensagem}
+            </p>
+            <div
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 14,
+              }}
+            >
+              <label className="form-label" style={{ color: '#fca5a5' }}>
+                Liberação Excepcional com PIN Gerencial (registra alerta no Radar Antifraude)
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                className="form-input font-mono"
+                placeholder="Digite o PIN Gerencial (4 a 6 dígitos)..."
+                value={pinVencida}
+                onChange={(e) => setPinVencida(e.target.value)}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => {
+                  setBloqueioVencida(null)
+                  setPinVencida('')
+                }}
+              >
+                Cancelar (Recomendado)
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                disabled={pinVencida.trim().length < 4}
+                onClick={async () => {
+                  const cx = bloqueioVencida.caixa
+                  const pin = pinVencida.trim()
+                  setBloqueioVencida(null)
+                  setPinVencida('')
+                  await executarAdicaoCaixa(cx, true, pin)
+                }}
+              >
+                Autorizar com PIN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modalFinalizarParcial && (
         <div
           style={{

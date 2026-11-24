@@ -287,6 +287,8 @@ export function obterModulosVisiveis(operador, isFilialVarejo) {
         'temperatura', 'fefo', 'validade', 'vencimento', 'vencido', 'perda', 'perdas',
         'descarte', 'quebra', 'promocao', 'liquidacao', 'queima', 'antifraude',
         'auditoria', 'cancelamento', 'fraude', 'prevencao de perdas',
+        'loss prevention', 'ronda', 'camara fria', 'cadeia de frio', 'laudo',
+        'furo rendimento', 'rendimento', 'desossa', 'etiqueta fantasma', 'subfaturamento',
       ],
     },
 

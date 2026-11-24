@@ -61,7 +61,11 @@ export async function apiRequest(path, { method = 'GET', body, tokenOverride, sk
     if (!skipAuth && res.status === 401 && state.operador) {
       state.logout()
     }
-    throw new Error(data?.error || `Erro na API (${res.status})`)
+    const err = new Error(data?.error || `Erro na API (${res.status})`)
+    err.status = res.status
+    err.code = data?.code
+    err.data = data
+    throw err
   }
   return data
 }

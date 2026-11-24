@@ -23,6 +23,7 @@ import {
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
+import { registerLossPreventionRoutes } from './lossPreventionRoutes.js'
 import {
   gerarCodigoDocumento,
   hojeIsoLocal,
@@ -1714,15 +1715,29 @@ export function registerGovernancaRoutes(app: FastifyInstance, conn: DbConnectio
         'TROCA_TABELA_ACOUGUE',
         'PROMOCAO_FEFO_CRIADA',
         'COTACAO_FECHADA_GEROU_PC',
+        'OVERRIDE_CAIXA_VENCIDA_EXPEDICAO',
+        'FURO_FILA_FEFO',
+        'ALERTA_TEMPERATURA_CAMARA',
       ])
+      let alertasTempQtd = 0
+      let furosFefoQtd = 0
       for (const au of audRows) {
         if (!acoesSens.has(au.acao)) continue
+        const isAlta =
+          au.acao === 'OVERRIDE_CAIXA_VENCIDA_EXPEDICAO' || au.acao === 'ALERTA_TEMPERATURA_CAMARA'
+        const isMedia =
+          au.acao === 'AJUSTE_MANUAL_EMPORIO' || au.acao === 'FURO_FILA_FEFO'
+        if (au.acao === 'ALERTA_TEMPERATURA_CAMARA') alertasTempQtd += 1
+        if (au.acao === 'FURO_FILA_FEFO' || au.acao === 'OVERRIDE_CAIXA_VENCIDA_EXPEDICAO') {
+          furosFefoQtd += 1
+          acumOp(au.executorNome || 'Operador', 0)
+        }
         eventos.push({
           id: `au-${au.id}`,
           categoria: 'AUDITORIA_GOVERNANCA',
-          severidade: au.acao === 'AJUSTE_MANUAL_EMPORIO' ? 'MEDIA' : 'INFO',
+          severidade: isAlta ? 'ALTA' : isMedia ? 'MEDIA' : 'INFO',
           titulo: `${au.acao.replace(/_/g, ' ')} • ${au.targetUserNome || ''}`.trim(),
-          detalhe: JSON.stringify(au.detalhesDepois || {}).slice(0, 140),
+          detalhe: JSON.stringify(au.detalhesDepois || {}).slice(0, 160),
           operador: au.executorNome || 'Sistema',
           valor_impacto: 0,
           data_hora: new Date(au.createdAt).toISOString(),
@@ -1754,6 +1769,8 @@ export function registerGovernancaRoutes(app: FastifyInstance, conn: DbConnectio
           travas_comerciais_qtd: pedsComerciais.length,
           perdas_estoque_qtd: perdasRows.length,
           perdas_estoque_valor: totalPerdas,
+          alertas_temperatura_qtd: alertasTempQtd,
+          furos_fefo_qtd: furosFefoQtd,
         },
         ranking_operadores: Array.from(porOperador.values())
           .sort((a, b) => b.valor_impacto - a.valor_impacto || b.qtd_alertas - a.qtd_alertas)
@@ -1762,4 +1779,6 @@ export function registerGovernancaRoutes(app: FastifyInstance, conn: DbConnectio
       }
     },
   )
+
+  registerLossPreventionRoutes(app, conn)
 }

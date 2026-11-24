@@ -29,6 +29,8 @@ import * as produtosQueries from '../queries/produtos'
 import { ApiModeRequiredBanner } from '../components/shared/ApiModeRequiredBanner'
 import { MesSelector } from '../components/shared/MesSelector'
 import { FornecedorSearchSelect, ProdutoSearchSelect } from '../components/shared/SmartSearchSelect'
+import { AbaRondaTemperatura } from '../components/governanca/AbaRondaTemperatura'
+import { AbaAuditoriaRendimentoEtiquetas } from '../components/governanca/AbaAuditoriaRendimentoEtiquetas'
 
 const fmtMoeda = (v) =>
   `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -445,6 +447,20 @@ export function GovernancaPerdas() {
           onClick={() => setAba('FEFO')}
         >
           <Flame size={15} /> Monitor FEFO &amp; Perdas
+        </button>
+        <button
+          type="button"
+          className={`btn ${aba === 'TEMPERATURA' ? 'btn--primary' : 'btn--secondary'}`}
+          onClick={() => setAba('TEMPERATURA')}
+        >
+          <Thermometer size={15} /> Ronda de Temperatura (°C)
+        </button>
+        <button
+          type="button"
+          className={`btn ${aba === 'RENDIMENTO_ETQ' ? 'btn--primary' : 'btn--secondary'}`}
+          onClick={() => setAba('RENDIMENTO_ETQ')}
+        >
+          <Scale size={15} /> Rendimento &amp; Etiquetas
         </button>
         <button
           type="button"
@@ -1079,6 +1095,15 @@ export function GovernancaPerdas() {
               </div>
               <div className="kpi-card__sub">Perdas: {fmtMoeda(resumoAnti.perdas_estoque_valor)}</div>
             </div>
+            <div className={`kpi-card ${(resumoAnti.alertas_temperatura_qtd || 0) + (resumoAnti.furos_fefo_qtd || 0) > 0 ? 'kpi-card--danger' : ''}`}>
+              <div className="kpi-card__label">Cadeia Frio &amp; Furos FEFO</div>
+              <div className="kpi-card__value">
+                {(resumoAnti.alertas_temperatura_qtd || 0) + (resumoAnti.furos_fefo_qtd || 0)}
+              </div>
+              <div className="kpi-card__sub">
+                Temp.: {resumoAnti.alertas_temperatura_qtd || 0} • FEFO: {resumoAnti.furos_fefo_qtd || 0}
+              </div>
+            </div>
           </div>
 
           {(antiData.ranking_operadores || []).length > 0 && (
@@ -1183,6 +1208,24 @@ export function GovernancaPerdas() {
             )}
           </div>
         </div>
+      )}
+
+      {/* ABA 5: RONDA DE TEMPERATURA DAS CÂMARAS (CADEIA DE FRIO / SIF) */}
+      {aba === 'TEMPERATURA' && <AbaRondaTemperatura />}
+
+      {/* ABA 6: AUDITORIA DE FURO DE RENDIMENTO & ETIQUETAS FANTASMA */}
+      {aba === 'RENDIMENTO_ETQ' && (
+        <AbaAuditoriaRendimentoEtiquetas
+          onBaixarPerdaEtiqueta={(etq) => {
+            setModalPerda(etq)
+            setPerdaForm({
+              produto_id: '',
+              qtd_kg: String(etq.peso_kg || ''),
+              motivo: 'VENCIMENTO',
+              observacoes: `Baixa via Auditoria de Etiqueta Fantasma (${etq.codigo_rastreio})`,
+            })
+          }}
+        />
       )}
 
       {/* MODAL NOVA COTAÇÃO (RFQ) */}

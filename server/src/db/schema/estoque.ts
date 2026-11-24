@@ -460,3 +460,30 @@ export const perdasRegistro = pgTable(
     index('idx_perdas_tenant_filial_data').on(t.tenantId, t.filialId, t.createdAt),
   ]
 )
+
+export const camarasTemperaturaLog = pgTable(
+  'camaras_temperatura_log',
+  {
+    id: uuid('id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    filialId: uuid('filial_id')
+      .notNull()
+      .references(() => filiais.id, { onDelete: 'cascade' }),
+    localNome: text('local_nome').notNull(),
+    tipoAmbiente: text('tipo_ambiente').notNull().default('RESFRIADO'), // RESFRIADO | CONGELADO | CLIMATIZADO | BALCAO_ACOUGUE | VEICULO
+    temperaturaC: numeric('temperatura_c', { precision: 6, scale: 2 }).notNull(),
+    tempMinC: numeric('temp_min_c', { precision: 6, scale: 2 }).notNull(),
+    tempMaxC: numeric('temp_max_c', { precision: 6, scale: 2 }).notNull(),
+    conforme: integer('conforme').notNull().default(1), // 1 = conforme, 0 = fora da faixa
+    desvioC: numeric('desvio_c', { precision: 6, scale: 2 }).notNull().default('0'),
+    acaoCorretiva: text('acao_corretiva').notNull().default(''),
+    operadorId: uuid('operador_id').references(() => operadores.id, { onDelete: 'set null' }),
+    operadorNome: text('operador_nome').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_camaras_temp_tenant_filial_data').on(t.tenantId, t.filialId, t.createdAt),
+  ]
+)
