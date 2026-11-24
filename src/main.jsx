@@ -13,6 +13,12 @@ if (typeof window !== 'undefined') {
       window.location.reload()
     }
   })
+
+  if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    })
+  }
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

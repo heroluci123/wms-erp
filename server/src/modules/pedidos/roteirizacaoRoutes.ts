@@ -9,6 +9,7 @@ import {
   fiscalNotas,
   pedidos,
   pedidosItens,
+  pendenciasSetor,
   produtos,
   romaneios,
   romaneiosItens,
@@ -50,6 +51,36 @@ function calcPesoBrutoCaixa(pesoLiq: unknown, pesoBruto: unknown, taraKg: unknow
   const pb = toNum(pesoBruto, 0)
   if (pb > 0) return pb
   return toNum(pesoLiq, 0) + toNum(taraKg, 0)
+}
+
+function sanitizarImagemDataUrl(raw: unknown, maxBytes: number, campo: string): string | null | undefined {
+  if (raw === undefined) return undefined
+  if (raw === null || String(raw).trim() === '') return null
+  const s = String(raw).trim()
+  if (!/^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/i.test(s)) {
+    throw new HttpError(400, `Formato inválido em ${campo}. Envie uma imagem PNG, JPEG ou WEBP válida.`)
+  }
+  if (s.length > maxBytes) {
+    throw new HttpError(400, `A imagem em ${campo} excede o limite permitido. Tente capturar novamente.`)
+  }
+  return s
+}
+
+function parseCoord(raw: unknown, min: number, max: number): string | undefined {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return undefined
+  const n = Number(String(raw).replace(',', '.'))
+  if (!Number.isFinite(n) || n < min || n > max) return undefined
+  return n.toFixed(7)
+}
+
+function parseTempOpcional(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined
+  if (raw === null || String(raw).trim() === '') return null
+  const n = Number(String(raw).replace(',', '.'))
+  if (!Number.isFinite(n) || n < -50 || n > 50) {
+    throw new HttpError(400, 'Informe uma temperatura válida (entre -50°C e 50°C).')
+  }
+  return n.toFixed(2)
 }
 
 async function calcularPesoCargaPedidos(
@@ -200,6 +231,10 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             numero_nf_lote: embarques.numeroNfLote,
             observacoes: embarques.observacoes,
             operador_carregamento_nome: embarques.operadorCarregamentoNome,
+            checklist_saida_json: embarques.checklistSaidaJson,
+            ultima_lat: embarques.ultimaLat,
+            ultima_lng: embarques.ultimaLng,
+            ultima_localizacao_em: embarques.ultimaLocalizacaoEm,
             iniciado_em: embarques.iniciadoEm,
             concluido_em: embarques.concluidoEm,
             created_at: embarques.createdAt,
@@ -597,6 +632,10 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
             numero_nf_lote: embarques.numeroNfLote,
             observacoes: embarques.observacoes,
             operador_carregamento_nome: embarques.operadorCarregamentoNome,
+            checklist_saida_json: embarques.checklistSaidaJson,
+            ultima_lat: embarques.ultimaLat,
+            ultima_lng: embarques.ultimaLng,
+            ultima_localizacao_em: embarques.ultimaLocalizacaoEm,
             iniciado_em: embarques.iniciadoEm,
             concluido_em: embarques.concluidoEm,
             created_at: embarques.createdAt,
@@ -620,6 +659,15 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           pagamento_confirmado: entregasTracking.pagamentoConfirmado,
           forma_pagamento_recebida: entregasTracking.formaPagamentoRecebida,
           valor_pago: entregasTracking.valorPago,
+          canhoto_foto_url: entregasTracking.canhotoFotoUrl,
+          assinatura_url: entregasTracking.assinaturaUrl,
+          recebedor_nome: entregasTracking.recebedorNome,
+          recebedor_documento: entregasTracking.recebedorDocumento,
+          temperatura_entrega: entregasTracking.temperaturaEntrega,
+          motivo_recusa: entregasTracking.motivoRecusa,
+          itens_recusados_json: entregasTracking.itensRecusadosJson,
+          entrega_lat: entregasTracking.entregaLat,
+          entrega_lng: entregasTracking.entregaLng,
           observacao_motorista: entregasTracking.observacaoMotorista,
           chegou_em: entregasTracking.chegouEm,
           concluido_at: entregasTracking.concluidoAt,
@@ -812,6 +860,16 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           status_entrega: s.status_entrega,
           pagamento_confirmado: Number(s.pagamento_confirmado || 0) === 1,
           forma_pagamento_recebida: s.forma_pagamento_recebida || '',
+          valor_pago: s.valor_pago != null ? toNum(s.valor_pago, 0) : null,
+          canhoto_foto_url: s.canhoto_foto_url || null,
+          assinatura_url: s.assinatura_url || null,
+          recebedor_nome: s.recebedor_nome || '',
+          recebedor_documento: s.recebedor_documento || '',
+          temperatura_entrega: s.temperatura_entrega != null ? toNum(s.temperatura_entrega, 0) : null,
+          motivo_recusa: s.motivo_recusa || '',
+          itens_recusados: Array.isArray(s.itens_recusados_json) ? s.itens_recusados_json : [],
+          entrega_lat: s.entrega_lat != null ? toNum(s.entrega_lat, 0) : null,
+          entrega_lng: s.entrega_lng != null ? toNum(s.entrega_lng, 0) : null,
           observacao_motorista: s.observacao_motorista || '',
           chegou_em: s.chegou_em,
           concluido_at: s.concluido_at,
@@ -866,6 +924,11 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           tolerancia_pct: Number(tolPct.toFixed(2)),
           capacidade_maxima_kg: capMax || null,
           temperatura_bau: emb.temperatura_bau != null ? toNum(emb.temperatura_bau, 0) : null,
+          checklist_saida:
+            emb.checklist_saida_json && typeof emb.checklist_saida_json === 'object' ? emb.checklist_saida_json : {},
+          ultima_lat: emb.ultima_lat != null ? toNum(emb.ultima_lat, 0) : null,
+          ultima_lng: emb.ultima_lng != null ? toNum(emb.ultima_lng, 0) : null,
+          ultima_localizacao_em: emb.ultima_localizacao_em || null,
           nfs_vinculadas: Array.from(nfsSet),
           paradas,
           produtos_consolidados: Array.from(produtosConsolidados.values()).map((p) => ({
@@ -1684,7 +1747,58 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
     },
   )
 
-  // ── ROTAS PÚBLICAS DE RASTREIO (QR CODE DO MOTORISTA & CLIENTE — SEM LOGIN) ─────────────────────────
+  // Lista enxuta de rotas com QR Token para o Hub do App Motorista (usuário autenticado no celular)
+  app.get(
+    '/api/roteirizacao/minhas-rotas',
+    { preHandler: requirePermission(PERM_ROT_VIEW, { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const rows = await conn.db
+        .select({
+          id: embarques.id,
+          codigo: embarques.codigo,
+          titulo: embarques.titulo,
+          data_embarque: embarques.dataEmbarque,
+          horario_saida: embarques.horarioSaida,
+          status: embarques.status,
+          motorista_nome: embarques.motoristaNome,
+          veiculo_placa: embarques.veiculoPlaca,
+          qr_token: embarques.qrToken,
+          rota_nome: rotas.nome,
+          tipo_veiculo_nome: tiposVeiculo.nome,
+          temperatura_bau: embarques.temperaturaBau,
+          total_paradas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM entregas_tracking et WHERE et.embarque_id = ${embarques.id}), 0)`,
+          entregues: sql<number>`COALESCE((SELECT COUNT(*)::int FROM entregas_tracking et WHERE et.embarque_id = ${embarques.id} AND et.status_entrega = 'ENTREGUE'), 0)`,
+          devolvidas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM entregas_tracking et WHERE et.embarque_id = ${embarques.id} AND et.status_entrega = 'DEVOLVIDA'), 0)`,
+        })
+        .from(embarques)
+        .leftJoin(rotas, eq(rotas.id, embarques.rotaId))
+        .leftJoin(tiposVeiculo, eq(tiposVeiculo.id, embarques.tipoVeiculoId))
+        .where(
+          and(
+            eq(embarques.tenantId, ctx.tenantId),
+            eq(embarques.filialId, ctx.filialId),
+            inArray(embarques.status, ['PLANEJADO', 'EM_CARREGAMENTO', 'EM_ROTA', 'CONCLUIDO']),
+          ),
+        )
+        .orderBy(
+          sql`CASE WHEN ${embarques.status} = 'EM_ROTA' THEN 0 WHEN ${embarques.status} = 'EM_CARREGAMENTO' THEN 1 WHEN ${embarques.status} = 'PLANEJADO' THEN 2 ELSE 3 END`,
+          desc(embarques.dataEmbarque),
+          desc(embarques.createdAt),
+        )
+        .limit(40)
+
+      return {
+        success: true,
+        data: rows.map((r) => ({
+          ...r,
+          temperatura_bau: r.temperatura_bau != null ? toNum(r.temperatura_bau, 0) : null,
+        })),
+      }
+    },
+  )
+
+  // ── ROTAS PÚBLICAS DE RASTREIO (APP MOTORISTA PWA & RASTREIO DO CLIENTE — SEM LOGIN) ────────────────
   async function assertRastreioHabilitado(dbOrTx: Pick<DbConnection['db'], 'select'>, tenantId: string) {
     const [t] = await dbOrTx.select({ featuresJson: tenants.featuresJson }).from(tenants).where(eq(tenants.id, tenantId)).limit(1)
     const features = (t?.featuresJson as Record<string, boolean>) || {}
@@ -1704,16 +1818,25 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         codigo: embarques.codigo,
         titulo: embarques.titulo,
         data_embarque: embarques.dataEmbarque,
+        horario_saida: embarques.horarioSaida,
+        temperatura_bau: embarques.temperaturaBau,
         status: embarques.status,
         motorista_nome: embarques.motoristaNome,
         veiculo_placa: embarques.veiculoPlaca,
         rota_nome: rotas.nome,
         transportadora_nome: transportadoras.nomeFantasia,
+        tipo_veiculo_nome: tiposVeiculo.nome,
+        checklist_saida_json: embarques.checklistSaidaJson,
+        ultima_lat: embarques.ultimaLat,
+        ultima_lng: embarques.ultimaLng,
+        ultima_localizacao_em: embarques.ultimaLocalizacaoEm,
         iniciado_em: embarques.iniciadoEm,
+        concluido_em: embarques.concluidoEm,
       })
       .from(embarques)
       .leftJoin(rotas, eq(rotas.id, embarques.rotaId))
       .leftJoin(transportadoras, eq(transportadoras.id, embarques.transportadoraId))
+      .leftJoin(tiposVeiculo, eq(tiposVeiculo.id, embarques.tipoVeiculoId))
       .where(eq(embarques.qrToken, qrToken))
       .limit(1)
 
@@ -1724,13 +1847,27 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       .select({
         pedido_id: pedidos.id,
         pedido_codigo: pedidos.codigo,
+        numero_nf: pedidos.numeroNf,
+        rastreio_token: pedidos.rastreioToken,
         cliente: pedidos.cliente,
         ordem_parada: entregasTracking.ordemParada,
         status_entrega: entregasTracking.statusEntrega,
         pagamento_na_entrega: pedidos.pagamentoNaEntrega,
         pagamento_confirmado: entregasTracking.pagamentoConfirmado,
+        forma_pagamento_recebida: entregasTracking.formaPagamentoRecebida,
+        valor_pago: entregasTracking.valorPago,
         valor_total: pedidos.valorTotal,
+        recebedor_nome: entregasTracking.recebedorNome,
+        recebedor_documento: entregasTracking.recebedorDocumento,
+        temperatura_entrega: entregasTracking.temperaturaEntrega,
+        canhoto_foto_url: entregasTracking.canhotoFotoUrl,
+        assinatura_url: entregasTracking.assinaturaUrl,
+        motivo_recusa: entregasTracking.motivoRecusa,
+        itens_recusados_json: entregasTracking.itensRecusadosJson,
+        entrega_lat: entregasTracking.entregaLat,
+        entrega_lng: entregasTracking.entregaLng,
         observacao_motorista: entregasTracking.observacaoMotorista,
+        chegou_em: entregasTracking.chegouEm,
         concluido_at: entregasTracking.concluidoAt,
         cidade: clientes.cidade,
         uf: clientes.uf,
@@ -1747,46 +1884,123 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       .where(eq(entregasTracking.embarqueId, emb.id))
       .orderBy(asc(entregasTracking.ordemParada))
 
+    const pedIds = stops.map((s) => s.pedido_id)
+    const itensRows =
+      pedIds.length > 0
+        ? await conn.db
+            .select({
+              pedido_id: pedidosItens.pedidoId,
+              produto_id: pedidosItens.produtoId,
+              produto_codigo: produtos.codigo,
+              produto_descricao: produtos.descricao,
+              qtd_kg_solicitada: pedidosItens.qtdKgSolicitada,
+              qtd_caixas_solicitada: pedidosItens.qtdCaixasSolicitada,
+            })
+            .from(pedidosItens)
+            .innerJoin(produtos, eq(produtos.id, pedidosItens.produtoId))
+            .where(inArray(pedidosItens.pedidoId, pedIds))
+        : []
+
+    const itensPorPedido = new Map<string, Array<Record<string, unknown>>>()
+    for (const it of itensRows) {
+      const arr = itensPorPedido.get(it.pedido_id) || []
+      arr.push({
+        produto_id: it.produto_id,
+        produto_codigo: it.produto_codigo || '',
+        produto_descricao: it.produto_descricao,
+        qtd_kg: toNum(it.qtd_kg_solicitada, 0),
+        qtd_caixas: it.qtd_caixas_solicitada != null ? toNum(it.qtd_caixas_solicitada, 0) : null,
+      })
+      itensPorPedido.set(it.pedido_id, arr)
+    }
+
     return {
       success: true,
       rota: {
         codigo: emb.codigo,
         titulo: emb.titulo,
         data_embarque: emb.data_embarque,
+        horario_saida: emb.horario_saida || '',
+        temperatura_bau: emb.temperatura_bau != null ? toNum(emb.temperatura_bau, 0) : null,
         status: emb.status,
         motorista_nome: emb.motorista_nome,
         veiculo_placa: emb.veiculo_placa,
         rota_nome: emb.rota_nome,
         transportadora_nome: emb.transportadora_nome,
+        tipo_veiculo_nome: emb.tipo_veiculo_nome || '',
+        checklist_saida:
+          emb.checklist_saida_json && typeof emb.checklist_saida_json === 'object' ? emb.checklist_saida_json : {},
+        ultima_lat: emb.ultima_lat != null ? toNum(emb.ultima_lat, 0) : null,
+        ultima_lng: emb.ultima_lng != null ? toNum(emb.ultima_lng, 0) : null,
+        ultima_localizacao_em: emb.ultima_localizacao_em || null,
         iniciado_em: emb.iniciado_em,
+        concluido_em: emb.concluido_em,
       },
       paradas: stops.map((s) => ({
         pedido_id: s.pedido_id,
         pedido_codigo: s.pedido_codigo,
+        numero_nf: s.numero_nf || '',
+        rastreio_token: s.rastreio_token || '',
         cliente: s.cliente,
         ordem_parada: s.ordem_parada,
         status_entrega: s.status_entrega,
         pagamento_na_entrega: Number(s.pagamento_na_entrega || 0) === 1,
         pagamento_confirmado: Number(s.pagamento_confirmado || 0) === 1,
+        forma_pagamento_recebida: s.forma_pagamento_recebida || '',
+        valor_pago: s.valor_pago != null ? toNum(s.valor_pago, 0) : null,
         valor_total: toNum(s.valor_total, 0),
+        recebedor_nome: s.recebedor_nome || '',
+        recebedor_documento: s.recebedor_documento || '',
+        temperatura_entrega: s.temperatura_entrega != null ? toNum(s.temperatura_entrega, 0) : null,
+        canhoto_foto_url: s.canhoto_foto_url || null,
+        assinatura_url: s.assinatura_url || null,
+        tem_canhoto_foto: Boolean(s.canhoto_foto_url),
+        tem_assinatura: Boolean(s.assinatura_url),
+        motivo_recusa: s.motivo_recusa || '',
+        itens_recusados: Array.isArray(s.itens_recusados_json) ? s.itens_recusados_json : [],
+        entrega_lat: s.entrega_lat != null ? toNum(s.entrega_lat, 0) : null,
+        entrega_lng: s.entrega_lng != null ? toNum(s.entrega_lng, 0) : null,
         observacao_motorista: s.observacao_motorista,
+        chegou_em: s.chegou_em,
         concluido_at: s.concluido_at,
         endereco_completo: [s.endereco, s.numero, s.bairro, s.cidade, s.uf].filter(Boolean).join(', '),
         telefone: s.telefone || '',
         total_kg: toNum(s.total_kg, 0),
         total_caixas: Number(s.total_caixas || 0),
+        itens_pedido: itensPorPedido.get(s.pedido_id) || [],
       })),
     }
   })
 
   app.post('/api/public/rastreio/:qrToken/iniciar', async (req) => {
     const qrToken = String((req.params as { qrToken: string }).qrToken || '').trim()
-    const body = (req.body || {}) as { motorista_nome?: string; veiculo_placa?: string }
+    const body = (req.body || {}) as {
+      motorista_nome?: string
+      veiculo_placa?: string
+      checklist_saida?: {
+        bau_limpo?: boolean
+        temperatura_ok?: boolean
+        temperatura_saida_c?: number | string | null
+        documentos_nf_ok?: boolean
+        carga_lacrada?: boolean
+        odometro_saida?: number | string | null
+        observacao_checklist?: string
+      }
+      lat?: number | string
+      lng?: number | string
+    }
     const motorista = String(body.motorista_nome || '').trim()
     const placa = String(body.veiculo_placa || '').trim().toUpperCase()
     if (!motorista || !placa) {
       throw new HttpError(400, 'Informe o nome do motorista e a placa do veículo para iniciar a rota.')
     }
+
+    const latStr = parseCoord(body.lat, -90, 90)
+    const lngStr = parseCoord(body.lng, -180, 180)
+    const tempChecklist =
+      body.checklist_saida?.temperatura_saida_c !== undefined
+        ? parseTempOpcional(body.checklist_saida.temperatura_saida_c)
+        : undefined
 
     await conn.db.transaction(async (tx) => {
       const [emb] = await tx.select().from(embarques).where(eq(embarques.qrToken, qrToken)).limit(1)
@@ -1797,15 +2011,38 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       }
 
       const now = new Date()
-      await tx
-        .update(embarques)
-        .set({
-          motoristaNome: motorista,
-          veiculoPlaca: placa,
-          status: emb.status === 'CONCLUIDO' ? 'CONCLUIDO' : 'EM_ROTA',
-          iniciadoEm: emb.iniciadoEm || now,
-        })
-        .where(eq(embarques.id, emb.id))
+      const patch: Partial<typeof embarques.$inferInsert> = {
+        motoristaNome: motorista,
+        veiculoPlaca: placa,
+        status: emb.status === 'CONCLUIDO' ? 'CONCLUIDO' : 'EM_ROTA',
+        iniciadoEm: emb.iniciadoEm || now,
+      }
+      if (body.checklist_saida && typeof body.checklist_saida === 'object') {
+        const ck = body.checklist_saida
+        patch.checklistSaidaJson = {
+          bau_limpo: Boolean(ck.bau_limpo),
+          temperatura_ok: Boolean(ck.temperatura_ok),
+          temperatura_saida_c: tempChecklist != null ? Number(tempChecklist) : null,
+          documentos_nf_ok: Boolean(ck.documentos_nf_ok),
+          carga_lacrada: Boolean(ck.carga_lacrada),
+          odometro_saida:
+            ck.odometro_saida !== undefined && ck.odometro_saida !== null && String(ck.odometro_saida).trim() !== ''
+              ? Number(String(ck.odometro_saida).replace(',', '.')) || null
+              : null,
+          observacao_checklist: String(ck.observacao_checklist || '').trim(),
+          concluido_em: now.toISOString(),
+        }
+        if (tempChecklist != null && emb.temperaturaBau == null) {
+          patch.temperaturaBau = tempChecklist
+        }
+      }
+      if (latStr && lngStr) {
+        patch.ultimaLat = latStr
+        patch.ultimaLng = lngStr
+        patch.ultimaLocalizacaoEm = now
+      }
+
+      await tx.update(embarques).set(patch).where(eq(embarques.id, emb.id))
 
       await tx
         .update(entregasTracking)
@@ -1816,6 +2053,26 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
     return { success: true }
   })
 
+  app.post('/api/public/rastreio/:qrToken/localizacao', async (req) => {
+    const qrToken = String((req.params as { qrToken: string }).qrToken || '').trim()
+    const body = (req.body || {}) as { lat?: number | string; lng?: number | string }
+    const latStr = parseCoord(body.lat, -90, 90)
+    const lngStr = parseCoord(body.lng, -180, 180)
+    if (!latStr || !lngStr) throw new HttpError(400, 'Coordenadas GPS inválidas.')
+
+    const [emb] = await conn.db.select().from(embarques).where(eq(embarques.qrToken, qrToken)).limit(1)
+    if (!emb) throw new HttpError(404, 'Rota não encontrada.')
+    await assertRastreioHabilitado(conn.db, emb.tenantId)
+
+    const now = new Date()
+    await conn.db
+      .update(embarques)
+      .set({ ultimaLat: latStr, ultimaLng: lngStr, ultimaLocalizacaoEm: now })
+      .where(eq(embarques.id, emb.id))
+
+    return { success: true, lat: Number(latStr), lng: Number(lngStr), atualizado_em: now.toISOString() }
+  })
+
   app.post('/api/public/rastreio/:qrToken/paradas/:pedidoId', async (req) => {
     const p = req.params as { qrToken: string; pedidoId: string }
     const qrToken = String(p.qrToken || '').trim()
@@ -1824,12 +2081,49 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       status_entrega?: 'A_CAMINHO' | 'NO_CLIENTE' | 'ENTREGUE' | 'DEVOLVIDA'
       pagamento_confirmado?: boolean
       forma_pagamento_recebida?: string
+      valor_pago?: number | string | null
+      recebedor_nome?: string
+      recebedor_documento?: string
+      temperatura_entrega?: number | string | null
+      canhoto_foto_url?: string | null
+      assinatura_url?: string | null
+      motivo_recusa?: string
+      itens_recusados?: Array<{
+        produto_id?: string
+        produto_descricao?: string
+        qtd_caixas?: number
+        peso_kg?: number
+        motivo?: string
+      }>
       observacao_motorista?: string
+      lat?: number | string
+      lng?: number | string
     }
     const nextStatus = String(body.status_entrega || '').toUpperCase()
     if (!['A_CAMINHO', 'NO_CLIENTE', 'ENTREGUE', 'DEVOLVIDA'].includes(nextStatus)) {
       throw new HttpError(400, 'Status de parada inválido.')
     }
+
+    const fotoUrl = sanitizarImagemDataUrl(body.canhoto_foto_url, 3_500_000, 'foto do canhoto')
+    const assinaturaUrl = sanitizarImagemDataUrl(body.assinatura_url, 1_500_000, 'assinatura digital')
+    const tempEntrega = parseTempOpcional(body.temperatura_entrega)
+    const latStr = parseCoord(body.lat, -90, 90)
+    const lngStr = parseCoord(body.lng, -180, 180)
+    const itensRecusados = Array.isArray(body.itens_recusados)
+      ? body.itens_recusados
+          .filter((it) => it && String(it.produto_descricao || '').trim())
+          .map((it) => ({
+            produto_id: it.produto_id || null,
+            produto_descricao: String(it.produto_descricao || '').trim(),
+            qtd_caixas: Number(it.qtd_caixas || 0),
+            peso_kg: Number(it.peso_kg || 0),
+            motivo: String(it.motivo || '').trim(),
+          }))
+      : undefined
+    const valorPagoNum =
+      body.valor_pago !== undefined && body.valor_pago !== null && String(body.valor_pago).trim() !== ''
+        ? Math.max(0, Number(String(body.valor_pago).replace(',', '.')) || 0)
+        : undefined
 
     await conn.db.transaction(async (tx) => {
       const [emb] = await tx.select().from(embarques).where(eq(embarques.qrToken, qrToken)).limit(1)
@@ -1840,7 +2134,12 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       }
 
       const [ped] = await tx
-        .select({ pagamentoNaEntrega: pedidos.pagamentoNaEntrega, codigo: pedidos.codigo })
+        .select({
+          pagamentoNaEntrega: pedidos.pagamentoNaEntrega,
+          codigo: pedidos.codigo,
+          cliente: pedidos.cliente,
+          valorTotal: pedidos.valorTotal,
+        })
         .from(pedidos)
         .where(eq(pedidos.id, pedidoId))
         .limit(1)
@@ -1854,17 +2153,44 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       }
 
       const now = new Date()
+      const trackPatch: Partial<typeof entregasTracking.$inferInsert> = {
+        statusEntrega: nextStatus,
+        pagamentoConfirmado: body.pagamento_confirmado ? 1 : 0,
+        formaPagamentoRecebida: String(body.forma_pagamento_recebida || '').trim().toUpperCase(),
+        observacaoMotorista: String(body.observacao_motorista || '').trim(),
+        chegouEm: nextStatus === 'NO_CLIENTE' ? now : undefined,
+        concluidoAt: nextStatus === 'ENTREGUE' || nextStatus === 'DEVOLVIDA' ? now : null,
+      }
+      if (valorPagoNum !== undefined) {
+        trackPatch.valorPago = valorPagoNum.toFixed(2)
+      } else if (body.pagamento_confirmado) {
+        trackPatch.valorPago = toNum(ped.valorTotal, 0).toFixed(2)
+      }
+      if (body.recebedor_nome !== undefined) trackPatch.recebedorNome = String(body.recebedor_nome || '').trim()
+      if (body.recebedor_documento !== undefined) {
+        trackPatch.recebedorDocumento = String(body.recebedor_documento || '').trim()
+      }
+      if (tempEntrega !== undefined) trackPatch.temperaturaEntrega = tempEntrega
+      if (fotoUrl !== undefined) trackPatch.canhotoFotoUrl = fotoUrl
+      if (assinaturaUrl !== undefined) trackPatch.assinaturaUrl = assinaturaUrl
+      if (body.motivo_recusa !== undefined) trackPatch.motivoRecusa = String(body.motivo_recusa || '').trim()
+      if (itensRecusados !== undefined) trackPatch.itensRecusadosJson = itensRecusados
+      if (latStr && lngStr) {
+        trackPatch.entregaLat = latStr
+        trackPatch.entregaLng = lngStr
+      }
+
       await tx
         .update(entregasTracking)
-        .set({
-          statusEntrega: nextStatus,
-          pagamentoConfirmado: body.pagamento_confirmado ? 1 : 0,
-          formaPagamentoRecebida: String(body.forma_pagamento_recebida || '').trim(),
-          observacaoMotorista: String(body.observacao_motorista || '').trim(),
-          chegouEm: nextStatus === 'NO_CLIENTE' ? now : undefined,
-          concluidoAt: nextStatus === 'ENTREGUE' || nextStatus === 'DEVOLVIDA' ? now : null,
-        })
+        .set(trackPatch)
         .where(and(eq(entregasTracking.embarqueId, emb.id), eq(entregasTracking.pedidoId, pedidoId)))
+
+      if (latStr && lngStr) {
+        await tx
+          .update(embarques)
+          .set({ ultimaLat: latStr, ultimaLng: lngStr, ultimaLocalizacaoEm: now })
+          .where(eq(embarques.id, emb.id))
+      }
 
       if (body.pagamento_confirmado) {
         await baixarTitulosPedidoEntregaConfirmada(tx, {
@@ -1873,6 +2199,25 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
           pedidoId,
           formaPagamentoRecebida: String(body.forma_pagamento_recebida || '').trim(),
           operadorNome: emb.motoristaNome || 'Motorista',
+        })
+      }
+
+      // Se houve recusa total ou devolução parcial em rota, abre alerta automático na Central de Pendências (Logística)
+      if (nextStatus === 'DEVOLVIDA' || (itensRecusados && itensRecusados.length > 0)) {
+        const motivoResumo =
+          String(body.motivo_recusa || '').trim() ||
+          (itensRecusados && itensRecusados.length > 0 ? `${itensRecusados.length} item(ns) devolvido(s)` : 'Recusa na entrega')
+        await tx.insert(pendenciasSetor).values({
+          id: uuidv7(),
+          tenantId: emb.tenantId,
+          filialId: emb.filialId,
+          setorDestino: 'LOGISTICA',
+          tipoPendencia: nextStatus === 'DEVOLVIDA' ? 'RECUSA_ENTREGA' : 'DEVOLUCAO_PARCIAL',
+          referenciaTabela: 'pedidos',
+          referenciaId: pedidoId,
+          titulo: `[App Motorista • ${emb.codigo}] ${nextStatus === 'DEVOLVIDA' ? 'RECUSA' : 'DEVOLUÇÃO PARCIAL'} — ${ped.codigo} (${ped.cliente}): ${motivoResumo}`,
+          prioridade: 3,
+          status: 'PENDENTE',
         })
       }
 
@@ -1913,7 +2258,14 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
       .select({
         status_entrega: entregasTracking.statusEntrega,
         ordem_parada: entregasTracking.ordemParada,
+        iniciado_em: entregasTracking.iniciadoEm,
+        chegou_em: entregasTracking.chegouEm,
         concluido_at: entregasTracking.concluidoAt,
+        recebedor_nome: entregasTracking.recebedorNome,
+        temperatura_entrega: entregasTracking.temperaturaEntrega,
+        motivo_recusa: entregasTracking.motivoRecusa,
+        canhoto_foto_url: entregasTracking.canhotoFotoUrl,
+        assinatura_url: entregasTracking.assinaturaUrl,
         embarque_codigo: embarques.codigo,
         motorista_nome: embarques.motoristaNome,
         veiculo_placa: embarques.veiculoPlaca,
@@ -1935,7 +2287,13 @@ export function registerRoteirizacaoRoutes(app: FastifyInstance, conn: DbConnect
         embarque_codigo: track?.embarque_codigo || null,
         motorista_nome: track?.motorista_nome || null,
         veiculo_placa: track?.veiculo_placa || null,
+        iniciado_em: track?.iniciado_em || null,
+        chegou_em: track?.chegou_em || null,
         concluido_at: track?.concluido_at || null,
+        recebedor_nome: track?.recebedor_nome || '',
+        temperatura_entrega: track?.temperatura_entrega != null ? toNum(track.temperatura_entrega, 0) : null,
+        motivo_recusa: track?.motivo_recusa || '',
+        tem_comprovante: Boolean(track?.canhoto_foto_url || track?.assinatura_url),
       },
     }
   })

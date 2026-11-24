@@ -12,6 +12,11 @@ export const roteirizacaoQueries = {
     return await apiRequest(`/api/roteirizacao/embarques${buildQueryString({ status_grupo: statusGrupo })}`)
   },
 
+  async listarMinhasRotas() {
+    if (!isApiEnabled()) return { data: [] }
+    return await apiRequest('/api/roteirizacao/minhas-rotas')
+  },
+
   async listarPedidosDisponiveis(opts = null) {
     requireApi()
     const params =
@@ -139,6 +144,15 @@ export const roteirizacaoQueries = {
   async atualizarParadaPublica(qrToken, pedidoId, payload) {
     requireApi()
     return await apiRequest(`/api/public/rastreio/${encodeURIComponent(qrToken)}/paradas/${pedidoId}`, {
+      method: 'POST',
+      body: payload,
+      skipAuth: true,
+    })
+  },
+
+  async atualizarLocalizacaoPublica(qrToken, payload) {
+    requireApi()
+    return await apiRequest(`/api/public/rastreio/${encodeURIComponent(qrToken)}/localizacao`, {
       method: 'POST',
       body: payload,
       skipAuth: true,

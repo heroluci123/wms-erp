@@ -1,18 +1,41 @@
 {
   "short_name": "WMSphere",
-  "name": "WMSphere - Tricarnes",
-  "description": "Sistema de Gerenciamento de Estoque Offline-First",
+  "name": "WMSphere — ERP & App Motorista",
+  "description": "Sistema WMS/ERP e Aplicativo de Entregas do Motorista (iOS & Android PWA)",
   "icons": [
     {
       "src": "/icon.png",
       "type": "image/png",
-      "sizes": "192x192 512x512",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
       "purpose": "any maskable"
     }
   ],
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "theme_color": "#1e1e2f",
-  "background_color": "#1e1e2f",
-  "orientation": "portrait"
+  "theme_color": "#0b1120",
+  "background_color": "#0b1120",
+  "orientation": "portrait-primary",
+  "shortcuts": [
+    {
+      "name": "App Motorista",
+      "short_name": "Motorista",
+      "description": "Abrir rotas e comprovantes de entrega",
+      "url": "/#/motorista",
+      "icons": [{ "src": "/icon.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "PDV Frente de Caixa",
+      "short_name": "PDV",
+      "description": "Abrir frente de caixa",
+      "url": "/#/pdv",
+      "icons": [{ "src": "/icon.png", "sizes": "192x192" }]
+    }
+  ]
 }

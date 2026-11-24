@@ -1847,6 +1847,19 @@ CREATE TABLE IF NOT EXISTS acougue_config_filial (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_acougue_cfg_filial ON acougue_config_filial(tenant_id, filial_id);
+
+-- Etapa 4: App Motorista PWA (Checklist Pré-Viagem, Comprovante Digital POD, Assinatura, Recusa Parcial & GPS)
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS checklist_saida_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS ultima_lat NUMERIC(10,7);
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS ultima_lng NUMERIC(10,7);
+ALTER TABLE embarques ADD COLUMN IF NOT EXISTS ultima_localizacao_em TIMESTAMPTZ;
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS recebedor_nome TEXT NOT NULL DEFAULT '';
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS recebedor_documento TEXT NOT NULL DEFAULT '';
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS temperatura_entrega NUMERIC(6,2);
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS motivo_recusa TEXT NOT NULL DEFAULT '';
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS itens_recusados_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS entrega_lat NUMERIC(10,7);
+ALTER TABLE entregas_tracking ADD COLUMN IF NOT EXISTS entrega_lng NUMERIC(10,7);
 `
 
 export interface SeedDefaultsResult {

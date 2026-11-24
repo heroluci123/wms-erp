@@ -317,6 +317,15 @@ export function obterModulosVisiveis(operador, isFilialVarejo) {
       visible: temAlgumaPermissao(operador, ['roteirizacao', 'pedidos', 'transportadoras']),
       keywords: ['roteirizacao', 'embarque', 'carga', 'carregamento', 'caminhao', 'rota', 'entrega', 'motorista', 'logistica', 'expedicao', 'despacho', 'romaneio'],
     },
+    {
+      id: 'app-motorista',
+      to: '/motorista',
+      label: 'App Motorista (PWA)',
+      section: 'Faturamento',
+      icon: 'Smartphone',
+      visible: temAlgumaPermissao(operador, ['roteirizacao', 'roteirizacao_carregamento', 'saida', 'expedicao', 'pedidos']),
+      keywords: ['motorista', 'app', 'pwa', 'iphone', 'celular', 'mobile', 'entregas', 'canhoto', 'assinatura', 'comprovante', 'pod', 'rota', 'waze', 'gps', 'checklist'],
+    },
 
     // ── FINANCEIRO ────────────────────────────────────────────────────────────
     {

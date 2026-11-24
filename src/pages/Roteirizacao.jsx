@@ -29,6 +29,11 @@ import {
   Lock,
   Gauge,
   Flag,
+  Camera,
+  ClipboardCheck,
+  MessageCircle,
+  ShieldCheck,
+  Smartphone,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
@@ -47,6 +52,17 @@ const fmtData = (d) => {
   const s = String(d).split('T')[0].split(' ')[0]
   const p = s.split('-')
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s
+}
+const fmtDataHora = (iso) => {
+  if (!iso) return '-'
+  const dt = new Date(iso)
+  if (Number.isNaN(dt.getTime())) return String(iso)
+  return dt.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 const hojeIso = () => {
@@ -155,6 +171,7 @@ export function Roteirizacao() {
 
   const [modalConfigOpen, setModalConfigOpen] = useState(false)
   const [modalQrData, setModalQrData] = useState({ open: false, dataUrl: '', url: '' })
+  const [modalPodParada, setModalPodParada] = useState(null)
   const [printCfg, setPrintCfg] = useState(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
 
@@ -1465,12 +1482,69 @@ export function Roteirizacao() {
                     </div>
                   </div>
 
+                  {/* FAIXA DE STATUS DO APP MOTORISTA (CHECKLIST PRÉ-VIAGEM + ÚLTIMO GPS) */}
+                  {(embarqueAtivo.checklist_saida?.concluido_em || embarqueAtivo.ultima_lat != null) && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        background: 'rgba(15, 23, 42, 0.72)',
+                        border: '1px solid rgba(56, 189, 248, 0.28)',
+                        marginBottom: 14,
+                        fontSize: 12.5,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        {embarqueAtivo.checklist_saida?.concluido_em && (
+                          <span className="badge badge--success" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <ClipboardCheck size={13} /> Checklist Saída OK ({fmtDataHora(embarqueAtivo.checklist_saida.concluido_em)})
+                          </span>
+                        )}
+                        {embarqueAtivo.checklist_saida?.temperatura_saida_c != null && (
+                          <span className="text-muted">
+                            Temp. Saída: <strong style={{ color: '#38bdf8' }}>{embarqueAtivo.checklist_saida.temperatura_saida_c}°C</strong>
+                          </span>
+                        )}
+                        {embarqueAtivo.checklist_saida?.odometro_saida != null && (
+                          <span className="text-muted">
+                            Odômetro: <strong>{Number(embarqueAtivo.checklist_saida.odometro_saida).toLocaleString('pt-BR')} km</strong>
+                          </span>
+                        )}
+                      </div>
+                      {embarqueAtivo.ultima_lat != null && embarqueAtivo.ultima_lng != null && (
+                        <a
+                          href={`https://www.google.com/maps?q=${embarqueAtivo.ultima_lat},${embarqueAtivo.ultima_lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn--secondary btn--sm"
+                        >
+                          <MapPin size={13} /> Último GPS ({fmtDataHora(embarqueAtivo.ultima_localizacao_em)}) ↗
+                        </a>
+                      )}
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {(embarqueAtivo.paradas || []).map((p) => {
                       const st = STATUS_STOP_BADGE[p.status_entrega] || { label: p.status_entrega, cls: 'badge--neutral' }
                       const linkCliente = p.rastreio_token
                         ? `${window.location.origin}${window.location.pathname}#/rastreio-pedido/${p.rastreio_token}`
                         : ''
+                      const itensRecusados = Array.isArray(p.itens_recusados) ? p.itens_recusados : []
+                      const temPod = Boolean(
+                        p.canhoto_foto_url ||
+                          p.assinatura_url ||
+                          p.recebedor_nome ||
+                          p.motivo_recusa ||
+                          itensRecusados.length > 0 ||
+                          p.entrega_lat != null ||
+                          p.temperatura_entrega != null,
+                      )
                       return (
                         <div
                           key={p.pedido_id}
@@ -1493,17 +1567,47 @@ export function Roteirizacao() {
                               <span className={`badge ${st.cls}`}>{st.label}</span>
                               {p.pagamento_na_entrega && (
                                 <span className={`badge ${p.pagamento_confirmado ? 'badge--success' : 'badge--danger'}`}>
-                                  <DollarSign size={11} /> {p.pagamento_confirmado ? 'Pago na Entrega' : 'Cobrar na Entrega'}
+                                  <DollarSign size={11} />{' '}
+                                  {p.pagamento_confirmado
+                                    ? `Pago${p.forma_pagamento_recebida ? ` (${p.forma_pagamento_recebida})` : ''}`
+                                    : 'Cobrar na Entrega'}
+                                </span>
+                              )}
+                              {p.assinatura_url && (
+                                <span className="badge badge--success" style={{ fontSize: 10.5 }}>
+                                  <ShieldCheck size={11} /> Assinado
+                                </span>
+                              )}
+                              {p.canhoto_foto_url && (
+                                <span className="badge badge--info" style={{ fontSize: 10.5 }}>
+                                  <Camera size={11} /> Foto Canhoto
+                                </span>
+                              )}
+                              {itensRecusados.length > 0 && (
+                                <span className="badge badge--warning" style={{ fontSize: 10.5 }}>
+                                  Devolução Parcial ({itensRecusados.length})
                                 </span>
                               )}
                             </div>
                             <div className="text-muted text-xs" style={{ marginTop: 4 }}>
                               <MapPin size={12} style={{ verticalAlign: 'middle' }} /> {p.endereco_entrega} • {p.caixas_total} cx (Bruto: {fmtKg(p.peso_bruto_kg || p.kg_real || p.kg_pedido)})
+                              {p.recebedor_nome ? ` • Recebedor: ${p.recebedor_nome}` : ''}
+                              {p.temperatura_entrega != null ? ` • Temp. entrega: ${p.temperatura_entrega}°C` : ''}
+                              {p.motivo_recusa ? ` • Recusa: ${p.motivo_recusa}` : ''}
                               {p.observacao_motorista ? ` • Motorista: "${p.observacao_motorista}"` : ''}
                             </div>
                           </div>
 
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {temPod && (
+                              <button
+                                type="button"
+                                className="btn btn--primary btn--sm"
+                                onClick={() => setModalPodParada(p)}
+                              >
+                                <ShieldCheck size={13} /> Ver Comprovante (POD)
+                              </button>
+                            )}
                             {configModulos.rastreio_motorista_ativo && linkCliente && (
                               <button
                                 type="button"
@@ -1925,25 +2029,37 @@ export function Roteirizacao() {
       {/* MODAL QR CODE MOTORISTA */}
       {modalQrData.open && (
         <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 96, backgroundColor: 'rgba(5,9,18,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div className="card" style={{ width: '95vw', maxWidth: 420, padding: 24, textAlign: 'center' }}>
+          <div className="card" style={{ width: '95vw', maxWidth: 460, padding: 24, textAlign: 'center' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>QR Code do Motorista — {embarqueAtivo?.codigo}</h3>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Smartphone size={18} className="text-primary" /> App Motorista — {embarqueAtivo?.codigo}
+              </h3>
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => setModalQrData({ open: false, dataUrl: '', url: '' })}>
                 <X size={16} />
               </button>
             </div>
-            <p className="text-muted text-xs">
-              O motorista aponta a câmera do celular para iniciar a rota, informar placa e acompanhar as entregas.
+            <p className="text-muted text-xs" style={{ marginBottom: 10 }}>
+              Aponte a câmera do iPhone ou Android para o QR Code, ou envie o link direto no WhatsApp do motorista.
             </p>
             {modalQrData.dataUrl && (
-              <div style={{ background: '#fff', padding: 12, borderRadius: 10, display: 'inline-block', margin: '10px auto' }}>
-                <img src={modalQrData.dataUrl} alt="QR Code da Rota" style={{ width: 220, height: 220, display: 'block' }} />
+              <div style={{ background: '#fff', padding: 12, borderRadius: 10, display: 'inline-block', margin: '8px auto' }}>
+                <img src={modalQrData.dataUrl} alt="QR Code da Rota" style={{ width: 210, height: 210, display: 'block' }} />
               </div>
             )}
-            <div className="font-mono text-xs text-muted" style={{ wordBreak: 'break-all', marginBottom: 14 }}>
+            <div className="font-mono text-xs text-muted" style={{ wordBreak: 'break-all', marginBottom: 12 }}>
               {modalQrData.url}
             </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(
+                  `🚚 *Rota de Entregas ${embarqueAtivo?.codigo || ''}*${embarqueAtivo?.titulo ? ` — ${embarqueAtivo.titulo}` : ''}\nAbra no celular (Safari no iPhone ou Chrome no Android) para ver as paradas, GPS e registrar os canhotos:\n${modalQrData.url}`,
+                )}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn--success btn--sm"
+              >
+                <MessageCircle size={14} /> Enviar no WhatsApp
+              </a>
               <button
                 type="button"
                 className="btn btn--primary btn--sm"
@@ -1952,7 +2068,7 @@ export function Roteirizacao() {
                   toastSuccess('Link copiado!')
                 }}
               >
-                <Copy size={14} /> Copiar Link da Rota
+                <Copy size={14} /> Copiar Link
               </button>
               <a
                 href={modalQrData.url}
@@ -1960,8 +2076,205 @@ export function Roteirizacao() {
                 rel="noreferrer"
                 className="btn btn--secondary btn--sm"
               >
-                Abrir no Navegador
+                Abrir App
               </a>
+            </div>
+            <div
+              style={{
+                marginTop: 14,
+                padding: '10px 12px',
+                borderRadius: 9,
+                background: 'rgba(56, 189, 248, 0.08)',
+                border: '1px solid rgba(56, 189, 248, 0.28)',
+                fontSize: 11.5,
+                color: '#cbd5e1',
+                textAlign: 'left',
+                lineHeight: 1.45,
+              }}
+            >
+              <strong style={{ color: '#7dd3fc' }}>📱 Dica iPhone (sem App Store):</strong> abra o link no{' '}
+              <strong>Safari</strong>, toque em <strong>Compartilhar (⬆️)</strong> →{' '}
+              <strong>Adicionar à Tela de Início</strong>. O sistema vira um app em tela cheia com câmera, GPS, assinatura e modo offline!
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL VISUALIZADOR DE COMPROVANTE DIGITAL DE ENTREGA (POD) */}
+      {modalPodParada && (
+        <div
+          className="modal-overlay"
+          style={{ position: 'fixed', inset: 0, zIndex: 98, backgroundColor: 'rgba(5,9,18,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={(e) => e.target === e.currentTarget && setModalPodParada(null)}
+        >
+          <div className="card" style={{ width: '95vw', maxWidth: 680, maxHeight: '92vh', overflowY: 'auto', padding: 22 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div>
+                <div className="text-xs font-bold" style={{ color: '#38bdf8' }}>
+                  COMPROVANTE DIGITAL DE ENTREGA (POD) • PARADA #{modalPodParada.ordem_parada}
+                </div>
+                <h3 style={{ margin: '2px 0 0' }}>
+                  {modalPodParada.pedido_codigo} — {modalPodParada.cliente}
+                </h3>
+              </div>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setModalPodParada(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 10,
+                padding: 12,
+                borderRadius: 10,
+                background: 'rgba(15, 23, 42, 0.65)',
+                border: '1px solid var(--border-color)',
+                marginBottom: 14,
+                fontSize: 12.5,
+              }}
+            >
+              <div>
+                <div className="text-muted text-xs">STATUS</div>
+                <div style={{ fontWeight: 800, marginTop: 2 }}>
+                  {(STATUS_STOP_BADGE[modalPodParada.status_entrega] || { label: modalPodParada.status_entrega }).label}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted text-xs">RECEBEDOR</div>
+                <div style={{ fontWeight: 700, marginTop: 2 }}>
+                  {modalPodParada.recebedor_nome || 'Não informado'}
+                  {modalPodParada.recebedor_documento ? ` (${modalPodParada.recebedor_documento})` : ''}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted text-xs">HORÁRIOS</div>
+                <div style={{ marginTop: 2 }}>
+                  {(modalPodParada.chegou_em || modalPodParada.chegou_at)
+                    ? `Chegou: ${fmtDataHora(modalPodParada.chegou_em || modalPodParada.chegou_at)}`
+                    : 'Chegada: —'}
+                  <br />
+                  {modalPodParada.concluido_at ? `Concluído: ${fmtDataHora(modalPodParada.concluido_at)}` : 'Conclusão: —'}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted text-xs">TEMP. NA ENTREGA</div>
+                <div style={{ fontWeight: 800, color: '#38bdf8', marginTop: 2 }}>
+                  {modalPodParada.temperatura_entrega != null ? `${modalPodParada.temperatura_entrega} °C` : 'Não informada'}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted text-xs">PAGAMENTO NA ENTREGA</div>
+                <div style={{ fontWeight: 700, marginTop: 2 }}>
+                  {modalPodParada.pagamento_confirmado
+                    ? `Confirmado • ${modalPodParada.forma_pagamento_recebida || 'Pago'}${modalPodParada.valor_pago != null ? ` (${fmtMoeda(modalPodParada.valor_pago)})` : ''}`
+                    : modalPodParada.pagamento_na_entrega
+                      ? `Pendente (${fmtMoeda(modalPodParada.valor_total)})`
+                      : 'Faturado / Sem cobrança'}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted text-xs">GEOLOCALIZAÇÃO (GPS)</div>
+                <div style={{ marginTop: 2 }}>
+                  {modalPodParada.entrega_lat != null && modalPodParada.entrega_lng != null ? (
+                    <a
+                      href={`https://www.google.com/maps?q=${modalPodParada.entrega_lat},${modalPodParada.entrega_lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#38bdf8', fontWeight: 700 }}
+                    >
+                      Abrir Pin no Google Maps ↗
+                    </a>
+                  ) : (
+                    <span className="text-muted">Sem coordenada</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {modalPodParada.motivo_recusa && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 9,
+                  background: 'rgba(239, 68, 68, 0.14)',
+                  border: '1px solid rgba(239, 68, 68, 0.45)',
+                  color: '#fca5a5',
+                  fontSize: 13,
+                  marginBottom: 14,
+                }}
+              >
+                <strong>Motivo da Recusa:</strong> {modalPodParada.motivo_recusa}
+              </div>
+            )}
+
+            {Array.isArray(modalPodParada.itens_recusados) && modalPodParada.itens_recusados.length > 0 && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 9,
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  border: '1px solid rgba(245, 158, 11, 0.4)',
+                  marginBottom: 14,
+                }}
+              >
+                <div style={{ fontWeight: 800, color: '#fbbf24', fontSize: 12.5, marginBottom: 6 }}>
+                  Itens com Devolução Parcial ({modalPodParada.itens_recusados.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+                  {modalPodParada.itens_recusados.map((it, idx) => (
+                    <div key={`${it.produto_id || idx}-${idx}`}>
+                      • <strong>{it.produto_descricao || it.produto_id}</strong> — {it.qtd_caixas || 0} cx /{' '}
+                      {fmtKg(it.peso_kg)} {it.motivo ? `(${it.motivo})` : ''}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {modalPodParada.observacao_motorista && (
+              <div className="text-sm" style={{ marginBottom: 14, color: '#cbd5e1' }}>
+                <strong>Observação do motorista:</strong> {modalPodParada.observacao_motorista}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+              {modalPodParada.assinatura_url && (
+                <div>
+                  <div className="text-xs text-muted font-bold" style={{ marginBottom: 6 }}>
+                    ASSINATURA DIGITAL DO RECEBEDOR
+                  </div>
+                  <div style={{ background: '#ffffff', borderRadius: 10, padding: 8, border: '1px solid #334155' }}>
+                    <img
+                      src={modalPodParada.assinatura_url}
+                      alt="Assinatura digital"
+                      style={{ width: '100%', maxHeight: 220, objectFit: 'contain', display: 'block' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {modalPodParada.canhoto_foto_url && (
+                <div>
+                  <div className="text-xs text-muted font-bold" style={{ marginBottom: 6 }}>
+                    FOTO DO CANHOTO / OCORRÊNCIA
+                  </div>
+                  <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid #334155' }}>
+                    <img
+                      src={modalPodParada.canhoto_foto_url}
+                      alt="Foto do canhoto"
+                      style={{ width: '100%', maxHeight: 260, objectFit: 'cover', display: 'block' }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => setModalPodParada(null)}>
+                Fechar Comprovante
+              </button>
             </div>
           </div>
         </div>

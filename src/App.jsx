@@ -47,6 +47,7 @@ import { MapaProducao } from './pages/MapaProducao'
 import { Devolucao } from './pages/Devolucao'
 import { Roteirizacao } from './pages/Roteirizacao'
 import { TiposVeiculo } from './pages/TiposVeiculo'
+import { MotoristaHub } from './pages/MotoristaHub'
 import { MotoristaRastreio } from './pages/MotoristaRastreio'
 import { PedidoRastreio } from './pages/PedidoRastreio'
 import { Financeiro } from './pages/Financeiro'
@@ -115,6 +116,7 @@ function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/motorista" element={<MotoristaHub />} />
         <Route path="/motorista/:qrToken" element={<MotoristaRastreio />} />
         <Route path="/rastreio-pedido/:rastreioToken" element={<PedidoRastreio />} />
         
