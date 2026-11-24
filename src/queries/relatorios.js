@@ -244,3 +244,13 @@ export async function getDadosRelatorioExecutivo(dataInicio, dataFim) {
     entradasCaixas
   };
 }
+
+/**
+ * Queries da Central de Relatórios & BI Gerencial (Etapa 7 — 14 relatórios BI)
+ */
+export const relatoriosBiQueries = {
+  async buscar(slug, params = {}) {
+    if (!isApiEnabled()) return null;
+    return await apiRequest(`/api/relatorios/bi/${slug}${buildQueryString(params)}`);
+  },
+};

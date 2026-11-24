@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import type { DbConnection } from '../../db/client.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { hojeIsoLocal, normalizarDataIso, toNum } from '../wms/helpers.js'
+import { registerRelatoriosBiRoutes } from './biRoutes.js'
 
 export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnection): void {
   const { requirePermission } = createAuthMiddleware(app, conn)
@@ -511,4 +512,6 @@ export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnectio
       }
     },
   )
+
+  registerRelatoriosBiRoutes(app, conn)
 }

@@ -5,7 +5,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import * as relatoriosQueries from '../queries/relatorios'
 import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao'
 import RelatorioGeralWms from '../components/shared/RelatorioGeralWms'
-import { FileSpreadsheet, ShieldAlert } from 'lucide-react'
+import { CATALOGO_BI_RELATORIOS, VisualizadorRelatorioBi } from '../components/relatorios/CentralBiRelatorios'
+import { FileSpreadsheet, ShieldAlert, X } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isCliente, temPermissao } from '../utils/permissoes'
 
@@ -146,6 +147,9 @@ export function Relatorios() {
 
   const [activeTab, setActiveTab] = useState(() => (podeRelEstoque ? 'executivo' : podeRelProducao ? 'ops' : 'executivo'))
   const [presetAtivo, setPresetAtivo] = useState(2)
+  const [categoriaCatalogo, setCategoriaCatalogo] = useState('TODOS')
+  const [buscaCatalogo, setBuscaCatalogo] = useState('')
+  const [catalogoAberto, setCatalogoAberto] = useState(true)
 
   // Datas de edição (o que o usuário digita)
   const [dataInicio, setDataInicio] = useState(() => subDays(new Date(), 29).toISOString().slice(0,10))
@@ -363,18 +367,105 @@ export function Relatorios() {
 
 
 
+  const catalogoCompleto = useMemo(() => {
+    const classicos = []
+    if (podeRelEstoque) {
+      classicos.push({
+        id: 'executivo',
+        categoria: 'CLASSICOS',
+        titulo: 'Relatório Geral WMS (PDF & Excel)',
+        subtitulo: 'Estoque caixa a caixa, entradas, romaneios e saídas consolidadas',
+        icon: FileSpreadsheet,
+        cor: '#38bdf8',
+        keywords: ['geral', 'executivo', 'pdf', 'excel', 'estoque', 'entradas', 'saidas', 'romaneio'],
+      })
+    }
+    if (!cliente && podeRelEstoque) {
+      classicos.push({
+        id: 'balanco',
+        categoria: 'CLASSICOS',
+        titulo: 'Balanço de Entradas e Saídas',
+        subtitulo: 'Comparativo de fluxo em kg por produto e gráficos Top 10',
+        icon: TrendingUp,
+        cor: '#10b981',
+        keywords: ['balanco', 'entradas', 'saidas', 'fluxo', 'top 10', 'grafico'],
+      })
+    }
+    if (podeRelProducao) {
+      classicos.push({
+        id: 'ops',
+        categoria: 'CLASSICOS',
+        titulo: cliente ? 'Produção Finalizada & Rendimento' : 'Transformação & Rendimento (OPs)',
+        subtitulo: 'Dossiê completo de desossa, insumos, retornos e rendimento por OP',
+        icon: Factory,
+        cor: '#a78bfa',
+        keywords: ['op', 'ops', 'producao', 'desossa', 'dossie', 'rendimento', 'transformacao'],
+      })
+    }
+    if (!cliente && podeRelProducao) {
+      classicos.push({
+        id: 'arvore',
+        categoria: 'CLASSICOS',
+        titulo: 'Árvore de Produção (BOM)',
+        subtitulo: 'Mapa hierárquico de matérias-primas e cortes subprodutos',
+        icon: Layers,
+        cor: '#f59e0b',
+        keywords: ['arvore', 'bom', 'estrutura', 'materia prima', 'subproduto', 'cortes'],
+      })
+    }
+
+    if (cliente) return classicos
+    return [...classicos, ...CATALOGO_BI_RELATORIOS]
+  }, [cliente, podeRelEstoque, podeRelProducao])
+
+  const catalogoFiltrado = useMemo(() => {
+    const q = buscaCatalogo
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+    const tokens = q ? q.split(/\s+/).filter(Boolean) : []
+    return catalogoCompleto.filter((item) => {
+      if (categoriaCatalogo !== 'TODOS' && item.categoria !== categoriaCatalogo) return false
+      if (tokens.length === 0) return true
+      const hay = `${item.titulo} ${item.subtitulo} ${(item.keywords || []).join(' ')}`
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+      return tokens.every((t) => hay.includes(t))
+    })
+  }, [catalogoCompleto, categoriaCatalogo, buscaCatalogo])
+
+  const relatorioBiAtivo = useMemo(
+    () => CATALOGO_BI_RELATORIOS.find((r) => r.id === activeTab) || null,
+    [activeTab],
+  )
+
   return (
-    <div className="p-24 max-w-[1400px] mx-auto fade-in">
-      <div className="flex items-center justify-between mb-24 no-print">
+    <div className="p-24 max-w-[1460px] mx-auto fade-in">
+      <div className="flex items-center justify-between flex-wrap gap-12 mb-20 no-print">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-12">
-            <PieChart className="text-primary" size={28} /> Relatórios
+            <PieChart className="text-primary" size={28} /> Central de Relatórios &amp; BI Gerencial
           </h1>
-          <p className="text-muted mt-4">Análise gerencial e inteligência de produção</p>
+          <p className="text-muted mt-4">
+            {cliente
+              ? 'Relatórios consolidados de estoque e produção finalizada'
+              : `${catalogoCompleto.length} relatórios gerenciais: 4 Clássicos WMS + 14 Indicadores de Estoque, Margem, PDV, Açougue, Compras e Logística`}
+          </p>
         </div>
+        {!cliente && (podeRelEstoque || podeRelProducao) && (
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={() => setCatalogoAberto((v) => !v)}
+          >
+            {catalogoAberto ? 'Recolher Catálogo (Foco no Relatório)' : `Mostrar Catálogo (${catalogoCompleto.length} Relatórios)`}
+          </button>
+        )}
       </div>
 
-      {/* ─── Tabs ────────────────────────────────────────────────────────────── */}
+      {/* ─── Catálogo de Relatórios ──────────────────────────────────────────── */}
       {!podeRelEstoque && !podeRelProducao ? (
         <div className="card p-32 text-center border border-danger/30 bg-danger/5">
           <ShieldAlert size={36} className="text-danger mx-auto mb-12" />
@@ -383,31 +474,181 @@ export function Relatorios() {
         </div>
       ) : (
         <>
-          <div className="flex gap-8 mb-24 flex-wrap no-print">
-            {podeRelEstoque && (
-              <button className={`btn ${activeTab === 'executivo' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('executivo')}>
-                <FileSpreadsheet size={18} /> Relatório Geral: Estoque, Entradas e Saídas (PDF & Excel)
-              </button>
-            )}
-            {!cliente && podeRelEstoque && (
-              <button className={`btn ${activeTab === 'balanco' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('balanco')}>
-                <TrendingUp size={18} /> Balanço de Entradas e Saídas
-              </button>
-            )}
-            {podeRelProducao && (
-              <button className={`btn ${activeTab === 'ops' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('ops')}>
-                <Factory size={18} /> {cliente ? 'Produção Finalizada & Rendimento' : 'Transformação & Rendimento (OPs)'}
-              </button>
-            )}
-            {!cliente && podeRelProducao && (
-              <button className={`btn ${activeTab === 'arvore' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setActiveTab('arvore')}>
-                <Layers size={18} /> Árvore de Produção (BOM)
-              </button>
-            )}
-          </div>
+          {cliente ? (
+            <div className="flex gap-8 mb-24 flex-wrap no-print">
+              {catalogoCompleto.map((item) => {
+                const IconItem = item.icon
+                return (
+                  <button
+                    key={item.id}
+                    className={`btn ${activeTab === item.id ? 'btn--primary' : 'btn--ghost'}`}
+                    onClick={() => setActiveTab(item.id)}
+                  >
+                    <IconItem size={18} /> {item.titulo}
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            catalogoAberto && (
+              <div className="card p-16 mb-20 no-print" style={{ background: 'var(--bg-2)' }}>
+                {/* Barra de busca + filtros de categoria */}
+                <div className="flex gap-10 items-center flex-wrap mb-14">
+                  <div style={{ position: 'relative', flex: '1 1 260px', minWidth: 220 }}>
+                    <Search
+                      size={15}
+                      style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#38bdf8' }}
+                    />
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ paddingLeft: 34, paddingRight: buscaCatalogo ? 32 : 12, height: 38 }}
+                      placeholder="Buscar relatório... (ex.: curva abc, kardex, pdv, margem, açougue, inflação, otif, perdas)"
+                      value={buscaCatalogo}
+                      onChange={(e) => setBuscaCatalogo(e.target.value)}
+                    />
+                    {buscaCatalogo && (
+                      <button
+                        type="button"
+                        onClick={() => setBuscaCatalogo('')}
+                        style={{
+                          position: 'absolute',
+                          right: 8,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          color: '#94a3b8',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex gap-6 flex-wrap">
+                    {[
+                      { id: 'TODOS', label: `Todos (${catalogoCompleto.length})` },
+                      { id: 'CLASSICOS', label: 'Clássicos WMS (4)' },
+                      { id: 'ESTOQUE', label: 'Estoque & WMS (6)' },
+                      { id: 'COMERCIAL', label: 'Comercial & Varejo (5)' },
+                      { id: 'COMPRAS_LOG', label: 'Compras & Logística (3)' },
+                    ].map((cat) => {
+                      const ativo = categoriaCatalogo === cat.id
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setCategoriaCatalogo(cat.id)}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 700,
+                            border: ativo ? '1px solid #38bdf8' : '1px solid var(--border)',
+                            background: ativo ? 'rgba(56,189,248,0.2)' : 'var(--bg-1)',
+                            color: ativo ? '#f8fafc' : '#94a3b8',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {cat.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Grade de Cards clicáveis */}
+                {catalogoFiltrado.length === 0 ? (
+                  <div className="text-center p-16 text-muted text-sm">
+                    Nenhum relatório encontrado para &ldquo;{buscaCatalogo}&rdquo;.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(235px, 1fr))',
+                      gap: 10,
+                    }}
+                  >
+                    {catalogoFiltrado.map((item) => {
+                      const IconItem = item.icon
+                      const selecionado = activeTab === item.id
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setActiveTab(item.id)}
+                          style={{
+                            textAlign: 'left',
+                            padding: '11px 12px',
+                            borderRadius: 10,
+                            border: selecionado ? `1.5px solid ${item.cor || '#38bdf8'}` : '1px solid var(--border)',
+                            background: selecionado ? 'rgba(56, 189, 248, 0.14)' : 'var(--bg-1)',
+                            boxShadow: selecionado ? '0 0 0 2px rgba(56,189,248,0.16)' : 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 10,
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 8,
+                              background: `${item.cor || '#38bdf8'}1f`,
+                              color: item.cor || '#38bdf8',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                              marginTop: 1,
+                            }}
+                          >
+                            <IconItem size={16} />
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                              style={{
+                                fontSize: 12.5,
+                                fontWeight: 800,
+                                color: '#f8fafc',
+                                lineHeight: 1.25,
+                              }}
+                            >
+                              {item.titulo}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: '#94a3b8',
+                                marginTop: 3,
+                                lineHeight: 1.3,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {item.subtitulo}
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          )}
 
           <div className="card p-24">
-            {activeTab === 'executivo' && podeRelEstoque ? (
+            {relatorioBiAtivo && !cliente ? (
+              <VisualizadorRelatorioBi relatorio={relatorioBiAtivo} />
+            ) : activeTab === 'executivo' && podeRelEstoque ? (
               <RelatorioGeralWms somenteCliente={cliente} />
             ) : loading ? (
               <div className="text-center p-32 text-muted">Carregando...</div>

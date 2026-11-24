@@ -468,11 +468,17 @@ export function obterModulosVisiveis(operador, isFilialVarejo) {
     {
       id: 'relatorios',
       to: '/relatorios',
-      label: 'Relatórios',
+      label: 'Relatórios & BI',
       section: 'Controle',
       icon: 'PieChart',
       visible: temAlgumaPermissao(operador, ['relatorios_producao', 'relatorios_estoque']),
-      keywords: ['relatorio', 'relatorios', 'pdf', 'executivo', 'dossie', 'exportar', 'csv', 'excel', 'historico', 'estoque', 'producao', 'romaneio'],
+      keywords: [
+        'relatorio', 'relatorios', 'bi', 'gerencial', 'pdf', 'executivo', 'dossie', 'exportar', 'csv', 'excel',
+        'historico', 'estoque', 'producao', 'romaneio', 'curva abc', 'abc', 'valuation', 'capital', 'kardex',
+        'extrato', 'giro', 'cobertura', 'dead stock', 'encalhado', 'fefo', 'validade', 'ira', 'acuracidade',
+        'inventario', 'margem', 'rentabilidade', 'fechamento pdv', 'comissao', 'comissoes', 'acougue',
+        'inflacao', 'compras', 'otif', 'logistica', 'devolucao', 'interunidades', 'perdas',
+      ],
     },
     {
       id: 'inventario',
