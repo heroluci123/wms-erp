@@ -64,6 +64,7 @@ import { Interunidades } from './pages/Interunidades'
 import { InsumosColeta } from './pages/InsumosColeta'
 import { ForcaVendasMobile } from './pages/ForcaVendasMobile'
 import { GovernancaPerdas } from './pages/GovernancaPerdas'
+import { ManualGoLive } from './pages/ManualGoLive'
 
 function AcessoNegado({ mensagem }) {
   return (
@@ -178,6 +179,7 @@ function App() {
           <Route path="tipos-veiculo" element={<RequirePermissao permissoes={['transportadoras', 'roteirizacao']} element={<TiposVeiculo />} />} />
           <Route path="filiais" element={<RequirePermissao permissoes={['empresas_filiais']} element={<EmpresasFiliais />} />} />
           <Route path="parametros-comerciais" element={<RequirePermissao permissoes={['parametros_comerciais']} element={<ParametrosComerciais />} />} />
+          <Route path="golive-manual" element={<RequirePermissao allowCliente={false} element={<ManualGoLive />} />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

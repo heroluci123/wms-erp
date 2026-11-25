@@ -639,6 +639,19 @@ export function obterModulosVisiveis(operador, isFilialVarejo) {
       visible: temAlgumaPermissao(operador, ['operadores', 'perfis_gerenciar']),
       keywords: ['usuario', 'usuarios', 'operador', 'permissao', 'perfil', 'acesso', 'senha', 'pin', 'gerencial', 'filial', 'conta', 'login'],
     },
+    {
+      id: 'golive-manual',
+      to: '/golive-manual',
+      label: 'Manual & Go-Live',
+      section: 'Cadastros',
+      icon: 'BookOpen',
+      visible: !isCliente(operador),
+      keywords: [
+        'manual', 'golive', 'go-live', 'implantacao', 'deploy', 'producao', 'vercel', 'render', 'railway',
+        'postgresql', 'neon', 'supabase', 'iphone', 'pwa', 'passo a passo', 'treinamento', 'ajuda',
+        'checklist', 'diagnostico', 'impressora', 'suporte', 'guia', 'playbook',
+      ],
+    },
   ]
 
   return definicoes.filter((d) => d.visible)

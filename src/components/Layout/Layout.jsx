@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map as MapIcon, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, TrendingUp, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes, Tag, CornerDownLeft, Smartphone } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map as MapIcon, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, TrendingUp, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes, Tag, CornerDownLeft, Smartphone, BookOpen } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -51,6 +51,7 @@ const ICON_MAP = {
   Boxes,
   Tag,
   Smartphone,
+  BookOpen,
 }
 
 function ModuloIcon({ name, size = 18 }) {

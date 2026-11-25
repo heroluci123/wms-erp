@@ -1,0 +1,23 @@
+# Blueprint oficial para publicar a API do WMSphere no Render.com em 1 clique
+# No Render: New -> Blueprint -> conecte o repositório heroluci123/wms-erp
+# Depois preencha DATABASE_URL (Neon ou Supabase) e CORS_ORIGIN (ex.: https://wms-erp-cow3.vercel.app)
+services:
+  - type: web
+    name: wms-erp-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PG_DRIVER
+        value: pg
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://wms-erp-cow3.vercel.app,https://*.vercel.app

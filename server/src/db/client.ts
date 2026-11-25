@@ -26,7 +26,13 @@ export async function createDbConnection(customEnv: Partial<AppEnv> = {}): Promi
     const pool = new pg.Pool({
       connectionString: cfg.DATABASE_URL,
       ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
-      max: 10,
+      max: 15,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+      allowExitOnIdle: false,
+    })
+    pool.on('error', (err) => {
+      console.error('[WMS-DB POOL ERROR]', err.message)
     })
     const db = drizzlePg(pool, { schema })
     return {

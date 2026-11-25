@@ -30,6 +30,25 @@ import { registerPrecosRoutes } from './modules/precos/routes.js'
 import { registerEspecificacoesRoutes } from './modules/cadastros/especificacoesRoutes.js'
 import { registerComercialRoutes } from './modules/comercial/routes.js'
 import { registerGovernancaRoutes } from './modules/governanca/routes.js'
+import { registerGoliveRoutes } from './modules/system/goliveRoutes.js'
+
+function criarMatcherCors(allowedOrigins: string[]) {
+  if (allowedOrigins.length === 0 || allowedOrigins.includes('*')) return true
+  const patterns = allowedOrigins.map((raw) => {
+    const clean = raw.replace(/\/+$/, '').toLowerCase()
+    if (clean.includes('*')) {
+      const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*')
+      return new RegExp(`^${escaped}$`, 'i')
+    }
+    return clean
+  })
+  return (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
+    if (!origin) return cb(null, true)
+    const norm = origin.replace(/\/+$/, '').toLowerCase()
+    const ok = patterns.some((p) => (typeof p === 'string' ? p === norm : p.test(norm)))
+    return cb(null, ok)
+  }
+}
 
 export async function buildApp(
   conn: DbConnection,
@@ -42,11 +61,11 @@ export async function buildApp(
   })
 
   const allowedOrigins = cfg.CORS_ORIGIN.split(',')
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\/+$/, ''))
     .filter(Boolean)
 
   await app.register(cors, {
-    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+    origin: criarMatcherCors(allowedOrigins),
     credentials: true,
   })
 
@@ -84,6 +103,9 @@ export async function buildApp(
       ok: Number(res[0]?.ok) === 1,
       driver: conn.driver,
       service: 'wms-erp-server',
+      version: '1.0.0',
+      node_env: cfg.NODE_ENV,
+      uptime_sec: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
     }
   })
@@ -114,6 +136,7 @@ export async function buildApp(
   registerEspecificacoesRoutes(app, conn)
   registerComercialRoutes(app, conn)
   registerGovernancaRoutes(app, conn)
+  registerGoliveRoutes(app, conn, cfg)
 
   return app
 }
