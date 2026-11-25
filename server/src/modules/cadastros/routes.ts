@@ -23,6 +23,7 @@ import {
 } from './codigoHelper.js'
 import { registerCadastrosMestresRoutes } from './mestresRoutes.js'
 import { calcularMetricasProdutosEmLote } from './especificacoesRoutes.js'
+import { recalcularCurvaAbcTenant } from './curvaAbcAuto.js'
 
 const ArvoreVinculoSchema = z.object({
   pai_id: z.string().uuid(),
@@ -41,7 +42,6 @@ const ProdutoSchema = z.object({
   ultimo_preco_compra: z.coerce.number().min(0).optional(),
   custo_medio_kg: z.coerce.number().min(0).default(0),
   tipo_produto: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : 'Materia Prima')),
-  status_curva: z.enum(['A', 'B', 'C']).default('C'),
   unidade: z.string().nullish().transform((v) => (v && v.trim() ? v.trim() : 'CX')),
   grupo: z.string().nullish().transform((v) => (v ?? '').trim()),
   especie: z.string().nullish().transform((v) => (v ?? '').trim().toUpperCase()),
@@ -167,6 +167,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
     { preHandler: requirePermission(PERM_PROD_READ, { write: false }) },
     async (req) => {
       const ctx = req.authCtx!
+      await recalcularCurvaAbcTenant(conn.db, ctx.tenantId).catch(() => null)
       const [res, arvRes, metricasBatch] = await Promise.all([
         conn.db.execute(sql`
           SELECT
@@ -425,7 +426,8 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
           ultimoPrecoCompra: String(d.ultimo_preco_compra ?? d.custo_medio_kg ?? 0),
           custoMedioKg: String(d.custo_medio_kg),
           tipoProduto: d.tipo_produto,
-          statusCurva: d.status_curva,
+          // Curva ABC e definida 100% automaticamente pelo motor de giro real (Producao + Vendas Diretas)
+          statusCurva: 'C',
           unidade: d.unidade,
           grupo: d.grupo,
           especie: d.especie,
@@ -489,6 +491,20 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
     }
   )
 
+  app.post(
+    '/api/cadastros/produtos/recalcular-curva-abc',
+    { preHandler: requirePermission(PERM_PROD_READ, { write: false }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const body = (req.body || {}) as { dias?: number }
+      const res = await recalcularCurvaAbcTenant(conn.db, ctx.tenantId, {
+        dias: body.dias ?? 90,
+        force: true,
+      })
+      return { success: true, data: res }
+    }
+  )
+
   app.put(
     '/api/cadastros/produtos/:id',
     { preHandler: requirePermission('produtos') },
@@ -516,7 +532,7 @@ export function registerCadastrosRoutes(app: FastifyInstance, conn: DbConnection
             ...(d.ultimo_preco_compra !== undefined ? { ultimoPrecoCompra: String(d.ultimo_preco_compra) } : {}),
             custoMedioKg: String(d.custo_medio_kg),
             tipoProduto: d.tipo_produto,
-            statusCurva: d.status_curva,
+            // Curva ABC preservada: recalculada automaticamente pelo giro real (Producao + Vendas)
             unidade: d.unidade,
             grupo: d.grupo,
             especie: d.especie,

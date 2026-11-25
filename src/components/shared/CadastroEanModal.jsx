@@ -30,7 +30,7 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
   const [produtoSelecionado, setProdutoSelecionado] = useState(null);
   
   const [formNovo, setFormNovo] = useState({
-    descricao: '', codigo: '', unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima', status_curva: 'C'
+    descricao: '', codigo: '', unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima'
   });
 
   // Quantos dígitos finais usar como sufixo (editável pelo usuário)
@@ -310,7 +310,7 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
                   <button className="btn btn--ghost btn--sm text-primary" onClick={async () => {
                     codigoNovoEditadoRef.current = false;
                     const codInicial = isEanLongo ? sugerirProximoCodigoLocal(produtosList) : ean;
-                    setFormNovo({ descricao: '', codigo: codInicial, unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima', status_curva: 'C' });
+                    setFormNovo({ descricao: '', codigo: codInicial, unidade: 'CX', grupo: '', tipo_produto: 'Materia Prima' });
                     setModo('novo');
                     if (isEanLongo) {
                       const codServ = await obterProximoCodigoDisponivel('produto', produtosList);
@@ -359,24 +359,14 @@ export function CadastroEanModal({ isOpen, onClose, codigoDesconhecido, onRegraS
                   </div>
                 </div>
 
-                <div className="form-grid form-grid--2 mb-12">
-                  <div className="form-group">
-                    <label className="form-label">Tipo de Produto</label>
-                    <select className="form-input" value={formNovo.tipo_produto} onChange={e => setFormNovo({...formNovo, tipo_produto: e.target.value})}>
-                      <option value="Materia Prima">Matéria Prima</option>
-                      <option value="Embalagem">Embalagem</option>
-                      <option value="Subproduto">Subproduto</option>
-                      <option value="Revenda">Revenda</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Curva ABC</label>
-                    <select className="form-input" value={formNovo.status_curva} onChange={e => setFormNovo({...formNovo, status_curva: e.target.value})}>
-                      <option value="A">Curva A</option>
-                      <option value="B">Curva B</option>
-                      <option value="C">Curva C</option>
-                    </select>
-                  </div>
+                <div className="form-group mb-12">
+                  <label className="form-label">Tipo de Produto</label>
+                  <select className="form-input" value={formNovo.tipo_produto} onChange={e => setFormNovo({...formNovo, tipo_produto: e.target.value})}>
+                    <option value="Materia Prima">Matéria Prima</option>
+                    <option value="Embalagem">Embalagem</option>
+                    <option value="Subproduto">Subproduto</option>
+                    <option value="Revenda">Revenda</option>
+                  </select>
                 </div>
               </div>
 

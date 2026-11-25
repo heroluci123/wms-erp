@@ -29,6 +29,7 @@ import {
 import * as produtosQueries from '../queries/produtos'
 import { ModalDialog } from '../components/shared/ModalDialog'
 import { SmartSearchSelect } from '../components/shared/SmartSearchSelect'
+import { CurvaBadge } from '../components/shared/Badge'
 import { useAppStore } from '../store/appStore'
 import {
   encontrarCodigoDuplicadoLocal,
@@ -47,7 +48,6 @@ const FORM_PRODUTO_INICIAL = {
   codigo_auxiliar: '',
   ean: '',
   descricao: '',
-  status_curva: 'C',
   unidade: 'CX',
   valor_unitario: 0,
   custo_medio_kg: 0,
@@ -254,7 +254,6 @@ export function Produtos() {
       codigo_auxiliar: p.codigo_auxiliar || '',
       ean: p.ean || '',
       descricao: p.descricao || '',
-      status_curva: p.status_curva || 'C',
       unidade: p.unidade || (modoDet === 'CARNES' ? 'CX' : 'UN'),
       valor_unitario: p.valor_unitario || 0,
       custo_medio_kg: p.custo_medio_kg || 0,
@@ -875,6 +874,7 @@ export function Produtos() {
                             {p.classificacao === 'SUBPRODUTO' && (
                               <span className="badge badge--warning" style={{ fontSize: 10 }}>Subproduto</span>
                             )}
+                            {p.status_curva && <CurvaBadge curva={p.status_curva} />}
                           </div>
                           {p.pai_descricao && (
                             <div className="text-xs text-muted" style={{ marginTop: 2, fontSize: 10.5 }}>
@@ -1149,12 +1149,20 @@ export function Produtos() {
               }}
             >
               <div>
-                <h2 className="text-lg font-bold flex items-center gap-8 m-0">
+                <h2 className="text-lg font-bold flex items-center gap-8 m-0 flex-wrap">
                   {formData.id ? <Edit2 size={18} className="text-primary" /> : <Plus size={18} className="text-primary" />}
                   {formData.id ? `${formData.codigo} — ${formData.descricao}` : 'Novo Produto'}
+                  {formData.id && (
+                    <CurvaBadge
+                      curva={
+                        resumoGerencial?.status_curva ||
+                        produtos.find((x) => x.id === formData.id)?.status_curva
+                      }
+                    />
+                  )}
                 </h2>
                 <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-                  Cadastro unificado para todas as filiais • Preços de venda são geridos em Tabelas de Preço
+                  Cadastro unificado para todas as filiais • Preços em Tabelas de Preço • Curva ABC definida automaticamente pelo sistema
                 </div>
               </div>
               <button type="button" className="btn-icon" onClick={resetForm} title="Fechar">
@@ -1412,30 +1420,16 @@ export function Produtos() {
                         </div>
                       </div>
 
-                      <div className="form-grid form-grid--3">
-                        <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
-                          <label className="form-label">Descrição do Produto *</label>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={formData.descricao}
-                            onChange={(e) => setFormData({ ...formData, descricao: e.target.value.toUpperCase() })}
-                            placeholder="Ex: COCA-COLA LATA 350ML ou CARVÃO VEGETAL 5KG"
-                            required
-                          />
-                        </div>
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Curva ABC</label>
-                          <select
-                            className="form-input"
-                            value={formData.status_curva}
-                            onChange={(e) => setFormData({ ...formData, status_curva: e.target.value })}
-                          >
-                            <option value="A">Curva A (Alta)</option>
-                            <option value="B">Curva B (Média)</option>
-                            <option value="C">Curva C (Baixa)</option>
-                          </select>
-                        </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Descrição do Produto *</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={formData.descricao}
+                          onChange={(e) => setFormData({ ...formData, descricao: e.target.value.toUpperCase() })}
+                          placeholder="Ex: COCA-COLA LATA 350ML ou CARVÃO VEGETAL 5KG"
+                          required
+                        />
                       </div>
 
                       {/* CONVERSÃO COMPRA (FARDO) → VENDA (UNIDADE) + CONSERVAÇÃO */}
@@ -1748,7 +1742,7 @@ export function Produtos() {
                       />
                     </div>
 
-                    <div className="form-grid form-grid--4">
+                    <div className="form-grid form-grid--3">
                       <div className="form-group" style={{ marginBottom: 0 }}>
                         <label className="form-label">Tipo de Produto</label>
                         <select
@@ -1771,18 +1765,6 @@ export function Produtos() {
                           <option value="KG">KG (Quilograma)</option>
                           <option value="UN">UN (Unidade)</option>
                           <option value="PC">PC (Peça)</option>
-                        </select>
-                      </div>
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Curva ABC</label>
-                        <select
-                          className="form-input"
-                          value={formData.status_curva}
-                          onChange={(e) => setFormData({ ...formData, status_curva: e.target.value })}
-                        >
-                          <option value="A">Curva A (Alta)</option>
-                          <option value="B">Curva B (Média)</option>
-                          <option value="C">Curva C (Baixa)</option>
                         </select>
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>

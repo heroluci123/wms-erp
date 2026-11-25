@@ -81,7 +81,17 @@ const PRESETS_BI = [
 ]
 
 export const CATALOGO_BI_RELATORIOS = [
-  // ── ESTOQUE & WMS (6) ──
+  // ── ESTOQUE & WMS (7) ──
+  {
+    id: 'curva-abc-demanda',
+    categoria: 'ESTOQUE',
+    titulo: 'Curva ABC Automática (Produção + Vendas)',
+    subtitulo: 'Classificação 100% automática por giro real: MPs enviadas p/ produção/açougue + vendas diretas (Atacado & PDV)',
+    icon: BarChart3,
+    cor: '#22c55e',
+    usaPeriodo: true,
+    keywords: ['abc', 'curva', 'automatica', 'demanda', 'giro', 'producao', 'materia prima', 'vendas', 'pareto', 'classe a'],
+  },
   {
     id: 'curva-abc-estoque',
     categoria: 'ESTOQUE',
@@ -260,6 +270,74 @@ function buildConfigRelatorio(slug, dados) {
   const r = dados.resumo || {}
 
   switch (slug) {
+    case 'curva-abc-demanda': {
+      const origemLabels = {
+        PRODUCAO: 'Produção / Açougue',
+        VENDA_DIRETA: 'Venda Direta',
+        MISTO: 'Produção + Venda',
+        SEM_GIRO: 'Sem Giro',
+      }
+      return {
+        kpis: [
+          {
+            label: 'Demanda Total (Prod. + Vendas)',
+            valor: fmtMoeda(r.valor_total_demanda),
+            cor: '#22c55e',
+            sub: `${r.produtos_com_giro || 0} de ${r.total_produtos || 0} SKUs com giro • ${fmtKg(r.qtd_total_demanda)}`,
+          },
+          {
+            label: 'MPs & Insumos p/ Produção',
+            valor: fmtMoeda(r.valor_producao_total),
+            cor: '#f59e0b',
+            sub: 'OPs de desossa + MPs abertas no Açougue + Insumos',
+          },
+          {
+            label: 'Vendas Diretas (Atacado + PDV)',
+            valor: fmtMoeda(r.valor_venda_direta_total),
+            cor: '#38bdf8',
+            sub: 'Produtos acabados e MPs vendidas direto',
+          },
+          {
+            label: 'Distribuição ABC Automática',
+            valor: `${r.classe_a?.skus || 0} A • ${r.classe_b?.skus || 0} B • ${r.classe_c?.skus || 0} C`,
+            cor: '#a78bfa',
+            sub: `Critério Pareto 80/15/5 (${r.criterio === 'VOLUME' ? 'Volume kg' : 'Valor R$'})`,
+          },
+        ],
+        chart: {
+          titulo: 'Top 12 Produtos por Demanda Real — Produção + Vendas Diretas (R$)',
+          data: (dados.data || []).filter((x) => x.qtd_total > 0).slice(0, 12).map((x) => ({
+            name: String(x.descricao || '').slice(0, 20),
+            valor: x.valor_total > 0 ? x.valor_total : x.qtd_total,
+            fill: x.classe_abc === 'A' ? '#22c55e' : x.classe_abc === 'B' ? '#f59e0b' : '#64748b',
+          })),
+          formatter: r.criterio === 'VOLUME' ? fmtKg : fmtMoeda,
+        },
+        tabela: {
+          titulo: 'Ranking Automático de Curva ABC (Sincronizado com Produtos & Inventário Cíclico)',
+          colunas: [
+            { key: 'classe_abc', label: 'Curva (Auto)', badge: (v) => (v === 'A' ? 'badge--success' : v === 'B' ? 'badge--warning' : 'badge--secondary') },
+            { key: 'codigo', label: 'Código', mono: true },
+            { key: 'descricao', label: 'Produto', bold: true },
+            {
+              key: 'origem_predominante',
+              label: 'Origem Giro',
+              fmt: (v) => origemLabels[v] || v,
+              badge: (v) => (v === 'PRODUCAO' ? 'badge--warning' : v === 'VENDA_DIRETA' ? 'badge--info' : v === 'MISTO' ? 'badge--success' : 'badge--secondary'),
+            },
+            { key: 'qtd_producao', label: 'Saída Prod. (kg)', align: 'right', mono: true, fmt: fmtKg },
+            { key: 'valor_producao', label: 'Valor Prod.', align: 'right', mono: true, fmt: fmtMoeda },
+            { key: 'qtd_venda_direta', label: 'Venda Dir. (kg)', align: 'right', mono: true, fmt: fmtKg },
+            { key: 'valor_venda_direta', label: 'Valor Vendas', align: 'right', mono: true, fmt: fmtMoeda },
+            { key: 'valor_total', label: 'Total Demanda', align: 'right', mono: true, fmt: fmtMoeda, bold: true },
+            { key: 'participacao_pct', label: '% Part.', align: 'right', mono: true, fmt: (v) => `${v}%` },
+            { key: 'acumulado_pct', label: '% Acum.', align: 'right', mono: true, fmt: (v) => `${v}%` },
+          ],
+          linhas: dados.data || [],
+        },
+      }
+    }
+
     case 'curva-abc-estoque':
       return {
         kpis: [

@@ -227,7 +227,6 @@ export async function criar({
   ultimo_preco_compra,
   especificacao_id,
   tipo_produto,
-  status_curva,
   unidade,
   grupo,
   especie,
@@ -260,7 +259,6 @@ export async function criar({
           ultimo_preco_compra: ultimo_preco_compra === '' || ultimo_preco_compra == null ? 0 : Number(ultimo_preco_compra),
           especificacao_id: especificacao_id || null,
           tipo_produto,
-          status_curva,
           unidade,
           grupo,
           especie: especie || '',
@@ -309,9 +307,9 @@ export async function criar({
     const result = await db.execute({
       sql: `
         INSERT INTO produtos (codigo, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, 'C', ?, ?, ?)
       `,
-      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null]
+      args: [codVal, descricao, valor_unitario, tipo_produto, unidade, grupo, classificacao || null]
     })
     
     const newId = result.lastInsertRowid.toString()
@@ -345,7 +343,6 @@ export async function atualizar({
   ultimo_preco_compra,
   especificacao_id,
   tipo_produto,
-  status_curva,
   unidade,
   grupo,
   especie,
@@ -377,7 +374,6 @@ export async function atualizar({
           ultimo_preco_compra: ultimo_preco_compra === '' || ultimo_preco_compra == null ? 0 : Number(ultimo_preco_compra),
           especificacao_id: especificacao_id || null,
           tipo_produto,
-          status_curva,
           unidade,
           grupo,
           especie: especie || '',
@@ -413,10 +409,10 @@ export async function atualizar({
   try {
     await db.execute({
       sql: `
-        UPDATE produtos SET codigo=?, descricao=?, valor_unitario=?, tipo_produto=?, status_curva=?, unidade=?, grupo=?, classificacao=?
+        UPDATE produtos SET codigo=?, descricao=?, valor_unitario=?, tipo_produto=?, unidade=?, grupo=?, classificacao=?
         WHERE id=?
       `,
-      args: [codVal, descricao, valor_unitario, tipo_produto, status_curva, unidade, grupo, classificacao || null, id]
+      args: [codVal, descricao, valor_unitario, tipo_produto, unidade, grupo, classificacao || null, id]
     })
 
     // Atualizar Paternidade se for SUBPRODUTO

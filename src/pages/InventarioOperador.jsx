@@ -68,7 +68,7 @@ export function InventarioOperador() {
 
   // Modal de cadastro rápido (CargaInicial)
   const [modalCadastro, setModalCadastro] = useState(null)
-  const [formCadastro, setFormCadastro] = useState({ descricao: '', tipo_produto: 'Materia Prima', status_curva: 'C', valor_unitario: '', grupo: '', produtoVinculado: null })
+  const [formCadastro, setFormCadastro] = useState({ descricao: '', tipo_produto: 'Materia Prima', valor_unitario: '', grupo: '', produtoVinculado: null })
   const [salvandoCadastro, setSalvandoCadastro] = useState(false)
   const [produtosSemEan, setProdutosSemEan] = useState([])
 
@@ -253,7 +253,7 @@ export function InventarioOperador() {
           const prods = await produtosQueries.listar()
           setProdutosSemEan(prods.filter(p => !p.ean))
           setModalCadastro({ ean: eanBipado })
-          setFormCadastro({ descricao: '', tipo_produto: 'Materia Prima', status_curva: 'C', valor_unitario: '', grupo: '', produtoVinculado: null })
+          setFormCadastro({ descricao: '', tipo_produto: 'Materia Prima', valor_unitario: '', grupo: '', produtoVinculado: null })
         } else {
           setEanDesconhecido(eanBipado)
           setModalEanOpen(true)
@@ -476,7 +476,6 @@ export function InventarioOperador() {
           ean: modalCadastro.isEdicao ? formCadastro.produtoVinculado.ean : modalCadastro.ean,
           descricao: formCadastro.descricao.trim(),
           tipo_produto: formCadastro.tipo_produto,
-          status_curva: formCadastro.status_curva || 'C',
           grupo: formCadastro.grupo || '',
           valor_unitario: parseFloat(formCadastro.valor_unitario) || 0
         })
@@ -485,7 +484,6 @@ export function InventarioOperador() {
           ean: modalCadastro.ean, codigo: '',
           descricao: formCadastro.descricao.trim(),
           tipo_produto: formCadastro.tipo_produto,
-          status_curva: formCadastro.status_curva || 'C',
           grupo: formCadastro.grupo || '',
           unidade: 'CX',
           valor_unitario: parseFloat(formCadastro.valor_unitario) || 0
@@ -522,7 +520,6 @@ export function InventarioOperador() {
         setFormCadastro({
           descricao: p.descricao,
           tipo_produto: p.tipo_produto || 'Materia Prima',
-          status_curva: p.status_curva || 'C',
           grupo: p.grupo || '',
           valor_unitario: p.valor_unitario || '',
           produtoVinculado: p
@@ -856,7 +853,6 @@ export function InventarioOperador() {
                             onClick={() => setFormCadastro(prev => ({
                               ...prev, produtoVinculado: p, descricao: p.descricao,
                               tipo_produto: p.tipo_produto || 'Materia Prima',
-                              status_curva: p.status_curva || 'C',
                               grupo: p.grupo || '', valor_unitario: p.valor_unitario || ''
                             }))}>
                             <span className="font-bold">{p.descricao}</span>
@@ -875,14 +871,6 @@ export function InventarioOperador() {
                     <option value="Materia Prima">Matéria Prima</option>
                     <option value="Produto Acabado">Produto Acabado</option>
                     <option value="Insumos">Insumos</option>
-                  </select>
-                </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Curva ABC</label>
-                  <select className="form-input" value={formCadastro.status_curva} onChange={e => setFormCadastro(prev => ({ ...prev, status_curva: e.target.value }))}>
-                    <option value="A">Curva A</option>
-                    <option value="B">Curva B</option>
-                    <option value="C">Curva C</option>
                   </select>
                 </div>
                 <div className="form-group" style={{ flex: 1 }}>

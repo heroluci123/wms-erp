@@ -12,6 +12,7 @@ import {
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { uuidv7 } from '../../utils/uuid.js'
 import { parseUuidOrBadRequest, toDec, toNum } from '../wms/helpers.js'
+import { recalcularCurvaAbcTenant } from './curvaAbcAuto.js'
 
 const PERM_PROD_READ = [
   'produtos',
@@ -354,6 +355,7 @@ export function registerEspecificacoesRoutes(app: FastifyInstance, conn: DbConne
     async (req) => {
       const ctx = req.authCtx!
       const prodId = parseUuidOrBadRequest((req.params as { id: string }).id, 'produto_id')
+      await recalcularCurvaAbcTenant(conn.db, ctx.tenantId).catch(() => null)
 
       const [prod] = await conn.db
         .select()
@@ -414,6 +416,7 @@ export function registerEspecificacoesRoutes(app: FastifyInstance, conn: DbConne
         success: true,
         data: {
           produto_id: prodId,
+          status_curva: prod.statusCurva || 'C',
           ultimo_preco_compra: toNum(prod.ultimoPrecoCompra, 0),
           custo_medio_kg: toNum(prod.custoMedioKg, 0),
           preco_medio_venda: m.preco_medio_venda,

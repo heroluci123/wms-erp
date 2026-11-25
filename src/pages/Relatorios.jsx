@@ -451,7 +451,7 @@ export function Relatorios() {
           <p className="text-muted mt-4">
             {cliente
               ? 'Relatórios consolidados de estoque e produção finalizada'
-              : `${catalogoCompleto.length} relatórios gerenciais: 4 Clássicos WMS + 14 Indicadores de Estoque, Margem, PDV, Açougue, Compras e Logística`}
+              : `${catalogoCompleto.length} relatórios gerenciais: 4 Clássicos WMS + ${CATALOGO_BI_RELATORIOS.length} Indicadores de Estoque, Margem, PDV, Açougue, Compras e Logística`}
           </p>
         </div>
         {!cliente && (podeRelEstoque || podeRelProducao) && (

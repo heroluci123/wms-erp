@@ -1,10 +1,13 @@
 import React from 'react'
 
-/** Badge de Curva ABC */
+/** Badge de Curva ABC (calculada automaticamente pelo sistema) */
 export function CurvaBadge({ curva }) {
   if (!curva) return null
   return (
-    <span className={`badge badge--curva-${curva.toLowerCase()}`}>
+    <span
+      className={`badge badge--curva-${curva.toLowerCase()}`}
+      title="Curva ABC calculada automaticamente pelo sistema (saídas para produção + vendas diretas nos últimos 90 dias)"
+    >
       Curva {curva}
     </span>
   )

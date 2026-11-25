@@ -31,6 +31,7 @@ import {
 } from '../../db/schema/index.js'
 import { createAuthMiddleware, HttpError } from '../../middlewares/auth.js'
 import { hojeIsoLocal, parseUuidOrBadRequest, toNum } from '../wms/helpers.js'
+import { calcularCurvaAbcDemanda, recalcularCurvaAbcTenant } from '../cadastros/curvaAbcAuto.js'
 
 const PERM_BI_READ = [
   'relatorios_estoque',
@@ -477,8 +478,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
               eq(movimentacoesLog.tenantId, ctx.tenantId),
               eq(movimentacoesLog.filialId, ctx.filialId),
               sql`${movimentacoesLog.tipo} IN ('SAIDA', 'EXPEDICAO', 'ALOCADA_PRODUCAO', 'PRODUCAO_SAIDA')`,
-              sql`DATE(${movimentacoesLog.dataHora}) >= ${dataInicio}::date`,
-              sql`DATE(${movimentacoesLog.dataHora}) <= ${dataFim}::date`,
+              sql`${movimentacoesLog.dataHora} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${movimentacoesLog.dataHora} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
       ])
@@ -675,8 +676,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(inventarios.tenantId, ctx.tenantId),
-              sql`DATE(${inventarios.dataCriacao}) >= ${dataInicio}::date`,
-              sql`DATE(${inventarios.dataCriacao}) <= ${dataFim}::date`,
+              sql`${inventarios.dataCriacao} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${inventarios.dataCriacao} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .orderBy(desc(inventarios.dataCriacao))
@@ -698,8 +699,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(inventarioAjustesLog.tenantId, ctx.tenantId),
-              sql`DATE(${inventarioAjustesLog.dataAjuste}) >= ${dataInicio}::date`,
-              sql`DATE(${inventarioAjustesLog.dataAjuste}) <= ${dataFim}::date`,
+              sql`${inventarioAjustesLog.dataAjuste} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${inventarioAjustesLog.dataAjuste} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .orderBy(desc(inventarioAjustesLog.dataAjuste))
@@ -710,8 +711,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(varejoInventarios.tenantId, ctx.tenantId),
-              sql`DATE(${varejoInventarios.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${varejoInventarios.createdAt}) <= ${dataFim}::date`,
+              sql`${varejoInventarios.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${varejoInventarios.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .orderBy(desc(varejoInventarios.createdAt))
@@ -823,8 +824,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
             and(
               eq(pedidos.tenantId, ctx.tenantId),
               sql`${pedidos.status} NOT IN ('CANCELADO', 'RASCUNHO')`,
-              sql`DATE(${pedidos.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${pedidos.createdAt}) <= ${dataFim}::date`,
+              sql`${pedidos.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${pedidos.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
         conn.db
@@ -836,8 +837,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
             and(
               eq(pdvVendas.tenantId, ctx.tenantId),
               eq(pdvVendas.status, 'CONCLUIDA'),
-              sql`DATE(${pdvVendas.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${pdvVendas.createdAt}) <= ${dataFim}::date`,
+              sql`${pdvVendas.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${pdvVendas.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
         conn.db
@@ -980,8 +981,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
             and(
               eq(pedidos.tenantId, ctx.tenantId),
               sql`${pedidos.status} NOT IN ('CANCELADO', 'RASCUNHO')`,
-              sql`DATE(${pedidos.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${pedidos.createdAt}) <= ${dataFim}::date`,
+              sql`${pedidos.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${pedidos.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
         conn.db
@@ -995,8 +996,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
             and(
               eq(pdvVendas.tenantId, ctx.tenantId),
               eq(pdvVendas.status, 'CONCLUIDA'),
-              sql`DATE(${pdvVendas.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${pdvVendas.createdAt}) <= ${dataFim}::date`,
+              sql`${pdvVendas.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${pdvVendas.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
       ])
@@ -1084,8 +1085,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(pdvCaixas.tenantId, ctx.tenantId),
-              sql`DATE(${pdvCaixas.abertoEm}) >= ${dataInicio}::date`,
-              sql`DATE(${pdvCaixas.abertoEm}) <= ${dataFim}::date`,
+              sql`${pdvCaixas.abertoEm} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${pdvCaixas.abertoEm} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .orderBy(desc(pdvCaixas.abertoEm))
@@ -1100,8 +1101,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(pdvVendas.tenantId, ctx.tenantId),
-              sql`DATE(${pdvVendas.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${pdvVendas.createdAt}) <= ${dataFim}::date`,
+              sql`${pdvVendas.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${pdvVendas.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
       ])
@@ -1186,8 +1187,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
             and(
               eq(pedidos.tenantId, ctx.tenantId),
               sql`${pedidos.status} NOT IN ('CANCELADO', 'RASCUNHO')`,
-              sql`DATE(${pedidos.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${pedidos.createdAt}) <= ${dataFim}::date`,
+              sql`${pedidos.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${pedidos.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
       ])
@@ -1265,8 +1266,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
             and(
               eq(estoqueCaixas.tenantId, ctx.tenantId),
               inArray(estoqueCaixas.status, ['ABERTA_ACOUGUE', 'CONSUMIDA_ACOUGUE']),
-              sql`DATE(${estoqueCaixas.updatedAt}) >= ${dataInicio}::date`,
-              sql`DATE(${estoqueCaixas.updatedAt}) <= ${dataFim}::date`,
+              sql`${estoqueCaixas.updatedAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${estoqueCaixas.updatedAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .orderBy(desc(estoqueCaixas.updatedAt))
@@ -1283,8 +1284,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(etiquetasAcougue.tenantId, ctx.tenantId),
-              sql`DATE(${etiquetasAcougue.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${etiquetasAcougue.createdAt}) <= ${dataFim}::date`,
+              sql`${etiquetasAcougue.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${etiquetasAcougue.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .limit(1000),
@@ -1398,8 +1399,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           and(
             eq(pedidosCompra.tenantId, ctx.tenantId),
             sql`${pedidosCompra.status} != 'CANCELADO'`,
-            sql`DATE(${pedidosCompra.createdAt}) >= ${dataInicio}::date`,
-            sql`DATE(${pedidosCompra.createdAt}) <= ${dataFim}::date`,
+            sql`${pedidosCompra.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+            sql`${pedidosCompra.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
           ),
         )
         .orderBy(asc(pedidosCompra.createdAt))
@@ -1560,8 +1561,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(devolucoes.tenantId, ctx.tenantId),
-              sql`DATE(${devolucoes.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${devolucoes.createdAt}) <= ${dataFim}::date`,
+              sql`${devolucoes.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${devolucoes.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .orderBy(desc(devolucoes.createdAt))
@@ -1661,8 +1662,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(perdasRegistro.tenantId, ctx.tenantId),
-              sql`DATE(${perdasRegistro.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${perdasRegistro.createdAt}) <= ${dataFim}::date`,
+              sql`${perdasRegistro.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${perdasRegistro.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           )
           .orderBy(desc(perdasRegistro.createdAt))
@@ -1673,8 +1674,8 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           .where(
             and(
               eq(camarasTemperaturaLog.tenantId, ctx.tenantId),
-              sql`DATE(${camarasTemperaturaLog.createdAt}) >= ${dataInicio}::date`,
-              sql`DATE(${camarasTemperaturaLog.createdAt}) <= ${dataFim}::date`,
+              sql`${camarasTemperaturaLog.createdAt} >= ${`${dataInicio}T00:00:00-03:00`}::timestamptz`,
+              sql`${camarasTemperaturaLog.createdAt} <= ${`${dataFim}T23:59:59.999-03:00`}::timestamptz`,
             ),
           ),
       ])
@@ -1735,6 +1736,56 @@ export function registerRelatoriosBiRoutes(app: FastifyInstance, conn: DbConnect
           operador_nome: p.operadorNome,
           created_at: p.createdAt,
         })),
+      }
+    },
+  )
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 15) CURVA ABC AUTOMÁTICA DE GIRO REAL (PRODUÇÃO + AÇOUGUE + VENDAS DIRETAS)
+  // ═══════════════════════════════════════════════════════════════════════════
+  app.get(
+    '/api/relatorios/bi/curva-abc-demanda',
+    { preHandler: requirePermission(PERM_BI_READ, { write: false, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const q = (req.query || {}) as { dataInicio?: string; dataFim?: string; dias?: string }
+      const usarDatas = Boolean(q.dataInicio && q.dataFim)
+      const periodo = usarDatas ? resolverPeriodo(q) : null
+
+      // Mantém produtos.status_curva sincronizado automaticamente com base nos últimos 90d
+      await recalcularCurvaAbcTenant(conn.db, ctx.tenantId).catch(() => null)
+
+      const resultado = await calcularCurvaAbcDemanda(
+        conn.db,
+        ctx.tenantId,
+        periodo ? { dataInicio: periodo.dataInicio, dataFim: periodo.dataFim } : { dias: Number(q.dias || 90) },
+      )
+
+      const porClasse = (c: 'A' | 'B' | 'C') => {
+        const sub = resultado.itens.filter((x) => x.classe_abc === c)
+        return {
+          skus: sub.length,
+          valor: Number(sub.reduce((s, x) => s + x.valor_total, 0).toFixed(2)),
+          qtd: Number(sub.reduce((s, x) => s + x.qtd_total, 0).toFixed(2)),
+        }
+      }
+
+      return {
+        success: true,
+        periodo: periodo || { dias: resultado.dias },
+        resumo: {
+          criterio: resultado.criterio,
+          total_produtos: resultado.total_produtos,
+          produtos_com_giro: resultado.produtos_com_giro,
+          valor_producao_total: resultado.valor_producao_total,
+          valor_venda_direta_total: resultado.valor_venda_direta_total,
+          valor_total_demanda: resultado.valor_total_demanda,
+          qtd_total_demanda: resultado.qtd_total_demanda,
+          classe_a: porClasse('A'),
+          classe_b: porClasse('B'),
+          classe_c: porClasse('C'),
+        },
+        data: resultado.itens,
       }
     },
   )

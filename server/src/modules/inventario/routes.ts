@@ -26,6 +26,7 @@ import {
   toNum,
   verificarEnderecoBloqueado,
 } from '../wms/helpers.js'
+import { recalcularCurvaAbcTenant } from '../cadastros/curvaAbcAuto.js'
 
 const PERM_INV_READ = [
   'inventario_coletor',
@@ -476,6 +477,10 @@ export function registerInventarioRoutes(app: FastifyInstance, conn: DbConnectio
       const tipoFiltro = body.tipo_filtro || 'Rua'
       const identFiltro = String(body.identificador_filtro || '').trim()
       if (!identFiltro) throw new HttpError(400, 'Informe o identificador do filtro para inventário cíclico.')
+
+      if (tipoFiltro === 'Curva') {
+        await recalcularCurvaAbcTenant(conn.db, ctx.tenantId, { force: true }).catch(() => null)
+      }
 
       const resInv = await conn.db.transaction(async (tx) => {
         const [ativo] = await tx
