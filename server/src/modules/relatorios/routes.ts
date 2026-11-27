@@ -381,7 +381,7 @@ export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnectio
             AND c.status IN ('DISPONIVEL', 'RESERVADA')
             AND COALESCE(c.endereco, '') NOT IN ('EXPEDICAO', 'SAIDA', 'PERDIDO')
           ORDER BY p.descricao ASC, c.endereco ASC, c.validade ASC
-          LIMIT 2000
+          LIMIT 10000
         `),
         conn.db.execute(sql`
           SELECT r.*,
@@ -428,7 +428,7 @@ export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnectio
             AND c.ean_caixa != ''
             AND DATE(c.created_at - INTERVAL '3 hours') BETWEEN ${dIni} AND ${dFim}
           ORDER BY c.created_at DESC
-          LIMIT 1000
+          LIMIT 10000
         `),
       ])
 

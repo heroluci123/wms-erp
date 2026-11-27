@@ -621,13 +621,24 @@ export function RelatorioGeralWms({ somenteCliente = false }) {
     };
   }, [estoqueCaixasFiltrado, estoquePorProduto, romaneiosFiltrados, entradasFiltradas]);
 
+  const saidasItensFiltrados = useMemo(() => {
+    if (!termo) return dados.saidasItens;
+    return (dados.saidasItens || []).filter(it =>
+      (it.romaneio_codigo || '').toLowerCase().includes(termo) ||
+      (it.romaneio_cliente || '').toLowerCase().includes(termo) ||
+      (it.produto_descricao || '').toLowerCase().includes(termo) ||
+      String(it.produto_codigo || '').toLowerCase().includes(termo) ||
+      String(it.ean_caixa || '').toLowerCase().includes(termo)
+    );
+  }, [dados.saidasItens, termo]);
+
   const handleDownloadExcel = async () => {
     setExportingExcel(true);
     try {
       await exportRelatorioWmsExcel({
         estoqueAtual: estoqueCaixasFiltrado,
         romaneios: romaneiosFiltrados,
-        saidasItens: dados.saidasItens,
+        saidasItens: saidasItensFiltrados,
         entradasCaixas: entradasFiltradas,
         dataInicio: periodoAtivo.inicio,
         dataFim: periodoAtivo.fim

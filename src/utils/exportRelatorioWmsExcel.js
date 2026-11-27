@@ -81,16 +81,341 @@ export async function exportRelatorioWmsExcel({
     right: { style: 'thin', color: { argb: COLORS.borderGray } }
   };
 
+  const saidasEfetivas = saidasItens.length > 0
+    ? saidasItens
+    : romaneios.flatMap((rom) =>
+        (rom.itens || []).map((it) => ({
+          ...it,
+          romaneio_id: it.romaneio_id ?? rom.id,
+          romaneio_codigo: it.romaneio_codigo ?? rom.codigo,
+          romaneio_cliente: it.romaneio_cliente ?? rom.cliente,
+          romaneio_status: it.romaneio_status ?? rom.status,
+          romaneio_criado_em: it.romaneio_criado_em ?? rom.created_at,
+          romaneio_expedido_em: it.romaneio_expedido_em ?? rom.expedido_at,
+        }))
+      );
+
   const totalEstoqueKg = estoqueAtual.reduce((s, r) => s + Number(r.peso_kg || 0), 0);
-  const totalSaidaKg = saidasItens.reduce((s, r) => s + Number(r.peso_kg || 0), 0);
+  const totalSaidaKg = saidasEfetivas.reduce((s, r) => s + Number(r.peso_kg || 0), 0);
   const totalEntradaKg = entradasCaixas.reduce((s, r) => s + Number(r.peso_kg || 0), 0);
+  const totalEntradaBrutoKg = entradasCaixas.reduce((s, r) => {
+    const liq = Number(r.peso_kg || 0);
+    const tara = Number(r.tara_kg || 0);
+    return s + (r.peso_bruto_kg != null && Number(r.peso_bruto_kg) > 0 ? Number(r.peso_bruto_kg) : Number((liq + tara).toFixed(2)));
+  }, 0);
   const totalEstoquePecas = estoqueAtual.reduce((s, r) => s + Number(r.qtd_pecas || 0), 0);
-  const totalSaidaPecas = saidasItens.reduce((s, r) => s + Number(r.qtd_pecas || 0), 0);
+  const totalSaidaPecas = saidasEfetivas.reduce((s, r) => s + Number(r.qtd_pecas || 0), 0);
   const totalEntradaPecas = entradasCaixas.reduce((s, r) => s + Number(r.qtd_pecas || 0), 0);
   const periodoLabel = `${fmtDateBR(dataInicio)} a ${fmtDateBR(dataFim)}`;
 
   // =========================================================================
-  // ABA 1: SAÍDAS POR ROMANEIO (SEPARADAS POR ROMANEIO COM SUBTOTAIS)
+  // ABA 1: SAÍDA CONSOLIDADA POR PRODUTO (NO PERÍODO FILTRADO)
+  // =========================================================================
+  const wsSaiProd = wb.addWorksheet('Saída Consolidada Produto', {
+    views: [{ state: 'frozen', ySplit: 4 }]
+  });
+
+  const saidaProdMap = new Map();
+  for (const item of saidasEfetivas) {
+    const cod = String(item.produto_codigo || '');
+    const desc = String(item.produto_descricao || '');
+    const key = `${cod}__${desc}`;
+    if (!saidaProdMap.has(key)) {
+      saidaProdMap.set(key, {
+        codigo: cod,
+        descricao: desc,
+        grupo: item.grupo || '',
+        tipo_produto: item.tipo_produto || '',
+        romaneiosSet: new Set(),
+        qtd_caixas: 0,
+        qtd_pecas: 0,
+        peso_kg: 0
+      });
+    }
+    const p = saidaProdMap.get(key);
+    if (item.romaneio_codigo || item.romaneio_id) {
+      p.romaneiosSet.add(String(item.romaneio_codigo || item.romaneio_id));
+    }
+    p.qtd_caixas += 1;
+    p.qtd_pecas += Number(item.qtd_pecas || 0);
+    p.peso_kg += Number(item.peso_kg || 0);
+  }
+  const saidaProdList = Array.from(saidaProdMap.values()).sort(
+    (a, b) => b.peso_kg - a.peso_kg || a.descricao.localeCompare(b.descricao)
+  );
+
+  wsSaiProd.mergeCells('A1:J1');
+  wsSaiProd.getCell('A1').value = 'WMSphere • TRICARNES — SAÍDA CONSOLIDADA POR PRODUTO NO PERÍODO';
+  wsSaiProd.getCell('A1').font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  wsSaiProd.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.emeraldDark } };
+  wsSaiProd.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  wsSaiProd.getRow(1).height = 28;
+
+  wsSaiProd.mergeCells('A2:J2');
+  wsSaiProd.getCell('A2').value = `Período Filtrado: ${periodoLabel}  |  Produtos Distintos: ${saidaProdList.length}  |  Romaneios: ${romaneios.length}  |  Caixas Expedidas: ${saidasEfetivas.length} cx  |  Peso Total Saída: ${totalSaidaKg.toFixed(2).replace('.', ',')} kg`;
+  wsSaiProd.getCell('A2').font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
+  wsSaiProd.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subHeaderBg } };
+  wsSaiProd.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  wsSaiProd.getRow(2).height = 20;
+  wsSaiProd.getRow(3).height = 8;
+
+  const hSaiProd = [
+    'Código', 'Produto', 'Grupo', 'Tipo', 'Qtd. Romaneios',
+    'Qtd. Caixas Saída', 'Total Peças', 'Peso Médio / Cx (Kg)', 'Peso Total Saída (Kg)', '% das Saídas'
+  ];
+  const rHSaiProd = wsSaiProd.getRow(4);
+  hSaiProd.forEach((h, i) => {
+    const cell = rHSaiProd.getCell(i + 1);
+    cell.value = h;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.slateHeader } };
+    cell.alignment = { vertical: 'middle', horizontal: i >= 4 ? 'right' : (i === 0 ? 'center' : 'left') };
+    cell.border = thinBorder;
+  });
+  rHSaiProd.height = 24;
+
+  const saiProdEndRow = Math.max(5, 4 + saidaProdList.length);
+  const saiProdTotRowNum = saiProdEndRow + 1;
+
+  saidaProdList.forEach((p, idx) => {
+    const rIdx = 5 + idx;
+    const row = wsSaiProd.getRow(rIdx);
+    const pesoArred = Number(p.peso_kg.toFixed(2));
+    const mediaCx = p.qtd_caixas > 0 ? Number((p.peso_kg / p.qtd_caixas).toFixed(2)) : 0;
+
+    row.getCell(1).value = String(p.codigo || '');
+    row.getCell(2).value = p.descricao;
+    row.getCell(3).value = p.grupo || '';
+    row.getCell(4).value = p.tipo_produto || '';
+    row.getCell(5).value = p.romaneiosSet.size;
+    row.getCell(6).value = p.qtd_caixas;
+    row.getCell(7).value = p.qtd_pecas;
+    row.getCell(8).value = { formula: `IF(F${rIdx}>0,I${rIdx}/F${rIdx},0)`, result: mediaCx };
+    row.getCell(9).value = pesoArred;
+    row.getCell(10).value = {
+      formula: `IF($I$${saiProdTotRowNum}>0,I${rIdx}/$I$${saiProdTotRowNum},0)`,
+      result: totalSaidaKg > 0 ? p.peso_kg / totalSaidaKg : 0
+    };
+
+    row.getCell(1).numFmt = '@';
+    row.getCell(5).numFmt = '#,##0';
+    row.getCell(6).numFmt = '#,##0';
+    row.getCell(7).numFmt = '#,##0';
+    row.getCell(8).numFmt = '#,##0.00';
+    row.getCell(9).numFmt = '#,##0.00';
+    row.getCell(10).numFmt = '0.0%';
+
+    for (let c = 1; c <= 10; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: 'Calibri', size: 10, color: { argb: COLORS.navyDark } };
+      cell.border = thinBorder;
+      if (idx % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.zebraBg } };
+      if (c === 1) cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      else if (c >= 5) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      else cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    }
+    row.getCell(9).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.greenText } };
+    row.height = 19;
+  });
+
+  const totSaiProdRow = wsSaiProd.getRow(saiProdTotRowNum);
+  totSaiProdRow.getCell(1).value = 'TOTAL GERAL';
+  totSaiProdRow.getCell(2).value = `${saidaProdList.length} produto(s) expedido(s) no período`;
+  totSaiProdRow.getCell(5).value = romaneios.length;
+  totSaiProdRow.getCell(6).value = saidaProdList.length > 0 ? { formula: `SUBTOTAL(109,F5:F${saiProdEndRow})`, result: saidasEfetivas.length } : 0;
+  totSaiProdRow.getCell(7).value = saidaProdList.length > 0 ? { formula: `SUBTOTAL(109,G5:G${saiProdEndRow})`, result: totalSaidaPecas } : 0;
+  totSaiProdRow.getCell(8).value = saidaProdList.length > 0
+    ? { formula: `IF(F${saiProdTotRowNum}>0,I${saiProdTotRowNum}/F${saiProdTotRowNum},0)`, result: saidasEfetivas.length > 0 ? Number((totalSaidaKg / saidasEfetivas.length).toFixed(2)) : 0 }
+    : 0;
+  totSaiProdRow.getCell(9).value = saidaProdList.length > 0 ? { formula: `SUBTOTAL(109,I5:I${saiProdEndRow})`, result: totalSaidaKg } : 0;
+  totSaiProdRow.getCell(10).value = saidaProdList.length > 0 ? { formula: `SUBTOTAL(109,J5:J${saiProdEndRow})`, result: totalSaidaKg > 0 ? 1 : 0 } : 0;
+  totSaiProdRow.getCell(5).numFmt = '#,##0';
+  totSaiProdRow.getCell(6).numFmt = '#,##0';
+  totSaiProdRow.getCell(7).numFmt = '#,##0';
+  totSaiProdRow.getCell(8).numFmt = '#,##0.00';
+  totSaiProdRow.getCell(9).numFmt = '#,##0.00';
+  totSaiProdRow.getCell(10).numFmt = '0.0%';
+
+  for (let c = 1; c <= 10; c++) {
+    const cell = totSaiProdRow.getCell(c);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
+    cell.border = {
+      top: { style: 'medium', color: { argb: COLORS.navyDark } },
+      bottom: { style: 'medium', color: { argb: COLORS.navyDark } },
+      left: { style: 'thin', color: { argb: COLORS.borderGray } },
+      right: { style: 'thin', color: { argb: COLORS.borderGray } }
+    };
+    if (c >= 5) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+  }
+  totSaiProdRow.height = 22;
+
+  wsSaiProd.autoFilter = `A4:J${saiProdEndRow}`;
+  wsSaiProd.columns = [
+    { width: 12 }, { width: 40 }, { width: 18 }, { width: 16 }, { width: 15 },
+    { width: 17 }, { width: 13 }, { width: 19 }, { width: 20 }, { width: 13 }
+  ];
+
+  // =========================================================================
+  // ABA 2: ENTRADA CONSOLIDADA POR PRODUTO (NO PERÍODO FILTRADO)
+  // =========================================================================
+  const wsEntProd = wb.addWorksheet('Entrada Consolidada Produto', {
+    views: [{ state: 'frozen', ySplit: 4 }]
+  });
+
+  const entradaProdMap = new Map();
+  for (const item of entradasCaixas) {
+    const cod = String(item.produto_codigo || '');
+    const desc = String(item.produto_descricao || '');
+    const key = `${cod}__${desc}`;
+    const origemRaw = String(item.origem_tipo || '').toUpperCase();
+    const origLabel = origemRaw === 'PRODUCAO' || item.origem_operacao === 'PRODUCAO' || item.endereco === 'PRODUÇÃO PAVAN' || item.endereco === 'PRODUCAO'
+      ? 'Retorno de Produção'
+      : 'Recebimento / Carga';
+    const liq = Number(item.peso_kg || 0);
+    const tara = Number(item.tara_kg || 0);
+    const bruto = item.peso_bruto_kg != null && Number(item.peso_bruto_kg) > 0 ? Number(item.peso_bruto_kg) : Number((liq + tara).toFixed(2));
+
+    if (!entradaProdMap.has(key)) {
+      entradaProdMap.set(key, {
+        codigo: cod,
+        descricao: desc,
+        grupo: item.grupo || '',
+        tipo_produto: item.tipo_produto || '',
+        origensSet: new Set(),
+        qtd_caixas: 0,
+        qtd_pecas: 0,
+        peso_bruto_kg: 0,
+        peso_kg: 0
+      });
+    }
+    const p = entradaProdMap.get(key);
+    p.origensSet.add(origLabel);
+    p.qtd_caixas += 1;
+    p.qtd_pecas += Number(item.qtd_pecas || 0);
+    p.peso_bruto_kg += bruto;
+    p.peso_kg += liq;
+  }
+  const entradaProdList = Array.from(entradaProdMap.values()).sort(
+    (a, b) => b.peso_kg - a.peso_kg || a.descricao.localeCompare(b.descricao)
+  );
+
+  wsEntProd.mergeCells('A1:K1');
+  wsEntProd.getCell('A1').value = 'WMSphere • TRICARNES — ENTRADA CONSOLIDADA POR PRODUTO NO PERÍODO';
+  wsEntProd.getCell('A1').font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  wsEntProd.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.indigoDark } };
+  wsEntProd.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  wsEntProd.getRow(1).height = 28;
+
+  wsEntProd.mergeCells('A2:K2');
+  wsEntProd.getCell('A2').value = `Período Filtrado: ${periodoLabel}  |  Produtos Distintos: ${entradaProdList.length}  |  Caixas de Entrada: ${entradasCaixas.length} cx  |  Peças: ${totalEntradaPecas} pç  |  Peso Líquido Entrada: ${totalEntradaKg.toFixed(2).replace('.', ',')} kg`;
+  wsEntProd.getCell('A2').font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
+  wsEntProd.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subHeaderBg } };
+  wsEntProd.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  wsEntProd.getRow(2).height = 20;
+  wsEntProd.getRow(3).height = 8;
+
+  const hEntProd = [
+    'Código', 'Produto', 'Grupo', 'Tipo', 'Origem da Entrada',
+    'Qtd. Caixas Entrada', 'Total Peças', 'Peso Bruto Total (Kg)', 'Peso Médio / Cx (Kg)', 'Peso Líquido Entrada (Kg)', '% das Entradas'
+  ];
+  const rHEntProd = wsEntProd.getRow(4);
+  hEntProd.forEach((h, i) => {
+    const cell = rHEntProd.getCell(i + 1);
+    cell.value = h;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.slateHeader } };
+    cell.alignment = { vertical: 'middle', horizontal: i >= 5 ? 'right' : (i === 0 ? 'center' : 'left') };
+    cell.border = thinBorder;
+  });
+  rHEntProd.height = 24;
+
+  const entProdEndRow = Math.max(5, 4 + entradaProdList.length);
+  const entProdTotRowNum = entProdEndRow + 1;
+
+  entradaProdList.forEach((p, idx) => {
+    const rIdx = 5 + idx;
+    const row = wsEntProd.getRow(rIdx);
+    const liqArred = Number(p.peso_kg.toFixed(2));
+    const brutoArred = Number(p.peso_bruto_kg.toFixed(2));
+    const mediaCx = p.qtd_caixas > 0 ? Number((p.peso_kg / p.qtd_caixas).toFixed(2)) : 0;
+
+    row.getCell(1).value = String(p.codigo || '');
+    row.getCell(2).value = p.descricao;
+    row.getCell(3).value = p.grupo || '';
+    row.getCell(4).value = p.tipo_produto || '';
+    row.getCell(5).value = Array.from(p.origensSet).join(' + ');
+    row.getCell(6).value = p.qtd_caixas;
+    row.getCell(7).value = p.qtd_pecas;
+    row.getCell(8).value = brutoArred;
+    row.getCell(9).value = { formula: `IF(F${rIdx}>0,J${rIdx}/F${rIdx},0)`, result: mediaCx };
+    row.getCell(10).value = liqArred;
+    row.getCell(11).value = {
+      formula: `IF($J$${entProdTotRowNum}>0,J${rIdx}/$J$${entProdTotRowNum},0)`,
+      result: totalEntradaKg > 0 ? p.peso_kg / totalEntradaKg : 0
+    };
+
+    row.getCell(1).numFmt = '@';
+    row.getCell(6).numFmt = '#,##0';
+    row.getCell(7).numFmt = '#,##0';
+    row.getCell(8).numFmt = '#,##0.00';
+    row.getCell(9).numFmt = '#,##0.00';
+    row.getCell(10).numFmt = '#,##0.00';
+    row.getCell(11).numFmt = '0.0%';
+
+    for (let c = 1; c <= 11; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: 'Calibri', size: 10, color: { argb: COLORS.navyDark } };
+      cell.border = thinBorder;
+      if (idx % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.zebraBg } };
+      if (c === 1) cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      else if (c >= 6) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      else cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    }
+    row.getCell(10).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.blueText } };
+    row.height = 19;
+  });
+
+  const totEntProdRow = wsEntProd.getRow(entProdTotRowNum);
+  totEntProdRow.getCell(1).value = 'TOTAL GERAL';
+  totEntProdRow.getCell(2).value = `${entradaProdList.length} produto(s) com entrada no período`;
+  totEntProdRow.getCell(6).value = entradaProdList.length > 0 ? { formula: `SUBTOTAL(109,F5:F${entProdEndRow})`, result: entradasCaixas.length } : 0;
+  totEntProdRow.getCell(7).value = entradaProdList.length > 0 ? { formula: `SUBTOTAL(109,G5:G${entProdEndRow})`, result: totalEntradaPecas } : 0;
+  totEntProdRow.getCell(8).value = entradaProdList.length > 0 ? { formula: `SUBTOTAL(109,H5:H${entProdEndRow})`, result: totalEntradaBrutoKg } : 0;
+  totEntProdRow.getCell(9).value = entradaProdList.length > 0
+    ? { formula: `IF(F${entProdTotRowNum}>0,J${entProdTotRowNum}/F${entProdTotRowNum},0)`, result: entradasCaixas.length > 0 ? Number((totalEntradaKg / entradasCaixas.length).toFixed(2)) : 0 }
+    : 0;
+  totEntProdRow.getCell(10).value = entradaProdList.length > 0 ? { formula: `SUBTOTAL(109,J5:J${entProdEndRow})`, result: totalEntradaKg } : 0;
+  totEntProdRow.getCell(11).value = entradaProdList.length > 0 ? { formula: `SUBTOTAL(109,K5:K${entProdEndRow})`, result: totalEntradaKg > 0 ? 1 : 0 } : 0;
+  totEntProdRow.getCell(6).numFmt = '#,##0';
+  totEntProdRow.getCell(7).numFmt = '#,##0';
+  totEntProdRow.getCell(8).numFmt = '#,##0.00';
+  totEntProdRow.getCell(9).numFmt = '#,##0.00';
+  totEntProdRow.getCell(10).numFmt = '#,##0.00';
+  totEntProdRow.getCell(11).numFmt = '0.0%';
+
+  for (let c = 1; c <= 11; c++) {
+    const cell = totEntProdRow.getCell(c);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
+    cell.border = {
+      top: { style: 'medium', color: { argb: COLORS.navyDark } },
+      bottom: { style: 'medium', color: { argb: COLORS.navyDark } },
+      left: { style: 'thin', color: { argb: COLORS.borderGray } },
+      right: { style: 'thin', color: { argb: COLORS.borderGray } }
+    };
+    if (c >= 6) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+  }
+  totEntProdRow.height = 22;
+
+  wsEntProd.autoFilter = `A4:K${entProdEndRow}`;
+  wsEntProd.columns = [
+    { width: 12 }, { width: 40 }, { width: 18 }, { width: 16 }, { width: 26 },
+    { width: 18 }, { width: 13 }, { width: 19 }, { width: 19 }, { width: 22 }, { width: 14 }
+  ];
+
+  // =========================================================================
+  // ABA 3: SAÍDAS POR ROMANEIO (SEPARADAS POR ROMANEIO COM SUBTOTAIS)
   // =========================================================================
   const wsRom = wb.addWorksheet('Saídas por Romaneio', {
     views: [{ state: 'frozen', ySplit: 3 }]
@@ -104,7 +429,7 @@ export async function exportRelatorioWmsExcel({
   wsRom.getRow(1).height = 28;
 
   wsRom.mergeCells('A2:J2');
-  wsRom.getCell('A2').value = `Período: ${periodoLabel}  |  Romaneios: ${romaneios.length}  |  Caixas: ${saidasItens.length} cx  |  Peças: ${totalSaidaPecas} pç  |  Peso Total Geral: ${totalSaidaKg.toFixed(2).replace('.', ',')} kg`;
+  wsRom.getCell('A2').value = `Período: ${periodoLabel}  |  Romaneios: ${romaneios.length}  |  Caixas: ${saidasEfetivas.length} cx  |  Peças: ${totalSaidaPecas} pç  |  Peso Total Geral: ${totalSaidaKg.toFixed(2).replace('.', ',')} kg`;
   wsRom.getCell('A2').font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
   wsRom.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subHeaderBg } };
   wsRom.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
@@ -132,7 +457,7 @@ export async function exportRelatorioWmsExcel({
   romaneios.forEach((rom, idx) => {
     const rIdx = 6 + idx;
     const row = wsRom.getRow(rIdx);
-    const itensDoRom = rom.itens || saidasItens.filter(it => Number(it.romaneio_id) === Number(rom.id));
+    const itensDoRom = rom.itens || saidasEfetivas.filter(it => String(it.romaneio_id) === String(rom.id));
     const prodsDistintos = new Set(itensDoRom.map(it => it.produto_codigo)).size;
     const pecasRom = itensDoRom.reduce((s, it) => s + Number(it.qtd_pecas || 0), 0);
     const dtMont = toExcelDateTimeBRT(rom.created_at);
@@ -174,7 +499,7 @@ export async function exportRelatorioWmsExcel({
   const romSumTotRow = wsRom.getRow(romSumEnd + 1);
   romSumTotRow.getCell(1).value = 'TOTAL GERAL';
   romSumTotRow.getCell(2).value = `${romaneios.length} romaneios no período`;
-  romSumTotRow.getCell(8).value = romaneios.length > 0 ? { formula: `SUM(H6:H${romSumEnd})`, result: saidasItens.length } : 0;
+  romSumTotRow.getCell(8).value = romaneios.length > 0 ? { formula: `SUM(H6:H${romSumEnd})`, result: saidasEfetivas.length } : 0;
   romSumTotRow.getCell(9).value = romaneios.length > 0 ? { formula: `SUM(I6:I${romSumEnd})`, result: totalSaidaPecas } : 0;
   romSumTotRow.getCell(10).value = romaneios.length > 0 ? { formula: `SUM(J6:J${romSumEnd})`, result: totalSaidaKg } : 0;
   romSumTotRow.getCell(8).numFmt = '#,##0';
@@ -204,7 +529,7 @@ export async function exportRelatorioWmsExcel({
   currRow += 2;
 
   romaneios.forEach((rom) => {
-    const itensDoRom = rom.itens || saidasItens.filter(it => Number(it.romaneio_id) === Number(rom.id));
+    const itensDoRom = rom.itens || saidasEfetivas.filter(it => String(it.romaneio_id) === String(rom.id));
     const pesoRom = itensDoRom.reduce((s, i) => s + Number(i.peso_kg || 0), 0);
     const pecasDoRom = itensDoRom.reduce((s, i) => s + Number(i.qtd_pecas || 0), 0);
 
@@ -316,7 +641,7 @@ export async function exportRelatorioWmsExcel({
   wsSaida.getRow(1).height = 28;
 
   wsSaida.mergeCells('A2:O2');
-  wsSaida.getCell('A2').value = `Período: ${periodoLabel}  |  Romaneios: ${romaneios.length}  |  Caixas: ${saidasItens.length} cx  |  Peças: ${totalSaidaPecas} pç  |  Peso Total Expedido: ${totalSaidaKg.toFixed(2).replace('.', ',')} kg`;
+  wsSaida.getCell('A2').value = `Período: ${periodoLabel}  |  Romaneios: ${romaneios.length}  |  Caixas: ${saidasEfetivas.length} cx  |  Peças: ${totalSaidaPecas} pç  |  Peso Total Expedido: ${totalSaidaKg.toFixed(2).replace('.', ',')} kg`;
   wsSaida.getCell('A2').font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
   wsSaida.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subHeaderBg } };
   wsSaida.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
@@ -339,7 +664,7 @@ export async function exportRelatorioWmsExcel({
   });
   headerRowSaida.height = 24;
 
-  saidasItens.forEach((item, idx) => {
+  saidasEfetivas.forEach((item, idx) => {
     const rIdx = 5 + idx;
     const row = wsSaida.getRow(rIdx);
     const dtExp = toExcelDateTimeBRT(item.romaneio_expedido_em || item.romaneio_criado_em);
@@ -385,13 +710,13 @@ export async function exportRelatorioWmsExcel({
     row.height = 19;
   });
 
-  const saiEndRow = Math.max(5, 4 + saidasItens.length);
+  const saiEndRow = Math.max(5, 4 + saidasEfetivas.length);
   const saiTotalRow = wsSaida.getRow(saiEndRow + 1);
   saiTotalRow.getCell(1).value = 'TOTAIS';
   saiTotalRow.getCell(6).value = `${romaneios.length} romaneios expedidos no período`;
-  saiTotalRow.getCell(12).value = saidasItens.length > 0 ? { formula: `SUBTOTAL(109,L5:L${saiEndRow})`, result: saidasItens.length } : 0;
-  saiTotalRow.getCell(13).value = saidasItens.length > 0 ? { formula: `SUBTOTAL(109,M5:M${saiEndRow})`, result: totalSaidaPecas } : 0;
-  saiTotalRow.getCell(14).value = saidasItens.length > 0 ? { formula: `SUBTOTAL(109,N5:N${saiEndRow})`, result: totalSaidaKg } : 0;
+  saiTotalRow.getCell(12).value = saidasEfetivas.length > 0 ? { formula: `SUBTOTAL(109,L5:L${saiEndRow})`, result: saidasEfetivas.length } : 0;
+  saiTotalRow.getCell(13).value = saidasEfetivas.length > 0 ? { formula: `SUBTOTAL(109,M5:M${saiEndRow})`, result: totalSaidaPecas } : 0;
+  saiTotalRow.getCell(14).value = saidasEfetivas.length > 0 ? { formula: `SUBTOTAL(109,N5:N${saiEndRow})`, result: totalSaidaKg } : 0;
   saiTotalRow.getCell(12).numFmt = '#,##0';
   saiTotalRow.getCell(13).numFmt = '#,##0';
   saiTotalRow.getCell(14).numFmt = '#,##0.00';
