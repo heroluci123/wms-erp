@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify'
+import { createClient } from '@libsql/client'
 import { and, eq, sql } from 'drizzle-orm'
 import type { DbConnection } from '../../db/client.js'
 import type { AppEnv } from '../../config/env.js'
+import { migrateTursoToPostgres } from '../../scripts/migrateFromTurso.js'
+import { HttpError } from '../../middlewares/auth.js'
 import {
   camarasTemperaturaLog,
   clientes,
@@ -331,12 +334,46 @@ export function registerGoliveRoutes(app: FastifyInstance, conn: DbConnection, c
           pendentes: checks.filter((c) => c.status === 'PENDENTE').length,
         },
         pulso_operacional: {
+          produtos_ativos: qtdProdutos,
           caixas_em_estoque: qtdCaixasEstoque,
           ops_abertas: qtdOpsAbertas,
           pedidos_abertos: qtdPedidosAbertos,
           rondas_temperatura_24h: qtdRondas24h,
         },
         checks,
+      }
+    },
+  )
+
+  // Endpoint exclusivo MASTER para importar o banco de producao legado do Turso (sem dados de localhost)
+  app.post(
+    '/api/system/migrar-turso',
+    { preHandler: requirePermission(null, { write: true, bloquearCliente: true }) },
+    async (req) => {
+      const ctx = req.authCtx!
+      const ehMaster =
+        String(ctx.operador.nivel || '').toUpperCase() === 'MASTER' ||
+        String(ctx.operador.perfil || '').toUpperCase() === 'MASTER'
+      if (!ehMaster) {
+        throw new HttpError(403, 'Apenas o usuario MASTER pode executar a migracao do banco legado.')
+      }
+
+      const body = (req.body || {}) as { turso_url?: string; turso_token?: string }
+      const rawUrl = String(body.turso_url || cfg.TURSO_DATABASE_URL || '').trim()
+      const authToken = String(body.turso_token || cfg.TURSO_AUTH_TOKEN || '').trim()
+      if (!rawUrl || !authToken) {
+        throw new HttpError(400, 'Informe turso_url e turso_token.')
+      }
+
+      const turso = createClient({
+        url: rawUrl.replace(/^libsql:\/\//i, 'https://'),
+        authToken,
+      })
+      try {
+        const report = await migrateTursoToPostgres(turso, conn)
+        return { success: true, report }
+      } finally {
+        turso.close()
       }
     },
   )

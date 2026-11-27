@@ -21,7 +21,9 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { apiRequest, getApiBaseUrl, isApiEnabled } from '../lib/apiClient'
+import { getLegacyTursoCredentials } from '../lib/db'
 import { useAppStore } from '../store/appStore'
+import { isMaster } from '../utils/permissoes'
 import { PrintDocumentModal } from '../components/shared/PrintDocumentModal'
 
 const STORAGE_KEY_ROTEIROS = 'wmsphere_golive_checklist_v1'
@@ -167,10 +169,11 @@ const TROUBLESHOOTING = [
 
 export function ManualGoLive() {
   const navigate = useNavigate()
-  const { toastSuccess, toastError } = useAppStore()
+  const { operador, toastSuccess, toastError } = useAppStore()
   const [aba, setAba] = useState('DIAGNOSTICO')
   const [statusData, setStatusData] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [migrandoTurso, setMigrandoTurso] = useState(false)
   const [imprimindoManual, setImprimindoManual] = useState(false)
   const [copiadoKey, setCopiadoKey] = useState('')
   const [abertos, setAbertos] = useState({ dia0: true, atacado_logistica: true })
@@ -198,6 +201,28 @@ export function ManualGoLive() {
   useEffect(() => {
     carregarDiagnostico()
   }, [carregarDiagnostico])
+
+  const handleRestaurarTurso = async () => {
+    if (!isApiEnabled()) return
+    setMigrandoTurso(true)
+    try {
+      const creds = getLegacyTursoCredentials()
+      const res = await apiRequest('/api/system/migrar-turso', {
+        method: 'POST',
+        body: creds,
+      })
+      const disp = res?.report?.estoqueDisponivel
+      toastSuccess(
+        'Dados do Beef Container sincronizados!',
+        `${res?.report?.counts?.produtos?.target ?? 0} produtos e ${disp?.targetCount ?? 0} caixas disponíveis (${disp?.targetKg ?? '0'} kg) validados.`,
+      )
+      await carregarDiagnostico()
+    } catch (err) {
+      toastError('Falha ao importar nuvem antiga', err.message)
+    } finally {
+      setMigrandoTurso(false)
+    }
+  }
 
   const copiarTexto = async (key, texto) => {
     try {
@@ -287,6 +312,18 @@ export function ManualGoLive() {
         </div>
 
         <div className="flex gap-8 flex-wrap no-print">
+          {isApiEnabled() && isMaster(operador) && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={handleRestaurarTurso}
+              disabled={migrandoTurso}
+              style={{ borderColor: 'rgba(34,197,94,0.45)', color: '#4ade80' }}
+            >
+              <Database size={15} className={migrandoTurso ? 'spin' : ''} />
+              {migrandoTurso ? 'Restaurando Nuvem...' : 'Restaurar Banco Nuvem (Beef Container)'}
+            </button>
+          )}
           <button type="button" className="btn btn--secondary" onClick={carregarDiagnostico} disabled={loading}>
             <RefreshCw size={15} className={loading ? 'spin' : ''} /> Atualizar Diagnóstico
           </button>

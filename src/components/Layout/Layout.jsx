@@ -4,7 +4,8 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
 import { validarSessaoServidor } from '../../lib/authGuard'
-import { isApiEnabled } from '../../lib/apiClient'
+import { apiRequest, isApiEnabled } from '../../lib/apiClient'
+import { getLegacyTursoCredentials } from '../../lib/db'
 import { cadastrosQueries } from '../../queries/cadastros'
 import { operadoresQueries } from '../../queries/operadores'
 import { isCliente, isMaster, temPermissao } from '../../utils/permissoes'
@@ -841,9 +842,10 @@ function ModalBuscaModulos({ isOpen, onClose }) {
 }
 
 export function Layout() {
-  const { operador, sessionToken, filialAtivaId, setOperador, logout, toastError } = useAppStore()
+  const { operador, sessionToken, filialAtivaId, setOperador, logout, toastSuccess, toastError } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
+  const migracaoAutoRef = useRef(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
   const [buscaRapidaAberta, setBuscaRapidaAberta] = useState(false)
   const [sidebarRecolhida, setSidebarRecolhida] = useState(() =>
@@ -878,6 +880,35 @@ export function Layout() {
       navigate('/login')
     }
   }, [operador, sessionToken, navigate])
+
+  useEffect(() => {
+    if (!operador || !sessionToken || Number(operador.deve_trocar_senha) === 1) return
+    if (!isApiEnabled() || !isMaster(operador) || migracaoAutoRef.current) return
+    migracaoAutoRef.current = true
+    ;(async () => {
+      try {
+        const st = await apiRequest('/api/system/golive-status')
+        // Dispara automaticamente APENAS em PostgreSQL de producao (driver === 'pg') ainda vazio (0 produtos),
+        // nunca puxando dados de testes do localhost!
+        if (st?.ambiente?.driver === 'pg' && Number(st?.pulso_operacional?.produtos_ativos ?? -1) === 0) {
+          toastSuccess('Restaurando dados da nuvem...', 'Importando estoque, pedidos e cadastros do Beef Container...')
+          const creds = getLegacyTursoCredentials()
+          const res = await apiRequest('/api/system/migrar-turso', {
+            method: 'POST',
+            body: creds,
+          })
+          const disp = res?.report?.estoqueDisponivel
+          toastSuccess(
+            'Estoque Beef Container restaurado!',
+            `${disp?.targetCount ?? 0} caixas disponíveis (${disp?.targetKg ?? '0'} kg) importadas com sucesso.`,
+          )
+          setTimeout(() => window.location.reload(), 900)
+        }
+      } catch (err) {
+        console.warn('[Auto-Migracao Turso]', err?.message)
+      }
+    })()
+  }, [operador, sessionToken, toastSuccess])
 
   const checarSessao = useCallback(async () => {
     if (!operador || !sessionToken) return
