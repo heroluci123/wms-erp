@@ -4,7 +4,7 @@
  */
 import { useAppStore } from '../store/appStore'
 
-const API_BASE = (() => {
+const RAW_ENV_API = (() => {
   try {
     return (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
   } catch {
@@ -12,12 +12,34 @@ const API_BASE = (() => {
   }
 })()
 
+// Se estiver rodando no servidor local Vite (localhost ou IP de Wi-Fi local ex: 192.168.x.x:5173)
+// apontando para localhost:3333, quando aberto pelo celular no Wi-Fi usa o proxy /api do próprio Vite!
+const IS_LAN_DEV_PROXY =
+  typeof window !== 'undefined' &&
+  /^https?:\/\/(localhost|127\.0\.0\.1):3333$/i.test(RAW_ENV_API) &&
+  window.location.hostname !== 'localhost' &&
+  window.location.hostname !== '127.0.0.1'
+
+const API_BASE = IS_LAN_DEV_PROXY ? '' : RAW_ENV_API
+
 export function isApiEnabled() {
-  return Boolean(API_BASE)
+  return Boolean(RAW_ENV_API)
 }
 
 export function getApiBaseUrl() {
   return API_BASE
+}
+
+export function isAmbienteTesteLocal() {
+  if (typeof window === 'undefined') return false
+  const h = window.location.hostname || ''
+  return (
+    h === 'localhost' ||
+    h === '127.0.0.1' ||
+    /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) ||
+    h.includes('-homolog') ||
+    h.includes('-teste')
+  )
 }
 
 export function buildQueryString(params = {}) {
@@ -32,7 +54,7 @@ export function buildQueryString(params = {}) {
 }
 
 export async function apiRequest(path, { method = 'GET', body, tokenOverride, skipAuth = false } = {}) {
-  if (!API_BASE) {
+  if (!RAW_ENV_API) {
     throw new Error('VITE_API_URL nao configurada para este ambiente.')
   }
 

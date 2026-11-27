@@ -4,7 +4,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
 import { validarSessaoServidor } from '../../lib/authGuard'
-import { apiRequest, isApiEnabled } from '../../lib/apiClient'
+import { apiRequest, isApiEnabled, isAmbienteTesteLocal } from '../../lib/apiClient'
 import { getLegacyTursoCredentials } from '../../lib/db'
 import { cadastrosQueries } from '../../queries/cadastros'
 import { operadoresQueries } from '../../queries/operadores'
@@ -180,6 +180,23 @@ function TopBar({ sidebarRecolhida = false, onToggleSidebar, onAbrirBuscaRapida 
             </button>
           )}
           <span className="titlebar__title">WMSphere - Tricarnes</span>
+          {isAmbienteTesteLocal() && (
+            <span
+              title="Você está no banco local de testes. Nada aqui afeta o estoque em produção."
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: '0.05em',
+                padding: '2px 7px',
+                borderRadius: 6,
+                background: 'rgba(245, 158, 11, 0.2)',
+                color: '#fbbf24',
+                border: '1px solid rgba(245, 158, 11, 0.5)',
+              }}
+            >
+              AMBIENTE DE TESTE
+            </span>
+          )}
         </div>
 
         {isApiEnabled() && operador && !clienteUser && filiaisDisponiveis.length > 0 && (
@@ -916,6 +933,23 @@ function MobileTopBar({ onAbrirBusca, onAbrirMenu }) {
       </div>
 
       <div className="mobile-topbar__actions">
+        {isAmbienteTesteLocal() && (
+          <span
+            title="Banco local de testes isolado da produção"
+            style={{
+              fontSize: 9.5,
+              fontWeight: 800,
+              padding: '3px 6px',
+              borderRadius: 6,
+              background: 'rgba(245, 158, 11, 0.2)',
+              color: '#fbbf24',
+              border: '1px solid rgba(245, 158, 11, 0.5)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            TESTE
+          </span>
+        )}
         <button
           type="button"
           className="mobile-topbar__icon-btn"
