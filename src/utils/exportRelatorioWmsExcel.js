@@ -92,6 +92,8 @@ export async function exportRelatorioWmsExcel({
           romaneio_status: it.romaneio_status ?? rom.status,
           romaneio_criado_em: it.romaneio_criado_em ?? rom.created_at,
           romaneio_expedido_em: it.romaneio_expedido_em ?? rom.expedido_at,
+          pedido_codigo: it.pedido_codigo ?? rom.pedido_codigo,
+          numero_nf: it.numero_nf ?? rom.numero_nf,
         }))
       );
 
@@ -109,7 +111,167 @@ export async function exportRelatorioWmsExcel({
   const periodoLabel = `${fmtDateBR(dataInicio)} a ${fmtDateBR(dataFim)}`;
 
   // =========================================================================
-  // ABA 1: SAÍDA CONSOLIDADA POR PRODUTO (NO PERÍODO FILTRADO)
+  // ABA 1: ROMANEIOS DE SAÍDA CONSOLIDADO (LINHA A LINHA CONTÍNUO: DATA + ROMANEIO + PRODUTO + KG + CX)
+  // =========================================================================
+  const wsRomLinha = wb.addWorksheet('Romaneios Consolidado', {
+    views: [{ state: 'frozen', ySplit: 4 }]
+  });
+
+  const romProdLinhaMap = new Map();
+  for (const item of saidasEfetivas) {
+    const romKey = String(item.romaneio_codigo || item.romaneio_id || '');
+    const cod = String(item.produto_codigo || '');
+    const desc = String(item.produto_descricao || '');
+    const key = `${romKey}__${cod}__${desc}`;
+    const rawTs = item.romaneio_expedido_em || item.romaneio_criado_em || '';
+    const brt = toExcelDateTimeBRT(rawTs);
+    const dtSaidaDateOnly = brt
+      ? new Date(Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate()))
+      : null;
+    const dtSaidaIso = brt
+      ? `${brt.getUTCFullYear()}-${String(brt.getUTCMonth() + 1).padStart(2, '0')}-${String(brt.getUTCDate()).padStart(2, '0')}`
+      : '';
+
+    if (!romProdLinhaMap.has(key)) {
+      romProdLinhaMap.set(key, {
+        data_saida_dt: dtSaidaDateOnly,
+        data_saida_iso: dtSaidaIso,
+        romaneio_codigo: String(item.romaneio_codigo || ''),
+        numero_nf: item.numero_nf ? String(item.numero_nf) : '',
+        pedido_codigo: item.pedido_codigo ? String(item.pedido_codigo) : '',
+        cliente: String(item.romaneio_cliente || '').trim(),
+        codigo: cod,
+        descricao: desc,
+        peso_kg: 0,
+        qtd_caixas: 0,
+        qtd_pecas: 0,
+        status: String(item.romaneio_status || 'EXPEDIDO'),
+      });
+    }
+    const rowAgg = romProdLinhaMap.get(key);
+    rowAgg.peso_kg += Number(item.peso_kg || 0);
+    rowAgg.qtd_caixas += 1;
+    rowAgg.qtd_pecas += Number(item.qtd_pecas || 0);
+  }
+
+  const romProdLinhas = Array.from(romProdLinhaMap.values()).sort(
+    (a, b) =>
+      a.data_saida_iso.localeCompare(b.data_saida_iso) ||
+      a.romaneio_codigo.localeCompare(b.romaneio_codigo, undefined, { numeric: true }) ||
+      a.descricao.localeCompare(b.descricao, 'pt-BR')
+  );
+
+  wsRomLinha.mergeCells('A1:J1');
+  wsRomLinha.getCell('A1').value = 'WMSphere • TRICARNES — CONSOLIDADO CONTÍNUO DE ROMANEIOS DE SAÍDA (UM EMBAIXO DO OUTRO)';
+  wsRomLinha.getCell('A1').font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  wsRomLinha.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.emeraldDark } };
+  wsRomLinha.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  wsRomLinha.getRow(1).height = 28;
+
+  wsRomLinha.mergeCells('A2:J2');
+  wsRomLinha.getCell('A2').value = `Período Filtrado: ${periodoLabel}  |  Linhas Consolidadas: ${romProdLinhas.length}  |  Romaneios: ${romaneios.length}  |  Total Caixas: ${saidasEfetivas.length} cx  |  Total Peso Saída: ${totalSaidaKg.toFixed(2).replace('.', ',')} kg`;
+  wsRomLinha.getCell('A2').font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
+  wsRomLinha.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.subHeaderBg } };
+  wsRomLinha.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  wsRomLinha.getRow(2).height = 20;
+  wsRomLinha.getRow(3).height = 8;
+
+  const hRomLinha = [
+    'Data de Saída',
+    'Romaneio',
+    'NF / Pedido',
+    'Código',
+    'Produto',
+    'Quantidade Saldo (Kg)',
+    'Quantidade (Cx)',
+    'Total Peças',
+    'Cliente / Destino',
+    'Status'
+  ];
+  const rHRomLinha = wsRomLinha.getRow(4);
+  hRomLinha.forEach((h, i) => {
+    const cell = rHRomLinha.getCell(i + 1);
+    cell.value = h;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.slateHeader } };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: [5, 6, 7].includes(i) ? 'right' : ([0, 1, 2, 3, 9].includes(i) ? 'center' : 'left')
+    };
+    cell.border = thinBorder;
+  });
+  rHRomLinha.height = 24;
+
+  romProdLinhas.forEach((ln, idx) => {
+    const rIdx = 5 + idx;
+    const row = wsRomLinha.getRow(rIdx);
+    const nfOuPed = ln.numero_nf ? `NF ${ln.numero_nf}` : (ln.pedido_codigo || '');
+
+    row.getCell(1).value = ln.data_saida_dt;
+    row.getCell(2).value = ln.romaneio_codigo;
+    row.getCell(3).value = nfOuPed;
+    row.getCell(4).value = String(ln.codigo || '');
+    row.getCell(5).value = ln.descricao;
+    row.getCell(6).value = Number(ln.peso_kg.toFixed(2));
+    row.getCell(7).value = ln.qtd_caixas;
+    row.getCell(8).value = ln.qtd_pecas > 0 ? ln.qtd_pecas : null;
+    row.getCell(9).value = ln.cliente;
+    row.getCell(10).value = ln.status;
+
+    if (ln.data_saida_dt) row.getCell(1).numFmt = 'dd/mm/yyyy';
+    row.getCell(4).numFmt = '@';
+    row.getCell(6).numFmt = '#,##0.00';
+    row.getCell(7).numFmt = '#,##0';
+    row.getCell(8).numFmt = '#,##0';
+
+    for (let c = 1; c <= 10; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: 'Calibri', size: 10, color: { argb: COLORS.navyDark } };
+      cell.border = thinBorder;
+      if (idx % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.zebraBg } };
+      if ([1, 2, 3, 4, 10].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      else if ([6, 7, 8].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      else cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    }
+    row.getCell(2).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.blueText } };
+    row.getCell(6).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.greenText } };
+    row.getCell(7).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.navyDark } };
+    row.height = 19;
+  });
+
+  const romLinhaEndRow = Math.max(5, 4 + romProdLinhas.length);
+  const romLinhaTotRow = wsRomLinha.getRow(romLinhaEndRow + 1);
+  romLinhaTotRow.getCell(1).value = 'TOTAL GERAL';
+  romLinhaTotRow.getCell(5).value = `${romProdLinhas.length} linha(s) consolidada(s) em ${romaneios.length} romaneio(s)`;
+  romLinhaTotRow.getCell(6).value = romProdLinhas.length > 0 ? { formula: `SUBTOTAL(109,F5:F${romLinhaEndRow})`, result: totalSaidaKg } : 0;
+  romLinhaTotRow.getCell(7).value = romProdLinhas.length > 0 ? { formula: `SUBTOTAL(109,G5:G${romLinhaEndRow})`, result: saidasEfetivas.length } : 0;
+  romLinhaTotRow.getCell(8).value = romProdLinhas.length > 0 ? { formula: `SUBTOTAL(109,H5:H${romLinhaEndRow})`, result: totalSaidaPecas } : 0;
+  romLinhaTotRow.getCell(6).numFmt = '#,##0.00';
+  romLinhaTotRow.getCell(7).numFmt = '#,##0';
+  romLinhaTotRow.getCell(8).numFmt = '#,##0';
+
+  for (let c = 1; c <= 10; c++) {
+    const cell = romLinhaTotRow.getCell(c);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
+    cell.border = {
+      top: { style: 'medium', color: { argb: COLORS.navyDark } },
+      bottom: { style: 'medium', color: { argb: COLORS.navyDark } },
+      left: { style: 'thin', color: { argb: COLORS.borderGray } },
+      right: { style: 'thin', color: { argb: COLORS.borderGray } }
+    };
+    if ([6, 7, 8].includes(c)) cell.alignment = { vertical: 'middle', horizontal: 'right' };
+  }
+  romLinhaTotRow.height = 22;
+
+  wsRomLinha.autoFilter = `A4:J${romLinhaEndRow}`;
+  wsRomLinha.columns = [
+    { width: 15 }, { width: 14 }, { width: 14 }, { width: 11 }, { width: 40 },
+    { width: 21 }, { width: 16 }, { width: 13 }, { width: 26 }, { width: 13 }
+  ];
+
+  // =========================================================================
+  // ABA 2: SAÍDA CONSOLIDADA POR PRODUTO (NO PERÍODO FILTRADO)
   // =========================================================================
   const wsSaiProd = wb.addWorksheet('Saída Consolidada Produto', {
     views: [{ state: 'frozen', ySplit: 4 }]

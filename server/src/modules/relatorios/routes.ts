@@ -385,10 +385,13 @@ export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnectio
         `),
         conn.db.execute(sql`
           SELECT r.*,
+                 ped.codigo AS pedido_codigo,
+                 ped.numero_nf AS numero_nf,
                  (SELECT COUNT(*)::int FROM romaneios_itens ri WHERE ri.romaneio_id = r.id) AS qtd_caixas,
                  COALESCE((SELECT SUM(ri.peso_kg) FROM romaneios_itens ri WHERE ri.romaneio_id = r.id), 0) AS peso_total,
                  COALESCE((SELECT SUM(ri.peso_kg * COALESCE(p.valor_unitario, 0)) FROM romaneios_itens ri JOIN produtos p ON p.id = ri.produto_id WHERE ri.romaneio_id = r.id), 0) AS valor_total
           FROM romaneios r
+          LEFT JOIN pedidos ped ON ped.id = r.pedido_id
           WHERE r.tenant_id = ${ctx.tenantId}
             AND r.filial_id = ${ctx.filialId}
             AND DATE(COALESCE(r.expedido_at, r.created_at) - INTERVAL '3 hours') BETWEEN ${dIni} AND ${dFim}
@@ -399,6 +402,7 @@ export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnectio
                  r.status AS romaneio_status, r.previsao_entrega,
                  r.created_at AS romaneio_criado_em, r.expedido_at AS romaneio_expedido_em,
                  r.operador_nome AS operador_montagem, r.operador_expedicao_nome AS operador_expedicao,
+                 ped.codigo AS pedido_codigo, ped.numero_nf AS numero_nf,
                  ri.id AS item_id, ri.caixa_id, ri.produto_id, ri.peso_kg,
                  c.ean_caixa, c.lote, c.data_producao, c.validade, c.peso_bruto_kg, c.tara_kg, c.qtd_pecas,
                  c.endereco AS endereco_atual_ou_origem, c.status AS caixa_status_atual,
@@ -406,6 +410,7 @@ export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnectio
                  p.grupo, p.tipo_produto, p.valor_unitario
           FROM romaneios_itens ri
           JOIN romaneios r ON r.id = ri.romaneio_id
+          LEFT JOIN pedidos ped ON ped.id = r.pedido_id
           JOIN estoque_caixas c ON c.id = ri.caixa_id
           JOIN produtos p ON p.id = ri.produto_id
           WHERE r.tenant_id = ${ctx.tenantId}
