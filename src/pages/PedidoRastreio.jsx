@@ -45,7 +45,17 @@ export function PedidoRastreio() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100vh', background: '#0b1120', color: '#f8fafc', padding: 32, textAlign: 'center' }}>
+      <div
+        style={{
+          minHeight: '100dvh',
+          background: '#0b1120',
+          color: '#f8fafc',
+          paddingTop: 'calc(env(safe-area-inset-top, 0px) + 36px)',
+          paddingLeft: 24,
+          paddingRight: 24,
+          textAlign: 'center',
+        }}
+      >
         Consultando status da entrega...
       </div>
     )
@@ -55,7 +65,17 @@ export function PedidoRastreio() {
   const devolvida = dados?.status_entrega === 'DEVOLVIDA'
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0b1120', color: '#f8fafc', padding: '24px 16px' }}>
+    <div
+      style={{
+        minHeight: '100dvh',
+        background: '#0b1120',
+        color: '#f8fafc',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 32px)',
+        paddingLeft: 16,
+        paddingRight: 16,
+      }}
+    >
       <div style={{ maxWidth: 520, margin: '12px auto', background: '#111c33', border: '1px solid #1e293b', borderRadius: 16, padding: 22 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 18 }}>
           <div

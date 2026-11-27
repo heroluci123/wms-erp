@@ -155,13 +155,16 @@ export function Login() {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         background: 'radial-gradient(circle at top, #10203a 0%, #09101d 55%, #060b14 100%)',
-        padding: 20,
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
+        paddingLeft: 16,
+        paddingRight: 16,
       }}
     >
       <div
@@ -171,7 +174,7 @@ export function Login() {
           background: 'rgba(15, 23, 42, 0.92)',
           border: '1px solid rgba(59, 130, 246, 0.22)',
           borderRadius: 18,
-          padding: 32,
+          padding: '28px 22px',
           boxShadow: '0 24px 60px rgba(0, 0, 0, 0.55)',
           backdropFilter: 'blur(12px)',
         }}

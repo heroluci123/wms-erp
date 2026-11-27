@@ -517,7 +517,17 @@ export function MotoristaRastreio() {
 
   if (loading && !dados) {
     return (
-      <div style={{ minHeight: '100vh', background: '#0b1120', color: '#f8fafc', padding: 32, textAlign: 'center' }}>
+      <div
+        style={{
+          minHeight: '100dvh',
+          background: '#0b1120',
+          color: '#f8fafc',
+          paddingTop: 'calc(env(safe-area-inset-top, 0px) + 36px)',
+          paddingLeft: 24,
+          paddingRight: 24,
+          textAlign: 'center',
+        }}
+      >
         <RefreshCw size={24} className="spin" style={{ color: '#38bdf8', marginBottom: 10 }} />
         <div>Carregando roteiro de entrega...</div>
       </div>
@@ -529,11 +539,11 @@ export function MotoristaRastreio() {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         background: '#0b1120',
         color: '#f8fafc',
-        paddingTop: 'max(10px, env(safe-area-inset-top))',
-        paddingBottom: 'max(48px, env(safe-area-inset-bottom))',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 48px)',
         paddingLeft: 12,
         paddingRight: 12,
       }}
@@ -543,7 +553,7 @@ export function MotoristaRastreio() {
         <div
           style={{
             position: 'sticky',
-            top: 0,
+            top: 'calc(env(safe-area-inset-top, 0px) + 8px)',
             zIndex: 25,
             background: 'rgba(17, 28, 51, 0.96)',
             backdropFilter: 'blur(10px)',

@@ -75,11 +75,11 @@ export function MotoristaHub() {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         background: '#0b1120',
         color: '#f8fafc',
-        paddingTop: 'max(14px, env(safe-area-inset-top))',
-        paddingBottom: 'max(36px, env(safe-area-inset-bottom))',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 36px)',
         paddingLeft: 14,
         paddingRight: 14,
       }}
@@ -126,10 +126,10 @@ export function MotoristaHub() {
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
-                onClick={() => navigate('/roteirizacao')}
+                onClick={() => navigate(window.innerWidth <= 768 ? '/' : '/roteirizacao')}
                 title="Voltar ao ERP"
               >
-                <ArrowLeft size={14} /> ERP
+                <ArrowLeft size={14} /> Início
               </button>
             )}
             <button type="button" className="btn btn--ghost btn--sm" onClick={carregar} disabled={loading}>

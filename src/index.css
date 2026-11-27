@@ -63,27 +63,54 @@
   --shadow:    0 4px 16px rgba(0,0,0,0.5);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
   --shadow-glow: 0 0 20px var(--accent-glow);
+
+  /* Safe Area Insets (iPhone Notch / Dynamic Island / Barra Inferior PWA) */
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
 }
 
 /* ─── Reset & Base ────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { font-size: 14px; }
+html {
+  font-size: 14px;
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
 
 body {
   font-family: var(--font-sans);
   background: var(--bg-0);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  height: 100%;
   overflow: hidden;
+  overscroll-behavior-y: none;
 }
 
 /* ─── App Shell ──────────────────────────────────────────────────────────────── */
-#root { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+#root {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+#root > *:not(.app-shell) {
+  flex-shrink: 0;
+}
 
 .app-shell {
   display: flex;
-  flex: 1;
+  flex: 1 1 0%;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -1412,221 +1439,468 @@ input[type="number"] {
   color: var(--accent);
 }
 
-@media (max-width: 768px) {
-  .layout-sidebar {
-    display: none; /* Oculta a sidebar no celular */
-  }
-  .layout-content {
-    margin-left: 0 !important;
-    padding: 1rem !important;
-  }
-  .data-table-wrapper {
-    overflow-x: auto;
-  }
+/* ─── Mobile Shell, Safe-Area TopBar & Drawer (iPhone PWA / Android) ────────── */
+.mobile-topbar {
+  background: rgba(13, 20, 36, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  padding-top: calc(var(--safe-top) + 8px);
+  padding-bottom: 10px;
+  padding-left: calc(var(--safe-left) + 12px);
+  padding-right: calc(var(--safe-right) + 12px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  z-index: 120;
 }
 
-/* --- Modo Coletor REDESIGN ---------------------------------------------------- */
-.main-content-mobile {
+.mobile-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
   flex: 1;
-  overflow-y: auto;
-  background: var(--bg-0);
-  width: 100%;
-  height: 100%;
 }
 
+.mobile-topbar__badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--cyan));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 15px;
+  color: #ffffff;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+}
+
+.mobile-topbar__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.16);
+  border: 1px solid rgba(59, 130, 246, 0.42);
+  color: #93c5fd;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-topbar__back:active {
+  transform: scale(0.96);
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.mobile-topbar__title-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.mobile-topbar__title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-topbar__sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mobile-topbar__icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-topbar__icon-btn:active {
+  transform: scale(0.95);
+  background: var(--surface-hover);
+}
+
+.mobile-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  background: rgba(5, 9, 18, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: flex-end;
+  animation: fadeIn 0.16s ease;
+}
+
+.mobile-drawer {
+  width: min(86vw, 340px);
+  height: 100%;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  padding-top: calc(var(--safe-top) + 10px);
+  padding-bottom: calc(var(--safe-bottom) + 14px);
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+}
+
+.mobile-drawer__scroll {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 0 16px;
+}
+
+.main-content-mobile {
+  flex: 1 1 0%;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y pinch-zoom;
+  background: var(--bg-0);
+  padding: 12px 12px calc(var(--safe-bottom) + 32px) 12px;
+}
+
+/* ─── Mobile Home Hub / Coletor ──────────────────────────────────────────────── */
 .coletor-home {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  background: var(--bg-0);
-  padding: 0.6rem;
-  gap: 0.6rem;
-  overflow: hidden;
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding-bottom: 12px;
+}
+
+.coletor-hero {
+  background: linear-gradient(135deg, rgba(30, 42, 62, 0.95) 0%, rgba(19, 29, 50, 0.95) 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .coletor-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
 }
 
 .coletor-user {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 10px;
+  min-width: 0;
 }
 
 .coletor-avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: var(--accent-muted);
-  border: 2px solid var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 1.1rem;
-  color: var(--accent);
-}
-
-.coletor-nome {
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--text-primary);
-}
-
-.coletor-perfil {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.coletor-logout {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.6rem;
-  color: var(--danger);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.coletor-title {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.6rem 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-.coletor-title-badge {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius);
-  background: var(--accent);
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(6, 182, 212, 0.2));
+  border: 1.5px solid var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 1.3rem;
-  color: white;
+  font-size: 1.05rem;
+  color: #93c5fd;
   flex-shrink: 0;
 }
 
-.coletor-title-main {
-  font-size: 1.1rem;
+.coletor-nome {
   font-weight: 700;
+  font-size: 0.98rem;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.coletor-title-sub {
-  font-size: 0.8rem;
-  color: var(--text-muted);
+.coletor-perfil {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.coletor-logout {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  padding: 8px 11px;
+  color: #f87171;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.coletor-logout:active {
+  transform: scale(0.96);
+  background: rgba(239, 68, 68, 0.22);
+}
+
+.coletor-pills {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.coletor-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.coletor-pill {
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.coletor-pill--active {
+  background: var(--accent);
+  border-color: var(--accent-hover);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(59, 130, 246, 0.35);
+}
+
+.coletor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.coletor-section-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  padding: 2px 4px 0;
 }
 
 .coletor-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.6rem;
-  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .coletor-card {
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(30, 42, 62, 0.95) 0%, rgba(19, 29, 50, 0.98) 100%);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 0.75rem 0.5rem;
+  border-top: 3px solid var(--card-cor, var(--accent));
+  border-radius: 14px;
+  padding: 13px 10px;
+  min-height: 98px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 7px;
   color: var(--text-primary);
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
-  border-top: 3px solid var(--card-cor, var(--accent));
-  min-height: 0;
-  white-space: pre-line;
+  transition: transform 0.14s ease, background 0.15s ease, border-color 0.15s ease;
   text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
 .coletor-card:active {
   transform: scale(0.96);
   background: var(--surface-hover);
+  border-color: var(--card-cor, var(--accent));
 }
 
 .coletor-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--card-cor, var(--accent));
   display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .coletor-card-label {
-  line-height: 1.3;
+  line-height: 1.25;
+  white-space: pre-line;
+}
+
+.coletor-card-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.2;
 }
 
 .coletor-footer {
   text-align: center;
-  font-size: 0.7rem;
-  color: var(--text-disabled);
-  padding-bottom: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 8px 0 4px;
+}
+
+/* ─── Ajustes Responsivos Globais para Smartphones (<= 768px) ────────────────── */
+@media (max-width: 768px) {
+  .layout-sidebar {
+    display: none;
+  }
+  .layout-content {
+    margin-left: 0 !important;
+    padding: 1rem !important;
+  }
+  .data-table-wrapper,
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table-toolbar {
+    flex-wrap: wrap;
+    padding: 12px 14px;
+    gap: 8px;
+  }
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .page-header__title {
+    font-size: 18px;
+  }
+  .card {
+    padding: 14px;
+    border-radius: 14px;
+  }
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .kpi-card {
+    padding: 14px;
+  }
+  .kpi-card__value {
+    font-size: 22px;
+  }
+  .form-input,
+  .search-box input,
+  select.form-input {
+    font-size: 16px; /* Evita auto-zoom forçado no Safari / iOS PWA */
+  }
+  .modal-overlay {
+    padding: calc(var(--safe-top) + 12px) 12px calc(var(--safe-bottom) + 12px) 12px;
+  }
+  .modal {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 24px);
+    overflow-y: auto;
+    padding: 20px 16px;
+    border-radius: 18px;
+  }
+  .modal__actions {
+    flex-wrap: wrap;
+  }
+  .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--safe-bottom) + 14px);
+  }
+  .toast {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 380px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* --- Coletor RFID (tela curta, ex: Zebra/Honeywell) --- */
-@media (max-height: 600px) {
+@media (max-height: 580px) {
   .coletor-home {
-    padding: 0.3rem;
-    gap: 0.3rem;
-  }
-  .coletor-header {
-    margin-bottom: 0;
-  }
-  .coletor-avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 0.85rem;
-  }
-  .coletor-nome {
-    font-size: 0.85rem;
-  }
-  .coletor-perfil {
-    font-size: 0.65rem;
-  }
-  .coletor-title {
-    padding: 0.3rem 0.5rem;
-    gap: 0.4rem;
-  }
-  .coletor-title-badge {
-    width: 30px;
-    height: 30px;
-    font-size: 0.9rem;
-  }
-  .coletor-title-main {
-    font-size: 0.85rem;
-  }
-  .coletor-title-sub {
-    font-size: 0.65rem;
-  }
-  .coletor-grid {
-    gap: 0.3rem;
+    gap: 8px;
   }
   .coletor-card {
-    padding: 0.4rem 0.3rem;
-    gap: 0.25rem;
-    font-size: 0.8rem;
-    border-radius: 8px;
+    padding: 10px 8px;
+    min-height: 76px;
+    gap: 5px;
+    font-size: 0.84rem;
+    border-radius: 10px;
   }
-  .coletor-card-icon svg {
-    width: 28px;
-    height: 28px;
-  }
-  .coletor-footer {
-    display: none;
+  .coletor-card-icon {
+    width: 34px;
+    height: 34px;
   }
 }
 ::selection { background: var(--primary); color: #ffffff; }
@@ -1676,6 +1950,8 @@ input[type="number"] {
   }
 
   .titlebar,
+  .mobile-topbar,
+  .mobile-drawer-backdrop,
   .sidebar,
   .sidebar-edge-toggle,
   .no-print,

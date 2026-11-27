@@ -126,6 +126,7 @@ function App() {
         {/* Rotas protegidas (dentro do Layout principal) */}
         <Route path="/" element={<Layout />}>
           <Route index element={<HomeWrapper />} />
+          <Route path="dashboard" element={<RequirePermissao permissoes={['dashboard_executivo']} element={<Dashboard />} />} />
           <Route path="portal-cliente" element={<RequirePermissao allowCliente={true} element={<PortalCliente />} />} />
           <Route path="estoque" element={<RequirePermissao permissoes={['estoque_enderecos']} element={<EstoqueEnderecos />} />} />
           <Route path="recebimento" element={<RequirePermissao permissoes={['recebimento', 'recebimento_consultar']} element={<Recebimento />} />} />

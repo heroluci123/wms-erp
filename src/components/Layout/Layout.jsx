@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map as MapIcon, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, TrendingUp, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes, Tag, CornerDownLeft, Smartphone, BookOpen } from 'lucide-react'
+import { Package, ArrowRightLeft, Upload, CheckSquare, Search, Box, LogOut, Minus, Square, X, MapPin, Users, Map as MapIcon, Layers, Barcode, Factory, Scissors, ScanLine, PieChart, TrendingDown, TrendingUp, ClipboardList, Scale, Printer, KeyRound, ShieldCheck, Eye, EyeOff, Lock, Building2, Truck, Briefcase, Route, Settings2, BellRing, MessageSquare, ShoppingBag, GitBranch, RotateCcw, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, DollarSign, BarChart3, FileCheck2, ShoppingCart, Store, Boxes, Tag, CornerDownLeft, Smartphone, BookOpen, Menu, Home, ArrowLeft } from 'lucide-react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/appStore'
 import { ToastContainer } from '../shared/ToastContainer'
@@ -676,13 +676,18 @@ function ModalBuscaModulos({ isOpen, onClose }) {
   return (
     <div
       className="modal-overlay"
-      style={{ zIndex: 9998, alignItems: 'flex-start', paddingTop: '10vh' }}
+      style={{
+        zIndex: 9998,
+        alignItems: 'flex-start',
+        paddingTop: 'max(6vh, calc(env(safe-area-inset-top, 0px) + 14px))',
+      }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
         style={{
           width: '100%',
           maxWidth: 580,
+          maxHeight: 'calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 28px)',
           background: 'var(--bg-1)',
           border: '1px solid var(--border-light)',
           borderRadius: 14,
@@ -706,7 +711,7 @@ function ModalBuscaModulos({ isOpen, onClose }) {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Digite o módulo ou termo relacionado (ex.: compras, pedido de compra, pix, etiqueta, balança)..."
+            placeholder="Buscar módulo ou função (ex.: pedidos, estoque, motorista)..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -730,7 +735,7 @@ function ModalBuscaModulos({ isOpen, onClose }) {
               border: 'none',
               outline: 'none',
               color: 'var(--text-primary)',
-              fontSize: 14.5,
+              fontSize: 16,
               fontFamily: 'var(--font-sans)',
             }}
           />
@@ -841,13 +846,352 @@ function ModalBuscaModulos({ isOpen, onClose }) {
   )
 }
 
+function MobileTopBar({ onAbrirBusca, onAbrirMenu }) {
+  const { operador, filialAtivaId, filiaisDisponiveis } = useAppStore()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const cliente = isCliente(operador)
+  const naHome = location.pathname === '/' || (cliente && location.pathname === '/portal-cliente')
+
+  const filialAtivaObj =
+    (filiaisDisponiveis || []).find((f) => String(f.id) === String(filialAtivaId)) ||
+    (filiaisDisponiveis || [])[0] ||
+    null
+  const isFilialVarejo = String(filialAtivaObj?.tipo_unidade || '').toUpperCase() === 'VAREJO'
+
+  const modulosVisiveis = useMemo(
+    () => obterModulosVisiveis(operador, isFilialVarejo),
+    [operador, isFilialVarejo],
+  )
+
+  const moduloAtual = useMemo(() => {
+    if (location.pathname === '/dashboard') {
+      return { label: 'Painel Executivo (KPIs)' }
+    }
+    if (location.pathname.startsWith('/inventario/coletor')) {
+      return { label: 'Contagem de Inventário' }
+    }
+    if (location.pathname.startsWith('/inventario/conciliacao')) {
+      return { label: 'Conciliação de Inventário' }
+    }
+    return (
+      modulosVisiveis.find((m) => m.to !== '/' && location.pathname === m.to) ||
+      modulosVisiveis.find((m) => m.to !== '/' && location.pathname.startsWith(`${m.to}/`)) ||
+      null
+    )
+  }, [location.pathname, modulosVisiveis])
+
+  const subtituloFilial = filialAtivaObj
+    ? `${filialAtivaObj.codigo} • ${filialAtivaObj.nome}`
+    : 'Tricarnes Alimentos'
+
+  return (
+    <header className="mobile-topbar">
+      <div className="mobile-topbar__brand">
+        {naHome ? (
+          <>
+            <div className="mobile-topbar__badge">W</div>
+            <div className="mobile-topbar__title-wrap">
+              <span className="mobile-topbar__title">WMSphere</span>
+              <span className="mobile-topbar__sub">{subtituloFilial}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="mobile-topbar__back"
+              onClick={() => navigate(cliente ? '/portal-cliente' : '/')}
+              title="Voltar para a tela inicial"
+            >
+              <ArrowLeft size={16} />
+              <span>Início</span>
+            </button>
+            <div className="mobile-topbar__title-wrap">
+              <span className="mobile-topbar__title">{moduloAtual?.label || 'WMSphere'}</span>
+              <span className="mobile-topbar__sub">{subtituloFilial}</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="mobile-topbar__actions">
+        <button
+          type="button"
+          className="mobile-topbar__icon-btn"
+          onClick={onAbrirBusca}
+          title="Buscar módulo"
+          aria-label="Buscar módulo"
+        >
+          <Search size={18} color="#60a5fa" />
+        </button>
+        <button
+          type="button"
+          className="mobile-topbar__icon-btn"
+          onClick={onAbrirMenu}
+          title="Menu completo"
+          aria-label="Abrir menu completo"
+        >
+          <Menu size={19} />
+        </button>
+      </div>
+    </header>
+  )
+}
+
+function MobileDrawer({ isOpen, onClose }) {
+  const {
+    operador,
+    sessionToken,
+    filialAtivaId,
+    filiaisDisponiveis,
+    setFilialAtiva,
+    logout,
+    toastSuccess,
+  } = useAppStore()
+  const navigate = useNavigate()
+  const [filtro, setFiltro] = useState('')
+
+  useEffect(() => {
+    if (isOpen) setFiltro('')
+  }, [isOpen])
+
+  const cliente = isCliente(operador)
+  const masterUser = isMaster(operador)
+  const nivelLabel = masterUser ? 'MASTER' : cliente ? 'CLIENTE' : (operador?.nivel || operador?.perfil || 'OPERADOR')
+
+  const filialAtivaObj =
+    (filiaisDisponiveis || []).find((f) => String(f.id) === String(filialAtivaId)) ||
+    (filiaisDisponiveis || [])[0] ||
+    null
+  const isFilialVarejo = String(filialAtivaObj?.tipo_unidade || '').toUpperCase() === 'VAREJO'
+
+  const modulosVisiveis = useMemo(() => {
+    const base = obterModulosVisiveis(operador, isFilialVarejo)
+    if (!cliente && temPermissao(operador, 'dashboard_executivo')) {
+      const jaTemDash = base.some((m) => m.to === '/dashboard')
+      if (!jaTemDash) {
+        return [
+          {
+            id: 'home-mobile-hub',
+            to: '/',
+            label: 'Início (Menu Rápido)',
+            section: 'Visão Geral',
+            icon: 'Home',
+            keywords: ['inicio', 'home', 'menu', 'coletor'],
+          },
+          {
+            id: 'dashboard-exec-mobile',
+            to: '/dashboard',
+            label: 'Painel Executivo (KPIs)',
+            section: 'Visão Geral',
+            icon: 'BarChart3',
+            keywords: ['dashboard', 'painel', 'kpi', 'graficos', 'resumo'],
+          },
+          ...base.filter((m) => m.to !== '/'),
+        ]
+      }
+    }
+    return base
+  }, [operador, isFilialVarejo, cliente])
+
+  const filtrados = useMemo(
+    () => (filtro.trim() ? filtrarModulosDinamico(modulosVisiveis, filtro) : modulosVisiveis),
+    [modulosVisiveis, filtro],
+  )
+
+  const secoesAgrupadas = useMemo(() => {
+    const grupos = []
+    const mapa = Object.create(null)
+    for (const m of filtrados) {
+      if (!mapa[m.section]) {
+        const g = { section: m.section, items: [] }
+        mapa[m.section] = g
+        grupos.push(g)
+      }
+      mapa[m.section].items.push(m)
+    }
+    return grupos
+  }, [filtrados])
+
+  if (!isOpen) return null
+
+  const handleLogout = async () => {
+    onClose()
+    try {
+      await operadoresQueries.encerrarSessao(sessionToken)
+    } catch { /* ignore */ }
+    logout()
+    navigate('/login')
+  }
+
+  return (
+    <div
+      className="mobile-drawer-backdrop"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <aside className="mobile-drawer">
+        {/* Topo do Drawer: Usuário + Fechar */}
+        <div
+          style={{
+            padding: '8px 14px 12px',
+            borderBottom: '1px solid var(--border)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <div className="coletor-avatar" style={{ width: 38, height: 38, fontSize: '0.95rem' }}>
+                {operador?.nome?.charAt(0) || 'U'}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {operador?.nome}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      padding: '1px 7px',
+                      borderRadius: 99,
+                      background: masterUser ? 'rgba(245,158,11,0.18)' : 'rgba(59,130,246,0.18)',
+                      color: masterUser ? '#fbbf24' : '#60a5fa',
+                      border: `1px solid ${masterUser ? 'rgba(245,158,11,0.4)' : 'rgba(59,130,246,0.35)'}`,
+                    }}
+                  >
+                    {nivelLabel}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button type="button" className="mobile-topbar__icon-btn" onClick={onClose} aria-label="Fechar menu">
+              <X size={18} />
+            </button>
+          </div>
+
+          {isApiEnabled() && !cliente && (filiaisDisponiveis || []).length > 1 && (
+            <div>
+              <label className="form-label" style={{ marginBottom: 4, display: 'block' }}>
+                Filial Ativa
+              </label>
+              <select
+                className="form-input"
+                style={{ height: 38, fontSize: 14 }}
+                value={filialAtivaId}
+                onChange={(e) => {
+                  const novoId = e.target.value
+                  const f = filiaisDisponiveis.find((x) => String(x.id) === String(novoId))
+                  setFilialAtiva(novoId)
+                  if (f) toastSuccess('Filial alterada', `Operando em ${f.codigo} - ${f.nome}`)
+                }}
+              >
+                {filiaisDisponiveis.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.codigo} — {f.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="sidebar__search-box">
+            <Search size={15} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              className="sidebar__search-input"
+              style={{ fontSize: 15, padding: '9px 30px 9px 32px' }}
+              placeholder="Filtrar módulos..."
+              value={filtro}
+              onChange={(e) => setFiltro(e.target.value)}
+            />
+            {filtro && (
+              <button
+                type="button"
+                onClick={() => setFiltro('')}
+                style={{ position: 'absolute', right: 8, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Lista Rolável de Módulos */}
+        <div className="mobile-drawer__scroll">
+          {secoesAgrupadas.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
+              Nenhum módulo encontrado.
+            </div>
+          ) : (
+            secoesAgrupadas.map((grupo) => (
+              <React.Fragment key={grupo.section}>
+                <div className="sidebar__section-label">{grupo.section}</div>
+                {grupo.items.map((mod) => {
+                  const IconComp = mod.icon === 'Home' ? Home : null
+                  return (
+                    <NavLink
+                      key={mod.id}
+                      to={mod.to}
+                      end={mod.to === '/'}
+                      onClick={onClose}
+                      className={({ isActive }) => `sidebar__nav-item ${isActive ? 'active' : ''}`}
+                      style={{ paddingTop: 11, paddingBottom: 11, fontSize: 14 }}
+                    >
+                      {IconComp ? <IconComp size={18} /> : <ModuloIcon name={mod.icon} size={18} />}
+                      <span className="sidebar__nav-label">{mod.label}</span>
+                    </NavLink>
+                  )
+                })}
+              </React.Fragment>
+            ))
+          )}
+        </div>
+
+        {/* Rodapé do Drawer */}
+        <div
+          style={{
+            padding: '10px 14px 2px',
+            borderTop: '1px solid var(--border)',
+            display: 'flex',
+            gap: 8,
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn--danger"
+            style={{ width: '100%', justifyContent: 'center', padding: '10px 14px' }}
+            onClick={handleLogout}
+          >
+            <LogOut size={16} /> Sair da Conta
+          </button>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
 export function Layout() {
-  const { operador, sessionToken, filialAtivaId, setOperador, logout, toastSuccess, toastError } = useAppStore()
+  const {
+    operador,
+    sessionToken,
+    filialAtivaId,
+    setOperador,
+    setFilialAtiva,
+    setFiliaisDisponiveis,
+    logout,
+    toastSuccess,
+    toastError,
+  } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
   const migracaoAutoRef = useRef(false)
+  const mainScrollRef = useRef(null)
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
   const [buscaRapidaAberta, setBuscaRapidaAberta] = useState(false)
+  const [menuMobileAberto, setMenuMobileAberto] = useState(false)
   const [sidebarRecolhida, setSidebarRecolhida] = useState(() =>
     window.location.pathname.startsWith('/recebimento'),
   )
@@ -864,6 +1208,10 @@ export function Layout() {
   }, [])
 
   useEffect(() => {
+    setMenuMobileAberto(false)
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = 0
+    }
     if (location.pathname.startsWith('/recebimento')) {
       setSidebarRecolhida(true)
     }
@@ -874,6 +1222,23 @@ export function Layout() {
     window.addEventListener('resize', handler)
     return () => window.removeEventListener('resize', handler)
   }, [])
+
+  // Garante carregamento do contexto de filiais tanto no Desktop quanto no Mobile / iPhone PWA
+  useEffect(() => {
+    if (!isApiEnabled() || !operador || isCliente(operador)) return
+    cadastrosQueries
+      .listarContextoFiliais()
+      .then((res) => {
+        if (Array.isArray(res?.data) && res.data.length > 0) {
+          setFiliaisDisponiveis(res.data)
+          const atualOk = res.data.some((f) => String(f.id) === String(filialAtivaId))
+          if (!atualOk || res.data.length === 1) {
+            setFilialAtiva(res.data[0].id)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [operador?.id, filialAtivaId, setFiliaisDisponiveis, setFilialAtiva])
 
   useEffect(() => {
     if (!operador || !sessionToken || Number(operador.deve_trocar_senha) === 1) {
@@ -952,15 +1317,26 @@ export function Layout() {
 
   return (
     <div className="app-shell">
-      <div className="app-shell-col" style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-        {!isMobile && (
+      <div
+        className="app-shell-col"
+        style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0 }}
+      >
+        {isMobile ? (
+          <MobileTopBar
+            onAbrirBusca={() => setBuscaRapidaAberta(true)}
+            onAbrirMenu={() => setMenuMobileAberto(true)}
+          />
+        ) : (
           <TopBar
             sidebarRecolhida={sidebarRecolhida}
             onToggleSidebar={() => setSidebarRecolhida((v) => !v)}
             onAbrirBuscaRapida={() => setBuscaRapidaAberta(true)}
           />
         )}
-        <div className="app-shell-body" style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div
+          className="app-shell-body"
+          style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}
+        >
           {!isMobile && (
             <Sidebar
               collapsed={sidebarRecolhida}
@@ -978,6 +1354,7 @@ export function Layout() {
             </button>
           )}
           <main
+            ref={mainScrollRef}
             className={isMobile ? 'main-content-mobile' : 'main-content'}
             style={!isMobile && sidebarRecolhida ? { padding: '12px 18px' } : undefined}
           >
@@ -985,6 +1362,9 @@ export function Layout() {
           </main>
         </div>
       </div>
+      {isMobile && (
+        <MobileDrawer isOpen={menuMobileAberto} onClose={() => setMenuMobileAberto(false)} />
+      )}
       <ModalBuscaModulos isOpen={buscaRapidaAberta} onClose={() => setBuscaRapidaAberta(false)} />
       <ToastContainer />
     </div>
