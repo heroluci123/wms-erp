@@ -6,7 +6,8 @@ import * as relatoriosQueries from '../queries/relatorios'
 import RelatorioDossieProducao from '../components/shared/RelatorioDossieProducao'
 import RelatorioGeralWms from '../components/shared/RelatorioGeralWms'
 import { CATALOGO_BI_RELATORIOS, VisualizadorRelatorioBi } from '../components/relatorios/CentralBiRelatorios'
-import { FileSpreadsheet, ShieldAlert, X } from 'lucide-react'
+import { PrintDocumentModal, fmtData } from '../components/shared/PrintDocumentModal'
+import { FileSpreadsheet, Printer, ShieldAlert, X } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isCliente, temPermissao } from '../utils/permissoes'
 
@@ -171,6 +172,7 @@ export function Relatorios() {
   const [filtroStatusOP,   setFiltroStatusOP  ] = useState('TODOS')
   const [agruparMateriaPrima, setAgruparMateriaPrima] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [modalPrintClassico, setModalPrintClassico] = useState(null) // 'BALANCO' | 'ARVORE' | null
 
   // ── recebe datas como parâmetro → sem stale closure ──────────────────────
   const carregarRelatorios = async (inicio, fim) => {
@@ -531,7 +533,7 @@ export function Relatorios() {
                     {[
                       { id: 'TODOS', label: `Todos (${catalogoCompleto.length})` },
                       { id: 'CLASSICOS', label: 'Clássicos WMS (4)' },
-                      { id: 'ESTOQUE', label: 'Estoque & WMS (6)' },
+                      { id: 'ESTOQUE', label: 'Estoque & WMS (7)' },
                       { id: 'COMERCIAL', label: 'Comercial & Varejo (5)' },
                       { id: 'COMPRAS_LOG', label: 'Compras & Logística (3)' },
                     ].map((cat) => {
@@ -669,9 +671,19 @@ export function Relatorios() {
                       <label htmlFor="chk-agrupar" className="cursor-pointer text-sm font-bold select-none text-warning">Ocultar Subprodutos</label>
                     </div>
                   </div>
-                  <button className="btn btn--secondary" onClick={exportarCSVBalanco}>
-                    <Download size={18} /> Exportar CSV
-                  </button>
+                  <div className="flex gap-8">
+                    <button className="btn btn--secondary" onClick={exportarCSVBalanco}>
+                      <Download size={18} /> Exportar CSV
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      disabled={balancoView.length === 0}
+                      onClick={() => setModalPrintClassico('BALANCO')}
+                    >
+                      <Printer size={16} /> Imprimir / PDF A4
+                    </button>
+                  </div>
                 </div>
 
                 {balancoView.length > 0 && (
@@ -767,9 +779,19 @@ export function Relatorios() {
                     <h2 className="text-xl font-bold">Mapa Dinâmico do Frigorífico</h2>
                     <p className="text-muted text-sm mt-4">Grafo de produção aprendido pelo sistema através das OPs.</p>
                   </div>
-                  <div className="relative w-[300px]">
-                    <Search size={16} className="absolute left-12 top-10 text-muted" />
-                    <input type="text" placeholder="Buscar Origem ou Subproduto..." className="form-input pl-36" value={filtroArvore} onChange={e => setFiltroArvore(e.target.value)} />
+                  <div className="flex items-center gap-10">
+                    <div className="relative w-[300px]">
+                      <Search size={16} className="absolute left-12 top-10 text-muted" />
+                      <input type="text" placeholder="Buscar Origem ou Subproduto..." className="form-input pl-36" value={filtroArvore} onChange={e => setFiltroArvore(e.target.value)} />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      disabled={arvorePronta.length === 0}
+                      onClick={() => setModalPrintClassico('ARVORE')}
+                    >
+                      <Printer size={16} /> Imprimir / PDF A4
+                    </button>
                   </div>
                 </div>
                 <div className="bg-bg-1 border border-border p-16 rounded overflow-auto" style={{ maxHeight: 600 }}>
@@ -784,6 +806,108 @@ export function Relatorios() {
             )}
           </div>
         </>
+      )}
+
+      {modalPrintClassico === 'BALANCO' && (
+        <PrintDocumentModal
+          title={`Balanço de Movimentações — ${fmtData(periodoAtivo.inicio)} a ${fmtData(periodoAtivo.fim)}`}
+          orientation="landscape"
+          onClose={() => setModalPrintClassico(null)}
+        >
+          <div className="wms-print-header">
+            <div>
+              <div className="wms-print-brand">WMSphere ERP — Balanço de Entradas &amp; Saídas</div>
+              <div className="wms-print-brand-sub">Consolidado físico em quilogramas por produto no período</div>
+            </div>
+            <div>
+              <div className="wms-print-doc-title">BALANÇO DE ESTOQUE</div>
+              <div style={{ fontSize: 10, color: '#334155', textAlign: 'right', marginTop: 2 }}>
+                Período: <strong>{fmtData(periodoAtivo.inicio)}</strong> até <strong>{fmtData(periodoAtivo.fim)}</strong>
+              </div>
+            </div>
+          </div>
+
+          <table className="wms-print-table">
+            <thead>
+              <tr>
+                <th>Produto</th>
+                <th>Classificação</th>
+                <th style={{ textAlign: 'right' }}>Entradas (kg)</th>
+                <th style={{ textAlign: 'right' }}>Saídas (kg)</th>
+                <th style={{ textAlign: 'right' }}>Saldo Balanço (kg)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {balancoView.map((b) => {
+                const bc = Number(b.total_entrada || 0) - Number(b.total_saida || 0)
+                return (
+                  <tr key={b.produto_id}>
+                    <td style={{ fontWeight: 700 }}>{b.descricao}</td>
+                    <td>{b.classificacao || '-'}</td>
+                    <td className="wms-print-mono" style={{ textAlign: 'right' }}>
+                      {Number(b.total_entrada || 0).toFixed(2)}
+                    </td>
+                    <td className="wms-print-mono" style={{ textAlign: 'right' }}>
+                      {Number(b.total_saida || 0).toFixed(2)}
+                    </td>
+                    <td className="wms-print-mono" style={{ textAlign: 'right', fontWeight: 800 }}>
+                      {bc.toFixed(2)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          <div className="wms-print-footer">
+            <span>WMSphere ERP — Balanço de Estoque</span>
+            <span>Emitido em {new Date().toLocaleString('pt-BR')}</span>
+          </div>
+        </PrintDocumentModal>
+      )}
+
+      {modalPrintClassico === 'ARVORE' && (
+        <PrintDocumentModal
+          title="Árvore de Produtos & Rendimento (BOM)"
+          orientation="landscape"
+          onClose={() => setModalPrintClassico(null)}
+        >
+          <div className="wms-print-header">
+            <div>
+              <div className="wms-print-brand">WMSphere ERP — Árvore de Produtos (BOM)</div>
+              <div className="wms-print-brand-sub">Mapeamento de Matérias-Primas e Subprodutos derivados</div>
+            </div>
+            <div className="wms-print-doc-title">MAPA BOM FRIGORÍFICO</div>
+          </div>
+
+          <table className="wms-print-table">
+            <thead>
+              <tr>
+                <th>Matéria-Prima (Origem)</th>
+                <th>Subprodutos / Cortes Derivados</th>
+              </tr>
+            </thead>
+            <tbody>
+              {arvorePronta.map((root) => (
+                <tr key={root.id}>
+                  <td style={{ fontWeight: 800, width: '32%' }}>
+                    {root.codigo ? `${root.codigo} — ` : ''}{root.descricao}
+                  </td>
+                  <td>
+                    {(root.children || []).length === 0
+                      ? 'Sem subprodutos vinculados'
+                      : root.children.map((c) => `${c.codigo ? `${c.codigo} ` : ''}${c.descricao}`).join(' • ')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="wms-print-footer">
+            <span>WMSphere ERP — Estrutura de Produtos BOM</span>
+            <span>Emitido em {new Date().toLocaleString('pt-BR')}</span>
+          </div>
+        </PrintDocumentModal>
       )}
     </div>
   )

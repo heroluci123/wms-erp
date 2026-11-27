@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Factory, Search, Download, Printer, ChevronDown, ChevronRight, 
   Calendar, CheckCircle, Truck, Package, Layers, RefreshCw, ArrowRight,
@@ -9,6 +9,56 @@ import { exportProducaoExcel } from '../../utils/exportProducaoExcel';
 import { useAppStore } from '../../store/appStore';
 import { isCliente } from '../../utils/permissoes';
 import { SmartSearchSelect } from './SmartSearchSelect';
+import { imprimirHtmlIsolado } from './PrintDocumentModal';
+
+const PRINT_DOSSIE_EXEC_CSS = `
+  .print-dossie-executive {
+    display: block !important;
+    width: 100% !important;
+    color: #0f172a !important;
+    background: #ffffff !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+    font-size: 10px !important;
+    line-height: 1.25 !important;
+  }
+  .print-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 2px solid #0f172a !important;
+    padding-bottom: 6px !important;
+    margin-bottom: 8px !important;
+  }
+  .print-brand-title { font-size: 15px !important; font-weight: 900 !important; letter-spacing: -0.3px !important; color: #0f172a !important; }
+  .print-brand-sub { font-size: 8.5px !important; color: #475569 !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; }
+  .print-doc-title { font-size: 12px !important; font-weight: 800 !important; color: #0f172a !important; text-align: right !important; }
+  .print-doc-meta { display: flex !important; gap: 12px !important; font-size: 8.5px !important; color: #475569 !important; justify-content: flex-end !important; margin-top: 2px !important; }
+  .print-kpi-bar { display: grid !important; grid-template-columns: repeat(6, 1fr) !important; gap: 6px !important; margin-bottom: 12px !important; background: #f8fafc !important; border: 1px solid #cbd5e1 !important; padding: 6px !important; border-radius: 4px !important; }
+  .print-kpi-item { text-align: center !important; padding: 4px !important; border-right: 1px solid #e2e8f0 !important; }
+  .print-kpi-item:last-child { border-right: none !important; }
+  .print-kpi-label { display: block !important; font-size: 7.5px !important; font-weight: 700 !important; color: #64748b !important; text-transform: uppercase !important; }
+  .print-kpi-val { display: block !important; font-size: 11px !important; font-weight: 900 !important; color: #0f172a !important; margin-top: 1px !important; }
+  .print-kpi-item.highlight .print-kpi-val { color: #047857 !important; }
+  .print-op-card { border: 1px solid #94a3b8 !important; border-radius: 4px !important; margin-bottom: 16px !important; break-inside: auto !important; }
+  .print-op-header { display: flex !important; justify-content: space-between !important; background: #0f172a !important; color: #ffffff !important; padding: 5px 10px !important; font-size: 11px !important; }
+  .print-op-meta-grid { display: flex !important; justify-content: space-between !important; background: #f1f5f9 !important; border-bottom: 1px solid #cbd5e1 !important; padding: 5px 10px !important; font-size: 9px !important; }
+  .print-rend-highlight { color: #047857 !important; font-size: 10px !important; }
+  .print-section-title { background: #e2e8f0 !important; color: #1e293b !important; font-size: 9px !important; font-weight: 800 !important; text-transform: uppercase !important; padding: 3px 8px !important; letter-spacing: 0.3px !important; border-bottom: 1px solid #cbd5e1 !important; }
+  .print-table { width: 100% !important; border-collapse: collapse !important; font-size: 8.5px !important; }
+  .print-table th { background: #f8fafc !important; color: #334155 !important; font-weight: 700 !important; text-transform: uppercase !important; border-bottom: 1px solid #cbd5e1 !important; padding: 4px 6px !important; text-align: left !important; font-size: 8px !important; }
+  .print-table td { border-bottom: 1px solid #e2e8f0 !important; padding: 3.5px 6px !important; color: #0f172a !important; }
+  .print-tr-alt { background: #f8fafc !important; }
+  .print-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; font-size: 8px !important; }
+  .print-tfoot-row td { background: #f1f5f9 !important; border-top: 1.5px solid #94a3b8 !important; border-bottom: none !important; padding: 5px 6px !important; font-size: 9px !important; }
+  .print-badge-expedida { display: inline-block !important; background: #e0f2fe !important; color: #0369a1 !important; border: 1px solid #bae6fd !important; border-radius: 3px !important; padding: 1px 4px !important; font-size: 7.5px !important; font-weight: 700 !important; }
+  .print-badge-estoque { display: inline-block !important; background: #ecfdf5 !important; color: #047857 !important; border: 1px solid #a7f3d0 !important; border-radius: 3px !important; padding: 1px 4px !important; font-size: 7.5px !important; font-weight: 700 !important; }
+  .print-audit-box { display: flex !important; justify-content: space-between !important; background: #f8fafc !important; border-top: 1.5px solid #cbd5e1 !important; padding: 6px 12px !important; font-size: 8.5px !important; }
+  .print-audit-col { flex: 1 !important; }
+  .print-audit-col.center { text-align: center !important; border-left: 1px solid #cbd5e1 !important; border-right: 1px solid #cbd5e1 !important; padding: 0 10px !important; }
+  .print-audit-rend-label { font-size: 7.5px !important; font-weight: 800 !important; color: #64748b !important; text-transform: uppercase !important; }
+  .print-audit-rend-value { font-size: 14px !important; font-weight: 900 !important; color: #047857 !important; }
+  .print-footer { display: flex !important; justify-content: space-between !important; border-top: 1px solid #cbd5e1 !important; padding-top: 4px !important; font-size: 7.5px !important; color: #94a3b8 !important; margin-top: 10px !important; }
+`;
 
 const fmtKg = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kg';
 const fmtKg3 = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' kg';
@@ -168,6 +218,21 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
     }
   };
 
+  const printDossieRef = useRef(null);
+
+  const handlePrintDossieExecutivo = () => {
+    if (printDossieRef.current) {
+      imprimirHtmlIsolado({
+        title: `${titulo} — ${fmtDate(dataInicio)} a ${fmtDate(dataFim)}`,
+        orientation: 'landscape',
+        css: PRINT_DOSSIE_EXEC_CSS,
+        element: printDossieRef.current,
+      });
+    } else {
+      window.print();
+    }
+  };
+
   return (
     <div className="relatorio-dossie-root">
       {/* ─── ESTILOS ESPECÍFICOS: TELA VS IMPRESSÃO EXECUTIVA A4 ────────────────── */}
@@ -183,17 +248,6 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             size: A4 landscape;
             margin: 8mm 10mm 10mm 10mm;
           }
-
-          /* Oculta rigorosamente tudo que não faz parte do dossiê executivo */
-          body * {
-            visibility: hidden !important;
-          }
-
-          .print-dossie-executive,
-          .print-dossie-executive * {
-            visibility: visible !important;
-          }
-
           .screen-dossie-view,
           .no-print,
           nav,
@@ -202,244 +256,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
           .sidebar {
             display: none !important;
           }
-
-          .print-dossie-executive {
-            display: block !important;
-            position: static !important;
-            width: 100% !important;
-            height: auto !important;
-            overflow: visible !important;
-            color: #0f172a !important;
-            background: #ffffff !important;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
-            font-size: 10px !important;
-            line-height: 1.25 !important;
-          }
-
-          .print-header {
-            display: flex !important;
-            justify-content: space-between !important;
-            align-items: flex-start !important;
-            border-bottom: 2px solid #0f172a !important;
-            padding-bottom: 6px !important;
-            margin-bottom: 8px !important;
-          }
-
-          .print-brand-title {
-            font-size: 15px !important;
-            font-weight: 900 !important;
-            letter-spacing: -0.3px !important;
-            color: #0f172a !important;
-          }
-
-          .print-brand-sub {
-            font-size: 8.5px !important;
-            color: #475569 !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.5px !important;
-          }
-
-          .print-doc-title {
-            font-size: 12px !important;
-            font-weight: 800 !important;
-            color: #0f172a !important;
-            text-align: right !important;
-          }
-
-          .print-doc-meta {
-            display: flex !important;
-            gap: 12px !important;
-            font-size: 8.5px !important;
-            color: #475569 !important;
-            justify-content: flex-end !important;
-            margin-top: 2px !important;
-          }
-
-          .print-kpi-bar {
-            display: grid !important;
-            grid-template-columns: repeat(6, 1fr) !important;
-            gap: 6px !important;
-            margin-bottom: 12px !important;
-            background: #f8fafc !important;
-            border: 1px solid #cbd5e1 !important;
-            padding: 6px !important;
-            border-radius: 4px !important;
-          }
-
-          .print-kpi-item {
-            text-align: center !important;
-            padding: 4px !important;
-            border-right: 1px solid #e2e8f0 !important;
-          }
-          .print-kpi-item:last-child {
-            border-right: none !important;
-          }
-
-          .print-kpi-label {
-            display: block !important;
-            font-size: 7.5px !important;
-            font-weight: 700 !important;
-            color: #64748b !important;
-            text-transform: uppercase !important;
-          }
-
-          .print-kpi-val {
-            display: block !important;
-            font-size: 11px !important;
-            font-weight: 900 !important;
-            color: #0f172a !important;
-            margin-top: 1px !important;
-          }
-
-          .print-kpi-item.highlight .print-kpi-val {
-            color: #047857 !important;
-          }
-
-          .print-op-card {
-            border: 1px solid #94a3b8 !important;
-            border-radius: 4px !important;
-            margin-bottom: 16px !important;
-            break-inside: auto !important;
-          }
-
-          .print-op-header {
-            display: flex !important;
-            justify-content: space-between !important;
-            background: #0f172a !important;
-            color: #ffffff !important;
-            padding: 5px 10px !important;
-            font-size: 11px !important;
-          }
-
-          .print-op-meta-grid {
-            display: flex !important;
-            justify-content: space-between !important;
-            background: #f1f5f9 !important;
-            border-bottom: 1px solid #cbd5e1 !important;
-            padding: 5px 10px !important;
-            font-size: 9px !important;
-          }
-
-          .print-rend-highlight {
-            color: #047857 !important;
-            font-size: 10px !important;
-          }
-
-          .print-section-title {
-            background: #e2e8f0 !important;
-            color: #1e293b !important;
-            font-size: 9px !important;
-            font-weight: 800 !important;
-            text-transform: uppercase !important;
-            padding: 3px 8px !important;
-            letter-spacing: 0.3px !important;
-            border-bottom: 1px solid #cbd5e1 !important;
-          }
-
-          .print-table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-            font-size: 8.5px !important;
-          }
-
-          .print-table th {
-            background: #f8fafc !important;
-            color: #334155 !important;
-            font-weight: 700 !important;
-            text-transform: uppercase !important;
-            border-bottom: 1px solid #cbd5e1 !important;
-            padding: 4px 6px !important;
-            text-align: left !important;
-            font-size: 8px !important;
-          }
-
-          .print-table td {
-            border-bottom: 1px solid #e2e8f0 !important;
-            padding: 3.5px 6px !important;
-            color: #0f172a !important;
-          }
-
-          .print-tr-alt {
-            background: #f8fafc !important;
-          }
-
-          .print-mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-            font-size: 8px !important;
-          }
-
-          .print-tfoot-row td {
-            background: #f1f5f9 !important;
-            border-top: 1.5px solid #94a3b8 !important;
-            border-bottom: none !important;
-            padding: 5px 6px !important;
-            font-size: 9px !important;
-          }
-
-          .print-badge-expedida {
-            display: inline-block !important;
-            background: #e0f2fe !important;
-            color: #0369a1 !important;
-            border: 1px solid #bae6fd !important;
-            border-radius: 3px !important;
-            padding: 1px 4px !important;
-            font-size: 7.5px !important;
-            font-weight: 700 !important;
-          }
-
-          .print-badge-estoque {
-            display: inline-block !important;
-            background: #ecfdf5 !important;
-            color: #047857 !important;
-            border: 1px solid #a7f3d0 !important;
-            border-radius: 3px !important;
-            padding: 1px 4px !important;
-            font-size: 7.5px !important;
-            font-weight: 700 !important;
-          }
-
-          .print-audit-box {
-            display: flex !important;
-            justify-content: space-between !important;
-            background: #f8fafc !important;
-            border-top: 1.5px solid #cbd5e1 !important;
-            padding: 6px 12px !important;
-            font-size: 8.5px !important;
-          }
-
-          .print-audit-col {
-            flex: 1 !important;
-          }
-
-          .print-audit-col.center {
-            text-align: center !important;
-            border-left: 1px solid #cbd5e1 !important;
-            border-right: 1px solid #cbd5e1 !important;
-            padding: 0 10px !important;
-          }
-
-          .print-audit-rend-label {
-            font-size: 7.5px !important;
-            font-weight: 800 !important;
-            color: #64748b !important;
-            text-transform: uppercase !important;
-          }
-
-          .print-audit-rend-value {
-            font-size: 14px !important;
-            font-weight: 900 !important;
-            color: #047857 !important;
-          }
-
-.print-footer {
-            display: flex !important;
-            justify-content: space-between !important;
-            border-top: 1px solid #cbd5e1 !important;
-            padding-top: 4px !important;
-            font-size: 7.5px !important;
-            color: #94a3b8 !important;
-            margin-top: 10px !important;
-          }
+          ${PRINT_DOSSIE_EXEC_CSS}
         }
       `}</style>
 
@@ -472,7 +289,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
             <button className="btn btn--secondary btn--sm" onClick={exportarExcel} disabled={exportando || dossies.length === 0} title="Exportar relatório completo para Excel (.xlsx)">
               <Download size={15} /> {exportando ? 'Gerando Excel...' : 'Exportar Excel (.xlsx)'}
             </button>
-            <button className="btn btn--primary btn--sm" onClick={() => window.print()} title="Imprimir ou Salvar em PDF">
+            <button className="btn btn--primary btn--sm" onClick={handlePrintDossieExecutivo} title="Imprimir ou Salvar em PDF">
               <Printer size={15} /> Imprimir / PDF
             </button>
           </div>
@@ -876,7 +693,7 @@ export function RelatorioDossieProducao({ titulo = "Dossiê de Transformação &
           VISUALIZAÇÃO EXECUTIVA DE IMPRESSÃO / PDF (SOMENTE NA IMPRESSÃO)
           Formatado especificamente para apresentação à Diretoria e Gerência.
          ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="print-dossie-executive">
+      <div ref={printDossieRef} className="print-dossie-executive">
         {/* CABEÇALHO INSTITUCIONAL FORMAL */}
         <div className="print-header">
           <div className="print-header-left">

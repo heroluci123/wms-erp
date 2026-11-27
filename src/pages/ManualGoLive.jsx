@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { apiRequest, getApiBaseUrl, isApiEnabled } from '../lib/apiClient'
 import { useAppStore } from '../store/appStore'
+import { PrintDocumentModal } from '../components/shared/PrintDocumentModal'
 
 const STORAGE_KEY_ROTEIROS = 'wmsphere_golive_checklist_v1'
 
@@ -170,6 +171,7 @@ export function ManualGoLive() {
   const [aba, setAba] = useState('DIAGNOSTICO')
   const [statusData, setStatusData] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [imprimindoManual, setImprimindoManual] = useState(false)
   const [copiadoKey, setCopiadoKey] = useState('')
   const [abertos, setAbertos] = useState({ dia0: true, atacado_logistica: true })
   const [concluidos, setConcluidos] = useState(() => {
@@ -288,7 +290,7 @@ export function ManualGoLive() {
           <button type="button" className="btn btn--secondary" onClick={carregarDiagnostico} disabled={loading}>
             <RefreshCw size={15} className={loading ? 'spin' : ''} /> Atualizar Diagnóstico
           </button>
-          <button type="button" className="btn btn--primary" onClick={() => window.print()}>
+          <button type="button" className="btn btn--primary" onClick={() => setImprimindoManual(true)}>
             <Printer size={15} /> Imprimir / Salvar PDF
           </button>
         </div>
@@ -746,6 +748,94 @@ export function ManualGoLive() {
             </div>
           </div>
         </div>
+      )}
+
+      {imprimindoManual && (
+        <PrintDocumentModal
+          title="Playbook de Implantação, Operação & Go-Live — WMSphere ERP"
+          orientation="landscape"
+          onClose={() => setImprimindoManual(false)}
+        >
+          <div className="wms-print-header">
+            <div>
+              <div className="wms-print-brand">WMSphere ERP — Playbook Oficial de Implantação &amp; Operação</div>
+              <div className="wms-print-brand-sub">Diagnóstico Go-Live, Roteiros Operacionais por Setor e Padrão de Equipamentos</div>
+            </div>
+            <div className="wms-print-doc-title">
+              PRONTIDÃO: {statusData ? `${statusData.score_prontidao_pct}%` : '—'}
+            </div>
+          </div>
+
+          {statusData?.checks?.length > 0 && (
+            <>
+              <div className="wms-print-section-title">1. Diagnóstico de Prontidão do Ambiente</div>
+              <table className="wms-print-table">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Categoria</th>
+                    <th>Item Verificado</th>
+                    <th>Detalhe Atual</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {statusData.checks.map((c) => (
+                    <tr key={c.id}>
+                      <td style={{ fontWeight: 800 }}>{c.status}</td>
+                      <td>{c.categoria}</td>
+                      <td style={{ fontWeight: 700 }}>{c.titulo}</td>
+                      <td>{c.detalhe}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          <div className="wms-print-section-title">2. Roteiros Operacionais Ponta a Ponta</div>
+          {ROTEIROS_OPERACIONAIS.map((rot) => (
+            <div key={rot.id} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 800, fontSize: 11, marginBottom: 4 }}>{rot.titulo}</div>
+              <table className="wms-print-table">
+                <tbody>
+                  {rot.passos.map((p, idx) => (
+                    <tr key={idx}>
+                      <td className="wms-print-mono" style={{ width: 34, textAlign: 'center' }}>
+                        {concluidos[`${rot.id}:${idx}`] ? '[X]' : '[ ]'}
+                      </td>
+                      <td>
+                        <strong>{idx + 1}.</strong> {p.texto}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+
+          <div className="wms-print-section-title">3. Padrão de Impressoras &amp; Dispositivos</div>
+          <table className="wms-print-table">
+            <thead>
+              <tr>
+                <th>Equipamento</th>
+                <th>Configuração Recomendada</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CHECKLIST_HARDWARE.map((h, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 700 }}>{h.item}</td>
+                  <td>{h.config}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="wms-print-footer">
+            <span>WMSphere ERP — Playbook Oficial Go-Live</span>
+            <span>Emitido em {new Date().toLocaleString('pt-BR')}</span>
+          </div>
+        </PrintDocumentModal>
       )}
     </div>
   )

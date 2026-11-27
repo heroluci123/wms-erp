@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Printer, X } from 'lucide-react'
 
@@ -34,16 +34,326 @@ export const fmtDataHora = (d) => {
   return dt.toLocaleString('pt-BR')
 }
 
+export const WMS_PRINT_SHEET_BASE_CSS = `
+  .wms-print-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #0f172a;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+    gap: 16px;
+  }
+  .wms-print-brand {
+    font-size: 17px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: 0.4px;
+  }
+  .wms-print-brand-sub {
+    font-size: 9.5px;
+    color: #334155;
+    margin-top: 2px;
+  }
+  .wms-print-doc-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
+    text-align: right;
+  }
+  .wms-print-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 14px;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 9px 12px;
+    margin-bottom: 10px;
+  }
+  .wms-print-meta-label {
+    font-size: 8.5px;
+    text-transform: uppercase;
+    color: #475569;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+  }
+  .wms-print-meta-value {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-top: 1px;
+  }
+  .wms-print-section-title {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #0f172a;
+    background: #f1f5f9;
+    padding: 5px 8px;
+    border-left: 4px solid #0f172a;
+    border-bottom: 1px solid #cbd5e1;
+    margin: 10px 0 6px 0;
+  }
+  .wms-print-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10px;
+    font-size: 11px;
+  }
+  .wms-print-table th {
+    background: #f1f5f9;
+    color: #0f172a;
+    text-align: left;
+    padding: 6px 8px;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    font-weight: 800;
+    border: 1px solid #334155;
+  }
+  .wms-print-table td {
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    vertical-align: middle;
+    color: #0f172a;
+  }
+  .wms-print-table tbody tr:nth-child(even) td {
+    background: #f8fafc;
+  }
+  .wms-print-table tfoot td {
+    background: #f1f5f9;
+    color: #0f172a;
+    font-weight: 800;
+    border: 1px solid #334155;
+  }
+  .wms-print-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .wms-print-obs {
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    font-size: 10.5px;
+    color: #0f172a;
+    min-height: 32px;
+  }
+  .wms-print-signatures {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 24px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .wms-print-sign-box {
+    border: 1px solid #94a3b8;
+    border-radius: 4px;
+    padding: 14px 16px;
+    background: #ffffff;
+  }
+  .wms-print-sign-line {
+    border-top: 1px solid #0f172a;
+    margin-top: 52px;
+    padding-top: 5px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-align: center;
+    color: #0f172a;
+  }
+  .wms-print-sign-sub {
+    font-size: 10px;
+    color: #334155;
+    margin-top: 8px;
+    line-height: 1.85;
+  }
+  .wms-print-footer {
+    margin-top: 14px;
+    padding-top: 6px;
+    border-top: 1px solid #cbd5e1;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #475569;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 9.5px;
+    font-weight: 700;
+    border: 1px solid #94a3b8;
+    color: #0f172a;
+    background: #f1f5f9;
+  }
+  .badge--success { background: #dcfce7; color: #166534; border-color: #86efac; }
+  .badge--warning { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .badge--danger  { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+  .badge--info    { background: #e0f2fe; color: #075985; border-color: #7dd3fc; }
+`
+
+/**
+ * Imprime qualquer elemento/HTML em um <iframe> oculto 100% isolado da SPA.
+ * Evita definitivamente capturar a tela escura de fundo (#root) ou gerar folhas extras.
+ */
+export function imprimirHtmlIsolado({
+  title = 'Documento WMSphere',
+  orientation = 'portrait',
+  css = '',
+  element = null,
+  bodyHtml = '',
+}) {
+  if (typeof document === 'undefined') return
+
+  let htmlFinal = bodyHtml
+  if (element) {
+    const clone = element.cloneNode(true)
+    const origCanvases = element.querySelectorAll('canvas')
+    const cloneCanvases = clone.querySelectorAll('canvas')
+    origCanvases.forEach((cv, idx) => {
+      try {
+        const img = document.createElement('img')
+        img.src = cv.toDataURL('image/png')
+        img.style.cssText = cv.style.cssText
+        img.width = cv.width
+        img.height = cv.height
+        cloneCanvases[idx]?.replaceWith(img)
+      } catch {
+        /* ignore tainted canvas */
+      }
+    })
+    htmlFinal = clone.outerHTML
+  }
+
+  const orient = orientation === 'landscape' ? 'landscape' : 'portrait'
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '0'
+  iframe.style.bottom = '0'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  iframe.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(iframe)
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document
+  if (!doc) {
+    if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
+    window.print()
+    return
+  }
+
+  const safeTitle = String(title || 'Documento').replace(/[<>]/g, '')
+  doc.open()
+  doc.write(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>${safeTitle}</title>
+  <style>
+    @page {
+      size: A4 ${orient};
+      margin: 8mm 10mm 8mm 10mm;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      height: auto !important;
+      min-height: 0 !important;
+      background: #ffffff !important;
+      color: #0f172a !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .wms-print-sheet {
+      width: 100% !important;
+      max-width: none !important;
+      min-height: 0 !important;
+      height: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      background: #ffffff !important;
+      color: #0f172a !important;
+    }
+    .no-print {
+      display: none !important;
+    }
+    ${WMS_PRINT_SHEET_BASE_CSS}
+    ${css}
+  </style>
+</head>
+<body>
+  ${htmlFinal}
+</body>
+</html>`)
+  doc.close()
+
+  let limpou = false
+  const cleanup = () => {
+    if (limpou) return
+    limpou = true
+    setTimeout(() => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
+    }, 600)
+  }
+
+  setTimeout(() => {
+    try {
+      const win = iframe.contentWindow
+      if (!win) throw new Error('Sem janela de impressao')
+      win.onafterprint = cleanup
+      win.focus()
+      win.print()
+      setTimeout(cleanup, 45000)
+    } catch {
+      cleanup()
+      window.print()
+    }
+  }, 180)
+}
+
 export function PrintDocumentModal({ title, onClose, autoPrint = true, orientation = 'portrait', children }) {
   const isLandscape = orientation === 'landscape'
+  const sheetRef = useRef(null)
+
+  const handlePrint = useCallback(() => {
+    if (sheetRef.current) {
+      imprimirHtmlIsolado({
+        title: title || 'Documento WMSphere',
+        orientation,
+        element: sheetRef.current,
+      })
+    } else {
+      window.print()
+    }
+  }, [title, orientation])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    document.body.classList.add('wms-printing-modal')
+    return () => {
+      document.body.classList.remove('wms-printing-modal')
+    }
+  }, [])
 
   useEffect(() => {
     if (!autoPrint) return undefined
     const t = setTimeout(() => {
-      window.print()
-    }, 220)
+      handlePrint()
+    }, 260)
     return () => clearTimeout(t)
-  }, [autoPrint])
+  }, [autoPrint, handlePrint])
 
   const modalContent = (
     <div
@@ -75,148 +385,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
           line-height: 1.35;
           box-sizing: border-box;
         }
-        .wms-print-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          border-bottom: 2px solid #0f172a;
-          padding-bottom: 8px;
-          margin-bottom: 10px;
-          gap: 16px;
-        }
-        .wms-print-brand {
-          font-size: 17px;
-          font-weight: 800;
-          color: #0f172a;
-          letter-spacing: 0.4px;
-        }
-        .wms-print-brand-sub {
-          font-size: 9.5px;
-          color: #334155;
-          margin-top: 2px;
-        }
-        .wms-print-doc-title {
-          font-size: 15px;
-          font-weight: 800;
-          color: #0f172a;
-          text-align: right;
-        }
-        .wms-print-meta-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 8px 14px;
-          background: #f8fafc;
-          border: 1px solid #cbd5e1;
-          border-radius: 4px;
-          padding: 9px 12px;
-          margin-bottom: 10px;
-        }
-        .wms-print-meta-label {
-          font-size: 8.5px;
-          text-transform: uppercase;
-          color: #475569;
-          font-weight: 700;
-          letter-spacing: 0.4px;
-        }
-        .wms-print-meta-value {
-          font-size: 11.5px;
-          font-weight: 700;
-          color: #0f172a;
-          margin-top: 1px;
-        }
-        .wms-print-section-title {
-          font-size: 10px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.4px;
-          color: #0f172a;
-          background: #f1f5f9;
-          padding: 5px 8px;
-          border-left: 4px solid #0f172a;
-          border-bottom: 1px solid #cbd5e1;
-          margin: 10px 0 6px 0;
-        }
-        .wms-print-table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 10px;
-          font-size: 11px;
-        }
-        .wms-print-table th {
-          background: #f1f5f9;
-          color: #0f172a;
-          text-align: left;
-          padding: 6px 8px;
-          font-size: 9.5px;
-          text-transform: uppercase;
-          font-weight: 800;
-          border: 1px solid #334155;
-        }
-        .wms-print-table td {
-          padding: 6px 8px;
-          border: 1px solid #cbd5e1;
-          vertical-align: middle;
-          color: #0f172a;
-        }
-        .wms-print-table tbody tr:nth-child(even) td {
-          background: #f8fafc;
-        }
-        .wms-print-table tfoot td {
-          background: #f1f5f9;
-          color: #0f172a;
-          font-weight: 800;
-          border: 1px solid #334155;
-        }
-        .wms-print-mono {
-          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        }
-        .wms-print-obs {
-          border: 1px solid #cbd5e1;
-          background: #f8fafc;
-          border-radius: 4px;
-          padding: 8px 10px;
-          margin-top: 8px;
-          font-size: 10.5px;
-          color: #0f172a;
-          min-height: 32px;
-        }
-        .wms-print-signatures {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 24px;
-          margin-top: 24px;
-          page-break-inside: avoid;
-        }
-        .wms-print-sign-box {
-          border: 1px solid #94a3b8;
-          border-radius: 4px;
-          padding: 14px 16px;
-          background: #ffffff;
-        }
-        .wms-print-sign-line {
-          border-top: 1px solid #0f172a;
-          margin-top: 52px;
-          padding-top: 5px;
-          font-size: 10.5px;
-          font-weight: 700;
-          text-align: center;
-          color: #0f172a;
-        }
-        .wms-print-sign-sub {
-          font-size: 10px;
-          color: #334155;
-          margin-top: 8px;
-          line-height: 1.85;
-        }
-        .wms-print-footer {
-          margin-top: 14px;
-          padding-top: 6px;
-          border-top: 1px solid #cbd5e1;
-          display: flex;
-          justify-content: space-between;
-          font-size: 9px;
-          color: #475569;
-        }
+        ${WMS_PRINT_SHEET_BASE_CSS}
 
         @media print {
           @page {
@@ -234,7 +403,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
             overflow: visible !important;
             background: #ffffff !important;
           }
-          /* Remove totalmente #root e demais elementos do fluxo para nunca gerar folha extra em branco */
+          body > #root,
           body > *:not(.wms-print-overlay) {
             display: none !important;
           }
@@ -299,7 +468,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
           <button
             type="button"
             className="btn btn--primary"
-            onClick={() => window.print()}
+            onClick={handlePrint}
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             <Printer size={15} /> Imprimir / Salvar PDF
@@ -315,7 +484,7 @@ export function PrintDocumentModal({ title, onClose, autoPrint = true, orientati
         </div>
       </div>
 
-      <div className="wms-print-sheet">{children}</div>
+      <div ref={sheetRef} className="wms-print-sheet">{children}</div>
     </div>
   )
 

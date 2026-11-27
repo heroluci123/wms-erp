@@ -29,6 +29,7 @@ import { cadastrosQueries } from '../queries/cadastros'
 import * as produtosQueries from '../queries/produtos.js'
 import { hojeIsoLocal } from '../utils/rastreabilidade.js'
 import { ClienteSearchSelect, ProdutoSearchSelect } from '../components/shared/SmartSearchSelect'
+import { PrintDocumentModal } from '../components/shared/PrintDocumentModal'
 
 const fmtKg = (v) =>
   `${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg`
@@ -1882,68 +1883,77 @@ export function MapaProducao() {
         </div>
       )}
 
-      {/* ── MODAL IMPRESSÃO A4 DO MAPA ── */}
+      {/* ── MODAL IMPRESSÃO A4 DO MAPA (ISOLADO EM PORTAL/IFRAME) ── */}
       {mapaPrint && (
-        <div className="modal-overlay" style={{ padding: 20, zIndex: 98 }}>
-          <div className="card" style={{ width: '95vw', maxWidth: 1020, maxHeight: '92vh', overflowY: 'auto', padding: 24, background: '#ffffff', color: '#0f172a' }}>
-            <div className="flex justify-between items-center mb-12 no-print">
-              <strong>Pré-visualização para Impressão</strong>
-              <div className="flex gap-8">
-                <button type="button" className="btn btn--primary btn--sm" onClick={() => window.print()}>
-                  <Printer size={14} /> Imprimir Agora
-                </button>
-                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setMapaPrint(null)}>
-                  <X size={14} /> Fechar
-                </button>
-              </div>
-            </div>
-            <div style={{ borderBottom: '2px solid #0f172a', paddingBottom: 8, marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 18 }}>
+        <PrintDocumentModal
+          title={`Mapa de Produção — ${mapaPrint.codigo}`}
+          orientation="landscape"
+          autoPrint={false}
+          onClose={() => setMapaPrint(null)}
+        >
+          <div className="wms-print-header">
+            <div>
+              <div className="wms-print-brand">WMSphere ERP — Planejamento &amp; Mapa de Produção</div>
+              <div className="wms-print-brand-sub">
                 {mapaPrint.titulo} ({mapaPrint.codigo})
-              </h2>
-              <div style={{ fontSize: 12 }}>
-                Data de Produção: <strong>{fmtDataBr(mapaPrint.data_mapa)}</strong> • Status: <strong>{mapaPrint.status}</strong>
-                {mapaPrint.observacoes ? ` • Obs.: ${mapaPrint.observacoes}` : ''}
               </div>
             </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
-              <thead>
-                <tr style={{ background: '#e2e8f0', textAlign: 'left' }}>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Código</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Produto</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Especificação</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Conserv.</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6, textAlign: 'right' }}>Previsto</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Cliente</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Matéria-Prima</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6 }}>Obs.</th>
-                  <th style={{ border: '1px solid #94a3b8', padding: 6, textAlign: 'right' }}>Realizado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(mapaPrint.itens || []).map((it) => (
-                  <tr key={it.id}>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.produto_codigo || '-'}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6, fontWeight: 700 }}>{it.produto_descricao}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.especificacao || '-'}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.conservacao}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6, textAlign: 'right', fontWeight: 700 }}>
-                      {fmtKg(it.qtd_prevista_kg)}
-                    </td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.cliente_nome || 'INTERNO'}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>
-                      {it.materia_prima_descricao ? `${it.materia_prima_descricao} (${fmtKg(it.qtd_mp_kg)})` : '-'}
-                    </td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6 }}>{it.observacao || ''}</td>
-                    <td style={{ border: '1px solid #cbd5e1', padding: 6, textAlign: 'right' }}>
-                      {Number(it.qtd_realizada_kg) > 0 ? fmtKg(it.qtd_realizada_kg) : '________ kg'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div style={{ textAlign: 'right' }}>
+              <div className="wms-print-doc-title">MAPA — {mapaPrint.codigo}</div>
+              <div style={{ fontSize: 10.5, color: '#334155', marginTop: 2 }}>
+                Data: <strong>{fmtDataBr(mapaPrint.data_mapa)}</strong> • Status: <strong>{mapaPrint.status}</strong>
+              </div>
+            </div>
           </div>
-        </div>
+
+          {mapaPrint.observacoes && (
+            <div className="wms-print-obs" style={{ marginBottom: 10, minHeight: 0 }}>
+              <strong>Observações:</strong> {mapaPrint.observacoes}
+            </div>
+          )}
+
+          <table className="wms-print-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Produto</th>
+                <th>Especificação</th>
+                <th>Conserv.</th>
+                <th style={{ textAlign: 'right' }}>Previsto</th>
+                <th>Cliente</th>
+                <th>Matéria-Prima</th>
+                <th>Obs.</th>
+                <th style={{ textAlign: 'right' }}>Realizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(mapaPrint.itens || []).map((it) => (
+                <tr key={it.id}>
+                  <td className="wms-print-mono">{it.produto_codigo || '-'}</td>
+                  <td style={{ fontWeight: 700 }}>{it.produto_descricao}</td>
+                  <td>{it.especificacao || '-'}</td>
+                  <td>{it.conservacao}</td>
+                  <td className="wms-print-mono" style={{ textAlign: 'right', fontWeight: 700 }}>
+                    {fmtKg(it.qtd_prevista_kg)}
+                  </td>
+                  <td>{it.cliente_nome || 'INTERNO'}</td>
+                  <td>
+                    {it.materia_prima_descricao ? `${it.materia_prima_descricao} (${fmtKg(it.qtd_mp_kg)})` : '-'}
+                  </td>
+                  <td>{it.observacao || ''}</td>
+                  <td className="wms-print-mono" style={{ textAlign: 'right' }}>
+                    {Number(it.qtd_realizada_kg) > 0 ? fmtKg(it.qtd_realizada_kg) : '________ kg'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="wms-print-footer">
+            <span>WMSphere ERP — Mapa de Produção {mapaPrint.codigo}</span>
+            <span>Emitido em {new Date().toLocaleString('pt-BR')}</span>
+          </div>
+        </PrintDocumentModal>
       )}
     </div>
   )

@@ -1643,14 +1643,23 @@ input[type="number"] {
 
 /* ─── Reset Global de Impressão / PDF Multi-Página (Chrome / Edge / Electron) ─ */
 @media print {
+  /* Quando um modal de impressão oficial (.wms-print-overlay) estiver aberto,
+     remove 100% do #root do fluxo para NUNCA imprimir a tela do sistema antes/depois do relatório */
+  body.wms-printing-modal > #root,
+  body.wms-printing-modal > *:not(.wms-print-overlay),
+  html:has(.wms-print-overlay) body > #root,
+  html:has(.wms-print-overlay) body > *:not(.wms-print-overlay) {
+    display: none !important;
+  }
+
   html,
   body,
-  #root,
-  .app-shell,
-  .app-shell-col,
-  .app-shell-body,
-  .main-content,
-  .main-content-mobile {
+  body:not(.wms-printing-modal) #root,
+  body:not(.wms-printing-modal) .app-shell,
+  body:not(.wms-printing-modal) .app-shell-col,
+  body:not(.wms-printing-modal) .app-shell-body,
+  body:not(.wms-printing-modal) .main-content,
+  body:not(.wms-printing-modal) .main-content-mobile {
     display: block !important;
     position: static !important;
     width: auto !important;
@@ -1674,7 +1683,7 @@ input[type="number"] {
     display: none !important;
   }
 
-  .card {
+  body:not(.wms-printing-modal) .card {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
