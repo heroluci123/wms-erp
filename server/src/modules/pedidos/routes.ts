@@ -350,6 +350,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
             qtd_conferidas: sql<number>`COALESCE((SELECT COUNT(*)::int FROM romaneios_itens ri JOIN romaneios r ON r.id = ri.romaneio_id WHERE r.pedido_id = "pedidos"."id" AND ri.conferido = 1), 0)`,
             motivo_trava_raw: sql<string | null>`(SELECT ps.titulo FROM pendencias_setor ps WHERE ps.referencia_id = "pedidos"."id" AND ps.status != 'CONCLUIDA' ORDER BY ps.created_at DESC LIMIT 1)`,
             tem_nf_autorizada: sql<boolean>`EXISTS (SELECT 1 FROM fiscal_notas fn WHERE fn.pedido_id = "pedidos"."id" AND fn.status = 'AUTORIZADA' AND fn.tipo_operacao = 'SAIDA')`,
+            cliente_nao_faturar: sql<number>`COALESCE((SELECT c.nao_faturar FROM clientes c WHERE c.id = "pedidos"."cliente_id" LIMIT 1), 0)`,
           })
           .from(pedidos)
           .where(and(...conds))
@@ -391,6 +392,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           total_kg_separado: toNum(r.total_kg_separado, 0),
           motivo_trava: limparMotivoTrava(r.motivo_trava_raw, r.status),
           tem_nf_autorizada: Boolean(r.tem_nf_autorizada),
+          cliente_nao_faturar: Number(r.cliente_nao_faturar || 0),
         })),
         kpis_gerais: kpisGerais,
         total_geral: totalGeral,
@@ -639,7 +641,17 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           separador_nome: rom?.operadorNome || null,
           operador_conferencia_nome: rom?.operadorConferenciaNome || null,
           operador_expedicao_nome: rom?.operadorExpedicaoNome || null,
-          cliente_dados: clienteDados,
+          cliente_nao_faturar: Number(clienteDados?.naoFaturar || 0),
+          cliente_dados: clienteDados
+            ? {
+                ...clienteDados,
+                razao_social: clienteDados.razaoSocial,
+                nome_fantasia: clienteDados.nomeFantasia,
+                cnpj_cpf: clienteDados.cnpjCpf,
+                inscricao_estadual: clienteDados.inscricaoEstadual,
+                nao_faturar: Number(clienteDados.naoFaturar || 0),
+              }
+            : null,
           parcelas: parcelasRows.map((p) => ({
             id: p.id,
             numero_parcela: p.numeroParcela,
@@ -752,14 +764,28 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       let status = body.liberar === false || forcarRascunho ? 'RASCUNHO' : 'LIBERADO'
       let itensInsuficientes: Awaited<ReturnType<typeof verificarEstoquePedido>>['insuficientes'] = []
 
-      const vendedorFinalId = body.vendedor_id
-        ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
-        : cliDefaults?.vendedorPadraoId || null
-      const tabelaPrecoFinalId = body.tabela_preco_id
-        ? parseUuidOrBadRequest(body.tabela_preco_id, 'tabela_preco_id')
-        : cliDefaults?.tabelaPrecoId || null
-      const pgtoEntregaFlag =
-        body.pagamento_na_entrega != null
+      const isClienteNaoFaturar = Number(cliDefaults?.naoFaturar || 0) === 1
+      if (isClienteNaoFaturar) {
+        for (const it of itensConsolidados) {
+          it.preco_unitario = 0
+          it.desconto_pct = 0
+          it.desconto_valor = 0
+        }
+      }
+
+      const vendedorFinalId = isClienteNaoFaturar
+        ? null
+        : body.vendedor_id
+          ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
+          : cliDefaults?.vendedorPadraoId || null
+      const tabelaPrecoFinalId = isClienteNaoFaturar
+        ? null
+        : body.tabela_preco_id
+          ? parseUuidOrBadRequest(body.tabela_preco_id, 'tabela_preco_id')
+          : cliDefaults?.tabelaPrecoId || null
+      const pgtoEntregaFlag = isClienteNaoFaturar
+        ? 0
+        : body.pagamento_na_entrega != null
           ? body.pagamento_na_entrega
             ? 1
             : 0
@@ -773,7 +799,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         tabelaPrecoId: tabelaPrecoFinalId,
         pagamentoNaEntrega: pgtoEntregaFlag === 1,
         itens: itensConsolidados,
-        forcarAvaliacaoEstrita: body.aplicar_trava_comercial === true,
+        forcarAvaliacaoEstrita: !isClienteNaoFaturar && body.aplicar_trava_comercial === true,
       })
 
       let aprovadoComercialPorId: string | null = null
@@ -781,7 +807,7 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       let aprovadoComercialEm: Date | null = null
       let aprovadoComercialObs = ''
 
-      if (status === 'LIBERADO' && gov.alerta.exige_aprovacao) {
+      if (!isClienteNaoFaturar && status === 'LIBERADO' && gov.alerta.exige_aprovacao) {
         let liberadoPelaGestao = false
         if (body.pin_gerencial && String(body.pin_gerencial).trim()) {
           const gestorPin = await validarPinGerencial(tx, ctx.tenantId, body.pin_gerencial)
@@ -843,16 +869,24 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         clienteId,
         cliente: clienteNome,
         vendedorId: vendedorFinalId,
-        formaPagamentoId: body.forma_pagamento_id
-          ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id')
-          : cliDefaults?.formaPagamentoPadraoId || null,
-        localCobrancaId: body.local_cobranca_id
-          ? parseUuidOrBadRequest(body.local_cobranca_id, 'local_cobranca_id')
-          : cliDefaults?.localCobrancaPadraoId || null,
-        naturezaId: body.natureza_id ? parseUuidOrBadRequest(body.natureza_id, 'natureza_id') : null,
-        tabelaPrecoId: gov.tabela_preco_usada_id || tabelaPrecoFinalId,
+        formaPagamentoId: isClienteNaoFaturar
+          ? null
+          : body.forma_pagamento_id
+            ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id')
+            : cliDefaults?.formaPagamentoPadraoId || null,
+        localCobrancaId: isClienteNaoFaturar
+          ? null
+          : body.local_cobranca_id
+            ? parseUuidOrBadRequest(body.local_cobranca_id, 'local_cobranca_id')
+            : cliDefaults?.localCobrancaPadraoId || null,
+        naturezaId: isClienteNaoFaturar
+          ? null
+          : body.natureza_id
+            ? parseUuidOrBadRequest(body.natureza_id, 'natureza_id')
+            : null,
+        tabelaPrecoId: isClienteNaoFaturar ? null : gov.tabela_preco_usada_id || tabelaPrecoFinalId,
         custoTotalEstimado: toDec(gov.custo_total_estimado, 2),
-        margemBrutaPct: gov.margem_bruta_pct != null ? toDec(gov.margem_bruta_pct, 2) : null,
+        margemBrutaPct: !isClienteNaoFaturar && gov.margem_bruta_pct != null ? toDec(gov.margem_bruta_pct, 2) : null,
         alertaComercialJson: gov.alerta,
         aprovadoComercialPorId,
         aprovadoComercialPorNome,
@@ -1189,20 +1223,41 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
       const clienteFinalId = body.cliente_id
         ? parseUuidOrBadRequest(body.cliente_id, 'cliente_id')
         : atual.clienteId
-      const vendedorFinalId =
-        body.vendedor_id !== undefined
+
+      let isClienteNaoFaturarPut = false
+      if (clienteFinalId) {
+        const [cliCheck] = await tx
+          .select({ naoFaturar: clientes.naoFaturar })
+          .from(clientes)
+          .where(and(eq(clientes.id, clienteFinalId), eq(clientes.tenantId, ctx.tenantId)))
+          .limit(1)
+        isClienteNaoFaturarPut = Number(cliCheck?.naoFaturar || 0) === 1
+      }
+      if (isClienteNaoFaturarPut) {
+        for (const it of itensConsolidados) {
+          it.preco_unitario = 0
+          it.desconto_pct = 0
+          it.desconto_valor = 0
+        }
+      }
+
+      const vendedorFinalId = isClienteNaoFaturarPut
+        ? null
+        : body.vendedor_id !== undefined
           ? body.vendedor_id
             ? parseUuidOrBadRequest(body.vendedor_id, 'vendedor_id')
             : null
           : atual.vendedorId
-      const tabelaPrecoFinalId =
-        body.tabela_preco_id !== undefined
+      const tabelaPrecoFinalId = isClienteNaoFaturarPut
+        ? null
+        : body.tabela_preco_id !== undefined
           ? body.tabela_preco_id
             ? parseUuidOrBadRequest(body.tabela_preco_id, 'tabela_preco_id')
             : null
           : atual.tabelaPrecoId
-      const pgtoEntregaFinal =
-        body.pagamento_na_entrega !== undefined
+      const pgtoEntregaFinal = isClienteNaoFaturarPut
+        ? 0
+        : body.pagamento_na_entrega !== undefined
           ? body.pagamento_na_entrega
             ? 1
             : 0
@@ -1215,7 +1270,8 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         tabelaPrecoId: tabelaPrecoFinalId,
         pagamentoNaEntrega: pgtoEntregaFinal === 1,
         itens: itensConsolidados,
-        forcarAvaliacaoEstrita: body.aplicar_trava_comercial === true || atual.status === 'BLOQUEADO_COMERCIAL',
+        forcarAvaliacaoEstrita:
+          !isClienteNaoFaturarPut && (body.aplicar_trava_comercial === true || atual.status === 'BLOQUEADO_COMERCIAL'),
         ignorePedidoId: pedidoId,
       })
 
@@ -1291,8 +1347,9 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
         0,
       )
 
-      const formaPgtoFinal =
-        body.forma_pagamento_id !== undefined
+      const formaPgtoFinal = isClienteNaoFaturarPut
+        ? null
+        : body.forma_pagamento_id !== undefined
           ? body.forma_pagamento_id
             ? parseUuidOrBadRequest(body.forma_pagamento_id, 'forma_pagamento_id')
             : null
@@ -1310,21 +1367,23 @@ export function registerPedidosRoutes(app: FastifyInstance, conn: DbConnection):
           cliente: clienteFinal,
           vendedorId: vendedorFinalId,
           formaPagamentoId: formaPgtoFinal,
-          localCobrancaId:
-            body.local_cobranca_id !== undefined
+          localCobrancaId: isClienteNaoFaturarPut
+            ? null
+            : body.local_cobranca_id !== undefined
               ? body.local_cobranca_id
                 ? parseUuidOrBadRequest(body.local_cobranca_id, 'local_cobranca_id')
                 : null
               : atual.localCobrancaId,
-          naturezaId:
-            body.natureza_id !== undefined
+          naturezaId: isClienteNaoFaturarPut
+            ? null
+            : body.natureza_id !== undefined
               ? body.natureza_id
                 ? parseUuidOrBadRequest(body.natureza_id, 'natureza_id')
                 : null
               : atual.naturezaId,
-          tabelaPrecoId: gov.tabela_preco_usada_id || tabelaPrecoFinalId,
+          tabelaPrecoId: isClienteNaoFaturarPut ? null : gov.tabela_preco_usada_id || tabelaPrecoFinalId,
           custoTotalEstimado: toDec(gov.custo_total_estimado, 2),
-          margemBrutaPct: gov.margem_bruta_pct != null ? toDec(gov.margem_bruta_pct, 2) : null,
+          margemBrutaPct: !isClienteNaoFaturarPut && gov.margem_bruta_pct != null ? toDec(gov.margem_bruta_pct, 2) : null,
           alertaComercialJson: gov.alerta,
           aprovadoComercialPorId: aprovadoPorId,
           aprovadoComercialPorNome: aprovadoPorNome,

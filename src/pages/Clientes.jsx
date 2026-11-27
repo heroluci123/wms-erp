@@ -13,6 +13,7 @@ import {
   Ban,
   Star,
   Power,
+  Package,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { isApiEnabled } from '../lib/apiClient'
@@ -57,6 +58,7 @@ const FORM_INICIAL = {
   desconto_max_pct: 0,
   permite_pagamento_entrega: 1,
   bloqueado_financeiro: 0,
+  nao_faturar: 0,
   is_padrao: 0,
 }
 
@@ -150,6 +152,7 @@ export function Clientes() {
         String(c.cidade || '').toLowerCase().includes(q)
 
       if (!matchBusca) return false
+      if (filtro === 'NAO_FATURAR') return Number(c.nao_faturar) === 1
       if (filtro === 'BLOQUEADOS') return Number(c.bloqueado_financeiro) === 1
       if (filtro === 'PGTO_ENTREGA') return Number(c.permite_pagamento_entrega) === 1
       if (filtro === 'COM_ALERTAS') return Number(c.qtd_alertas || 0) > 0
@@ -209,6 +212,7 @@ export function Clientes() {
       desconto_max_pct: Number(c.desconto_max_pct || 0),
       permite_pagamento_entrega: Number(c.permite_pagamento_entrega ?? 1),
       bloqueado_financeiro: Number(c.bloqueado_financeiro || 0),
+      nao_faturar: Number(c.nao_faturar || 0),
       is_padrao: Number(c.is_padrao || 0),
     })
     setModalOpen(true)
@@ -242,6 +246,7 @@ export function Clientes() {
         desconto_ativo: Number(form.desconto_max_pct || 0) > 0 ? 1 : Number(form.desconto_ativo || 0),
         desconto_max_pct: Number(form.desconto_max_pct || 0),
         limite_credito: Number(form.limite_credito || 0),
+        nao_faturar: Number(form.nao_faturar || 0),
       })
       toastSuccess('Cliente salvo', `${form.razao_social.toUpperCase()} salvo com sucesso.`)
       setModalOpen(false)
@@ -474,6 +479,7 @@ export function Clientes() {
             <span style={{ width: 1, height: 18, background: 'var(--border)' }} />
             {[
               { id: 'TODOS', label: 'Qualquer Perfil' },
+              { id: 'NAO_FATURAR', label: 'Não Faturar (Estoque)' },
               { id: 'PGTO_ENTREGA', label: 'Pgto na Entrega' },
               { id: 'BLOQUEADOS', label: 'Bloqueados Financeiro' },
               { id: 'COM_ALERTAS', label: 'Com Alertas ⚠️' },
@@ -536,7 +542,12 @@ export function Clientes() {
                               <Star size={10} /> Padrão
                             </span>
                           )}
-                          {Number(c.bloqueado_financeiro) === 1 && (
+                          {Number(c.nao_faturar) === 1 && (
+                            <span className="badge badge--purple" style={{ fontSize: 10 }}>
+                              <Package size={10} /> Somente Estoque (Não Faturar)
+                            </span>
+                          )}
+                          {Number(c.bloqueado_financeiro) === 1 && Number(c.nao_faturar) !== 1 && (
                             <span className="badge badge--danger" style={{ fontSize: 10 }}>
                               <Ban size={10} /> Bloqueado
                             </span>
@@ -551,7 +562,9 @@ export function Clientes() {
                         <div className="td-muted">{c.cidade || '-'}</div>
                       </td>
                       <td>
-                        {c.vendedor_nome ? (
+                        {Number(c.nao_faturar) === 1 ? (
+                          <span className="td-muted">Controle Logístico</span>
+                        ) : c.vendedor_nome ? (
                           <span className="badge badge--ghost">
                             {c.vendedor_sigla ? `(${c.vendedor_sigla}) ` : ''}
                             {c.vendedor_nome}
@@ -561,14 +574,24 @@ export function Clientes() {
                         )}
                       </td>
                       <td>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>{c.forma_pagamento_descricao || '-'}</div>
-                        <div className="td-muted">
-                          {c.local_cobranca_nome || '-'}
-                          {Number(c.permite_pagamento_entrega) === 1 ? ' • Aceita na Entrega' : ''}
-                        </div>
+                        {Number(c.nao_faturar) === 1 ? (
+                          <span className="badge badge--neutral" style={{ fontSize: 11 }}>
+                            Isento (Não Faturar)
+                          </span>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>{c.forma_pagamento_descricao || '-'}</div>
+                            <div className="td-muted">
+                              {c.local_cobranca_nome || '-'}
+                              {Number(c.permite_pagamento_entrega) === 1 ? ' • Aceita na Entrega' : ''}
+                            </div>
+                          </>
+                        )}
                       </td>
                       <td style={{ textAlign: 'right' }} className="td-mono">
-                        R$ {Number(c.limite_credito || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {Number(c.nao_faturar) === 1
+                          ? '—'
+                          : `R$ ${Number(c.limite_credito || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
                       </td>
                       <td>
                         <button
@@ -741,47 +764,76 @@ export function Clientes() {
               </div>
 
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-                <div className="text-xs font-bold uppercase text-primary mb-12">Regras Comerciais Automáticas no Pedido</div>
-                <div className="form-grid form-grid--3">
-                  <div>
-                    <label className="form-label">Vendedor Padrão</label>
-                    <SmartSearchSelect
-                      items={vendedores}
-                      value={form.vendedor_padrao_id}
-                      onChange={(val) => setForm({ ...form, vendedor_padrao_id: val })}
-                      icon="user"
-                      getCode={(v) => String(v?.codigo || v?.sigla || '')}
-                      getLabel={(v) => String(v?.nome || '')}
-                      emptyLabel="-- Nenhum --"
-                      placeholder="Pesquisar vendedor..."
-                      modalTitle="Selecionar Vendedor Padrão"
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Forma de Pagamento Padrão</label>
-                    <select className="form-input" value={form.forma_pagamento_padrao_id} onChange={(e) => setForm({ ...form, forma_pagamento_padrao_id: e.target.value })}>
-                      <option value="">-- Selecionar --</option>
-                      {(auxiliares.formasPagamento || []).map((fp) => (
-                        <option key={fp.id} value={fp.id}>
-                          {fp.descricao}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="form-label">Local de Cobrança / Banco</label>
-                    <select className="form-input" value={form.local_cobranca_padrao_id} onChange={(e) => setForm({ ...form, local_cobranca_padrao_id: e.target.value })}>
-                      <option value="">-- Selecionar --</option>
-                      {(auxiliares.locaisCobranca || []).map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.nome}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                <div className="text-xs font-bold uppercase text-primary mb-12">Regras Comerciais &amp; Modo de Operação no Pedido</div>
 
-                <div className="form-grid form-grid--3 mt-12">
+                <label
+                  className="flex items-start gap-10 cursor-pointer"
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    marginBottom: 14,
+                    background: Number(form.nao_faturar) === 1 ? 'rgba(139, 92, 246, 0.14)' : 'var(--bg-2)',
+                    border: Number(form.nao_faturar) === 1 ? '1.5px solid rgba(139, 92, 246, 0.55)' : '1px solid var(--border)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    style={{ marginTop: 3 }}
+                    checked={Number(form.nao_faturar) === 1}
+                    onChange={(e) => setForm({ ...form, nao_faturar: e.target.checked ? 1 : 0 })}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, color: Number(form.nao_faturar) === 1 ? '#c4b5fd' : 'var(--text-primary)' }}>
+                      Somente Controle de Estoque / Logístico (Não Faturar)
+                    </div>
+                    <div className="text-xs text-muted" style={{ marginTop: 2, lineHeight: 1.4 }}>
+                      Quando marcado, os pedidos deste cliente escondem campos de preço (R$/kg), descontos e condições financeiras, não aplicam travas de margem/crédito e não geram títulos no Contas a Receber nem fila de NF-e.
+                    </div>
+                  </div>
+                </label>
+
+                {Number(form.nao_faturar) !== 1 && (
+                  <div className="form-grid form-grid--3">
+                    <div>
+                      <label className="form-label">Vendedor Padrão</label>
+                      <SmartSearchSelect
+                        items={vendedores}
+                        value={form.vendedor_padrao_id}
+                        onChange={(val) => setForm({ ...form, vendedor_padrao_id: val })}
+                        icon="user"
+                        getCode={(v) => String(v?.codigo || v?.sigla || '')}
+                        getLabel={(v) => String(v?.nome || '')}
+                        emptyLabel="-- Nenhum --"
+                        placeholder="Pesquisar vendedor..."
+                        modalTitle="Selecionar Vendedor Padrão"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Forma de Pagamento Padrão</label>
+                      <select className="form-input" value={form.forma_pagamento_padrao_id} onChange={(e) => setForm({ ...form, forma_pagamento_padrao_id: e.target.value })}>
+                        <option value="">-- Selecionar --</option>
+                        {(auxiliares.formasPagamento || []).map((fp) => (
+                          <option key={fp.id} value={fp.id}>
+                            {fp.descricao}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Local de Cobrança / Banco</label>
+                      <select className="form-input" value={form.local_cobranca_padrao_id} onChange={(e) => setForm({ ...form, local_cobranca_padrao_id: e.target.value })}>
+                        <option value="">-- Selecionar --</option>
+                        {(auxiliares.locaisCobranca || []).map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.nome}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <div className={`form-grid ${Number(form.nao_faturar) === 1 ? 'form-grid--2' : 'form-grid--3'} mt-12`}>
                   <div>
                     <label className="form-label">Marchante Padrão</label>
                     <select className="form-input" value={form.marchante_padrao || marchantePadraoDefault} onChange={(e) => setForm({ ...form, marchante_padrao: e.target.value })}>
@@ -817,65 +869,73 @@ export function Clientes() {
                       ))}
                     </datalist>
                   </div>
-                  <div>
-                    <label className="form-label">Limite de Crédito (R$)</label>
-                    <input type="number" step="0.01" className="form-input" value={form.limite_credito} onChange={(e) => setForm({ ...form, limite_credito: e.target.value })} />
-                  </div>
+                  {Number(form.nao_faturar) !== 1 && (
+                    <div>
+                      <label className="form-label">Limite de Crédito (R$)</label>
+                      <input type="number" step="0.01" className="form-input" value={form.limite_credito} onChange={(e) => setForm({ ...form, limite_credito: e.target.value })} />
+                    </div>
+                  )}
                 </div>
 
-                <div className="form-grid form-grid--2 mt-12">
-                  <div>
-                    <label className="form-label">Tabela de Preço Padrão (Atacado / Contrato)</label>
-                    <select
-                      className="form-input"
-                      value={form.tabela_preco_id}
-                      onChange={(e) => setForm({ ...form, tabela_preco_id: e.target.value })}
-                    >
-                      <option value="">-- Usar Padrão Atacado / Base --</option>
-                      {tabelasPreco.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.codigo} — {t.nome} ({t.finalidade})
-                        </option>
-                      ))}
-                    </select>
+                {Number(form.nao_faturar) !== 1 && (
+                  <div className="form-grid form-grid--2 mt-12">
+                    <div>
+                      <label className="form-label">Tabela de Preço Padrão (Atacado / Contrato)</label>
+                      <select
+                        className="form-input"
+                        value={form.tabela_preco_id}
+                        onChange={(e) => setForm({ ...form, tabela_preco_id: e.target.value })}
+                      >
+                        <option value="">-- Usar Padrão Atacado / Base --</option>
+                        {tabelasPreco.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.codigo} — {t.nome} ({t.finalidade})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Desconto Máximo Negociado (%)</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max="100"
+                        className="form-input"
+                        value={form.desconto_max_pct}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            desconto_max_pct: e.target.value,
+                            desconto_ativo: Number(e.target.value || 0) > 0 ? 1 : 0,
+                          })
+                        }
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="form-label">Desconto Máximo Negociado (%)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      min="0"
-                      max="100"
-                      className="form-input"
-                      value={form.desconto_max_pct}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          desconto_max_pct: e.target.value,
-                          desconto_ativo: Number(e.target.value || 0) > 0 ? 1 : 0,
-                        })
-                      }
-                    />
-                  </div>
-                </div>
+                )}
 
                 <div className="flex gap-16 flex-wrap mt-16">
-                  <label className="flex items-center gap-8 cursor-pointer text-sm">
-                    <input
-                      type="checkbox"
-                      checked={Number(form.permite_pagamento_entrega) === 1}
-                      onChange={(e) => setForm({ ...form, permite_pagamento_entrega: e.target.checked ? 1 : 0 })}
-                    />
-                    Permite Pagamento na Entrega (Trava Motorista)
-                  </label>
-                  <label className="flex items-center gap-8 cursor-pointer text-sm">
-                    <input
-                      type="checkbox"
-                      checked={Number(form.bloqueado_financeiro) === 1}
-                      onChange={(e) => setForm({ ...form, bloqueado_financeiro: e.target.checked ? 1 : 0 })}
-                    />
-                    <span className="text-danger font-bold">Bloqueio Financeiro / Inadimplência</span>
-                  </label>
+                  {Number(form.nao_faturar) !== 1 && (
+                    <>
+                      <label className="flex items-center gap-8 cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          checked={Number(form.permite_pagamento_entrega) === 1}
+                          onChange={(e) => setForm({ ...form, permite_pagamento_entrega: e.target.checked ? 1 : 0 })}
+                        />
+                        Permite Pagamento na Entrega (Trava Motorista)
+                      </label>
+                      <label className="flex items-center gap-8 cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          checked={Number(form.bloqueado_financeiro) === 1}
+                          onChange={(e) => setForm({ ...form, bloqueado_financeiro: e.target.checked ? 1 : 0 })}
+                        />
+                        <span className="text-danger font-bold">Bloqueio Financeiro / Inadimplência</span>
+                      </label>
+                    </>
+                  )}
                   <label className="flex items-center gap-8 cursor-pointer text-sm">
                     <input
                       type="checkbox"

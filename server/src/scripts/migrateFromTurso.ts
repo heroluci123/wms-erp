@@ -441,6 +441,7 @@ export async function migrateTursoToPostgres(turso: Client, conn: DbConnection):
       pais: String(r.pais || 'BRASIL'),
       telefone: String(r.telefone || ''),
       icms: String(r.icms || 'CONTRIBUINTE'),
+      naoFaturar: String(r.razao_social || '').toUpperCase().includes('BEEF CONTAINER') ? 1 : 0,
       isPadrao: Number(r.is_padrao ?? 0),
       ativo: Number(r.ativo ?? 1),
       createdAt: asTimestamp(r.created_at) ?? new Date(),

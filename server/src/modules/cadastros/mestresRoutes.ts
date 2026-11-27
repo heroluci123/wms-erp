@@ -104,6 +104,7 @@ const ClienteSchema = z.object({
   tabela_preco_id: optNullableUuid.optional(),
   bloqueado_financeiro: z.union([z.boolean(), z.number()]).optional().default(0),
   permite_pagamento_entrega: z.union([z.boolean(), z.number()]).optional().default(1),
+  nao_faturar: z.union([z.boolean(), z.number()]).optional().default(0),
   is_padrao: z.union([z.boolean(), z.number()]).optional().default(0),
 })
 
@@ -505,6 +506,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           tp.nome AS tabela_preco_nome,
           c.bloqueado_financeiro,
           c.permite_pagamento_entrega,
+          c.nao_faturar,
           c.is_padrao,
           c.ativo,
           c.inativado_em,
@@ -553,6 +555,7 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
             desconto_max_pct: Number(r.desconto_max_pct || 0),
             bloqueado_financeiro: Number(r.bloqueado_financeiro || 0),
             permite_pagamento_entrega: Number(r.permite_pagamento_entrega ?? 1),
+            nao_faturar: Number(r.nao_faturar || 0),
             is_padrao: Number(r.is_padrao || 0),
             qtd_especificacoes: Number(r.qtd_especificacoes || 0),
             qtd_alertas: Number(r.qtd_alertas || 0),
@@ -621,6 +624,8 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           tabelaPrecoId: d.tabela_preco_id || null,
           bloqueadoFinanceiro: flag01(d.bloqueado_financeiro, 0),
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
+          naoFaturar: flag01(d.nao_faturar, 0),
+          naoFaturarDefinidoManual: 1,
           isPadrao,
         })
         return codResolvido
@@ -677,6 +682,8 @@ export function registerCadastrosMestresRoutes(app: FastifyInstance, conn: DbCon
           ...(d.tabela_preco_id !== undefined ? { tabelaPrecoId: d.tabela_preco_id || null } : {}),
           bloqueadoFinanceiro: flag01(d.bloqueado_financeiro, 0),
           permitePagamentoEntrega: flag01(d.permite_pagamento_entrega, 1),
+          naoFaturar: flag01(d.nao_faturar, 0),
+          naoFaturarDefinidoManual: 1,
           isPadrao,
           updatedAt: new Date(),
         })

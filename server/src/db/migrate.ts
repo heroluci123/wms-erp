@@ -1992,6 +1992,13 @@ CREATE TABLE IF NOT EXISTS camaras_temperatura_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_camaras_temp_tenant_filial_data ON camaras_temperatura_log(tenant_id, filial_id, created_at);
+
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS nao_faturar INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS nao_faturar_definido_manual INTEGER NOT NULL DEFAULT 0;
+UPDATE clientes
+   SET nao_faturar = 1
+ WHERE UPPER(razao_social) LIKE '%BEEF CONTAINER%'
+   AND nao_faturar_definido_manual = 0;
 `
 
 export interface SeedDefaultsResult {

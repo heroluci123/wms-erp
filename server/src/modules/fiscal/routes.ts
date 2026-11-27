@@ -765,6 +765,7 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
             eq(pedidos.filialId, ctx.filialId),
             ne(pedidos.status, 'CANCELADO'),
             ne(pedidos.status, 'RASCUNHO'),
+            sql`COALESCE(${clientes.naoFaturar}, 0) = 0`,
           ),
         )
         .orderBy(desc(pedidos.createdAt))
@@ -903,6 +904,13 @@ export function registerFiscalRoutes(app: FastifyInstance, conn: DbConnection): 
           .limit(1)
           .then((r) => r[0] || null),
       ])
+
+    if (Number(cli?.naoFaturar || 0) === 1) {
+      throw new HttpError(
+        400,
+        'Este cliente está configurado como Somente Controle de Estoque (Não Faturar). Desative essa opção no cadastro do cliente caso precise emitir NF-e.',
+      )
+    }
 
     let sugTranspId = embLink?.transportadoraId || null
     let sugPlaca = embLink?.veiculoPlaca || ''

@@ -323,6 +323,8 @@ export const clientes = pgTable(
     tabelaPrecoId: uuid('tabela_preco_id'),
     bloqueadoFinanceiro: integer('bloqueado_financeiro').notNull().default(0),
     permitePagamentoEntrega: integer('permite_pagamento_entrega').notNull().default(1),
+    naoFaturar: integer('nao_faturar').notNull().default(0),
+    naoFaturarDefinidoManual: integer('nao_faturar_definido_manual').notNull().default(0),
     isPadrao: integer('is_padrao').notNull().default(0),
     ativo: integer('ativo').notNull().default(1),
     inativadoEm: timestamp('inativado_em', { withTimezone: true }),

@@ -23,6 +23,7 @@ export interface ConfigComercial {
 
 export interface SaudeFinanceiraCliente {
   cliente_id: string
+  nao_faturar: boolean
   bloqueado_financeiro: boolean
   limite_credito: number
   credito_utilizado: number
@@ -154,6 +155,7 @@ export async function obterSaudeFinanceiraCliente(
       id: clientes.id,
       limiteCredito: clientes.limiteCredito,
       bloqueadoFinanceiro: clientes.bloqueadoFinanceiro,
+      naoFaturar: clientes.naoFaturar,
       descontoAtivo: clientes.descontoAtivo,
       descontoMaxPct: clientes.descontoMaxPct,
       tabelaPrecoId: clientes.tabelaPrecoId,
@@ -163,6 +165,26 @@ export async function obterSaudeFinanceiraCliente(
     .limit(1)
 
   if (!cli) return null
+
+  const naoFaturar = Number(cli.naoFaturar || 0) === 1
+  if (naoFaturar) {
+    return {
+      cliente_id: cli.id,
+      nao_faturar: true,
+      bloqueado_financeiro: false,
+      limite_credito: 0,
+      credito_utilizado: 0,
+      credito_disponivel: 0,
+      valor_vencido: 0,
+      qtd_titulos_abertos: 0,
+      qtd_titulos_vencidos: 0,
+      maior_atraso_dias: 0,
+      desconto_ativo: false,
+      desconto_max_pct: 0,
+      tabela_preco_id: null,
+      semaforo: 'VERDE',
+    }
+  }
 
   const hoje = hojeIsoLocal()
   const corteVenc = subtrairDiasIso(hoje, params.diasTolerancia ?? 3)
@@ -219,6 +241,7 @@ export async function obterSaudeFinanceiraCliente(
 
   return {
     cliente_id: cli.id,
+    nao_faturar: false,
     bloqueado_financeiro: bloqueado,
     limite_credito: Number(limite.toFixed(2)),
     credito_utilizado: Number(creditoUtilizado.toFixed(2)),
@@ -556,8 +579,9 @@ export async function avaliarGovernancaComercialPedido(
   let bloqueadoInadimplencia = false
   const motivos: string[] = []
 
-  const aplicarTravaMargem = config.trava_margem_ativa || params.forcarAvaliacaoEstrita === true
-  const aplicarTravaCredito = config.trava_credito_ativa || params.forcarAvaliacaoEstrita === true
+  const clienteNaoFaturar = Boolean(saudeCliente?.nao_faturar)
+  const aplicarTravaMargem = !clienteNaoFaturar && (config.trava_margem_ativa || params.forcarAvaliacaoEstrita === true)
+  const aplicarTravaCredito = !clienteNaoFaturar && (config.trava_credito_ativa || params.forcarAvaliacaoEstrita === true)
 
   if (aplicarTravaMargem) {
     if (bloqueadoAbaixoCusto && config.bloquear_venda_abaixo_custo) {

@@ -209,7 +209,7 @@ export function Pedidos() {
   const [novoCliForm, setNovoCliForm] = useState({
     codigo: '', razao_social: '', nome_fantasia: '', cnpj_cpf: '', inscricao_estadual: '',
     endereco: '', numero: '', bairro: '', cep: '', cidade: '', uf: 'SP', pais: 'BRASIL',
-    telefone: '', icms: 'CONTRIBUINTE'
+    telefone: '', icms: 'CONTRIBUINTE', nao_faturar: 0
   })
   const [previsaoEntrega, setPrevisaoEntrega] = useState('')
   const [observacoes, setObservacoes] = useState('')
@@ -467,6 +467,15 @@ export function Pedidos() {
     [clientes, clienteIdSelecionado, clientePadrao]
   )
 
+  const clienteNaoFaturar = Number(clienteAtivo?.nao_faturar || 0) === 1
+  const modoComercialAtivo = apiAtiva && !clienteNaoFaturar
+
+  useEffect(() => {
+    if (clienteNaoFaturar && abaForm === 'NF_DESCONTOS') {
+      setAbaForm('ITENS')
+    }
+  }, [clienteNaoFaturar, abaForm])
+
   const aplicarRegrasDoCliente = async (cli, preservarCamposEdit = false) => {
     if (!apiAtiva || !cli) return
     try {
@@ -524,7 +533,7 @@ export function Pedidos() {
     setIndiceSugestao(-1)
     setPesoManualCxInput('')
     const espec = especificacoesCliente.find((e) => String(e.produto_id) === String(prod.id))
-    const precoSug = espec?.preco_negociado ?? espec?.ultima_venda_preco ?? prod.valor_unitario ?? 0
+    const precoSug = clienteNaoFaturar ? 0 : (espec?.preco_negociado ?? espec?.ultima_venda_preco ?? prod.valor_unitario ?? 0)
     setPrecoUnitInput(precoSug > 0 ? String(precoSug) : '')
     if (espec?.especificacao_corte && !obsItemInput) {
       setObsItemInput(espec.especificacao_corte)
@@ -808,7 +817,11 @@ export function Pedidos() {
 
     const espec = especificacoesCliente.find((e) => String(e.produto_id) === String(produtoSelecionado.id))
     const precoNum = Number(String(precoUnitInput).replace(',', '.') || 0)
-    const precoFinal = Number.isFinite(precoNum) && precoNum >= 0 ? precoNum : Number(produtoSelecionado.valor_unitario || 0)
+    const precoFinal = clienteNaoFaturar
+      ? 0
+      : Number.isFinite(precoNum) && precoNum >= 0
+        ? precoNum
+        : Number(produtoSelecionado.valor_unitario || 0)
 
     setItensForm((prev) => {
       const idx = prev.findIndex((i) => String(i.produto_id) === String(produtoSelecionado.id))
@@ -879,7 +892,7 @@ export function Pedidos() {
       setNovoCliForm({
         codigo: '', razao_social: '', nome_fantasia: '', cnpj_cpf: '', inscricao_estadual: '',
         endereco: '', numero: '', bairro: '', cep: '', cidade: '', uf: 'SP', pais: 'BRASIL',
-        telefone: '', icms: 'CONTRIBUINTE'
+        telefone: '', icms: 'CONTRIBUINTE', nao_faturar: 0
       })
       toastSuccess(`Cliente "${criado.razao_social}" cadastrado e selecionado neste pedido.`)
     } catch (err) {
@@ -978,9 +991,9 @@ export function Pedidos() {
         : null,
       unidade_solicitada: i.unidade_solicitada || 'KG',
       qtd_solicitada_exibicao: i.qtd_solicitada_exibicao != null ? Number(i.qtd_solicitada_exibicao) : null,
-      preco_unitario: Number(String(i.preco_unitario || 0).replace(',', '.') || 0),
-      desconto_pct: Math.max(0, Math.min(100, Number(String(i.desconto_pct || 0).replace(',', '.') || 0))),
-      desconto_valor: Math.max(0, Number(String(i.desconto_valor || 0).replace(',', '.') || 0)),
+      preco_unitario: clienteNaoFaturar ? 0 : Number(String(i.preco_unitario || 0).replace(',', '.') || 0),
+      desconto_pct: clienteNaoFaturar ? 0 : Math.max(0, Math.min(100, Number(String(i.desconto_pct || 0).replace(',', '.') || 0))),
+      desconto_valor: clienteNaoFaturar ? 0 : Math.max(0, Number(String(i.desconto_valor || 0).replace(',', '.') || 0)),
       codigo_aux: i.codigo_aux || '',
       cfop_aplicado: i.cfop_aplicado || cfopSugerido?.cfop_completo || '',
       observacao: i.observacao || '',
@@ -1678,10 +1691,14 @@ export function Pedidos() {
                 )}
                 {' • '}
                 Peso Total: <strong style={{ color: '#38bdf8' }}>{fmtKg(resumoFiltrado.totalKg)}</strong>
-                {' • '}
-                Valor Total: <strong style={{ color: '#4ade80' }}>
-                  R$ {resumoFiltrado.totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </strong>
+                {resumoFiltrado.totalValor > 0 && (
+                  <>
+                    {' • '}
+                    Valor Total: <strong style={{ color: '#4ade80' }}>
+                      R$ {resumoFiltrado.totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </strong>
+                  </>
+                )}
               </div>
               {(presetData !== 'TODAS' || filtroStatus !== 'TODOS' || filtroBusca || filtroVendedorId || filtroFormaPagtoId || filtroSetor !== 'TODOS' || filtroPagtoEntrega) &&
                 totalGeralApi > resumoFiltrado.qtd && (
@@ -1757,12 +1774,17 @@ export function Pedidos() {
                             <div style={{ fontWeight: 700 }}>{ped.titulo}</div>
                             <div className="text-muted text-xs">
                               {ped.cliente || 'BEEF CONTAINER LIMITADA'} • Criado em {fmtDataHora(ped.created_at)} por <strong>{ped.criado_por_nome || '-'}</strong>{ped.setor_solicitante ? ` (${ped.setor_solicitante})` : ''}
-                              {Number(ped.valor_total || 0) > 0 && (
+                              {Number(ped.cliente_nao_faturar || 0) === 1 && (
+                                <span className="badge badge--purple" style={{ fontSize: 10, marginLeft: 6 }}>
+                                  Somente Estoque (Não Faturar)
+                                </span>
+                              )}
+                              {Number(ped.cliente_nao_faturar || 0) !== 1 && Number(ped.valor_total || 0) > 0 && (
                                 <strong style={{ color: '#4ade80', marginLeft: 8 }}>
                                   R$ {Number(ped.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </strong>
                               )}
-                              {ped.margem_bruta_pct != null && (
+                              {Number(ped.cliente_nao_faturar || 0) !== 1 && ped.margem_bruta_pct != null && (
                                 <span
                                   className={`badge ${
                                     Number(ped.margem_bruta_pct) < 0
@@ -2019,34 +2041,36 @@ export function Pedidos() {
             </div>
           )}
 
-          {/* Abas internas do formulário do Pedido */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
-            <button
-              type="button"
-              className={`btn btn--sm ${abaForm === 'ITENS' ? 'btn--primary' : 'btn--secondary'}`}
-              onClick={() => setAbaForm('ITENS')}
-            >
-              <Package size={15} /> 1. Dados &amp; Itens do Pedido ({itensForm.length})
-            </button>
-            <button
-              type="button"
-              className={`btn btn--sm ${abaForm === 'NF_DESCONTOS' ? 'btn--primary' : 'btn--secondary'}`}
-              onClick={() => setAbaForm('NF_DESCONTOS')}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              <FileText size={15} /> 2. Especificações da NF &amp; Descontos
-              {totalFormDesconto > 0 && (
-                <span className="badge badge--success font-mono" style={{ fontSize: 10.5, padding: '1px 6px' }}>
-                  -R$ {totalFormDesconto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
-              )}
-              {observacaoNf.trim() && (
-                <span className="badge badge--info" style={{ fontSize: 10.5, padding: '1px 6px' }}>
-                  Obs. NF
-                </span>
-              )}
-            </button>
-          </div>
+          {/* Abas internas do formulário do Pedido (oculta aba fiscal/descontos quando cliente é Não Faturar) */}
+          {!clienteNaoFaturar && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+              <button
+                type="button"
+                className={`btn btn--sm ${abaForm === 'ITENS' ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => setAbaForm('ITENS')}
+              >
+                <Package size={15} /> 1. Dados &amp; Itens do Pedido ({itensForm.length})
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${abaForm === 'NF_DESCONTOS' ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => setAbaForm('NF_DESCONTOS')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <FileText size={15} /> 2. Especificações da NF &amp; Descontos
+                {totalFormDesconto > 0 && (
+                  <span className="badge badge--success font-mono" style={{ fontSize: 10.5, padding: '1px 6px' }}>
+                    -R$ {totalFormDesconto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                )}
+                {observacaoNf.trim() && (
+                  <span className="badge badge--info" style={{ fontSize: 10.5, padding: '1px 6px' }}>
+                    Obs. NF
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
 
           {abaForm === 'ITENS' && (
             <>
@@ -2073,7 +2097,10 @@ export function Pedidos() {
                   {Number(clienteAtivo?.is_padrao) === 1 && (
                     <span className="badge badge--success">Cliente Padrão</span>
                   )}
-                  {Number(clienteAtivo?.bloqueado_financeiro) === 1 && (
+                  {clienteNaoFaturar && (
+                    <span className="badge badge--purple">Somente Controle de Estoque (Não Faturar)</span>
+                  )}
+                  {!clienteNaoFaturar && Number(clienteAtivo?.bloqueado_financeiro) === 1 && (
                     <span className="badge badge--danger">⚠️ Bloqueio Financeiro</span>
                   )}
                   {Number(clienteAtivo?.qtd_alertas || 0) > 0 && (
@@ -2169,8 +2196,8 @@ export function Pedidos() {
             />
           </div>
 
-          {/* Condições Comerciais & Cobrança (Auto do Cliente no Modo API/PostgreSQL) */}
-          {apiAtiva && (
+          {/* Condições Comerciais & Cobrança (Auto do Cliente no Modo API/PostgreSQL, oculto para clientes Não Faturar) */}
+          {modoComercialAtivo && (
             <div
               style={{
                 background: 'rgba(13, 20, 36, 0.72)',
@@ -2292,7 +2319,7 @@ export function Pedidos() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: apiAtiva
+                gridTemplateColumns: modoComercialAtivo
                   ? '130px minmax(220px, 1.8fr) 195px 115px minmax(120px, 1fr) auto'
                   : '145px minmax(260px, 1.8fr) 205px minmax(140px, 1fr) auto',
                 gap: '10px',
@@ -2529,8 +2556,8 @@ export function Pedidos() {
                 </div>
               </div>
 
-              {/* 4B. Preço Unitário (Modo API/Comercial) */}
-              {apiAtiva && (
+              {/* 4B. Preço Unitário (Modo Comercial — oculto quando cliente é Não Faturar) */}
+              {modoComercialAtivo && (
                 <div>
                   <label className="form-label">Preço R$/kg</label>
                   <input
@@ -2714,12 +2741,12 @@ export function Pedidos() {
               <strong>Itens do Pedido ({itensForm.length})</strong>
               <span className="font-mono font-bold">
                 Total Solicitado: {fmtKg(totalFormKg)} {totalFormCx > 0 ? `• ~${fmtCx(totalFormCx)}` : ''}
-                {apiAtiva && totalFormDesconto > 0 && (
+                {modoComercialAtivo && totalFormDesconto > 0 && (
                   <span style={{ color: '#fbbf24', marginLeft: 10 }}>
                     • Desc.: -R$ {totalFormDesconto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 )}
-                {apiAtiva && (totalFormValor > 0 || totalFormBruto > 0) && (
+                {modoComercialAtivo && (totalFormValor > 0 || totalFormBruto > 0) && (
                   <span style={{ color: '#4ade80', marginLeft: 10 }}>
                     • Líq.: R$ {totalFormValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
@@ -2741,8 +2768,8 @@ export function Pedidos() {
                       <th style={{ textAlign: 'right' }}>Estoque Atual</th>
                       <th style={{ width: '130px' }}>Kg Solicitado *</th>
                       <th style={{ width: '100px' }}>Cx Previstas</th>
-                      {apiAtiva && <th style={{ width: '115px', textAlign: 'right' }}>R$/kg</th>}
-                      {apiAtiva && <th style={{ textAlign: 'right' }}>Subtotal</th>}
+                      {modoComercialAtivo && <th style={{ width: '115px', textAlign: 'right' }}>R$/kg</th>}
+                      {modoComercialAtivo && <th style={{ textAlign: 'right' }}>Subtotal</th>}
                       <th style={{ textAlign: 'right' }}>Saldo Projetado</th>
                       <th>Obs. / Alertas</th>
                       <th style={{ textAlign: 'right' }}>Remover</th>
@@ -2901,7 +2928,7 @@ export function Pedidos() {
                               </div>
                             )}
                           </td>
-                          {apiAtiva && (
+                          {modoComercialAtivo && (
                             <td>
                               <input
                                 type="number"
@@ -2916,7 +2943,7 @@ export function Pedidos() {
                               />
                             </td>
                           )}
-                          {apiAtiva && (
+                          {modoComercialAtivo && (
                             <td style={{ textAlign: 'right' }} className="font-mono font-bold text-success">
                               <div>R$ {subtotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                               {descTotalItem > 0 && (
@@ -3211,7 +3238,7 @@ export function Pedidos() {
           )}
 
           {/* Simulação de Parcelas */}
-          {apiAtiva && parcelasSimuladas.length > 0 && (
+          {modoComercialAtivo && parcelasSimuladas.length > 0 && (
             <div
               style={{
                 background: 'rgba(13, 20, 36, 0.72)',
@@ -3647,6 +3674,30 @@ export function Pedidos() {
                 <input className="form-input" value={novoCliForm.icms} onChange={(e) => setNovoCliForm({ ...novoCliForm, icms: e.target.value })} />
               </div>
             </div>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '10px 12px',
+                borderRadius: 8,
+                marginBottom: 14,
+                cursor: 'pointer',
+                background: Number(novoCliForm.nao_faturar) === 1 ? 'rgba(139, 92, 246, 0.14)' : 'var(--bg-2)',
+                border: Number(novoCliForm.nao_faturar) === 1 ? '1px solid rgba(139, 92, 246, 0.5)' : '1px solid var(--border)',
+                fontSize: 13,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={Number(novoCliForm.nao_faturar) === 1}
+                onChange={(e) => setNovoCliForm({ ...novoCliForm, nao_faturar: e.target.checked ? 1 : 0 })}
+              />
+              <span>
+                <strong>Somente Controle de Estoque (Não Faturar)</strong> — não pede preço nos pedidos nem gera Contas a Receber
+              </span>
+            </label>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button type="button" className="btn btn--secondary" onClick={() => setModalNovoClienteAberto(false)}>Cancelar</button>
