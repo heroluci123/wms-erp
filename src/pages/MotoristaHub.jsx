@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
+  Camera,
   CheckCircle2,
   Clock,
   ExternalLink,
@@ -15,6 +16,7 @@ import {
 import { roteirizacaoQueries } from '../queries/roteirizacao'
 import { useAppStore } from '../store/appStore'
 import { PwaInstallBanner } from '../components/shared/PwaInstallBanner'
+import { QrCameraModal } from '../components/shared/QrCameraModal'
 import { extrairQrTokenDeEntrada, listarRotasRecentes } from '../utils/motoristaPwa'
 
 const STATUS_CFG = {
@@ -41,6 +43,7 @@ export function MotoristaHub() {
   const [rotasRecentes, setRotasRecentes] = useState(() => listarRotasRecentes())
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
+  const [cameraAberta, setCameraAberta] = useState(false)
 
   const carregar = useCallback(async () => {
     setRotasRecentes(listarRotasRecentes())
@@ -65,10 +68,22 @@ export function MotoristaHub() {
     e.preventDefault()
     const token = extrairQrTokenDeEntrada(linkOuToken)
     if (!token) {
-      setErro('Cole o link recebido no WhatsApp ou o token do QR Code da rota.')
+      setErro('Cole o link recebido no WhatsApp ou leia o QR Code da rota com a câmera.')
       return
     }
     setErro('')
+    navigate(`/motorista/${encodeURIComponent(token)}`)
+  }
+
+  const handleQrLidoCamera = (rawText) => {
+    setCameraAberta(false)
+    const token = extrairQrTokenDeEntrada(rawText)
+    if (!token) {
+      setErro('QR Code lido, mas não corresponde a uma rota do WMSphere.')
+      return
+    }
+    setErro('')
+    setLinkOuToken(rawText)
     navigate(`/motorista/${encodeURIComponent(token)}`)
   }
 
@@ -155,10 +170,35 @@ export function MotoristaHub() {
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 800, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 7 }}>
-            <QrCode size={16} color="#38bdf8" /> Abrir Rota por Link ou Token
+            <QrCode size={16} color="#38bdf8" /> Abrir Rota por QR Code ou Link
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setErro('')
+              setCameraAberta(true)
+            }}
+            style={{
+              width: '100%',
+              height: 48,
+              borderRadius: 12,
+              border: 'none',
+              background: 'linear-gradient(135deg, #2563eb, #06b6d4)',
+              color: '#ffffff',
+              fontWeight: 800,
+              fontSize: 14,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              boxShadow: '0 6px 18px rgba(37, 99, 235, 0.35)',
+            }}
+          >
+            <Camera size={18} /> Ler QR Code com a Câmera
+          </button>
           <div style={{ fontSize: 12, color: '#94a3b8' }}>
-            Aponte a câmera do iPhone para o QR Code impresso no romaneio ou cole abaixo o link enviado no WhatsApp:
+            Ou cole abaixo o link enviado no WhatsApp / código do roteiro:
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
@@ -328,6 +368,13 @@ export function MotoristaHub() {
           </div>
         )}
       </div>
+
+      <QrCameraModal
+        open={cameraAberta}
+        onClose={() => setCameraAberta(false)}
+        onDetected={handleQrLidoCamera}
+        titulo="Ler QR Code do Roteiro"
+      />
     </div>
   )
 }
