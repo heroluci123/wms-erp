@@ -10,10 +10,29 @@ function toExcelDateOnly(str) {
 
 function toExcelDateTimeBRT(str) {
   if (!str) return null;
-  const s = String(str).trim().replace(' ', 'T') + (/[Zz]$/.test(String(str).trim()) ? '' : 'Z');
+  if (str instanceof Date) {
+    if (isNaN(str.getTime())) return null;
+    return new Date(str.getTime() - 3 * 3600 * 1000);
+  }
+  const raw = String(str).trim();
+  const s = raw.replace(' ', 'T') + (/[Zz]|[+-]\d{2}:?\d{2}$/.test(raw) ? '' : 'Z');
   const dt = new Date(s);
   if (isNaN(dt.getTime())) return null;
   return new Date(dt.getTime() - 3 * 3600 * 1000);
+}
+
+function toExcelDateOnlyBRT(str) {
+  if (!str) return null;
+  const raw = typeof str === 'string' ? str.trim() : '';
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return toExcelDateOnly(raw);
+  const brt = toExcelDateTimeBRT(str);
+  if (!brt) return toExcelDateOnly(raw);
+  return new Date(Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate()));
+}
+
+function dateToIsoKey(dt) {
+  if (!dt) return '';
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
 }
 
 function fmtDateTimeBRT(str) {
@@ -110,8 +129,251 @@ export async function exportRelatorioWmsExcel({
   const totalEntradaPecas = entradasCaixas.reduce((s, r) => s + Number(r.qtd_pecas || 0), 0);
   const periodoLabel = `${fmtDateBR(dataInicio)} a ${fmtDateBR(dataFim)}`;
 
+  const planilhaBorder = {
+    top: { style: 'thin', color: { argb: 'FF475569' } },
+    left: { style: 'thin', color: { argb: 'FF475569' } },
+    bottom: { style: 'thin', color: { argb: 'FF475569' } },
+    right: { style: 'thin', color: { argb: 'FF475569' } }
+  };
+
   // =========================================================================
-  // ABA 1: ROMANEIOS DE SAÍDA CONSOLIDADO (LINHA A LINHA CONTÍNUO: DATA + ROMANEIO + PRODUTO + KG + CX)
+  // ABA 1: SAÍDAS (PLANILHA LIMPA — 6 COLUNAS PADRÃO OPERACIONAL)
+  // =========================================================================
+  const wsSaiPlan = wb.addWorksheet('Saídas (Planilha)', {
+    views: [{ state: 'frozen', ySplit: 1 }]
+  });
+
+  const saidasPlanilha = saidasEfetivas
+    .map((item) => {
+      const dtSaida = toExcelDateOnlyBRT(item.romaneio_expedido_em || item.romaneio_criado_em);
+      return {
+        dtSaida,
+        dtIso: dateToIsoKey(dtSaida),
+        romaneio: String(item.romaneio_codigo || ''),
+        item: String(item.produto_descricao || ''),
+        ean: String(item.ean_caixa || ''),
+        qtdCx: 1,
+        pesoKg: Number(item.peso_kg || 0),
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.dtIso.localeCompare(b.dtIso) ||
+        a.romaneio.localeCompare(b.romaneio, undefined, { numeric: true }) ||
+        a.item.localeCompare(b.item, 'pt-BR') ||
+        a.ean.localeCompare(b.ean)
+    );
+
+  const hSaiPlan = [
+    'Data Saída',
+    'Romaneio',
+    'Item',
+    'Código de Barras',
+    'Quantidade CX',
+    'Quantidade KG',
+  ];
+  const rHSaiPlan = wsSaiPlan.getRow(1);
+  hSaiPlan.forEach((h, i) => {
+    const cell = rHSaiPlan.getCell(i + 1);
+    cell.value = h;
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.navyDark } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = planilhaBorder;
+  });
+  rHSaiPlan.height = 22;
+
+  saidasPlanilha.forEach((ln, idx) => {
+    const row = wsSaiPlan.getRow(2 + idx);
+    row.getCell(1).value = ln.dtSaida;
+    row.getCell(2).value = ln.romaneio;
+    row.getCell(3).value = ln.item;
+    row.getCell(4).value = ln.ean;
+    row.getCell(5).value = ln.qtdCx;
+    row.getCell(6).value = Number(ln.pesoKg.toFixed(2));
+
+    if (ln.dtSaida) row.getCell(1).numFmt = 'dd/mm/yyyy';
+    row.getCell(4).numFmt = '@';
+    row.getCell(5).numFmt = '#,##0';
+    row.getCell(6).numFmt = '#,##0.00';
+
+    for (let c = 1; c <= 6; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: 'Calibri', size: 10.5, color: { argb: COLORS.navyDark } };
+      cell.border = planilhaBorder;
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: c === 3 ? 'left' : (c === 6 ? 'right' : 'center'),
+      };
+    }
+    row.getCell(2).font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.blueText } };
+    row.getCell(6).font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
+    row.height = 19;
+  });
+
+  const saiPlanEndRow = 1 + saidasPlanilha.length;
+  const saiPlanTotRow = wsSaiPlan.getRow(saiPlanEndRow + 1);
+  saiPlanTotRow.getCell(1).value = 'TOTAL';
+  saiPlanTotRow.getCell(3).value = `${saidasPlanilha.length} caixa(s) expedida(s)`;
+  saiPlanTotRow.getCell(5).value = saidasPlanilha.length > 0
+    ? { formula: `SUBTOTAL(109,E2:E${saiPlanEndRow})`, result: saidasPlanilha.length }
+    : 0;
+  saiPlanTotRow.getCell(6).value = saidasPlanilha.length > 0
+    ? { formula: `SUBTOTAL(109,F2:F${saiPlanEndRow})`, result: Number(totalSaidaKg.toFixed(2)) }
+    : 0;
+  saiPlanTotRow.getCell(5).numFmt = '#,##0';
+  saiPlanTotRow.getCell(6).numFmt = '#,##0.00';
+  for (let c = 1; c <= 6; c++) {
+    const cell = saiPlanTotRow.getCell(c);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
+    cell.border = {
+      top: { style: 'medium', color: { argb: COLORS.navyDark } },
+      bottom: { style: 'medium', color: { argb: COLORS.navyDark } },
+      left: { style: 'thin', color: { argb: 'FF475569' } },
+      right: { style: 'thin', color: { argb: 'FF475569' } },
+    };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: c === 3 ? 'left' : (c === 6 ? 'right' : 'center'),
+    };
+  }
+  saiPlanTotRow.height = 22;
+
+  wsSaiPlan.autoFilter = `A1:F${Math.max(1, saiPlanEndRow)}`;
+  wsSaiPlan.columns = [
+    { width: 15 }, { width: 16 }, { width: 42 }, { width: 22 }, { width: 16 }, { width: 17 }
+  ];
+
+  // =========================================================================
+  // ABA 2: ENTRADAS (PLANILHA LIMPA — 6 COLUNAS PADRÃO OPERACIONAL)
+  // =========================================================================
+  const wsEntPlan = wb.addWorksheet('Entradas (Planilha)', {
+    views: [{ state: 'frozen', ySplit: 1 }]
+  });
+
+  const entradasPlanilha = entradasCaixas
+    .map((item) => {
+      const dtEntrada = toExcelDateOnlyBRT(item.created_at);
+      const origemRaw = String(item.origem_tipo || '').toUpperCase();
+      let origemDoc = '';
+      if (item.recebimento_nf) {
+        origemDoc = `NF ${item.recebimento_nf}`;
+      } else if (item.recebimento_codigo) {
+        origemDoc = String(item.recebimento_codigo);
+      } else if (item.op_codigo) {
+        origemDoc = String(item.op_codigo);
+      } else if (
+        origemRaw === 'PRODUCAO' ||
+        item.origem_operacao === 'PRODUCAO' ||
+        item.endereco === 'PRODUÇÃO PAVAN' ||
+        item.endereco === 'PRODUCAO'
+      ) {
+        origemDoc = 'PRODUÇÃO';
+      } else {
+        origemDoc = origemRaw || String(item.origem_operacao || 'RECEBIMENTO');
+      }
+      return {
+        dtEntrada,
+        dtIso: dateToIsoKey(dtEntrada),
+        origemDoc,
+        item: String(item.produto_descricao || ''),
+        ean: String(item.ean_caixa || ''),
+        qtdCx: 1,
+        pesoKg: Number(item.peso_kg || 0),
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.dtIso.localeCompare(b.dtIso) ||
+        a.origemDoc.localeCompare(b.origemDoc, undefined, { numeric: true }) ||
+        a.item.localeCompare(b.item, 'pt-BR') ||
+        a.ean.localeCompare(b.ean)
+    );
+
+  const hEntPlan = [
+    'Data Entrada',
+    'Origem / Doc.',
+    'Item',
+    'Código de Barras',
+    'Quantidade CX',
+    'Quantidade KG',
+  ];
+  const rHEntPlan = wsEntPlan.getRow(1);
+  hEntPlan.forEach((h, i) => {
+    const cell = rHEntPlan.getCell(i + 1);
+    cell.value = h;
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: COLORS.navyDark } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = planilhaBorder;
+  });
+  rHEntPlan.height = 22;
+
+  entradasPlanilha.forEach((ln, idx) => {
+    const row = wsEntPlan.getRow(2 + idx);
+    row.getCell(1).value = ln.dtEntrada;
+    row.getCell(2).value = ln.origemDoc;
+    row.getCell(3).value = ln.item;
+    row.getCell(4).value = ln.ean;
+    row.getCell(5).value = ln.qtdCx;
+    row.getCell(6).value = Number(ln.pesoKg.toFixed(2));
+
+    if (ln.dtEntrada) row.getCell(1).numFmt = 'dd/mm/yyyy';
+    row.getCell(4).numFmt = '@';
+    row.getCell(5).numFmt = '#,##0';
+    row.getCell(6).numFmt = '#,##0.00';
+
+    for (let c = 1; c <= 6; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: 'Calibri', size: 10.5, color: { argb: COLORS.navyDark } };
+      cell.border = planilhaBorder;
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: c === 3 ? 'left' : (c === 6 ? 'right' : 'center'),
+      };
+    }
+    row.getCell(2).font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.blueText } };
+    row.getCell(6).font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
+    row.height = 19;
+  });
+
+  const entPlanEndRow = 1 + entradasPlanilha.length;
+  const entPlanTotRow = wsEntPlan.getRow(entPlanEndRow + 1);
+  entPlanTotRow.getCell(1).value = 'TOTAL';
+  entPlanTotRow.getCell(3).value = `${entradasPlanilha.length} caixa(s) entrada(s)`;
+  entPlanTotRow.getCell(5).value = entradasPlanilha.length > 0
+    ? { formula: `SUBTOTAL(109,E2:E${entPlanEndRow})`, result: entradasPlanilha.length }
+    : 0;
+  entPlanTotRow.getCell(6).value = entradasPlanilha.length > 0
+    ? { formula: `SUBTOTAL(109,F2:F${entPlanEndRow})`, result: Number(totalEntradaKg.toFixed(2)) }
+    : 0;
+  entPlanTotRow.getCell(5).numFmt = '#,##0';
+  entPlanTotRow.getCell(6).numFmt = '#,##0.00';
+  for (let c = 1; c <= 6; c++) {
+    const cell = entPlanTotRow.getCell(c);
+    cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: COLORS.navyDark } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
+    cell.border = {
+      top: { style: 'medium', color: { argb: COLORS.navyDark } },
+      bottom: { style: 'medium', color: { argb: COLORS.navyDark } },
+      left: { style: 'thin', color: { argb: 'FF475569' } },
+      right: { style: 'thin', color: { argb: 'FF475569' } },
+    };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: c === 3 ? 'left' : (c === 6 ? 'right' : 'center'),
+    };
+  }
+  entPlanTotRow.height = 22;
+
+  wsEntPlan.autoFilter = `A1:F${Math.max(1, entPlanEndRow)}`;
+  wsEntPlan.columns = [
+    { width: 15 }, { width: 18 }, { width: 42 }, { width: 22 }, { width: 16 }, { width: 17 }
+  ];
+
+  // =========================================================================
+  // ABA 3: ROMANEIOS DE SAÍDA CONSOLIDADO (LINHA A LINHA CONTÍNUO: DATA + ROMANEIO + PRODUTO + KG + CX)
   // =========================================================================
   const wsRomLinha = wb.addWorksheet('Romaneios Consolidado', {
     views: [{ state: 'frozen', ySplit: 4 }]

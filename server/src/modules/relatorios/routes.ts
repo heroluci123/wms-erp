@@ -422,12 +422,16 @@ export function registerRelatoriosRoutes(app: FastifyInstance, conn: DbConnectio
           SELECT c.id, c.ean_caixa, c.endereco, c.lote, c.data_producao, c.validade,
                  c.peso_bruto_kg, c.tara_kg, c.peso_kg, c.qtd_pecas, c.origem_tipo,
                  c.status AS status_caixa, c.created_at,
+                 rec.codigo AS recebimento_codigo, rec.numero_nf AS recebimento_nf,
+                 op.codigo AS op_codigo,
                  p.id AS produto_id, p.codigo AS produto_codigo, p.descricao AS produto_descricao,
                  p.grupo, p.tipo_produto, p.valor_unitario,
                  (SELECT ch.operacao FROM caixas_historico ch WHERE ch.caixa_id = c.id ORDER BY ch.data_hora ASC LIMIT 1) AS origem_operacao,
                  (SELECT ch.operador_nome FROM caixas_historico ch WHERE ch.caixa_id = c.id ORDER BY ch.data_hora ASC LIMIT 1) AS operador_entrada
           FROM estoque_caixas c
           JOIN produtos p ON p.id = c.produto_id
+          LEFT JOIN recebimentos rec ON rec.id = c.recebimento_id
+          LEFT JOIN ordens_producao op ON op.id = c.op_id
           WHERE c.tenant_id = ${ctx.tenantId}
             AND c.filial_id = ${ctx.filialId}
             AND c.ean_caixa != ''

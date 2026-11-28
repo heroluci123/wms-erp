@@ -383,8 +383,15 @@ test('WMS Parte 2B: OP Producao (FEFO, Lock Concorrente FOR UPDATE, Auto-Arvore 
     // Verificar Dossie de Producao
     const dossieRes = await app.inject({ method: 'GET', url: `/api/ops/dossies?opId=${opId}`, headers })
     assert.equal(dossieRes.statusCode, 200)
-    assert.equal(dossieRes.json().data[0].peso_insumos, 25)
-    assert.equal(dossieRes.json().data[0].peso_retornos, 18.5)
+    const d0 = dossieRes.json().data[0]
+    assert.equal(d0.peso_insumos, 25)
+    assert.equal(d0.peso_retornos, 18.5)
+    assert.ok(d0.insumos[0].data_entrada, 'insumo deve retornar data_entrada')
+    assert.ok(d0.insumos[0].data_entrada_estoque, 'insumo deve retornar data_entrada_estoque')
+    assert.equal(d0.insumos[0].data_producao, '2026-11-10')
+    assert.ok(d0.retornos[0].data_entrada, 'retorno deve retornar data_entrada')
+    assert.equal(d0.retornos[0].data_producao, '2026-11-16')
+    assert.equal(d0.retornos[0].caixa_status, 'DISPONIVEL')
   } finally {
     await app.close()
     await conn.close()
