@@ -214,5 +214,27 @@ export function extrairQrTokenDeEntrada(rawInput) {
   if (!s) return ''
   const match = s.match(/motorista\/([a-zA-Z0-9_-]+)/i)
   if (match?.[1]) return match[1]
+  if (/^https?:\/\//i.test(s)) return ''
   return s
+}
+
+export function resolverUrlRotaOutroAmbiente(rawInput) {
+  const s = String(rawInput || '').trim()
+  if (!/^https?:\/\//i.test(s) || !/motorista\/[a-zA-Z0-9_-]+/i.test(s)) return ''
+  try {
+    const parsed = new URL(s)
+    const h = parsed.hostname || ''
+    const hostPermitido =
+      h === 'localhost' ||
+      h === '127.0.0.1' ||
+      /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) ||
+      /\.vercel\.app$/i.test(h) ||
+      h === window.location.hostname
+    if (hostPermitido && parsed.origin !== window.location.origin) {
+      return parsed.href
+    }
+  } catch {
+    return ''
+  }
+  return ''
 }

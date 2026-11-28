@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wmsphere-pwa-v10'
+const CACHE_NAME = 'wmsphere-pwa-v11'
 const STATIC_ASSETS = ['/', '/manifest.json', '/icon.png']
 
 self.addEventListener('install', (event) => {

@@ -17,7 +17,7 @@ import { roteirizacaoQueries } from '../queries/roteirizacao'
 import { useAppStore } from '../store/appStore'
 import { PwaInstallBanner } from '../components/shared/PwaInstallBanner'
 import { QrCameraModal } from '../components/shared/QrCameraModal'
-import { extrairQrTokenDeEntrada, listarRotasRecentes } from '../utils/motoristaPwa'
+import { extrairQrTokenDeEntrada, listarRotasRecentes, resolverUrlRotaOutroAmbiente } from '../utils/motoristaPwa'
 
 const STATUS_CFG = {
   EM_ROTA: { label: 'EM ROTA', bg: 'rgba(168,85,247,0.18)', border: '#a855f7', color: '#d8b4fe' },
@@ -77,9 +77,15 @@ export function MotoristaHub() {
 
   const handleQrLidoCamera = (rawText) => {
     setCameraAberta(false)
+    const urlOutroAmbiente = resolverUrlRotaOutroAmbiente(rawText)
+    if (urlOutroAmbiente) {
+      setErro('')
+      window.location.href = urlOutroAmbiente
+      return
+    }
     const token = extrairQrTokenDeEntrada(rawText)
     if (!token) {
-      setErro('QR Code lido, mas não corresponde a uma rota do WMSphere.')
+      setErro('QR Code lido, mas não corresponde a uma rota do WMSphere (use o QR Code gerado dentro do Embarque).')
       return
     }
     setErro('')
